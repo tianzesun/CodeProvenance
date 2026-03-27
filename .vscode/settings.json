@@ -1,0 +1,14 @@
+{
+  "files.associations": {
+    "**/.ai-rules.md": "markdown",
+    "**/.cursorrules": "markdown"
+  },
+  "editor.formatOnSave": true,
+  "editor.rulers": [100],
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  "python.analysis.typeCheckingMode": "basic"
+}

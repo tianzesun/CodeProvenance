@@ -1,0 +1,38 @@
+# Kilo Code Workspace Configuration
+# This file ensures AI always follows project rules
+
+## Automatic Rule Enforcement
+
+When working on CodeProvenance, AI MUST:
+
+1. **Read these files first** (in order):
+   - `.ai-rules.md` - Primary coding rules
+   - `.cursorrules` - Additional guidelines
+   - `PROJECT_STRUCTURE.md` - Folder organization
+
+2. **Follow all rules in .ai-rules.md**:
+   - Type hints required for all functions
+   - Error handling with proper exceptions
+   - Unit tests for new code
+   - No hardcoded values
+   - Security best practices
+   - Performance guidelines
+
+3. **Respect project structure**:
+   - Place code in correct `src/` subdirectories
+   - Place tests in correct `tests/` subdirectories
+   - Follow naming conventions
+
+4. **Before any code change**:
+   - Verify rules are understood
+   - Write tests first (TDD approach)
+   - Ensure no breaking changes
+
+## Quick Reference
+
+| File | Purpose |
+|------|---------|
+| `.ai-rules.md` | Must-read coding rules |
+| `.cursorrules` | IDE-specific guidelines |
+| `PROJECT_STRUCTURE.md` | Folder organization |
+| `PROMPT_TEMPLATE.md` | Ready-to-use prompts |
