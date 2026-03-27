@@ -1,0 +1,75 @@
+# Cursor Rules for CodeProvenance
+
+This file contains project-specific rules that Cursor AI follows automatically.
+
+## IMPORTANT: Read Before Any Task
+
+1. **Always read** `.ai-rules.md` before making any changes
+2. **Follow** all guidelines in `.ai-rules.md` without exception
+3. **Check** PROJECT_STRUCTURE.md for correct file locations
+
+## Quick Reference
+
+### Must Follow Rules
+- ✅ Use type hints for ALL functions (parameters and return types)
+- ✅ Handle all error cases with appropriate exceptions
+- ✅ Write docstrings for all public functions
+- ✅ No hardcoded values - use config module
+- ✅ Write unit tests for new code
+- ✅ Validate ALL input before processing
+- ✅ Prevent path traversal attacks
+- ✅ Use async/await for I/O operations
+- ✅ Cache expensive computations
+
+### Project Structure
+```
+src/
+├── api/         → REST endpoints
+├── core/        → Similarity detection (parser, processor, similarity, analyzer)
+├── models/      → Data models (Pydantic)
+├── utils/       → Utility functions
+└── config/      → Configuration management
+
+tests/
+├── unit/        → Unit tests
+├── integration/ → Integration tests
+└── fixtures/    → Test data
+```
+
+### API Design
+- RESTful endpoints in `src/api/routes/`
+- Request validation with Pydantic schemas
+- Consistent error response format
+- Rate limiting enabled
+
+### Code Style
+- PEP 8 compliant
+- Max line length: 100 characters
+- 4 spaces indentation
+- snake_case for functions/variables
+- PascalCase for classes
+- UPPER_SNAKE for constants
+
+### Security Checklist
+- [ ] Input validation (never trust user data)
+- [ ] Path traversal prevention
+- [ ] File size limits enforced
+- [ ] Timeout for all operations
+- [ ] No secrets in code (use env vars)
+- [ ] Output sanitization
+
+### Git Workflow
+- Branch: `feature/<name>` or `fix/<name>`
+- Commit: `<type>: <description>` (feat, fix, refactor, test, docs, chore)
+- Always update tests when changing code
+
+## Context for AI
+
+CodeProvenance is a backend service that:
+- Detects software similarity (like MIT MOSS)
+- Runs as background service (no GUI)
+- Accepts submission folders, returns similarity analysis
+- Integrated into external grading platforms
+- Uses REST API for communication
+
+All code must be production-ready, type-safe, and well-documented.
