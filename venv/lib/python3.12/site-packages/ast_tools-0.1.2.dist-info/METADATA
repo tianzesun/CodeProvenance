@@ -1,0 +1,189 @@
+Metadata-Version: 2.1
+Name: ast-tools
+Version: 0.1.2
+Summary: Toolbox for working with the Python AST
+Home-page: https://github.com/leonardt/ast_tools
+Author: Leonard Truong
+Author-email: lenny@cs.stanford.edu
+License: UNKNOWN
+Platform: UNKNOWN
+Description-Content-Type: text/markdown
+Requires-Dist: astor
+Requires-Dist: libcst
+
+[![Build Status](https://travis-ci.com/leonardt/ast_tools.svg?branch=master)](https://travis-ci.com/leonardt/ast_tools)
+[![Coverage Status](https://coveralls.io/repos/github/leonardt/ast_tools/badge.svg?branch=master)](https://coveralls.io/github/leonardt/ast_tools?branch=master)
+
+Toolbox for working with the Python AST
+
+```
+pip install ast_tools
+```
+
+# Useful References
+* [Green Tree Snakes - the missing Python AST docs](greentreesnakes.readthedocs.io/)
+
+
+# Passes
+ast_tools provides a number of passes for rewriting function and classes (could
+also work at the module level however no such pass exists). Passes can be
+applied in one of two ways:
+
+```python
+@apply_ast_passes([pass1(), pass2()])
+def foo(...): ...
+
+@end_rewrite()
+@pass2()
+@pass1()
+@begin_rewrite()
+def foo(...): ...
+```
+Each pass takes as arguments an AST, an environment, and metadata and
+returns (possibly) modified versions of each.
+`apply_ast_pass` and `begin_rewrite` begin a chain of rewrites by first looking
+up the ast of the decorated object and gather attempts to gather locals
+and globals from the call site to build the environment.
+
+After all rewrites have run `apply_ast_pass` / `end_rewrite` serialize and
+execute the rewritten ast.
+
+## Know Issues
+### Collecting the AST
+`apply_ast_pass` and `begin_rewrite` rely on `inspect.getsource` to get the
+source of the decorated definition (which is then parsed to get the initial ast).
+However, `inspect.getsource` has many limitations.
+
+### Collecting the Environment
+`apply_ast_pass` and `begin_rewrite` do there best to infer the environment
+however there is no way to do this in a fully correct way.  Users are
+encouraged to pass environment explicitly:
+```python
+@apply_ast_passes(..., env=SymbolTable(locals(), globals()))
+def foo(...): ...
+
+@begin_rewrite(env=SymbolTable(locals(), globals()))
+def foo(...): ...
+```
+
+### Wrapping terminal passes
+Terminal passes `begin_rewrite` / `end_rewrite` / `apply_ast_passes` must not be
+wrapped.
+
+As decorators are a part of the AST of the object they are applied to
+they must be removed from the rewritten AST before it is executed.  If they
+are not removed rewrites will recurse infinitely as
+
+```python
+@apply_ast_passes([...])
+def foo(...): ...
+```
+
+would become
+
+```python
+exec('''\
+@apply_ast_passes([...])
+def rewritten_foo(...): ...
+''')
+```
+Note: this would invoke `apply_ast_passes([...])` on `rewritten_foo`
+
+To avoid this the terminating pass filters itself (and other decorators in the
+rewrite group in the begin / end style) from the decorator list.  If however
+the terminals are wrapped this filter will fail.
+
+### Inner decorators are called multiple times
+
+Decorators that are applied before a rewrite group will be called multiple times.
+See https://github.com/leonardt/ast_tools/issues/46 for detailed explanation.
+To avoid this users are encouraged to make rewrites the inner most decorators
+when possible.
+
+# Macros
+## Loop Unrolling
+Unroll loops using the pattern
+```python
+for <var> in ast_tools.macros.unroll(<iter>):
+    ...
+```
+
+`<iter>` should be an iterable object that produces integers (e.g. `range(8)`)
+that can be evaluated at definition time (can refer to variables in the scope
+of the function definition)
+
+For example,
+```python
+from ast_tools.passes import begin_rewrite, loop_unroll, end_rewrite
+
+@end_rewrite()
+@loop_unroll()
+@begin_rewrite()
+def foo():
+    for i in ast_tools.macros.unroll(range(8)):
+        print(i)
+```
+is rewritten into
+```python
+def foo():
+    print(0)
+    print(1)
+    print(2)
+    print(3)
+    print(4)
+    print(5)
+    print(6)
+    print(7)
+```
+
+You can also use a list of `int`s, here's an example that also uses a reference
+to a variable defined in the outer scope:
+```python
+from ast_tools.passes import apply_ast_passes, loop_unroll
+
+j = [1, 2, 3]
+@apply_ast_passes([loop_unroll()])
+def foo():
+    for i in ast_tools.macros.unroll(j):
+        print(i)
+```
+becomes
+```python
+def foo():
+    print(1)
+    print(2)
+    print(3)
+```
+
+## Inlining If Statements
+This macro allows you to evaluate `if` statements at function definition time,
+so the resulting rewritten function will have the `if` statements marked
+"inlined" removed from the final code and replaced with the chosen branch based
+on evaluating the condition in the definition's enclosing scope.  `if`
+statements are marked by using the form `if inline(...):` where `inline` is
+imported from the `ast_tools.macros` package.  `if` statements not matching
+this pattern will be ignored by the rewrite logic.
+
+Here's an example
+```python
+from ast_tools.macros import inline
+from ast_tools.passes import apply_ast_passes, if_inline
+
+y = True
+
+@apply_ast_passes([if_inline()])
+def foo(x):
+    if inline(y):
+        return x + 1
+    else:
+        return x - 1
+
+
+import inspect
+assert inspect.getsource(foo) == f"""\
+def foo(x):
+    return x + 1
+"""
+```
+
+

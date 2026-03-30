@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis Results - CodeProvenance</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 2rem;
+        }
+        h1 {
+            color: #00d4ff;
+            font-size: 1.5rem;
+        }
+        .btn-back {
+            padding: 0.75rem 1.5rem;
+            background: #16213e;
+            border: 1px solid #00d4ff;
+            border-radius: 6px;
+            color: #00d4ff;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat {
+            background: #16213e;
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00ff88;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 0.5rem;
+        }
+        .section {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid #333;
+        }
+        h2 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+        .result-item {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .pair-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .pair-name {
+            color: #fff;
+            font-weight: bold;
+        }
+        .similarity-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .similarity-badge.high {
+            background: rgba(255, 71, 87, 0.3);
+            color: #ff4757;
+        }
+        .similarity-badge.medium {
+            background: rgba(255, 193, 7, 0.3);
+            color: #ffc107;
+        }
+        .similarity-badge.low {
+            background: rgba(0, 212, 255, 0.3);
+            color: #00d4ff;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .metric {
+            text-align: center;
+            padding: 0.5rem;
+            background: #16213e;
+            border-radius: 4px;
+        }
+        .metric-label {
+            color: #666;
+            font-size: 0.75rem;
+        }
+        .metric-value {
+            color: #fff;
+            font-weight: bold;
+        }
+        pre {
+            background: #0d0d1a;
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            margin-top: 1rem;
+        }
+        .code-line {
+            display: flex;
+        }
+        .line-num {
+            color: #666;
+            width: 40px;
+            text-align: right;
+            padding-right: 1rem;
+            user-select: none;
+        }
+        .line-content {
+            color: #eee;
+        }
+        .highlight-match {
+            background: rgba(255, 71, 87, 0.3);
+            border-bottom: 2px solid #ff4757;
+        }
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .tab {
+            padding: 0.5rem 1rem;
+            background: #1a1a2e;
+            border: none;
+            border-radius: 6px 6px 0 0;
+            color: #666;
+            cursor: pointer;
+        }
+        .tab.active {
+            background: #16213e;
+            color: #00d4ff;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .ai-indicator {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            background: rgba(156, 39, 176, 0.3);
+            color: #ce93d8;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+        .export-btns {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .export-btn {
+            padding: 0.5rem 1rem;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 4px;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .export-btn:hover {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Analysis Results</h1>
+            <a href="/" class="btn-back">← New Analysis</a>
+        </header>
+
+        <div class="summary">
+            <div class="stat">
+                <div class="stat-value">{{ results.summary.total_files }}</div>
+                <div class="stat-label">Files Analyzed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ results.summary.total_pairs }}</div>
+                <div class="stat-label">Pairs Compared</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ "%.1f"|format(results.summary.avg_similarity) }}%</div>
+                <div class="stat-label">Avg Similarity</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ results.summary.max_similarity }}%</div>
+                <div class="stat-label">Max Similarity</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📊 Similarity Pairs</h2>
+            <div class="export-btns">
+                <button class="export-btn" onclick="exportJSON()">📄 Export JSON</button>
+                <button class="export-btn" onclick="exportCSV()">📊 Export CSV</button>
+                <button class="export-btn" onclick="exportHTML()">🌐 Export HTML</button>
+            </div>
+            
+            {% for pair in results.pairs %}
+            <div class="result-item">
+                <div class="pair-header">
+                    <span class="pair-name">{{ pair.file1 }} ↔ {{ pair.file2 }}</span>
+                    <span class="similarity-badge {{ 'high' if pair.similarity > 50 else 'medium' if pair.similarity > 25 else 'low' }}">
+                        {{ pair.similarity }}%
+                    </span>
+                </div>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-label">Token</div>
+                        <div class="metric-value">{{ pair.metrics.token_similarity }}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">N-gram</div>
+                        <div class="metric-value">{{ pair.metrics.ngram_similarity }}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">AST</div>
+                        <div class="metric-value">{{ pair.metrics.ast_similarity }}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Winnowing</div>
+                        <div class="metric-value">{{ pair.metrics.winnowing_similarity }}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Embedding</div>
+                        <div class="metric-value">{{ pair.metrics.embedding_similarity }}%</div>
+                    </div>
+                </div>
+                
+                {% if pair.matches %}
+                <div class="tabs">
+                    <button class="tab active" onclick="showTab(this, 'matches-{{ loop.index }}')">Matches</button>
+                    <button class="tab" onclick="showTab(this, 'code-{{ loop.index }}')">Code View</button>
+                </div>
+                <div id="matches-{{ loop.index }}" class="tab-content active">
+                    <pre><code>{% for match in pair.matches[:5] %}Lines {{ match.start1 }}-{{ match.end1 }} ↔ {{ match.start2 }}-{{ match.end2 }} ({{ match.tokens }} tokens)
+{% endfor %}</code></pre>
+                </div>
+                <div id="code-{{ loop.index }}" class="tab-content">
+                    <pre>{% for line in pair.code_snippet[:20].split('\n') %}<span class="code-line"><span class="line-num">{{ loop.index }}</span><span class="line-content">{{ line }}</span></span>
+{% endfor %}</pre>
+                </div>
+                {% endif %}
+                
+                {% if pair.ai_score > 0 %}
+                <div style="margin-top: 0.75rem;">
+                    <span class="ai-indicator">🤖 AI Score: {{ pair.ai_score }}%</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="section">
+            <h2>📋 Raw Output (MOSS-style)</h2>
+            <pre id="rawOutput">{{ results.raw_output }}</pre>
+        </div>
+    </div>
+
+    <script>
+        const results = {{ results | tojson }};
+        
+        function showTab(btn, id) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(id).classList.add('active');
+        }
+        
+        function exportJSON() {
+            const blob = new Blob([JSON.stringify(results, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'codeprovenance-results.json';
+            a.click();
+        }
+        
+        function exportCSV() {
+            let csv = 'File1,File2,Similarity,Token,Ast,Ngram,Winnowing,Embedding\n';
+            results.pairs.forEach(p => {
+                csv += `${p.file1},${p.file2},${p.similarity},${p.metrics.token_similarity},${p.metrics.ast_similarity},${p.metrics.ngram_similarity},${p.metrics.winnowing_similarity},${p.metrics.embedding_similarity}\n`;
+            });
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'codeprovenance-results.csv';
+            a.click();
+        }
+        
+        function exportHTML() {
+            const html = `<!DOCTYPE html>
+<html><head><title>CodeProvenance Report</title></head>
+<body><pre>${JSON.stringify(results, null, 2)}</pre></body></html>`;
+            const blob = new Blob([html], {type: 'text/html'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'codeprovenance-report.html';
+            a.click();
+        }
+    </script>
+</body>
+</html>

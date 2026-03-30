@@ -31,15 +31,15 @@ cryptography==41.0.7
 # Code Parsing & Similarity
 ast-tools==0.1.2
 javalang==0.13.0
-tree-sitter==0.20.4
-tree-sitter-python==0.20.4
-tree-sitter-java==0.20.2
-tree-sitter-javascript==0.20.1
-tree-sitter-typescript==0.20.3
-tree-sitter-cpp==0.20.5
-tree-sitter-c-sharp==0.20.0
-tree-sitter-go==0.20.0
-tree-sitter-rust==0.20.4
+tree-sitter==0.25
+tree-sitter-python==0.25
+tree-sitter-java==0.25
+tree-sitter-javascript==0.25
+tree-sitter-typescript==0.25
+tree-sitter-cpp==0.25
+tree-sitter-c-sharp==0.25
+tree-sitter-go==0.25
+tree-sitter-rust==0.25
 
 # AI/ML (Optional - for LLM detection)
 openai==1.12.0
@@ -50,7 +50,6 @@ scikit-learn==1.4.0
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
-httpx==0.26.0
 
 # Development
 black==24.1.1
@@ -65,3 +64,6 @@ prometheus-client==0.19.0
 # Utilities
 python-dateutil==2.8.2
 pytz==2024.1
+
+# PDF Generation (optional - install with: pip install weasyprint)
+# weasyprint==60.1

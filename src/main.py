@@ -2,9 +2,12 @@
 Main application entry point for CodeProvenance.
 """
 
+import os
 from fastapi import FastAPI
 from src.api.routes.api import api_router
 from src.config.database import db_config
+from src.api.middleware.auth import AuthMiddleware
+from src.api.middleware.rate_limit import RateLimitMiddleware
 
 # Create FastAPI app
 app = FastAPI(
@@ -14,6 +17,13 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
+
+# Add rate limiting middleware
+redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+app.add_middleware(RateLimitMiddleware, redis_url=redis_url)
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")

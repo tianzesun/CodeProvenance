@@ -52,6 +52,7 @@ class SimilarityEngine:
     def __init__(self):
         self.algorithms: List[BaseSimilarityAlgorithm] = []
         self.weights: Dict[str, float] = {}
+        self._deep_analysis_enabled = True
     
     def add_algorithm(self, algorithm: BaseSimilarityAlgorithm, weight: float = 1.0):
         """
@@ -63,6 +64,15 @@ class SimilarityEngine:
         """
         self.algorithms.append(algorithm)
         self.weights[algorithm.get_name()] = weight
+    
+    def enable_deep_analysis(self, enabled: bool = True):
+        """
+        Enable or disable deep analysis features.
+        
+        Args:
+            enabled: Whether to enable deep analysis
+        """
+        self._deep_analysis_enabled = enabled
     
     def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -77,6 +87,7 @@ class SimilarityEngine:
             - overall_score: Weighted average of all algorithm scores
             - individual_scores: Dictionary of algorithm names to scores
             - confidence_interval: Estimated confidence interval
+            - deep_analysis: Deep analysis results (if enabled)
         """
         if not self.algorithms:
             return {
@@ -120,7 +131,7 @@ class SimilarityEngine:
             # Single algorithm or no variance
             lower = upper = overall_score
         
-        return {
+        result = {
             'overall_score': overall_score,
             'individual_scores': individual_scores,
             'confidence_interval': {
@@ -129,6 +140,32 @@ class SimilarityEngine:
                 'confidence': 0.95  # Fixed for now
             }
         }
+        
+        # Add deep analysis if enabled
+        if self._deep_analysis_enabled:
+            try:
+                from .deep_analysis import compare_codes_deep
+                language = parsed_a.get('language', parsed_b.get('language', 'default'))
+                deep_result = compare_codes_deep(parsed_a, parsed_b, language)
+                result['deep_analysis'] = {
+                    'tree_edit_distance': deep_result.get('tree_edit_distance', 1.0),
+                    'tree_kernel_similarity': deep_result.get('tree_kernel_similarity', 0.0),
+                    'normalized_ast_similarity': deep_result.get('normalized_ast_similarity', 0.0),
+                    'cfg_similarity': deep_result.get('cfg_similarity', 0.0),
+                    'clone_score': deep_result.get('clone_detection', {}).get('clone_score', 0.0),
+                    'is_suspicious': deep_result.get('clone_detection', {}).get('is_suspicious', False)
+                }
+                
+                # Incorporate deep analysis into overall score
+                deep_score = deep_result.get('combined_score', 0.0)
+                # Weight deep analysis at 50% of final score for better rename detection
+                result['overall_score'] = overall_score * 0.5 + deep_score * 0.5
+                result['deep_analysis_score'] = deep_score
+            except ImportError:
+                # Deep analysis module not available
+                result['deep_analysis'] = None
+        
+        return result
 
 
 # Register built-in algorithms

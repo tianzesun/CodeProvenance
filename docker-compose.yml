@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # API Service
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - WEBHOOK_SECRET_KEY=${WEBHOOK_SECRET_KEY:-your-webhook-secret-key-change-in-production}
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app:cached
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Worker Service (for webhook delivery and background jobs)
+  worker:
+    build: .
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - WEBHOOK_SECRET_KEY=${WEBHOOK_SECRET_KEY:-your-webhook-secret-key-change-in-production}
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app:cached
+    command: python src/workers/webhook_worker.py
+
+  # Redis for caching, rate limiting, and Celery broker
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # PostgreSQL database
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=neondb
+      - POSTGRES_USER=neondb_owner
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-neondb_owner_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  redis_data:
+  postgres_data:
