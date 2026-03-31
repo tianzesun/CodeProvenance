@@ -1,0 +1,82 @@
+/*
+ * BSD-style license; for more info see http://pmd.sourceforge.net/license.html
+ */
+
+package net.sourceforge.pmd.lang.java.ast;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+
+/**
+ * Formal parameter of a lambda expression. Child of {@link ASTLambdaParameterList}.
+ *
+ * <pre class="grammar">
+ *
+ * LambdaParameter ::= {@link ASTModifierList LocalVarModifierList} ( "var" | {@link ASTType Type} ) {@link ASTVariableId VariableId}
+ *                   | {@link ASTModifierList EmptyModifierList} {@link ASTVariableId VariableId}
+ *
+ * </pre>
+ */
+public final class ASTLambdaParameter extends AbstractJavaTypeNode
+    implements InternalInterfaces.VariableIdOwner, ModifierOwner {
+
+    private boolean usesVarKw;
+
+    ASTLambdaParameter(int id) {
+        super(id);
+    }
+
+
+    void setUsesVarKw(boolean usesVarKw) {
+        this.usesVarKw = usesVarKw;
+    }
+
+    /**
+     * If true, the type node is null and the type was written with the "var"
+     * keyword in the source.
+     * @since 7.17.0
+     */
+    public boolean hasVarKeyword() {
+        return usesVarKw;
+    }
+
+    /**
+     * If true, this formal parameter represents one without explicit types.
+     * This can appear as part of a lambda expression with java11 using "var".
+     *
+     * @see ASTVariableId#isTypeInferred()
+     */
+    public boolean isTypeInferred() {
+        return getTypeNode() == null;
+    }
+
+    @Override
+    protected <P, R> R acceptVisitor(JavaVisitor<? super P, ? extends R> visitor, P data) {
+        return visitor.visit(this, data);
+    }
+
+    /**
+     * Returns the lambda that owns this parameter.
+     */
+    public ASTLambdaExpression getOwner() {
+        return (ASTLambdaExpression) getParent().getParent();
+    }
+
+    /**
+     * Returns the declarator ID of this formal parameter.
+     */
+    @Override
+    public @NonNull ASTVariableId getVarId() {
+        return firstChild(ASTVariableId.class);
+    }
+
+    /** Returns the type node of this formal parameter. */
+    public @Nullable ASTType getTypeNode() {
+        return firstChild(ASTType.class);
+    }
+
+    public boolean isFinal() {
+        return hasModifiers(JModifier.FINAL);
+    }
+}

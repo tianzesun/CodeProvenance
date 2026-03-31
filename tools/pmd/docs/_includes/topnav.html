@@ -1,0 +1,30 @@
+<!-- Navigation -->
+<nav class="navbar navbar-expand-lg fixed-top navbar-dark">
+    <div class="container topnavlinks">
+        <a class="navbar-brand fas fa-home fa-lg" href="index.html">&nbsp;<span class="projectTitle"> {{site.topnav_title}}</span></a>
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav mr-auto mt-2 mt-lg-0"></ul>
+            <ul class="navbar-nav">
+                <!-- toggle sidebar button -->
+                <li class="nav-item"><a id="tg-sb-link" class="nav-link" href="#"><i id="tg-sb-icon" class="fas fa-toggle-on"></i> Nav</a></li>
+                <!-- entries without drop-downs appear here -->
+                <li class="nav-item"><a class="nav-link" href="https://github.com/pmd/pmd/releases/tag/pmd_releases%2F{{ site.pmd.version }}" target="_blank">Download</a></li>
+                <li class="nav-item"><a class="nav-link" href="https://github.com/pmd/pmd" target="_blank">GitHub</a></li>
+                <!-- entries with drop-downs appear here -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="navbarPmdVersionsDropdownMenuLink" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">{{ site.pmd.version }}<b class="caret"></b></a>
+                    <div class="dropdown-menu" aria-labelledby="navbarPmdVersionsDropdownMenuLink" id="pmdVersions">
+                    </div>
+                </li>
+            </ul>
+            <form class="form-inline my-2 my-lg-0">
+                <input class="form-control mr-sm-2" type="search" placeholder="🔍️ Type 's' to search..." id="search-input" autocomplete="off">
+                <ul id="results-container"></ul>
+            </form>
+        </div>
+    </div>
+</nav>

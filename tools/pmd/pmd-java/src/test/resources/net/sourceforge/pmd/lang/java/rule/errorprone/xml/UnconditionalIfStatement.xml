@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<test-data
+    xmlns="http://pmd.sourceforge.net/rule-tests"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://pmd.sourceforge.net/rule-tests http://pmd.sourceforge.net/rule-tests_1_0_0.xsd">
+
+    <test-code>
+        <description>if (true)</description>
+        <expected-problems>1</expected-problems>
+        <expected-linenumbers>3</expected-linenumbers>
+        <code><![CDATA[
+public class Foo {
+    void bar() {
+        if (true) {}
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>if (false)</description>
+        <expected-problems>1</expected-problems>
+        <expected-linenumbers>3</expected-linenumbers>
+        <code><![CDATA[
+public class Foo {
+    void bar() {
+        if (false) {}
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>no constant folding</description>
+        <expected-problems>0</expected-problems>
+        <code><![CDATA[
+public class Foo {
+    private static final boolean DEBUG = "false";
+    void bar() {
+        if (DEBUG) {}
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>short circuit operator</description>
+        <expected-problems>0</expected-problems>
+        <code><![CDATA[
+public class Foo {
+    void bar(Object x, boolean y) {
+        if (y == true) {}
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>#5882 false-negative if true/false is not literal but local variable</description>
+        <expected-problems>1</expected-problems>
+        <expected-linenumbers>4</expected-linenumbers>
+        <code><![CDATA[
+class UnconditionalIfStatementBug {
+    public static void main(String[] args) {
+        boolean condition = true;
+        if (condition) {            // violation line 4
+            System.out.println("This will always print.");
+        }
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>#5882 false-negative if true/false is not literal but local variable negated</description>
+        <expected-problems>1</expected-problems>
+        <expected-linenumbers>4</expected-linenumbers>
+        <code><![CDATA[
+class UnconditionalIfStatementBug {
+    public static void main(String[] args) {
+        boolean condition = true;
+        if (!condition) {            // violation line 4
+            System.out.println("This will never print.");
+        }
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>#5882 false-negative if true/false is not literal but local variable nested</description>
+        <expected-problems>3</expected-problems>
+        <expected-linenumbers>6,7,8</expected-linenumbers>
+        <code><![CDATA[
+class UnconditionalIfStatementBug {
+    public static void main(String[] args) {
+        boolean b1 = true;
+        boolean b2 = false;
+        boolean b3 = true;
+        if (b1) {               // violation line 6
+            if (!b2) {          // violation line 7
+                if (b3) {       // violation line 8
+                    System.out.println("This will always print.");
+                }
+            }
+        }
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>#5882 false-positive if true/false is not literal but local variable modified</description>
+        <expected-problems>0</expected-problems>
+        <code><![CDATA[
+class UnconditionalIfStatementBug {
+    public static void main(String[] args) {
+        boolean condition = false;
+        for (String arg : args) {
+            if ("bar".equals(arg)) {
+                condition |= true;
+            }
+        }
+        if (condition) {
+            System.out.println("bar was given.");
+        }
+    }
+}
+        ]]></code>
+    </test-code>
+
+    <test-code>
+        <description>#5882 false-positive if true/false is not literal but local variable not a literal</description>
+        <expected-problems>0</expected-problems>
+        <code><![CDATA[
+class UnconditionalIfStatementBug {
+    public static void main(String[] args) {
+        boolean condition = args.length == 0;
+        if (condition) {
+            System.out.println("No args given.");
+        }
+    }
+}
+        ]]></code>
+    </test-code>
+</test-data>
