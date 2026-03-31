@@ -1,1 +1,0 @@
-"""JPlag integration."""

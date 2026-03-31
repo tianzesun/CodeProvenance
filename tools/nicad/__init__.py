@@ -1,1 +1,0 @@
-"""NiCad integration."""
