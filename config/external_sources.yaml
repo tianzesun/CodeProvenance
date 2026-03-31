@@ -1,0 +1,503 @@
+# CodeGuard Pro - External Source Configuration
+# Configure external code repositories and sources for plagiarism detection
+
+# ============================================================================
+# EXTERNAL CODE SOURCES
+# ============================================================================
+
+# GitHub Configuration
+github:
+  enabled: true
+  api_url: "https://api.github.com"
+
+  # Authentication (use environment variables for secrets)
+  # Set GITHUB_TOKEN environment variable
+  use_env_token: true
+
+  # Search Configuration
+  search:
+    enabled: true
+    max_results: 100
+    min_stars: 10 # Only include repos with minimum stars
+    languages:
+      - python
+      - java
+      - javascript
+      - typescript
+      - c
+      - cpp
+      - go
+      - rust
+      - ruby
+      - php
+
+  # Repositories to Index
+  repositories:
+    # Popular open source projects
+    - owner: "torvalds"
+      repo: "linux"
+      language: "c"
+
+    - owner: "python"
+      repo: "cpython"
+      language: "python"
+
+    - owner: "facebook"
+      repo: "react"
+      language: "javascript"
+
+    - owner: "microsoft"
+      repo: "typescript"
+      language: "typescript"
+
+    - owner: "golang"
+      repo: "go"
+      language: "go"
+
+    - owner: "rust-lang"
+      repo: "rust"
+      language: "rust"
+
+    - owner: "django"
+      repo: "django"
+      language: "python"
+
+    - owner: "spring-projects"
+      repo: "spring-boot"
+      language: "java"
+
+    - owner: "kubernetes"
+      repo: "kubernetes"
+      language: "go"
+
+    - owner: "tensorflow"
+      repo: "tensorflow"
+      language: "python"
+
+  # Gist Search
+  gists:
+    enabled: true
+    max_results: 50
+    min_files: 1
+
+  # Rate Limiting
+  rate_limit:
+    requests_per_hour: 5000
+    concurrent_requests: 10
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 2 * * *" # Daily at 2 AM
+    incremental: true # Only sync new/changed content
+
+# Stack Overflow Configuration
+stackoverflow:
+  enabled: true
+  api_url: "https://api.stackexchange.com/2.3"
+
+  # Search Configuration
+  search:
+    enabled: true
+    max_results: 100
+    min_score: 10 # Only include answers with minimum score
+    tags:
+      - python
+      - java
+      - javascript
+      - c++
+      - c#-4.0
+      - php
+      - ruby
+      - go
+      - rust
+      - swift
+
+  # Filter to accepted answers only
+  accepted_only: true
+
+  # Include code snippets
+  include_code: true
+  min_code_length: 50 # Minimum characters in code block
+
+  # Rate Limiting
+  rate_limit:
+    requests_per_day: 10000
+    concurrent_requests: 5
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 3 * * 0" # Weekly on Sunday at 3 AM
+    incremental: true
+
+# Reddit Configuration
+reddit:
+  enabled: true
+
+  # Subreddits to monitor
+  subreddits:
+    - name: "programming"
+      min_score: 50
+
+    - name: "learnprogramming"
+      min_score: 30
+
+    - name: "Python"
+      min_score: 20
+
+    - name: "javascript"
+      min_score: 20
+
+    - name: "java"
+      min_score: 20
+
+    - name: "cpp"
+      min_score: 20
+
+    - name: "golang"
+      min_score: 20
+
+    - name: "rust"
+      min_score: 20
+
+  # Search Configuration
+  search:
+    enabled: true
+    max_results: 50
+    time_filter: "year" # hour, day, week, month, year, all
+
+  # Content filtering
+  filters:
+    min_comment_length: 100 # Only include posts/comments with code
+    require_code_block: true
+    exclude_deleted: true
+
+  # Rate Limiting
+  rate_limit:
+    requests_per_minute: 60
+    concurrent_requests: 5
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 4 * * 0" # Weekly on Sunday at 4 AM
+    incremental: true
+
+# ============================================================================
+# ACADEMIC SOURCES
+# ============================================================================
+
+# ArXiv (Academic Papers with Code)
+arxiv:
+  enabled: true
+  api_url: "http://export.arxiv.org/api"
+
+  # Categories to monitor
+  categories:
+    - "cs.AI" # Artificial Intelligence
+    - "cs.CL" # Computation and Language
+    - "cs.CV" # Computer Vision
+    - "cs.LG" # Machine Learning
+    - "cs.SE" # Software Engineering
+    - "cs.PL" # Programming Languages
+
+  # Search Configuration
+  search:
+    max_results: 100
+    include_code_links: true
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 5 * * 1" # Weekly on Monday at 5 AM
+
+# IEEE Xplore
+ieee:
+  enabled: false # Requires institutional access
+  api_url: "https://ieeexploreapi.ieee.org/api/v1"
+
+  # Sync Schedule
+  sync:
+    enabled: false
+    schedule: "0 6 * * 1" # Weekly on Monday at 6 AM
+
+# ACM Digital Library
+acm:
+  enabled: false # Requires institutional access
+  api_url: "https://dl.acm.org/api"
+
+  # Sync Schedule
+  sync:
+    enabled: false
+    schedule: "0 7 * * 1" # Weekly on Monday at 7 AM
+
+# ============================================================================
+# PACKAGE REGISTRIES
+# ============================================================================
+
+# npm (JavaScript/TypeScript)
+npm:
+  enabled: true
+  api_url: "https://registry.npmjs.org"
+
+  # Popular packages to index
+  packages:
+    - "express"
+    - "react"
+    - "vue"
+    - "angular"
+    - "lodash"
+    - "axios"
+    - "moment"
+    - "webpack"
+    - "babel"
+    - "typescript"
+
+  # Search Configuration
+  search:
+    max_results: 50
+    min_downloads: 1000000
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 2 * * 0" # Weekly on Sunday at 2 AM
+
+# PyPI (Python)
+pypi:
+  enabled: true
+  api_url: "https://pypi.org/pypi"
+
+  # Popular packages to index
+  packages:
+    - "django"
+    - "flask"
+    - "requests"
+    - "numpy"
+    - "pandas"
+    - "tensorflow"
+    - "pytorch"
+    - "scikit-learn"
+    - "matplotlib"
+    - "sqlalchemy"
+
+  # Search Configuration
+  search:
+    max_results: 50
+    min_downloads: 1000000
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 3 * * 0" # Weekly on Sunday at 3 AM
+
+# Maven Central (Java)
+maven:
+  enabled: true
+  api_url: "https://search.maven.org/solrsearch/select"
+
+  # Popular packages to index
+  packages:
+    - "org.springframework.boot"
+    - "org.springframework"
+    - "com.google.guava"
+    - "org.apache.commons"
+    - "com.fasterxml.jackson.core"
+    - "org.projectlombok"
+    - "org.slf4j"
+    - "junit"
+    - "org.mockito"
+    - "org.hibernate"
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 4 * * 0" # Weekly on Sunday at 4 AM
+
+# Crates.io (Rust)
+crates:
+  enabled: true
+  api_url: "https://crates.io/api/v1"
+
+  # Popular packages to index
+  packages:
+    - "serde"
+    - "tokio"
+    - "reqwest"
+    - "actix-web"
+    - "clap"
+    - "rand"
+    - "regex"
+    - "rayon"
+    - "crossbeam"
+    - "hyper"
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 5 * * 0" # Weekly on Sunday at 5 AM
+
+# ============================================================================
+# ONLINE JUDGES
+# ============================================================================
+
+# LeetCode
+leetcode:
+  enabled: true
+  api_url: "https://leetcode.com/graphql"
+
+  # Problem categories
+  categories:
+    - "algorithms"
+    - "database"
+    - "shell"
+    - "concurrency"
+
+  # Difficulty levels
+  difficulties:
+    - "easy"
+    - "medium"
+    - "hard"
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 6 * * 0" # Weekly on Sunday at 6 AM
+
+# HackerRank
+hackerrank:
+  enabled: true
+  api_url: "https://www.hackerrank.com/rest"
+
+  # Domains to index
+  domains:
+    - "algorithms"
+    - "data-structures"
+    - "mathematics"
+    - "ai"
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 7 * * 0" # Weekly on Sunday at 7 AM
+
+# Codeforces
+codeforces:
+  enabled: true
+  api_url: "https://codeforces.com/api"
+
+  # Sync Schedule
+  sync:
+    enabled: true
+    schedule: "0 8 * * 0" # Weekly on Sunday at 8 AM
+
+# ============================================================================
+# CUSTOM SOURCES
+# ============================================================================
+
+# Add your own custom sources here
+custom:
+  enabled: false
+
+  # Example custom source
+  # - name: "internal_gitlab"
+  #   type: "gitlab"
+  #   api_url: "https://gitlab.company.com/api/v4"
+  #   token_env: "GITLAB_TOKEN"
+  #   projects:
+  #     - "group/project1"
+  #     - "group/project2"
+
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
+
+# Database storage for external sources
+storage:
+  # Use separate table for external code
+  table_prefix: "external_"
+
+  # Retention policy
+  retention_days: 365 # Keep external code for 1 year
+
+  # Compression
+  compress: true
+
+  # Deduplication
+  deduplicate: true
+  hash_algorithm: "sha256"
+
+# Indexing
+indexing:
+  # Enable full-text search
+  full_text_search: true
+
+  # Enable code-specific indexing
+  code_indexing: true
+
+  # Languages to index
+  languages:
+    - python
+    - java
+    - javascript
+    - typescript
+    - c
+    - cpp
+    - go
+    - rust
+    - ruby
+    - php
+    - swift
+    - kotlin
+    - scala
+    - r
+    - matlab
+    - julia
+    - haskell
+    - ocaml
+    - perl
+    - lua
+
+# Matching
+matching:
+  # Minimum similarity threshold for external matches
+  threshold: 0.7
+
+  # Include external matches in reports
+  include_in_reports: true
+
+  # Show source attribution
+  show_attribution: true
+
+  # External match weight (0-1)
+  weight: 0.8
+
+# Notifications
+notifications:
+  # Notify when external match found
+  on_external_match: true
+
+  # Notification channels
+  channels:
+    - email
+    - webhook
+
+  # Batch notifications
+  batch_threshold: 5 # Notify after 5 matches
+
+
+# ============================================================================
+# ENVIRONMENT VARIABLES REQUIRED
+# ============================================================================
+# Set these in your .env file or environment:
+#
+# GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+# STACKOVERFLOW_KEY=xxxxxxxxxxxx
+# REDDIT_CLIENT_ID=xxxxxxxxxxxx
+# REDDIT_CLIENT_SECRET=xxxxxxxxxxxx
+# REDDIT_USERNAME=xxxxxxxxxxxx
+# REDDIT_PASSWORD=xxxxxxxxxxxx
+# ARXIV_API_KEY=xxxxxxxxxxxx  (optional)
+# NPM_TOKEN=xxxxxxxxxxxx  (optional)
+# PYPI_TOKEN=xxxxxxxxxxxx  (optional)

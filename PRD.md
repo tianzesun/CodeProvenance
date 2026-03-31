@@ -1,525 +1,460 @@
-# CodeProvenance - Product Requirements Document (PRD)
+# CodeProvenance - Product Requirements Document
 
-## 1. Overview
-
-**Project Name:** CodeProvenance  
-**Project Type:** B2B SaaS Backend Service (Headless, API-first)  
-**Core Functionality:** Software similarity detection engine for EdTech platforms  
-**Target Users:** SaaS Platforms (Canvas, custom EdTech tools, HR technical interview platforms)  
-**Business Model:** Multi-tenant SaaS with tiered pricing  
+**Version**: 2.0  
+**Last Updated**: 2026-03-31  
+**Status**: Active Development
 
 ---
 
-## 2. Problem Statement
+## 1. Executive Summary
 
-EdTech platforms and HR tools need automated code similarity detection to identify potential plagiarism or cheating. Manual review is time-consuming and unreliable at scale.
+**CodeProvenance** is an enterprise-grade code plagiarism detection system designed to surpass industry leaders (MOSS, Copyleaks, Turnitin) by combining:
 
-**Goals:**
-- Provide a robust similarity detection API for B2B clients
-- Ensure strict data isolation between tenants
-- Offer advanced detection features (template exclusion, LLM obfuscation)
-- Support webhook-based async processing for large submissions
+- **MOSS-style Winnowing** for fast fingerprinting
+- **AST + Graph Matching** for structural similarity
+- **LLM Semantic Analysis** for logic equivalence
+- **AI Detection** for machine-generated code
+- **Global Code Database** for source detection
 
----
-
-## 3. Architecture Overview
-
-### 3.1 Design Principles
-- **API-First**: All functionality exposed via REST API
-- **Headless**: No GUI, clients build their own interfaces
-- **Multi-Tenant**: Strict data isolation between clients
-- **Scalable**: Horizontal scaling via queue workers
-- **Metered**: Usage tracking for billing purposes
-
-### 3.2 Tech Stack
-- **Language:** Python 3.11+
-- **Framework:** FastAPI (async REST API)
-- **Database:** PostgreSQL (production), SQLite (development)
-- **Cache:** Redis
-- **Queue:** Celery or similar for background tasks
-- **Hosting:** Docker/Kubernetes ready
+**Target**: Academic institutions, coding bootcamps, enterprise code review, and compliance agencies.
 
 ---
 
-## 4. User Stories & Requirements
+## 2. Core Detection Engine
 
-### 4.1 Core User Stories
+### 2.1 Algorithm Fusion (Surpassing MOSS Limitations)
 
-| ID | Story | Priority |
-|----|-------|----------|
-| US-01 | As a client SaaS, I can upload a folder containing multiple student submissions | P0 |
-| US-02 | As a client SaaS, I can configure similarity thresholds | P0 |
-| US-03 | As a client SaaS, I can receive webhook notifications when analysis completes | P0 |
-| US-04 | As a client SaaS, I can retrieve similarity results for all submission pairs | P0 |
-| US-05 | As a client SaaS, I can filter results by similarity score | P1 |
-| US-06 | As a client SaaS, I can specify supported programming languages | P1 |
-| US-07 | As a client SaaS, I can upload template/starter code to exclude from comparison | P1 |
-| US-08 | As a client SaaS, I can use idempotency keys to prevent duplicate processing | P1 |
-| US-09 | As a client SaaS, I can configure per-job data retention | P1 |
-| US-10 | As a client SaaS, I can detect LLM-obfuscated code | P2 |
+#### Winnowing Fingerprints (MOSS-style)
+- **k-gram hashing**: k=9-15 configurable
+- **Window size**: w=64 for optimal coverage
+- **Minimum hash selection**: Resistant to variable renaming
+- **Preprocessing**: Strip whitespace, comments, normalize identifiers
 
-### 4.2 Multi-Tenancy Stories
+#### AST + Graph Matching
+- **Control Flow Graph (CFG)**: Extract basic blocks and edges
+- **Data Flow Graph (DFG)**: Track variable dependencies
+- **Graph Edit Distance (GED)**: GED < 0.2 flagged as plagiarism
+- **Subtree Pattern Matching**: Detect code clones
 
-| ID | Story | Priority |
-|----|-------|----------|
-| MT-01 | As CodeProvenance, I ensure no cross-pollination between tenant submissions | P0 |
-| MT-02 | As a client, my API key is tied to my tenant_id | P0 |
-| MT-03 | As a client, I can configure data retention policies | P1 |
-| MT-04 | As CodeProvenance, I can enforce tier-based rate limits | P0 |
+#### LLM Semantic Analysis (Surpassing Copyleaks)
+- **Logic Equivalence Detection**: Analyze `for` vs `while` equivalence
+- **AI-Generated Detection**: Perplexity + Burstiness scoring
+- **Multi-Model Fingerprinting**: Detect GPT/Gemini/Llama outputs
+- **Confidence Intervals**: Statistical bounds on similarity scores
+
+#### Normalization & Deobfuscation
+- **Identifier Normalization**: Replace variable/function names with placeholders
+- **Dead Code Removal**: Pre-analysis cleanup
+- **String Normalization**: Hash literal strings
+- **Import Standardization**: Normalize import order/style
+
+### 2.2 Supported Languages (50+)
+
+| Category | Languages |
+|----------|-----------|
+| **Web** | JavaScript, TypeScript, HTML, CSS, PHP, Ruby |
+| **Systems** | C, C++, Rust, Go, Assembly |
+| **JVM** | Java, Kotlin, Scala, Clojure, Groovy |
+| **Functional** | Python, Haskell, OCaml, Elixir, Erlang, Scheme, Lisp |
+| **Scripting** | Perl, Lua, Bash, PowerShell, R |
+| **Data** | SQL, Julia, MATLAB |
+| **Hardware** | Verilog, VHDL, Arduino |
+| **Legacy** | Pascal, Fortran, COBOL, Ada, Prolog |
+
+**Auto-detection**: Language detected from file extension and content analysis.
+
+### 2.3 Code Database
+
+#### Internal Sources
+- **GitHub Mirror**: Daily sync of 10M+ public repositories
+- **Stack Overflow**: Code snippet index from accepted answers
+- **Academic Papers**: arXiv, IEEE, ACM code repositories
+- **User Submission Pool**: Anonymous submission archive
+
+#### External APIs
+- **GitHub Gist Search**: Real-time gist matching
+- **npm/PyPI/CRAN**: Package code analysis
+- **Custom Integrations**: Enterprise codebases via API
+
+### 2.4 Accuracy Targets
+
+| Metric | Target |
+|--------|--------|
+| **Overall Accuracy** | >99% |
+| **False Positive Rate** | <1% |
+| **Precision (ROC)** | >0.98 |
+| **Recall** | >0.99 |
+| **Threshold (Default)** | >20% similarity = Alert |
 
 ---
 
-## 5. API Specification
+## 3. Visualization & Reporting System
 
-### 5.1 Base URL
+### 3.1 Report Types
+
+#### Side-by-Side Highlighting
+- Code line alignment with synchronized scrolling
+- Color gradient: Red (100%) → Orange (50%) → Green (0%)
+- Click-to-jump: Navigate from match to source
+- Annotation tools: Add instructor notes
+
+#### Similarity Heatmap
+- File-level matrix: N×N comparison grid
+- Function-level: Per-function similarity scores
+- **Network Graph**: Plagiarism chain visualization (A→B→C)
+
+#### AI Detection Report
+- **AI Percentage**: Estimated % of AI-generated content
+- **Confidence Interval**: Statistical bounds (e.g., 95% CI: [85%, 92%])
+- **Paraphrase Score**: Detection of rephrased AI content
+- **Model Fingerprint**: Identified LLM (GPT-4, Claude, Gemini, Llama)
+
+#### License Risk Assessment
+- **License Conflict Detection**: GPL vs MIT incompatibilities
+- **Attribution Warnings**: Missing copyright notices
+- **Compliance Score**: Overall license compliance rating
+
+### 3.2 Export Formats
+
+| Format | Features |
+|--------|----------|
+| **PDF** | Watermarked, tamper-proof, digital signature |
+| **HTML** | Interactive, self-contained, offline-capable |
+| **JSON** | API-ready, machine-parseable |
+| **CSV** | Spreadsheet-compatible matrix export |
+
+### 3.3 Real-Time Preview
+
+- **Instant Scan**: Results as files upload (<10s for <1MB)
+- **Batch Processing**: <5min for 100 files, <1h for 10k files
+- **Progress Tracking**: Real-time percentage completion
+
+---
+
+## 4. Anti-Circumvention & Advanced Detection
+
+### 4.1 Behavioral Fingerprinting
+
+#### Git Blame Integration
+- **Edit History**: Track who modified which lines
+- **Author Attribution**: Link code segments to specific authors
+- **Timeline Analysis**: Detect sudden large insertions
+
+#### Typing Pattern Analysis
+- **Keystroke Dynamics**: Detect copy-paste patterns
+- **AI Typing Signals**: Uniform timing = machine-generated
+
+### 4.2 Cross-Variant Detection
+
+#### Template Matching
+- **Algorithm Variants**: Detect insertion sort vs quicksort equivalence
+- **Pattern Library**: Common assignment templates
+- **Structural Fingerprints**: Hash of algorithm skeleton
+
+#### Machine Learning Clustering
+- **Intent Classification**: Group semantically similar code
+- **Anomaly Detection**: Flag outliers in submission pool
+- **Similarity Graph**: K-means clustering of submission clusters
+
+### 4.3 AI-Detection "Killer" Features
+
+- **Prompt Trail Detection**: Identify instruct/prompt remnants
+- **Multi-Model Detection**: Separate GPT-4, Claude, Gemini, Llama signatures
+- **Manual Re-entry Detection**: Even retyped AI content flagged
+- **Style Transfer Resistance**: Detection survives paraphrasing
+
+### 4.4 Batch Mode
+
+- **N×N Comparison**: Complete pairwise analysis
+- **Auto-clustering**: Group suspicious submissions automatically
+- **Priority Queue**: Fast-track high-similarity pairs
+- **Distributed Processing**: Horizontal scaling via Celery
+
+---
+
+## 5. Integration & Automation
+
+### 5.1 Plugins & Extensions
+
+| Platform | Integration |
+|----------|-------------|
+| **VCS** | GitHub Actions, GitLab CI, Bitbucket Pipelines |
+| **IDE** | VSCode Extension, Jupyter Notebook Plugin |
+| **LMS** | Moodle, Blackboard, Canvas, Brightspace |
+| **Editor** | Vim/Neovim, Emacs, IntelliJ |
+| **Communication** | Slack, Microsoft Teams notifications |
+
+### 5.2 API Specifications
+
+#### REST API
 ```
-https://api.codeprovenance.io/v1
+POST /api/v1/analyze          # Submit files for analysis
+GET  /api/v1/results/{id}     # Retrieve results
+GET  /api/v1/report/{id}      # Download report
+POST /api/v1/webhooks         # Register webhook
+GET  /api/v1/usage            # Usage metrics
 ```
 
-### 5.2 Authentication
-```http
-Authorization: Bearer <api_key>
-X-Tenant-ID: <tenant_id>  (optional, derived from API key)
-```
+#### GraphQL API
+- Flexible querying for custom integrations
+- Real-time subscriptions for result updates
 
-### 5.3 Endpoints
+#### Rate Limits
+| Tier | Requests/min | Files/submission |
+|------|--------------|-------------------|
+| Free | 10 | 50 |
+| Pro | 100 | 500 |
+| Enterprise | Unlimited | Unlimited |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/jobs` | Create new similarity analysis job |
-| GET | `/jobs/{job_id}` | Get job status |
-| GET | `/jobs/{job_id}/results` | Get similarity results |
-| DELETE | `/jobs/{job_id}` | Cancel/delete job |
-| POST | `/jobs/{job_id}/abort` | Abort running job |
-| GET | `/languages` | List supported languages |
-| GET | `/health` | Health check |
-| GET | `/usage` | Get usage metrics for API key |
+### 5.3 Webhook Events
 
-### 5.4 Create Job Request
 ```json
 {
-  "name": "Assignment 1 - Sorting Algorithms",
-  "webhook_url": "https://client-saas.com/api/webhook/codeprovenance",
-  "idempotency_key": "uuid-v4-client-generated",
-  "threshold": 0.7,
-  "languages": ["python", "java"],
-  "exclude_patterns": ["__pycache__", "*.class", "node_modules"],
-  "template_files": [
-    {
-      "filename": "interface.java",
-      "content": "base64-encoded-content"
-    }
-  ],
-  "retention_days": 90,
-  "detection_modes": ["token", "ast", "llm_embeddings"]
+  "event": "analysis.complete",
+  "submission_id": "uuid",
+  "timestamp": "ISO8601",
+  "similarity_score": 0.85,
+  "ai_detected": true,
+  "report_url": "https://..."
 }
 ```
 
-### 5.5 Create Job Response
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "created_at": "2026-03-27T18:00:00Z",
-  "idempotency_key": "uuid-v4-client-generated",
-  "estimated_completion": "2026-03-27T18:01:00Z",
-  "status_url": "/v1/jobs/550e8400-e29b-41d4-a716-446655440000"
-}
-```
+### 5.4 Self-Hosted Deployment
+
+- **Docker Compose**: One-command deployment
+- **Kubernetes Helm Chart**: Production scaling
+- **Local Database**: SQLite for small deployments
+- **Air-Gapped Mode**: No external dependencies
+
+### 5.5 Automation
+
+- **CI/CD Gates**: PR/block merge on threshold violation
+- **Scheduled Scans**: Nightly batch analysis
+- **Webhook Triggers**: LMS assignment deadline sync
+- **Slack/Email Alerts**: Real-time plagiarism notifications
 
 ---
 
-## 6. Webhook Architecture
+## 6. Exclusive Features
 
-### 6.1 Event Types
-| Event | Trigger |
-|-------|---------|
-| `job.completed` | Analysis finished successfully |
-| `job.failed` | Analysis encountered an error |
-| `job.progress` | Progress update (optional, every 25%) |
+### 6.1 Collaboration Mode
 
-### 6.2 Webhook Payload - job.completed
-```json
-{
-  "event": "job.completed",
-  "timestamp": "2026-03-27T18:05:00Z",
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "tenant_id": "tenant-123",
-  "data": {
-    "status": "completed",
-    "total_submissions": 30,
-    "total_pairs_analyzed": 435,
-    "high_similarity_count": 5,
-    "execution_time_ms": 12500,
-    "results_summary": {
-      "average_similarity": 0.23,
-      "max_similarity": 0.92,
-      "min_similarity": 0.01
-    },
-    "results_url": "/v1/jobs/550e8400-e29b-41d4-a716-446655440000/results"
-  }
-}
-```
+#### Instructor Dashboard
+- Class overview with similarity distribution
+- Drill-down to individual students
+- Bulk actions (flag, exonerate, export)
+- Comment threads on specific code sections
 
-### 6.3 Webhook Payload - job.failed
-```json
-{
-  "event": "job.failed",
-  "timestamp": "2026-03-27T18:05:00Z",
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "tenant_id": "tenant-123",
-  "data": {
-    "status": "failed",
-    "error_code": "FILE_PARSE_ERROR",
-    "error_message": "Unable to parse file: submission_15/solution.py - Syntax error at line 42",
-    "can_retry": true
-  }
-}
-```
+#### Student Portal
+- **Self-Check**: Pre-submission plagiarism scan
+- **Feedback Loop**: Improvement suggestions
+- **Citation Guide**: How to properly reference code
+- **Progress Tracking**: Historical submission scores
 
-### 6.4 Webhook Security
-- HMAC-SHA256 signature in `X-Webhook-Signature` header
-- Secret per tenant (configurable)
-- Retry policy: 3 attempts with exponential backoff
+### 6.2 Multi-Modal Analysis
 
----
+- **Image OCR**: Detect code in screenshots/handwritten notes
+- **Binary Reverse Engineering**: Compare compiled executables
+- **PDF Code Extraction**: Pull code from research papers
 
-## 7. Similarity Results Schema
+### 6.3 Global Compliance Module
 
-### 7.1 Full Results Response
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "threshold_used": 0.7,
-  "total_submissions": 30,
-  "total_pairs": 435,
-  "high_similarity_pairs": 5,
-  "execution_time_ms": 12500,
-  "results": [
-    {
-      "submission_a": {
-        "id": "sub_001",
-        "name": "student_alice",
-        "files_analyzed": 3
-      },
-      "submission_b": {
-        "id": "sub_002",
-        "name": "student_bob",
-        "files_analyzed": 3
-      },
-      "overall_similarity_score": 0.85,
-      "confidence_interval": {
-        "lower": 0.82,
-        "upper": 0.88,
-        "confidence": 0.95
-      },
-      "matching_blocks": [
-        {
-          "file_a": "sort.py",
-          "file_b": "sort.py",
-          "block_type": "function",
-          "function_name": "quick_sort",
-          "lines_a": "10-45",
-          "lines_b": "12-47",
-          "similarity": 0.94,
-          "token_overlap": 0.89,
-          "ast_similarity": 0.96
-        },
-        {
-          "file_a": "main.py",
-          "file_b": "main.py",
-          "block_type": "code_block",
-          "lines_a": "100-120",
-          "lines_b": "105-125",
-          "similarity": 0.78
-        }
-      ],
-      "excluded_matches": [
-        {
-          "reason": "template_match",
-          "template_file": "interface.java",
-          "description": "Starter code provided by instructor"
-        }
-      ]
-    }
-  ],
-  "metadata": {
-    "algorithms_used": ["token", "ast", "ngram"],
-    "llm_detection_applied": true,
-    "llm_similarity_score": 0.45
-  }
-}
-```
+| Region | Compliance |
+|--------|------------|
+| **EU** | GDPR data isolation, right-to-erasure |
+| **US** | FERPA student record protection |
+| **Asia** | PDPA, China PIPL compliance |
+| **Global** | SOC2, ISO 27001 certification |
+
+#### Multi-Language Reports
+- English (default)
+- Chinese (中文)
+- Japanese (日本語)
+- Spanish, French, German, Portuguese
+
+#### Privacy Features
+- **Zero-Knowledge Proofs**: Verify without exposing code
+- **On-Premises Processing**: Data never leaves environment
+- **Encryption at Rest**: AES-256 for all stored code
+
+### 6.4 Educational Tools
+
+- **Tutorial System**: Interactive plagiarism awareness training
+- **Simulation Sandbox**: Practice detecting/creating plagiarism
+- **Citation Generator**: Auto-generate code references
+- **Integrity Score**: Student historical compliance rating
+
+### 6.5 Enterprise Extensions
+
+- **Team Collaboration**: Shared workspaces with RBAC
+- **Audit Logging**: Full immutable action history
+- **SLA Guarantee**: 99.99% uptime with status page
+- **Dedicated Support**: Priority ticket resolution
+- **Custom Integrations**: Tailored API development
 
 ---
 
-## 8. Multi-Tenancy & Security
+## 7. Business Model
 
-### 8.1 Tenant Isolation Rules
-1. **Strict Job Boundaries**: Similarity is ONLY calculated within submissions of the SAME job
-2. **No Cross-Tenant Access**: API keys are tenant-scoped
-3. **Database Isolation**: Row-level security or separate schemas per tenant
-4. **Queue Isolation**: Jobs processed in isolated contexts
+### 7.1 Open-Source Core
 
-### 8.2 API Key Structure
-```
-cp_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-|______| |________________________________|
-  prefix     random key (32 chars)
-```
+- **License**: MIT (core engine)
+- **Free Usage**: Unlimited for academic/research
+- **Self-Hosted**: No feature limitations
 
-### 8.3 Data Retention
-| Setting | Default | Configurable |
-|---------|---------|--------------|
-| Job data | 90 days | Yes (per job or per account) |
-| Uploaded files | 30 days | Yes |
-| Results | 90 days | Yes |
+### 7.2 Paid Tiers
 
----
+| Feature | Free | Pro ($29/mo) | Enterprise (Custom) |
+|---------|------|--------------|---------------------|
+| Submissions/mo | 100 | 10,000 | Unlimited |
+| Storage | 1GB | 100GB | Custom |
+| API Access | Limited | Full | Full |
+| Webhooks | ❌ | ✅ | ✅ |
+| AI Detection | Basic | Advanced | Advanced+ |
+| Priority Support | ❌ | ✅ | Dedicated |
+| SSO/SAML | ❌ | ❌ | ✅ |
+| Custom Branding | ❌ | ❌ | ✅ |
 
-## 9. Tiered Rate Limiting
+### 7.3 Revenue Streams
 
-### 9.1 Tier Definitions
-
-| Tier | Concurrent Jobs | Max Payload | Monthly Jobs | Rate |
-|------|-----------------|-------------|--------------|------|
-| Free | 1 | 50MB | 10 | 60 req/min |
-| Basic | 5 | 200MB | 500 | 100 req/min |
-| Pro | 20 | 1GB | 5000 | 200 req/min |
-| Enterprise | 100 | 5GB | Unlimited | 500 req/min |
-
-### 9.2 Rate Limit Headers
-```http
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1648401600
-X-RateLimit-Policy: Basic
-```
-
-### 9.3 Usage Metrics Response
-```json
-{
-  "tenant_id": "tenant-123",
-  "current_tier": "Basic",
-  "period": "2026-03",
-  "usage": {
-    "jobs_processed": 45,
-    "files_parsed": 890,
-    "mb_processed": 125.5,
-    "compute_seconds": 234.5
-  },
-  "limits": {
-    "jobs_remaining": 455,
-    "mb_remaining": 874.5
-  }
-}
-```
+1. **Subscription Revenue**: Monthly/annual plans
+2. **Credit Packs**: $0.01 per file (overage)
+3. **White-Label**: Custom domain + branding
+4. **Professional Services**: Setup, training, consulting
 
 ---
 
-## 10. Advanced Detection Features
+## 8. Technical Stack
 
-### 10.1 Template/Boilerplate Exclusion
-- Client uploads template files with job creation
-- Templates stored securely per job
-- Matched sections excluded from similarity calculation
-- Results include `excluded_matches` field
+### 8.1 Backend
 
-### 10.2 LLM Obfuscation Detection
-- Secondary analysis pass using code embeddings
-- Detects structurally similar but lexically different code
-- Returns `llm_similarity_score` in results
-- Useful for AI-assisted plagiarism detection
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Framework** | Python 3.12+ / FastAPI | High-performance async API |
+| **Parser** | Tree-sitter | Language-agnostic AST parsing |
+| **Graph Analysis** | NetworkX | CFG/DFG similarity |
+| **Machine Learning** | PyTorch | ML clustering, anomaly detection |
+| **LLM Integration** | OpenAI/Anthropic API | Semantic analysis |
+| **Task Queue** | Celery + Redis | Distributed processing |
+| **Database** | PostgreSQL 16 + pgvector | Relational + vector similarity |
+| **Cache** | Redis 7 | Session, results, rate limiting |
+| **Search** | Elasticsearch | Full-text code search |
 
-### 10.3 Detection Algorithms
+### 8.2 Frontend
 
-| Algorithm | Description | Use Case |
-|-----------|-------------|----------|
-| `token` | Token-based comparison | Fast, basic similarity |
-| `ngram` | N-gram text comparison | Code structure similarity |
-| `ast` | Abstract Syntax Tree comparison | Structural plagiarism |
-| `winnowing` | Fingerprinting with k-grams | Efficient large-scale |
-| `llm_embeddings` | Code embedding similarity | LLM obfuscation detection |
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Framework** | React 18 + TypeScript | Component-based UI |
+| **State** | Zustand / React Query | Client state management |
+| **Visualization** | D3.js + Three.js | Network graphs, heatmaps |
+| **Styling** | Tailwind CSS | Utility-first design |
+| **Charts** | Recharts | Data visualization |
 
----
+### 8.3 Infrastructure
 
-## 11. Configuration Options
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Container** | Docker + Compose | Local dev/deployment |
+| **Orchestration** | Kubernetes | Production scaling |
+| **CI/CD** | GitHub Actions | Automated testing/deployment |
+| **Monitoring** | Prometheus + Grafana | Metrics & alerting |
+| **Logging** | ELK Stack | Centralized logs |
+| **CDN** | Cloudflare | Global static asset delivery |
 
-```yaml
-# config/default.yaml
-service:
-  name: "CodeProvenance"
-  version: "1.0.0"
-  host: "0.0.0.0"
-  port: 8000
+### 8.4 Testing
 
-database:
-  type: "postgresql"
-  host: "${DB_HOST}"
-  port: 5432
-  name: "codeprovenance"
-  pool_size: 20
-
-redis:
-  host: "${REDIS_HOST}"
-  port: 6379
-  db: 0
-
-queue:
-  type: "celery"
-  broker: "${CELERY_BROKER_URL}"
-
-webhook:
-  max_retries: 3
-  retry_delay_seconds: 60
-  timeout_seconds: 30
-  hmac_algorithm: "sha256"
-
-analysis:
-  default_threshold: 0.7
-  max_file_size_mb: 10
-  max_folder_size_mb: 500
-  job_timeout_seconds: 600
-  max_concurrent_jobs_per_tenant: 5
-  algorithms:
-    enabled: ["token", "ast", "ngram"]
-    default: "token"
-  llm:
-    enabled: false
-    provider: "openai"
-    model: "code-embedding-3"
-
-languages:
-  supported:
-    - python
-    - java
-    - javascript
-    - typescript
-    - c
-    - cpp
-    - csharp
-    - go
-    - rust
-    - ruby
-    - php
-
-tiers:
-  free:
-    concurrent_jobs: 1
-    max_payload_mb: 50
-    monthly_jobs: 10
-    rate_limit: 60
-  basic:
-    concurrent_jobs: 5
-    max_payload_mb: 200
-    monthly_jobs: 500
-    rate_limit: 100
-  pro:
-    concurrent_jobs: 20
-    max_payload_mb: 1024
-    monthly_jobs: 5000
-    rate_limit: 200
-  enterprise:
-    concurrent_jobs: 100
-    max_payload_mb: 5120
-    monthly_jobs: -1  # unlimited
-    rate_limit: 500
-
-storage:
-  type: "local"
-  path: "./data"
-  retention:
-    job_data_days: 90
-    uploaded_files_days: 30
-```
+| Type | Tool | Coverage Target |
+|------|------|----------------|
+| **Unit** | pytest | >90% |
+| **Integration** | pytest + CI | 100% API endpoints |
+| **Benchmark** | BigCloneBench | 18 test cases |
+| **A/B Testing** | LaunchDarkly | Accuracy comparison |
+| **Fuzzing** | AFL | Parser robustness |
 
 ---
 
-## 12. Supported Languages
+## 9. Roadmap
 
-| Language | Extensions | Parser |
-|----------|------------|--------|
-| Python | .py | ast (stdlib) |
-| Java | .java | javalang |
-| JavaScript | .js | babel-parser |
-| TypeScript | .ts, .tsx | babel-parser |
-| C | .c | cparser |
-| C++ | .cpp, .cc, .h, .hpp | tree-sitter-cpp |
-| C# | .cs | tree-sitter-csharp |
-| Go | .go | goparser |
-| Rust | .rs | rustpython-parser |
-| Ruby | .rb | ruby-parser |
-| PHP | .php | php-parser |
+### Phase 1: MVP (Current)
+- [x] Core Winnowing algorithm
+- [x] AST parsing (20+ languages)
+- [x] REST API with authentication
+- [x] Webhook delivery
+- [x] Redis caching
+- [x] Basic report generation
+- [x] Simple Web GUI
 
----
+### Phase 2: Enhanced Detection (Q2 2026)
+- [ ] LLM semantic analysis integration
+- [ ] AI-generated code detection
+- [ ] Git blame analysis
+- [ ] Batch processing (10k files)
+- [ ] Enterprise SSO (SAML/OIDC)
 
-## 13. Error Codes
+### Phase 3: Intelligence (Q3 2026)
+- [ ] Graph Edit Distance algorithm
+- [ ] ML-based clustering
+- [ ] Global code database (GitHub mirror)
+- [ ] Real-time collaborative review
+- [ ] Multi-modal analysis (images, binary)
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `INVALID_REQUEST` | 400 | Malformed request body |
-| `AUTH_FAILED` | 401 | Invalid or missing API key |
-| `FORBIDDEN` | 403 | Tenant not authorized for action |
-| `NOT_FOUND` | 404 | Job or resource not found |
-| `PAYLOAD_TOO_LARGE` | 413 | File/folder exceeds size limit |
-| `RATE_LIMITED` | 429 | Rate limit exceeded |
-| `IDEMPOTENCY_CONFLICT` | 409 | Different request with same idempotency key |
-| `FILE_PARSE_ERROR` | 422 | Unable to parse uploaded file |
-| `JOB_TIMEOUT` | 504 | Analysis exceeded timeout |
-| `INTERNAL_ERROR` | 500 | Unexpected server error |
-
----
-
-## 14. Out of Scope (v1.0)
-
-- User interface / Web UI
-- User authentication (B2B API keys only)
-- Payment / Billing integration
-- Email notifications
-- Visualization of similarity results
-- Direct student/instructor access
-- File export/import features
+### Phase 4: Enterprise (Q4 2026)
+- [ ] White-label deployment
+- [ ] GDPR compliance module
+- [ ] Advanced audit logging
+- [ ] Custom model training
+- [ ] On-premises air-gapped version
 
 ---
 
-## 15. Open Questions / TBD
+## 10. Competitive Analysis
 
-| Item | Question | Status |
-|------|----------|--------|
-| Q1 | Which LLM provider for embeddings? (OpenAI, Anthropic, self-hosted) | Open |
-| Q2 | Database: separate schemas or row-level security per tenant? | Open |
-| Q3 | Webhook retry queue: database-backed or Redis? | Open |
-| Q4 | LLM detection enabled by default or opt-in? | Open |
-| Q5 | Support for password-protected ZIP files? | Open |
-| Q6 | Custom similarity thresholds per language? | Open |
-
----
-
-## 16. Success Criteria
-
-- [ ] Upload ZIP with 100+ submissions, complete analysis in < 60 seconds
-- [ ] Correctly identify obvious copies (same code with variable renaming)
-- [ ] Webhook delivery with < 1% failure rate
-- [ ] Zero cross-tenant data leakage (verified by tests)
-- [ ] 80%+ unit test coverage on core algorithms
-- [ ] Idempotency key prevents duplicate processing
-- [ ] Rate limiting enforced correctly per tier
-- [ ] API response schema matches documented format
+| Feature | CodeProvenance | MOSS | Copyleaks | Turnitin |
+|---------|---------------|------|-----------|----------|
+| **Winnowing** | ✅ | ✅ | ❌ | ❌ |
+| **AST Analysis** | ✅ | ✅ | Basic | ❌ |
+| **LLM Semantic** | ✅ | ❌ | ✅ | ❌ |
+| **AI Detection** | ✅ | ❌ | ✅ | ✅ |
+| **Git Integration** | ✅ | ❌ | ❌ | ❌ |
+| **Graph Matching** | ✅ | ❌ | ❌ | ❌ |
+| **50+ Languages** | ✅ | ✅ | ✅ | ❌ |
+| **REST API** | ✅ | ❌ | ✅ | Limited |
+| **Self-Hosted** | ✅ | ✅ | ❌ | ❌ |
+| **Webhook Events** | ✅ | ❌ | ✅ | ❌ |
+| **Open Source** | ✅ (Core) | ❌ | ❌ | ❌ |
+| **Global DB** | Planned | ❌ | ❌ | ✅ |
 
 ---
 
-## 17. TODO
+## 11. Glossary
 
-- [ ] Finalize LLM provider choice
-- [ ] Design database schema with tenant isolation
-- [ ] Implement idempotency layer
-- [ ] Build webhook delivery system with retry logic
-- [ ] Implement rate limiting middleware
-- [ ] Add usage metering
-- [ ] Review and approve PRD
+| Term | Definition |
+|------|------------|
+| **Winnowing** | Fingerprinting algorithm using k-grams and minimum hashes |
+| **AST** | Abstract Syntax Tree - parsed code representation |
+| **CFG** | Control Flow Graph - program execution paths |
+| **GED** | Graph Edit Distance - measure of graph similarity |
+| **Perplexity** | Measure of randomness in text (AI detection) |
+| **Burstiness** | Variance in sentence length (AI detection) |
+| **False Positive** | Legitimate code flagged as plagiarism |
+| **False Negative** | Plagiarism not detected |
 
 ---
 
-*Document Status: Draft v2*  
-*Last Updated: 2026-03-27*
+## 12. Appendix
+
+### A. Reference Standards
+- ACM Code of Ethics
+- IEEE Plagiarism Guidelines
+- FERPA Student Privacy Requirements
+- GDPR Data Protection Regulation
+
+### B. Related Documents
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture
+- [DATABASE_DESIGN.md](./DATABASE_DESIGN.md) - Data model
+- [TECH_CHOICES.md](./TECH_CHOICES.md) - Technology justification
+
+### C. Contact
+- **Email**: support@codeprovenance.io
+- **GitHub**: https://github.com/tianzesun/CodeProvenance
+- **Documentation**: https://docs.codeprovenance.io

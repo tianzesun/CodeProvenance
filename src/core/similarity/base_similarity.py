@@ -179,13 +179,15 @@ def register_builtin_algorithms(engine: SimilarityEngine):
     from .token_similarity import TokenSimilarity
     from .ngram_similarity import NgramSimilarity
     from .ast_similarity import ASTSimilarity
-    from .winnowing_similarity import WinnowingSimilarity
+    from .winnowing_similarity import EnhancedWinnowingSimilarity
     from .embedding_similarity import EmbeddingSimilarity
+    from .execution_similarity import ExecutionSimilarity
     
-    # Add algorithms with default weights
+    # Add algorithms with default weights (higher = more important)
+    engine.add_algorithm(EnhancedWinnowingSimilarity(), weight=1.5)
     engine.add_algorithm(TokenSimilarity(), weight=1.0)
     engine.add_algorithm(NgramSimilarity(), weight=1.0)
-    engine.add_algorithm(ASTSimilarity(), weight=1.5)  # Higher weight for AST
-    engine.add_algorithm(WinnowingSimilarity(), weight=1.2)
+    engine.add_algorithm(ASTSimilarity(), weight=2.0)  # Highest weight for AST
+    engine.add_algorithm(ExecutionSimilarity(), weight=1.5)  # Execution-based
     # Embedding similarity is optional and expensive, so lower weight by default
     engine.add_algorithm(EmbeddingSimilarity(), weight=0.5)

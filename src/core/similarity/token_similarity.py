@@ -1,23 +1,68 @@
 """
-Token-based similarity algorithm.
+Enhanced Token-based similarity algorithm.
 
-Compares code based on token sequences using Jaccard similarity or other token-based metrics.
+Compares code based on token sequences using:
+- Jaccard similarity of token sets
+- Longest Common Subsequence (LCS)
+- N-gram sequence similarity
+- Token type distribution
+- Keyword overlap detection
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set, Tuple
 from .base_similarity import BaseSimilarityAlgorithm
-import re
+from collections import Counter
+import math
 
 
 class TokenSimilarity(BaseSimilarityAlgorithm):
     """
-    Token similarity algorithm that compares code based on token sequences.
+    Enhanced Token similarity algorithm that compares code based on token sequences.
     
-    Uses Jaccard similarity of token sets or sequence similarity algorithms.
+    Uses multiple token-based metrics:
+    - Jaccard similarity of token sets
+    - N-gram overlap
+    - Token type distribution
+    - Keyword overlap
     """
     
-    def __init__(self):
-        super().__init__("token")
+    def __init__(self, 
+                 jaccard_weight: float = 0.4,
+                 ngram_weight: float = 0.3,
+                 distribution_weight: float = 0.2,
+                 keyword_weight: float = 0.1,
+                 ngram_size: int = 3):
+        """
+        Initialize Token similarity algorithm.
+        
+        Args:
+            jaccard_weight: Weight for Jaccard similarity
+            ngram_weight: Weight for n-gram overlap
+            distribution_weight: Weight for token type distribution
+            keyword_weight: Weight for keyword overlap
+            ngram_size: Size of n-grams for comparison
+        """
+        super().__init__("enhanced_token")
+        self.jaccard_weight = jaccard_weight
+        self.ngram_weight = ngram_weight
+        self.distribution_weight = distribution_weight
+        self.keyword_weight = keyword_weight
+        self.ngram_size = ngram_size
+        
+        # Programming language keywords
+        self.keywords = {
+            'if', 'else', 'elif', 'for', 'while', 'do', 'switch', 'case',
+            'break', 'continue', 'return', 'try', 'except', 'catch', 'finally',
+            'throw', 'throws', 'raise', 'yield', 'await', 'async',
+            'class', 'def', 'func', 'function', 'import', 'from', 'package',
+            'struct', 'interface', 'enum', 'type', 'trait', 'impl',
+            'true', 'false', 'null', 'nil', 'None', 'undefined', 'NaN',
+            'and', 'or', 'not', 'in', 'is', 'instanceof', 'typeof',
+            'var', 'let', 'const', 'auto', 'static', 'final',
+            'public', 'private', 'protected', 'internal', 'abstract',
+            'virtual', 'override', 'new', 'delete', 'this', 'self',
+            'super', 'base', 'extends', 'implements', 'with'
+        }
     
     def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
         """
@@ -30,88 +75,162 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         Returns:
             Similarity score between 0.0 and 1.0
         """
-        tokens_a = parsed_a.get('tokens', [])
-        tokens_b = parsed_b.get('tokens', [])
-        
-        if not tokens_a and not tokens_b:
-            return 1.0  # Both empty
-        if not tokens_a or not tokens_b:
-            return 0.0  # One empty
-        
-        # Use Jaccard similarity of token sets
-        set_a = set(tokens_a)
-        set_b = set(tokens_b)
-        
-        intersection = len(set_a.intersection(set_b))
-        union = len(set_a.union(set_b))
-        
-        if union == 0:
-            return 0.0
-            
-        return intersection / union
-
-
-class SequenceTokenSimilarity(BaseSimilarityAlgorithm):
-    """
-    Token similarity algorithm that considers token sequence order.
-    
-    Uses a simplified version of the Longest Common Subsequence (LCS) algorithm.
-    """
-    
-    def __init__(self):
-        super().__init__("sequence_token")
-    
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
-        """
-        Compare two parsed code representations based on token sequence similarity.
-        
-        Args:
-            parsed_a: First parsed code representation
-            parsed_b: Second parsed code representation
-            
-        Returns:
-            Similarity score between 0.0 and 1.0
-        """
-        tokens_a = parsed_a.get('tokens', [])
-        tokens_b = parsed_b.get('tokens', [])
+        tokens_a = self._extract_tokens(parsed_a)
+        tokens_b = self._extract_tokens(parsed_b)
         
         if not tokens_a and not tokens_b:
             return 1.0
         if not tokens_a or not tokens_b:
             return 0.0
         
-        # Use Longest Common Subsequence (LCS) similarity
-        lcs_length = self._lcs_length(tokens_a, tokens_b)
-        max_length = max(len(tokens_a), len(tokens_b))
+        jaccard_score = self._jaccard_similarity(tokens_a, tokens_b)
+        ngram_score = self._ngram_similarity(tokens_a, tokens_b)
+        distribution_score = self._distribution_similarity(tokens_a, tokens_b)
+        keyword_score = self._keyword_similarity(tokens_a, tokens_b)
         
-        if max_length == 0:
-            return 0.0
-            
-        return lcs_length / max_length
+        final_score = (
+            jaccard_score * self.jaccard_weight +
+            ngram_score * self.ngram_weight +
+            distribution_score * self.distribution_weight +
+            keyword_score * self.keyword_weight
+        )
+        
+        return min(1.0, max(0.0, final_score))
     
-    def _lcs_length(self, seq1: List[str], seq2: List[str]) -> int:
+    def _extract_tokens(self, parsed: Dict[str, Any]) -> List[str]:
+        """Extract token values from parsed representation."""
+        if 'tokens' in parsed:
+            tokens = parsed['tokens']
+            if tokens and isinstance(tokens[0], dict):
+                return [t.get('value', '') for t in tokens if t.get('value')]
+            return [str(t) for t in tokens]
+        if 'raw' in parsed:
+            return self._tokenize(parsed['raw'])
+        return []
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize source code text."""
+        # Remove strings and comments
+        text = re.sub(r'["\'].*?["\']', 'STR', text, flags=re.DOTALL)
+        text = re.sub(r'//.*?$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+        text = re.sub(r'#.*?$', '', text, flags=re.MULTILINE)
+        
+        # Tokenize
+        tokens = re.findall(r'[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]', text)
+        return [t for t in tokens if t]
+    
+    def _jaccard_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+        """Calculate Jaccard similarity of token sets."""
+        set_a = set(tokens_a)
+        set_b = set(tokens_b)
+        
+        if not set_a and not set_b:
+            return 1.0
+        
+        intersection = len(set_a.intersection(set_b))
+        union = len(set_a.union(set_b))
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def _ngram_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+        """Calculate n-gram overlap similarity."""
+        if len(tokens_a) < self.ngram_size or len(tokens_b) < self.ngram_size:
+            # Fall back to token similarity for short sequences
+            return self._jaccard_similarity(tokens_a, tokens_b)
+        
+        ngrams_a = self._get_ngrams(tokens_a)
+        ngrams_b = self._get_ngrams(tokens_b)
+        
+        if not ngrams_a and not ngrams_b:
+            return 1.0
+        
+        intersection = len(ngrams_a.intersection(ngrams_b))
+        union = len(ngrams_a.union(ngrams_b))
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def _get_ngrams(self, tokens: List[str]) -> Set[str]:
+        """Extract n-grams from token sequence."""
+        ngrams = set()
+        for i in range(len(tokens) - self.ngram_size + 1):
+            ngram = ' '.join(tokens[i:i + self.ngram_size])
+            ngrams.add(ngram)
+        return ngrams
+    
+    def _distribution_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
         """
-        Calculate the length of the Longest Common Subsequence.
+        Calculate similarity based on token type distributions.
         
-        Args:
-            seq1: First sequence
-            seq2: Second sequence
-            
-        Returns:
-            Length of LCS
+        Compares the distribution of:
+        - Identifiers (variable/function names)
+        - Keywords
+        - Literals (numbers, strings)
+        - Operators
+        - Punctuation
         """
-        m, n = len(seq1), len(seq2)
-        # Create a 2D array to store lengths of longest common subsequence
-        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        dist_a = self._get_token_distribution(tokens_a)
+        dist_b = self._get_token_distribution(tokens_b)
         
-        # Build the dp array from bottom up
-        for i in range(m + 1):
-            for j in range(n + 1):
-                if i == 0 or j == 0:
-                    dp[i][j] = 0
-                elif seq1[i-1] == seq2[j-1]:
-                    dp[i][j] = dp[i-1][j-1] + 1
-                else:
-                    dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+        # Calculate cosine similarity of distributions
+        common_keys = set(dist_a.keys()).union(set(dist_b.keys()))
         
-        return dp[m][n]
+        if not common_keys:
+            return 1.0
+        
+        dot_product = sum(dist_a.get(k, 0) * dist_b.get(k, 0) for k in common_keys)
+        norm_a = math.sqrt(sum(v ** 2 for v in dist_a.values()))
+        norm_b = math.sqrt(sum(v ** 2 for v in dist_b.values()))
+        
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        
+        return dot_product / (norm_a * norm_b)
+    
+    def _get_token_distribution(self, tokens: List[str]) -> Dict[str, float]:
+        """Get distribution of token types."""
+        categories = {
+            'identifier': 0,
+            'keyword': 0,
+            'literal': 0,
+            'operator': 0,
+            'punctuation': 0
+        }
+        
+        operators = set('+-*/%=<>&|^~!')
+        punctuation = set('()[]{}:;,.')
+        
+        for token in tokens:
+            if token in self.keywords:
+                categories['keyword'] += 1
+            elif token[0].isdigit():
+                categories['literal'] += 1
+            elif token in operators or len(token) == 1:
+                categories['punctuation'] += 1
+            elif any(c in token for c in operators):
+                categories['operator'] += 1
+            else:
+                categories['identifier'] += 1
+        
+        # Normalize to frequencies
+        total = sum(categories.values())
+        if total == 0:
+            return {k: 0.0 for k in categories}
+        
+        return {k: v / total for k, v in categories.items()}
+    
+    def _keyword_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+        """Calculate similarity based on keyword overlap."""
+        keywords_a = {t.lower() for t in tokens_a if t.lower() in self.keywords}
+        keywords_b = {t.lower() for t in tokens_b if t.lower() in self.keywords}
+        
+        if not keywords_a and not keywords_b:
+            return 1.0
+        
+        intersection = len(keywords_a.intersection(keywords_b))
+        union = len(keywords_a.union(keywords_b))
+        
+        return intersection / union if union > 0 else 0.0
+
+
+import re
