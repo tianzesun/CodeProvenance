@@ -1,0 +1,51 @@
+# Benchmark System Configuration
+
+experiment:
+  name: "baseline_v1"
+  description: "Initial benchmark vs competitors"
+  version: "1.0"
+
+datasets:
+  - name: "bigclonebench"
+    path: "benchmark/datasets/bigclone/"
+    language: "java"
+  - name: "ocd"
+    path: "benchmark/datasets/ocd/"
+    language: "java"
+  - name: "source_plag"
+    path: "benchmark/datasets/source_plag/"
+    language: "java"
+
+tools:
+  uniguard:
+    enabled: true
+    command: "python src/pipeline/detect.py --input {dataset} --output {output}"
+  
+  jplag:
+    enabled: true
+    command: "java -jar tools/jplag.jar -l java -r {output} {dataset}"
+  
+  moss:
+    enabled: false
+    command: "python tools/moss_client/moss.py -m {moss_id} {files}"
+  
+  nicad:
+    enabled: false
+    command: "tools/nicad/bin/nicad functions java {dataset}"
+
+evaluation:
+  threshold: 0.5
+  metrics:
+    - precision
+    - recall
+    - f1
+
+output:
+  report_dir: "benchmark/reports/"
+  save_raw: true
+  save_csv: true
+  save_json: true
+
+runtime:
+  parallel: true
+  max_workers: 8
