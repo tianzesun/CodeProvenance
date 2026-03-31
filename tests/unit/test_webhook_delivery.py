@@ -198,7 +198,7 @@ class TestWebhookRetryLogic:
     def test_max_retries_limit(self):
         """Test that max retries limit is enforced."""
         config = WebhookDeliveryConfig(
-            secret_key="test-secret",
+            secret_key="test-secret-key-12345",
             max_retries=3,
             retry_delay_base=60,
             timeout=30
@@ -271,7 +271,7 @@ class TestWebhookSecurity:
     def test_signature_immutable(self):
         """Test that signature cannot be modified after generation."""
         payload = '{"event": "test"}'
-        secret = "test-secret"
+        secret = "test-secret-key-12345"
         
         service = WebhookDeliveryService(WebhookDeliveryConfig(
             secret_key=secret,
@@ -301,13 +301,13 @@ class TestWebhookSecurity:
     def test_timestamp_in_headers(self):
         """Test that timestamp is included in headers."""
         service = WebhookDeliveryService(WebhookDeliveryConfig(
-            secret_key="test-secret",
+            secret_key="test-secret-key-12345",
             max_retries=3,
             retry_delay_base=60,
             timeout=30
         ))
         
-        headers = service._prepare_headers('{}', "test-secret")
+        headers = service._prepare_headers('{}', "test-secret-key-12345")
         
         assert 'X-Webhook-Timestamp' in headers
         timestamp = int(headers['X-Webhook-Timestamp'])
@@ -316,13 +316,13 @@ class TestWebhookSecurity:
     def test_content_type_header(self):
         """Test that Content-Type header is set correctly."""
         service = WebhookDeliveryService(WebhookDeliveryConfig(
-            secret_key="test-secret",
+            secret_key="test-secret-key-12345",
             max_retries=3,
             retry_delay_base=60,
             timeout=30
         ))
         
-        headers = service._prepare_headers('{}', "test-secret")
+        headers = service._prepare_headers('{}', "test-secret-key-12345")
         
         assert headers['Content-Type'] == 'application/json'
 
@@ -347,7 +347,7 @@ class TestWebhookConfiguration:
     def test_configuration_defaults(self):
         """Test configuration with default values."""
         config = WebhookDeliveryConfig(
-            secret_key="test-secret-key"
+            secret_key="test-secret-key-12345"
         )
         
         assert config.max_retries == 3

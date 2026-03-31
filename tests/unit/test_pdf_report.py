@@ -12,6 +12,13 @@ import tempfile
 import os
 from pathlib import Path
 
+# Check if WeasyPrint is available
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
+
 from src.utils.report import PDFReportGenerator, ReportGenerator
 
 
@@ -82,6 +89,7 @@ class TestPDFReportGenerator:
         assert hasattr(self.generator, 'html_generator')
         assert isinstance(self.generator.html_generator, ReportGenerator)
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_generation_creates_file(self):
         """Test that PDF generation creates a file."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -104,6 +112,7 @@ class TestPDFReportGenerator:
             file_size = os.path.getsize(result_path)
             assert file_size > 0
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_content_includes_summary(self):
         """Test that PDF includes summary information."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -124,6 +133,7 @@ class TestPDFReportGenerator:
             # PDF should start with PDF header
             assert pdf_content.startswith(b'%PDF')
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_with_empty_results(self):
         """Test PDF generation with empty results."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +150,7 @@ class TestPDFReportGenerator:
             assert os.path.exists(result_path)
             assert os.path.getsize(result_path) > 0
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_with_high_threshold(self):
         """Test PDF generation with high threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,6 +167,7 @@ class TestPDFReportGenerator:
             
             assert os.path.exists(result_path)
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_with_low_threshold(self):
         """Test PDF generation with low threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -202,6 +214,7 @@ class TestPDFReportFormatting:
 class TestPDFReportContent:
     """Test PDF report content."""
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_includes_title(self):
         """Test that PDF includes report title."""
         generator = PDFReportGenerator()
@@ -224,6 +237,7 @@ class TestPDFReportContent:
             
             assert os.path.exists(output_path)
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_includes_timestamp(self):
         """Test that PDF includes generation timestamp."""
         generator = PDFReportGenerator()
@@ -241,6 +255,7 @@ class TestPDFReportContent:
             
             assert os.path.exists(output_path)
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_includes_statistics(self):
         """Test that PDF includes statistics."""
         generator = PDFReportGenerator()
@@ -286,6 +301,7 @@ class TestPDFExportIntegration:
             assert 'json' in results
             assert 'csv' in results
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_pdf_from_html_report(self):
         """Test that PDF is generated from HTML report."""
         html_generator = ReportGenerator()
@@ -347,6 +363,7 @@ class TestPDFErrorHandling:
 class TestPDFPerformance:
     """Test PDF generation performance."""
     
+    @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
     def test_large_report_generation(self):
         """Test PDF generation with large dataset."""
         generator = PDFReportGenerator()

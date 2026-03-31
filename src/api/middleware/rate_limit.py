@@ -166,3 +166,52 @@ class RateLimiter:
 
 # Singleton instance
 rate_limiter = RateLimiter()
+
+
+class RateLimitMiddleware:
+    """
+    FastAPI middleware for rate limiting.
+    
+    Wraps the RateLimiter to provide middleware functionality.
+    """
+    
+    def __init__(self, app, redis_url: Optional[str] = None):
+        """
+        Initialize rate limit middleware.
+        
+        Args:
+            app: FastAPI application
+            redis_url: Redis URL (optional, for distributed rate limiting)
+        """
+        self.app = app
+        self.redis_url = redis_url
+        self.limiter = rate_limiter
+    
+    async def __call__(self, request: Request, call_next):
+        """
+        Process request through rate limiting middleware.
+        
+        Args:
+            request: FastAPI request
+            call_next: Next middleware/endpoint
+            
+        Returns:
+            Response from next middleware/endpoint
+        """
+        # Extract tenant ID from request (would come from auth middleware)
+        tenant_id = getattr(request.state, 'tenant_id', 'default')
+        
+        # Check rate limit
+        self.limiter.check_rate_limit(tenant_id, request)
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Add rate limit headers
+        remaining = self.limiter.get_remaining(tenant_id)
+        response.headers['X-RateLimit-Limit-Minute'] = str(remaining['minute']['limit'])
+        response.headers['X-RateLimit-Remaining-Minute'] = str(remaining['minute']['remaining'])
+        response.headers['X-RateLimit-Limit-Hour'] = str(remaining['hour']['limit'])
+        response.headers['X-RateLimit-Remaining-Hour'] = str(remaining['hour']['remaining'])
+        
+        return response

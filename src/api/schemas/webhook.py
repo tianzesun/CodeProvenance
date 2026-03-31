@@ -9,9 +9,9 @@ import uuid
 
 class WebhookEventBase(BaseModel):
     job_id: uuid.UUID
-    event_type: str = Field(..., regex=r'^(job\.completed|job\.failed|job\.progress)$')
+    event_type: str = Field(..., pattern=r'^(job\.completed|job\.failed|job\.progress)$')
     payload: Dict[str, Any]
-    status: Optional[str] = Field(None, regex=r'^(pending|delivered|failed|retried)$')
+    status: Optional[str] = Field(None, pattern=r'^(pending|delivered|failed|retried)$')
     signature: Optional[str] = None
 
 
