@@ -4,39 +4,41 @@
 CodeProvenance/
 ├── src/
 │   ├── api/                 # REST API layer
-│   │   ├── routes/         # API endpoints
-│   │   ├── middleware/     # Request/response middleware
-│   │   └── schemas/        # Request/response validation
-│   ├── core/               # Core similarity detection logic
-│   │   ├── parser/         # Code file parsing
-│   │   ├── processor/      # Text processing & tokenization
-│   │   ├── similarity/     # Similarity algorithms
-│   │   └── analyzer/       # Analysis orchestration
-│   ├── models/             # Data models & schemas
-│   ├── utils/              # Utility functions
-│   ├── config/              # Configuration management
-│   └── main.py             # Application entry point
-├── tests/                   # Unit and integration tests
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/           # Test data
-├── scripts/                 # Build and deployment scripts
-├── docs/                    # Documentation
-├── .ai-rules.md            # AI Development Rules (this file)
-├── .env.example             # Environment variables template
-├── pyproject.toml          # Python project configuration
-└── README.md
+│   ├── services/            # Business logic
+│   ├── models/              # Data models
+│   ├── engines/             # ⭐ Core algorithm layer (decoupled)
+│   │   ├── base_engine.py
+│   │   ├── fingerprint/     # Token-based fingerprinting
+│   │   ├── ast/             # AST structural analysis
+│   │   ├── semantic/        # Semantic/embedding similarity
+│   │   └── fusion/          # Ensemble engine
+│   ├── pipeline/            # ⭐ Pipeline orchestrator
+│   │   ├── detect.py        # Detection workflow
+│   │   ├── benchmark.py     # Benchmark workflow
+│   │   └── train.py         # Training workflow
+│   ├── analysis/            # ⭐ Error analysis
+│   │   └── error_analysis.py
+│   ├── workers/             # Background workers
+│   └── utils/               # Utilities
+├── benchmark/               # ⭐ Benchmark system
+│   ├── datasets/            # Benchmark datasets
+│   ├── runners/             # Dataset runners
+│   ├── evaluators/          # Metric evaluators
+│   └── reports/             # Benchmark reports
+├── ml/                      # ⭐ ML system
+│   ├── datasets/            # Training datasets
+│   ├── training/            # Model training
+│   ├── models/              # Trained model storage
+│   └── checkpoints/         # Training checkpoints
+├── tools/                   # ⭐ Competitor tools
+│   ├── jplag/
+│   ├── moss/
+│   ├── nicad/
+│   └── pmd/
+├── data/                    # Data files
+├── reports/                 # Generated reports
+├── scripts/                 # Build scripts
+├── tests/                   # Tests
+├── docker/                  # Docker config
+└── docs/                    # Documentation
 ```
-
-## Directory Purposes
-
-| Directory | Purpose |
-|-----------|---------|
-| `src/api/` | REST API endpoints and request handling |
-| `src/core/` | Core similarity detection algorithms |
-| `src/models/` | Pydantic/dataclass models for data validation |
-| `src/utils/` | Shared utility functions |
-| `src/config/` | Configuration loading and management |
-| `tests/` | All test files organized by type |
-| `scripts/` | Build, deployment, and utility scripts |
-| `docs/` | Project documentation |

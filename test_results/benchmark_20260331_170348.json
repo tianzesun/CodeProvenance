@@ -1,0 +1,35 @@
+{
+  "benchmark": "BigCloneBench",
+  "summary": {
+    "total_tests": 200,
+    "true_positives": 150,
+    "true_negatives": 50,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "accuracy": 1.0,
+    "avg_execution_time": 0.0018586337566375733,
+    "by_clone_type": {
+      "1": {
+        "recall": 1.0,
+        "avg_score": 0.40625,
+        "count": 50
+      },
+      "2": {
+        "recall": 1.0,
+        "avg_score": 0.2726823787625418,
+        "count": 50
+      },
+      "3": {
+        "recall": 1.0,
+        "avg_score": 0.26322878775108327,
+        "count": 50
+      }
+    },
+    "timestamp": "2026-03-31T17:03:48.047836"
+  },
+  "results_count": 200,
+  "algorithm_count": 6
+}
