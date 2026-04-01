@@ -1,3 +1,6 @@
-"""Services - application logic layer."""
-from src.services.detection_service import DetectionService
-__all__ = ['DetectionService']
+"""Services Layer - Thin wrapper (Clean Architecture).
+
+Services coordinate application layer.
+They do NOT implement business logic.
+API calls services -> application/use_cases -> domain -> engines
+"""

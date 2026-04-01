@@ -1,12 +1,8 @@
-"""Metrics - Pure computation (precision, recall, F1)."""
+"""Core Metrics - Production safe computation."""
 from typing import Dict, List
-from dataclasses import dataclass
 
-@dataclass
-class Metrics:
-    precision: float; recall: float; f1: float; tp: int; fp: int; fn: int; tn: int
-
-def compute_metrics(predictions: List[Dict], label_map: Dict[str, int], threshold: float = 0.5) -> Metrics:
+def compute_metrics(predictions: List[Dict], label_map: Dict[str, int], threshold: float = 0.5) -> Dict[str, float]:
+    """Compute P/R/F1."""
     tp = fp = fn = tn = 0
     for p in predictions:
         score = p.get("similarity", 0)
@@ -21,4 +17,4 @@ def compute_metrics(predictions: List[Dict], label_map: Dict[str, int], threshol
     prec = tp/(tp+fp) if (tp+fp) else 0
     rec = tp/(tp+fn) if (tp+fn) else 0
     f1 = 2*prec*rec/(prec+rec) if (prec+rec) else 0
-    return Metrics(precision=prec, recall=rec, f1=f1, tp=tp, fp=fp, fn=fn, tn=tn)
+    return {"precision": prec, "recall": rec, "f1": f1, "tp": tp, "fp": fp, "fn": fn, "tn": tn}

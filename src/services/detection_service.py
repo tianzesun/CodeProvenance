@@ -1,31 +1,16 @@
-"""Detection Service - SINGLE entry point for detection workflows."""
+"""Detection Service - Thin wrapper (NOT business logic).
+
+Responsibility: Coordinate application layer use cases.
+API calls this -> application/use_cases/detect_submission.execute()
+"""
 from typing import Dict, List, Any, Optional
 
 class DetectionService:
-    """
-    SINGLE entry point for all detection workflows.
-    flow: submission -> feature extract -> scoring -> decision
-    """
+    """Thin service layer - delegates to application use cases."""
     def __init__(self, weights: Optional[Dict] = None, threshold: float = 0.5):
-        from src.engines.features.feature_extractor import FeatureExtractor as _FE
-        from src.engines.scoring.fusion_engine import FusionEngine as _Fusion
-        from src.core.decision import DecisionEngine
-        self.extractor = _FE()
-        self.scoring = _Fusion(weights)
-        self.decision = DecisionEngine(threshold)
+        from src.application.use_cases.detect_submission import DetectSubmission
+        self.detect_submission = DetectSubmission(weights, threshold)
     
     def detect(self, submissions: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
-        """Run detection. NEVER call engines directly."""
-        results = []
-        for sub_id, submission in submissions.items():
-            ca, cb = submission.get("code_a", ""), submission.get("code_b", "")
-            features = self.extractor.extract(ca, cb)
-            fused = self.scoring.fuse(features)
-            final = self.decision.decide(fused.final_score)
-            results.append({
-                "submission_id": sub_id,
-                "score": fused.final_score,
-                "decision": final.predicted,
-                "confidence": final.confidence,
-            })
-        return results
+        """Delegate to use case."""
+        return self.detect_submission.execute(submissions)

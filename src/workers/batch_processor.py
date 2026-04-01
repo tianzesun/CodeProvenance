@@ -388,14 +388,14 @@ try:
         """
         try:
             # Import similarity engine
-            from src.engines.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+            from src.application.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
             
             # Get code content (would be fetched from storage in real implementation)
             code_a = ""  # Would be: storage.get_file(file_a)
             code_b = ""  # Would be: storage.get_file(file_b)
             
             # Parse code
-            from src.core.parser import CodeParser
+            from src.application.parser import CodeParser
             parser = CodeParser()
             parsed_a = parser.parse(code_a, file_a.split('.')[-1])
             parsed_b = parser.parse(code_b, file_b.split('.')[-1])
