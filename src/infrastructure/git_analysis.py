@@ -1,16 +1,19 @@
 """
-Git History Integration Module for CodeProvenance.
+Git History Analysis Module for CodeProvenance.
 
-Analyzes Git history to detect code origin, author attribution,
-and commit patterns for plagiarism detection.
+Detects plagiarism through Git history analysis:
+- Code origin detection (who wrote it first)
+- Commit timeline analysis (sudden vs incremental changes)
+- Cross-repo similarity (student vs student across time)
+- Sudden code appearance detection (copy-paste detection)
 """
 
 import subprocess
-import hashlib
+import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
