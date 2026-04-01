@@ -1,17 +1,17 @@
-"""Evaluator - Full evaluation with metrics + FP/FN lists."""
+"""Evaluator - PURE ONLINE metrics computation only. NO decision influence."""
 from typing import Dict, List, Any, Tuple
 from src.evaluation.metrics import Metrics, compute_metrics
 
 class Evaluator:
-    """Centralized evaluation engine."""
-    def evaluate(self, predictions: List[Dict[str, Any]], truth_pairs: List[Dict],
-                 threshold: float = 0.5) -> Tuple[Metrics, Dict]:
-        label_map = {}
-        for gt in truth_pairs:
-            k = tuple(sorted([gt.get("file1",""), gt.get("file2","")]))
-            label_map[k] = gt.get("label", 0)
-        metrics = compute_metrics(predictions, label_map, threshold)
-        fp_pairs, fn_pairs = [], []
+    """Offline evaluation only. NEVER affects runtime decisions."""
+    def evaluate(self, predictions: List[Dict], label_map: Dict[str, int], threshold: float = 0.5) -> Metrics:
+        """Compute metrics only."""
+        return compute_metrics(predictions, label_map, threshold)
+    def analyze(self, predictions: List[Dict], truth: List[Dict]) -> Tuple[Metrics, Dict]:
+        """Offline analysis."""
+        label_map = {tuple(sorted([gt.get("file1",""), gt.get("file2","")])): gt.get("label",0) for gt in truth}
+        m = compute_metrics(predictions, label_map, 0.5)
+        fp, fn = [], []
         pred_set = {}
         for p in predictions:
             k = tuple(sorted([p.get("file1",""), p.get("file2","")]))
@@ -20,9 +20,8 @@ class Evaluator:
                 pred_set[k] = sim
         for k, v in label_map.items():
             score = pred_set.get(k, 0)
-            pred = 1 if score >= threshold else 0
-            if pred and not v:
-                fp_pairs.append(list(k))
-            elif not pred and v:
-                fn_pairs.append(list(k))
-        return metrics, {"fp": fp_pairs, "fn": fn_pairs}
+            if score >= 0.5 and not v:
+                fp.append(list(k))
+            elif score < 0.5 and v:
+                fn.append(list(k))
+        return m, {"fp": fp, "fn": fn}
