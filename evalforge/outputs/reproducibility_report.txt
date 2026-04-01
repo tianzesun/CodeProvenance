@@ -1,0 +1,24 @@
+EVALFORGE REPRODUCIBILITY REPORT
+==================================================
+Run timestamp: 2026-04-01T15:33:17.572756
+Git commit: f193b19b
+Random seed: 42
+Dataset versions: {
+  "synthetic": "1.0",
+  "xiangtan_style": "1.0",
+  "google_code_jam": "1.0",
+  "bigclonebench": "bceval_2024",
+  "codesimilaritydataset": "1.0",
+  "kaggle_student_code": "1.0"
+}
+Tool versions: frozen in registry
+
+All experiments are fully deterministic given:
+  1. Fixed dataset versions (above)
+  2. Fixed tool versions (frozen in code)
+  3. Fixed random seed (above)
+  4. Deterministic tokenization (PYTHONHASHSEED set)
+
+To reproduce this run:
+  python -m evalforge.run_all --config evalforge/config.yaml
+==================================================

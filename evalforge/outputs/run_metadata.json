@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-04-01T15:33:17.572756",
+  "git_commit": "f193b19b",
+  "seed": 42,
+  "dataset_versions": {
+    "synthetic": "1.0",
+    "xiangtan_style": "1.0",
+    "google_code_jam": "1.0",
+    "bigclonebench": "bceval_2024",
+    "codesimilaritydataset": "1.0",
+    "kaggle_student_code": "1.0"
+  },
+  "tool_versions": {
+    "our_token": "frozen",
+    "our_ast": "frozen",
+    "our_hybrid": "frozen"
+  },
+  "tools": [
+    "our_token",
+    "our_ast",
+    "our_hybrid"
+  ],
+  "normalization": "percentile"
+}
