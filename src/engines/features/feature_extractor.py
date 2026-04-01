@@ -1,6 +1,6 @@
 """Feature Extractor - unified feature computation."""
 from typing import Dict, List, Any, Optional
-from src.core.domain import FeatureVector
+from src.domain import FeatureVector
 
 class FeatureExtractor:
     """Unified feature extractor for code pairs."""
