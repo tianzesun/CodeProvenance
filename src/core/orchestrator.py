@@ -1,9 +1,9 @@
 """Orchestrator - SINGLE entry point for ALL detection workflows.
 
-Design rules:
-- NEVER import evaluation/ here (offline only)
-- ALL decision logic goes through core/decision/
-- pipeline MUST call orchestrator, not engines directly
+DESIGN RULE: This module is RUNTIME ONLY.
+- NEVER import evaluation/ here (evaluation is OFFLINE only)
+- ALL decision logic MUST go through core/decision/
+- Pipeline MUST call orchestrator, not engines directly
 """
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from src.core.models import CodePair, FeatureVector
 
 @dataclass
 class DetectionResult:
-    """Result from orchestrator - contains decision from SINGLE decision layer."""
+    """Result from orchestrator - decision from SINGLE decision layer."""
     pair_id: str
     score: float
     decision: int  # 0 or 1 from DecisionEngine ONLY
@@ -20,7 +20,7 @@ class DetectionResult:
 class Orchestrator:
     """
     SINGLE entry point for all detection workflows.
-    flow: input → engines → fusion → DECISION (single) → result
+    flow: input → engines → fusion → DECISION (single source) → result
     """
     def __init__(self, weights: Optional[Dict] = None, threshold: float = 0.5):
         from src.core.fusion import FusionEngine
