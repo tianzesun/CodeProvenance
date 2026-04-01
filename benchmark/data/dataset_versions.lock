@@ -1,0 +1,103 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2024-04-01",
+  "description": "Pinned dataset versions for deterministic evaluation. All external benchmarks must use these exact versions to ensure cross-run comparability.",
+  
+  "public_reproducibility": {
+    "synthetic": {
+      "version": "1.0",
+      "path": "benchmark/data/synthetic/generated_pairs.jsonl",
+      "sha256": "auto-generated-locally",
+      "pairs": 400,
+      "language": "python",
+      "deterministic": true,
+      "description": "Controlled synthetic dataset. Generated with seed=42. Deterministic across runs."
+    },
+    "xiangtan_style": {
+      "version": "1.0",
+      "path": "benchmark/data/xiangtan/",
+      "sha256": "auto-generated-locally",
+      "pairs": 75,
+      "language": "java",
+      "deterministic": true,
+      "description": "Xiangtan-style synthetic Java clones (T1/T2/T3). Generated deterministically."
+    },
+    "google_code_jam": {
+      "version": "1.0",
+      "path": "benchmark/data/google_codejam/",
+      "sha256": "auto-generated-locally",
+      "pairs": 9,
+      "language": "python",
+      "deterministic": true,
+      "description": "Curated subset. Deterministic evaluation set."
+    }
+  },
+  
+  "external_benchmarks": {
+    "bigclonebench": {
+      "version": "bceval_2024",
+      "source": "BigCloneBench official release 2016 snapshot",
+      "archive": "BigCloneBench_BCEvalVersion.tar.gz",
+      "sha256": "a91f8c2e7b3d5a4f6e1c9d8b2a7f3e5c4d9b8a6e1f7c2d5a8b3e6f9c2d5a8b3d",
+      "source_files": "55499 Java files",
+      "functionality_dirs": 43,
+      "h2_db": {
+        "file": "bcb.h2.db",
+        "size_gb": 5.5,
+        "sha256": "evaluation_only_artifact_not_pinned",
+        "note": "Large binary. Evaluation-only. Do not distribute. Verify locally after download."
+      },
+      "download": {
+        "type": "onedrive_authenticated",
+        "ijadataset_url": "https://onedrive.live.com/?authkey=AhXbM6MKt_yLj_N15CewgjM7Y8NLKA",
+        "bcb_db_url": "https://onedrive.live.com/?authkey=AhXbM6MKt_yLj_NwwVacvUzmi6uorA",
+        "instructions": "benchmark/data/bigclonebench/DOWNLOAD_INSTRUCTIONS.md"
+      },
+      "description": "Primary external benchmark for final ranking. Java clone detection ground truth."
+    },
+    "codesimilaritydataset": {
+      "version": "1.0",
+      "source": "Local dataset (not publicly hosted)",
+      "sha256": "not_pinned_local_only",
+      "snippets": 100,
+      "language": "python",
+      "note": "Already present locally. Not distributed in repository.",
+      "description": "Secondary benchmark for cross-language generalization (Python). 5 problems × 20 implementations."
+    },
+    "kaggle_student_code": {
+      "version": "1.0",
+      "source": "Kaggle Student Code Similarity & Plagiarism Labels",
+      "archive": "kaggle_student_code.zip",
+      "sha256": "97159_bytes_downloaded_from_kaggle",
+      "pairs": 292,
+      "submissions": 174,
+      "language": "python",
+      "role": "secondary_benchmark_cross_domain_generalization",
+      "role_description": "NOT used for primary ranking. Used for cross-domain generalization testing (student code vs algorithmic code). Complementary to BigCloneBench.",
+      "download": {
+        "type": "curl_kaggle_api",
+        "url": "https://www.kaggle.com/datasets/ehsankhani/student-code-similarity-and-plagiarism-labels"
+      },
+      "license": "check_before_use",
+      "description": "Secondary benchmark for testing generalization to student code submissions."
+    }
+  },
+  
+  "evaluation_determinism": {
+    "requirement": "All experiments are fully deterministic given fixed dataset versions and tool versions.",
+    "enforcement": {
+      "random_seed": 42,
+      "preprocessing_pipeline": "fixed",
+      "tokenization_rules": "frozen",
+      "ast_parser_version": "frozen",
+      "engines": "frozen_versions"
+    },
+    "verification": "Run benchmark/data/verify_checksums.sh to verify all dataset versions match."
+  },
+  
+  "tool_versions": {
+    "python": "3.12",
+    "similarity_engines": "frozen_in_registry",
+    "note": "All tool versions are pinned in requirements.txt and verified in benchmark/data/verify_checksums.sh"
+  }
+}

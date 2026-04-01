@@ -50,6 +50,8 @@
       "pairs": 292,
       "languages": ["python"],
       "in_git": false,
+      "role": "secondary_benchmark_cross_domain_generalization",
+      "role_description": "NOT used for primary ranking. Used for cross-domain generalization testing (student code vs algorithmic code). Complementary to BigCloneBench.",
       "download_url": "https://www.kaggle.com/datasets/ehsankhani/student-code-similarity-and-plagiarism-labels",
       "license": "check_before_use"
     },
