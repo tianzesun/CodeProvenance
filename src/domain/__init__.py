@@ -1,6 +1,18 @@
-"""Domain Layer - System truth layer (Clean Architecture)."""
-from src.domain.models import CodePair, FeatureVector, SimilarityScore, DetectionResult, MetricsResult, EvaluationReport
-from src.domain.decision import DecisionEngine, DecisionResult, ThresholdPolicy, ClassificationPolicy
-__all__ = ['CodePair', 'FeatureVector', 'SimilarityScore', 'DetectionResult', 
-           'MetricsResult', 'EvaluationReport', 'DecisionEngine', 'DecisionResult', 
-           'ThresholdPolicy', 'ClassificationPolicy']
+"""Domain Layer - Academic Integrity Case Management.
+
+The system produces EVIDENCE. Humans make JUDGMENTS.
+These are fundamentally different responsibilities.
+"""
+from src.domain.models import (
+    ImmutableSubmission, EvidenceBlock, Finding,
+    AcademicIntegrityCase, CaseStatus, AuditEntry
+)
+from src.domain.decision.policy import PolicyConfig, get_default_policy
+
+__all__ = [
+    # Case management
+    'AcademicIntegrityCase', 'CaseStatus',
+    'ImmutableSubmission', 'EvidenceBlock', 'Finding', 'AuditEntry',
+    # Policy
+    'PolicyConfig', 'get_default_policy',
+]
