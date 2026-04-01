@@ -444,7 +444,7 @@ class EmbeddingProvider:
     
     def _generate_dummy_embedding(self, code: str) -> List[float]:
         """
-        Generate a deterministic pseudo-embedding for testing.
+        Generate a deterministic pseudo-embedding for testing (no numpy).
         
         Args:
             code: Source code
@@ -452,19 +452,23 @@ class EmbeddingProvider:
         Returns:
             Pseudo-embedding vector
         """
-        import numpy as np
+        import random
+        import math
         
         # Create a deterministic seed from code hash
         code_hash = hashlib.sha256(code.encode()).hexdigest()
         seed = int(code_hash[:8], 16)
         
-        np.random.seed(seed)
+        random.seed(seed)
         
         # Generate random vector normalized to unit length
-        vec = np.random.randn(1536)
-        vec = vec / np.linalg.norm(vec)
+        dim = 1536
+        vec = [random.gauss(0, 1) for _ in range(dim)]
+        norm = math.sqrt(sum(x * x for x in vec))
+        if norm > 0:
+            vec = [x / norm for x in vec]
         
-        return vec.tolist()
+        return vec
     
     async def generate_batch_embeddings(
         self,
