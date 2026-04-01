@@ -1,0 +1,80 @@
+{
+  "layers": {
+    "public_reproducibility": {
+      "description": "Fully reproducible datasets committed to Git. Used for sanity checks, ablation, and debugging.",
+      "datasets": [
+        "synthetic",
+        "xiangtan_style",
+        "google_code_jam",
+        "kaggle_student_code"
+      ]
+    },
+    "external_benchmarks": {
+      "description": "Publicly available datasets NOT committed to Git. Referenced by download scripts with version pinning and checksum verification. Used for final ranking and cross-paper comparability.",
+      "datasets": [
+        "bigclonebench",
+        "codesimilaritydataset"
+      ]
+    },
+    "evaluation_only": {
+      "description": "Evaluation artifacts not distributed in repository. Large binary files (H2 databases) used only in controlled evaluation environments.",
+      "datasets": [
+        "bigclonebench_h2_db"
+      ]
+    }
+  },
+  "datasets": {
+    "synthetic": {
+      "path": "benchmark/data/synthetic/generated_pairs.jsonl",
+      "pairs": 400,
+      "languages": ["python"],
+      "in_git": true,
+      "reproducible": true
+    },
+    "xiangtan_style": {
+      "path": "benchmark/data/xiangtan/",
+      "pairs": 75,
+      "languages": ["java"],
+      "in_git": true,
+      "reproducible": true
+    },
+    "google_code_jam": {
+      "path": "benchmark/data/google_codejam/",
+      "pairs": 9,
+      "languages": ["python"],
+      "in_git": true,
+      "reproducible": true
+    },
+    "kaggle_student_code": {
+      "path": "benchmark/data/kaggle_student_code/",
+      "pairs": 292,
+      "languages": ["python"],
+      "in_git": false,
+      "download_url": "https://www.kaggle.com/datasets/ehsankhani/student-code-similarity-and-plagiarism-labels",
+      "license": "check_before_use"
+    },
+    "bigclonebench": {
+      "path": "benchmark/data/bigclonebench/",
+      "files": 55499,
+      "languages": ["java"],
+      "in_git": false,
+      "download_url": "https://onedrive.live.com/?authkey=AhXbM6MKt_yLj_NwwVacvUzmi6uorA",
+      "version": "bceval_2024",
+      "h2_db_evaluation_only": true,
+      "git_files": ["README.md", "DOWNLOAD_INSTRUCTIONS.md", "metadata/"],
+      "note": "Requires OneDrive authentication. See benchmark/data/bigclonebench/DOWNLOAD_INSTRUCTIONS.md"
+    },
+    "codesimilaritydataset": {
+      "path": "benchmark/data/CodeSimilarityDataset/",
+      "snippets": 100,
+      "languages": ["python"],
+      "in_git": false,
+      "note": "Already present locally. Not distributed in repo."
+    }
+  },
+  "evaluation_policy": {
+    "public_reproducibility_set": "synthetic, xiangtan_style, google_code_jam",
+    "external_benchmark_set": "bigclonebench",
+    "key_rule": "All reported final results are computed exclusively on external benchmark datasets. Public datasets are used only for validation and ablation."
+  }
+}
