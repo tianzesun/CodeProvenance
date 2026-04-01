@@ -1,0 +1,1 @@
+# Scripts package - entry-point scripts only, no business logic
