@@ -1,30 +1,32 @@
-"""Orchestrator - ONLY entry point for ALL detection workflows.
+"""Orchestrator - SINGLE entry point for ALL detection workflows.
 
 Design rules:
+- NEVER import evaluation/ here (offline only)
+- ALL decision logic goes through core/decision/
 - pipeline MUST call orchestrator, not engines directly
-- evaluation is offline ONLY, never affects runtime
 """
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from src.core.models import CodePair, FeatureVector, SimilarityScore
+from src.core.models import CodePair, FeatureVector
 
 @dataclass
 class DetectionResult:
+    """Result from orchestrator - contains decision from SINGLE decision layer."""
     pair_id: str
     score: float
-    decision: int  # 0 or 1 from SINGLE decision layer
+    decision: int  # 0 or 1 from DecisionEngine ONLY
     confidence: float
 
 class Orchestrator:
     """
-    ONLY entry point for all detection workflows.
-    flow: input → engines → fusion → DECISION → result
+    SINGLE entry point for all detection workflows.
+    flow: input → engines → fusion → DECISION (single) → result
     """
     def __init__(self, weights: Optional[Dict] = None, threshold: float = 0.5):
         from src.core.fusion import FusionEngine
         from src.core.decision import DecisionEngine
         self.fusion = FusionEngine(weights)
-        self.decision_engine = DecisionEngine(threshold)
+        self.decision = DecisionEngine(threshold)
     
     def run(self, pairs: List[CodePair], code_store: Dict[str, str]) -> List[DetectionResult]:
         """Run detection through orchestrator ONLY."""
@@ -33,11 +35,11 @@ class Orchestrator:
         feature_vectors = [extractor.extract(pair, code_store.get(pair.a,""), code_store.get(pair.b,"")) for pair in pairs]
         results = []
         for pair, fv in zip(pairs, feature_vectors):
-            score = self.fusion.fuse(fv)
-            final = self.decision_engine.decide(score.final_score, {"pair_id": pair.id})
+            fused_score = self.fusion.fuse(fv)
+            final = self.decision.decide(fused_score.final_score)
             results.append(DetectionResult(
                 pair_id=pair.id,
-                score=score.final_score,
+                score=fused_score.final_score,
                 decision=final.predicted,
                 confidence=final.confidence,
             ))
