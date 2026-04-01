@@ -1,10 +1,10 @@
 """Pipeline Orchestrator - Phase 6. Single entry point."""
 from typing import List, Dict, Optional
-from core.models import CodePair, FeatureVector, SimilarityScore, Prediction, EvaluationReport
-from core.extractor import FeatureExtractor
-from core.fusion import FusionEngine
-from core.decision import ThresholdClassifier
-from core.evaluator import Evaluator
+from src.core.models import CodePair, FeatureVector, SimilarityScore, Prediction, EvaluationReport
+from src.core.extractor import FeatureExtractor
+from src.core.fusion import FusionEngine
+from src.core.decision import ThresholdClassifier
+from src.core.evaluator import Evaluator
 
 class EvalPipeline:
     """Orchestrate full evaluation pipeline."""

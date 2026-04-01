@@ -1,0 +1,25 @@
+# Similarity Fusion Weights
+weights:
+  ast: 0.35
+  fingerprint: 0.40
+  ai: 0.25
+
+# Default threshold
+threshold:
+  default: 0.5
+  bigclonebench: 0.5
+  ocd: 0.5
+
+# Top-K evaluation
+topk:
+  k_values: [5, 10, 20, 50]
+
+# PR curve
+pr_curve:
+  num_points: 1000
+  beta: 2.0  # F2 score, favors recall
+
+# Experiment tracking
+experiment:
+  version: "v0.2"
+  name: "default"

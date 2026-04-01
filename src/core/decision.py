@@ -1,6 +1,6 @@
 """Decision Layer - Phase 4. Threshold and classification logic."""
 from typing import List, Tuple
-from core.models import SimilarityScore, Prediction
+from src.core.models import SimilarityScore, Prediction
 
 class ThresholdClassifier:
     """Apply threshold to similarity scores."""

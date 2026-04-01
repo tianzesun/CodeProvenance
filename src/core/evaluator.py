@@ -1,6 +1,6 @@
 """Evaluation Engine - Phase 5. Pure evaluator (compare predictions vs labels)."""
 from typing import List, Dict, Optional
-from core.models import Prediction, MetricsResult, EvaluationReport
+from src.core.models import Prediction, MetricsResult, EvaluationReport
 
 class Evaluator:
     """Pure evaluator - NO feature computation, NO fusion, NO threshold logic."""

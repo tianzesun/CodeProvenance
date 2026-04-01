@@ -73,3 +73,6 @@ apps/backend/data/
 apps/backend/uploads/
 *.tsbuildinfo
 apps/frontend/tsconfig.tsbuildinfo
+data/
+reports/
+test_results/

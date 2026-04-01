@@ -1,6 +1,6 @@
 """Feature Layer - Phase 2. Extract similarity features from code pairs."""
 from typing import Any, Dict
-from core.models import CodePair, FeatureVector
+from src.core.models import CodePair, FeatureVector
 
 class FeatureExtractor:
     """Extract similarity features from code pairs."""

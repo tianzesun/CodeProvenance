@@ -1,6 +1,6 @@
 """Fusion Engine - Phase 3. Centralize all scoring logic."""
 from typing import Dict, Optional
-from core.models import FeatureVector, SimilarityScore
+from src.core.models import FeatureVector, SimilarityScore
 
 class FusionEngine:
     """Compute final similarity score from feature vector."""

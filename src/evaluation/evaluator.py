@@ -1,6 +1,6 @@
 """Evaluator - Full evaluation with metrics + FP/FN lists."""
 from typing import Dict, List, Any, Tuple
-from evaluation.metrics import Metrics, compute_metrics
+from src.evaluation.metrics import Metrics, compute_metrics
 
 class Evaluator:
     """Centralized evaluation engine."""
