@@ -1,4 +1,4 @@
-"""Evaluation Lab - Offline batch system (benchmark, threshold optimization).
+"""Evaluation Offline - Benchmark, threshold tuning, model comparison.
 
-This is RESEARCH ONLY.
+RESEARCH ONLY. Never called by production scoring path.
 """

@@ -1,7 +1,7 @@
-"""Evaluation Layer - Online metrics evaluation ONLY.
+"""Evaluation Online - Production-safe metrics only.
 
 This layer evaluates scoring results in production.
-DO NOT import engines, ML, or training data logic here.
+Latency-safe, no external systems.
 """
 from src.evaluation.core.evaluator import Evaluator
 from src.evaluation.core.metrics import compute_metrics

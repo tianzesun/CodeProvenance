@@ -1,7 +1,4 @@
-"""Submission Detection Service.
-
-Orchestrates: feature extraction → scoring → decision.
-"""
+"""Detection Service - Inference pipeline orchestration."""
 from typing import Dict, List, Any, Optional
 from src.domain.decision import DecisionEngine
 
@@ -15,14 +12,13 @@ class SubmissionService:
         self.decision = DecisionEngine(threshold)
     
     def detect(self, submissions: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
-        """Run detection on submissions."""
         results = []
-        for sub_id, submission in submissions.items():
-            ca, cb = submission.get("code_a", ""), submission.get("code_b", "")
+        for sub_id, sub in submissions.items():
+            ca, cb = sub.get("code_a", ""), sub.get("code_b", "")
             features = self.feature_extractor.extract(ca, cb)
             fused = self.fusion_engine.fuse(features)
             final = self.decision.decide(fused.final_score)
             results.append({
                 "submission_id": sub_id, "score": fused.final_score,
-                "decision": final.predicted, "confidence": final.confidence})
+                "decision": final.decided, "confidence": final.confidence})
         return results
