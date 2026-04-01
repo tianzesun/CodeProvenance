@@ -180,14 +180,20 @@ def register_builtin_algorithms(engine: SimilarityEngine):
     from .ngram_similarity import NgramSimilarity
     from .ast_similarity import ASTSimilarity
     from .winnowing_similarity import EnhancedWinnowingSimilarity
-    from .embedding_similarity import EmbeddingSimilarity
     from .execution_similarity import ExecutionSimilarity
-    
+
+    # Use UniXcoder (local GPU) — falls back to OpenAI EmbeddingSimilarity if unavailable
+    try:
+        from .unixcoder_similarity import UniXcoderSimilarity
+        embedding_engine = UniXcoderSimilarity()
+    except Exception:
+        from .embedding_similarity import EmbeddingSimilarity
+        embedding_engine = EmbeddingSimilarity()
+
     # Add algorithms with default weights (higher = more important)
     engine.add_algorithm(EnhancedWinnowingSimilarity(), weight=1.5)
     engine.add_algorithm(TokenSimilarity(), weight=1.0)
     engine.add_algorithm(NgramSimilarity(), weight=1.0)
-    engine.add_algorithm(ASTSimilarity(), weight=2.0)  # Highest weight for AST
+    engine.add_algorithm(ASTSimilarity(), weight=2.0)        # Highest weight for AST
     engine.add_algorithm(ExecutionSimilarity(), weight=1.5)  # Execution-based
-    # Embedding similarity is optional and expensive, so lower weight by default
-    engine.add_algorithm(EmbeddingSimilarity(), weight=0.5)
+    engine.add_algorithm(embedding_engine, weight=0.5)       # Semantic (local GPU)

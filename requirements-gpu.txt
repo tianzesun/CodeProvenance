@@ -1,0 +1,11 @@
+# requirements-gpu.txt
+# Install AFTER base requirements.txt
+# Run: pip install -r requirements-gpu.txt
+#
+# On university GPU server (CUDA 11.8 — adjust cu118 → cu121 for CUDA 12.1):
+# pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+torch>=2.0.0
+transformers>=4.38.0
+accelerate>=0.27.0          # faster model loading, optional but recommended
+sentencepiece>=0.1.99       # needed by some tokenizers

@@ -45,9 +45,15 @@ class FeatureExtractor:
     @staticmethod
     def _embedding_similarity(a, b):
         try:
-            from src.engines.similarity.embedding_similarity import EmbeddingSimilarity
-            return EmbeddingSimilarity().compare({'raw': a}, {'raw': b})
-        except: return 0.0
+            from src.engines.similarity.unixcoder_similarity import UniXcoderSimilarity
+            return UniXcoderSimilarity().compare({'raw': a}, {'raw': b})
+        except Exception:
+            # Fallback to OpenAI embedding if UniXcoder fails (e.g. model not downloaded yet)
+            try:
+                from src.engines.similarity.embedding_similarity import EmbeddingSimilarity
+                return EmbeddingSimilarity().compare({'raw': a}, {'raw': b})
+            except Exception:
+                return 0.0
     
     @staticmethod
     def _ngram_similarity(a, b):
