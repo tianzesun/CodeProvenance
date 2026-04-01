@@ -1,33 +1,33 @@
-"""Core Data Models - Phase 1. Strict typed data objects."""
+"""Core Domain Models - system truth layer."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-@dataclass(frozen=True)
+@dataclass
 class CodePair:
     id: str
-    a: str  # file path or content identifier
-    b: str  # file path or content identifier
-    label: int = -1  # -1=unknown, 0=not clone, 1=clone
+    a: str
+    b: str
+    label: int = -1
 
 @dataclass
 class FeatureVector:
-    pair_id: str
+    pair_id: str = ""
     ast: float = 0.0
     fingerprint: float = 0.0
     embedding: float = 0.0
 
 @dataclass
 class SimilarityScore:
-    pair_id: str
-    features: FeatureVector
+    pair_id: str = ""
     final_score: float = 0.0
+    features: Optional[FeatureVector] = None
 
 @dataclass
-class Prediction:
+class DetectionResult:
     pair_id: str
     score: float
-    pred: int = 0
-    label: int = -1
+    decision: int
+    confidence: float
 
 @dataclass
 class MetricsResult:
@@ -41,8 +41,7 @@ class MetricsResult:
 
 @dataclass
 class EvaluationReport:
-    metrics: MetricsResult
-    predictions: List[Prediction] = field(default_factory=list)
+    metrics: Optional[MetricsResult] = None
+    predictions: List = field(default_factory=list)
     fp_pairs: List[str] = field(default_factory=list)
     fn_pairs: List[str] = field(default_factory=list)
-    optimal_threshold: float = 0.5
