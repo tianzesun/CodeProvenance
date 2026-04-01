@@ -1,1 +1,1 @@
-"""ML training module."""
+"""ML Training - model training logic."""

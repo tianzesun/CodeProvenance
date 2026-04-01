@@ -1,1 +1,1 @@
-"""Evaluation Core - Production safe metrics computation."""
+"""evaluation/core/ = online metrics evaluation only."""

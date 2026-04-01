@@ -1,3 +1,3 @@
-"""Application Layer - Clean Architecture Use Cases."""
-from src.application.use_cases.detect_submission import DetectSubmission
-__all__ = ['DetectSubmission']
+"""Application Layer - Services/Use Cases (orchestration only)."""
+from src.application.services.detection_service import SubmissionService
+__all__ = ['SubmissionService']
