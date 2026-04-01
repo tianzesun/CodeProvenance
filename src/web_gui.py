@@ -24,8 +24,8 @@ from itertools import combinations
 
 # Import core modules
 from src.core.parser.base_parser import ParserFactory
-from src.core.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
-from src.core.similarity.deep_analysis import analyze_code_deep, compare_codes_deep
+from src.engines.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+from src.engines.similarity.deep_analysis import analyze_code_deep, compare_codes_deep
 
 # Import all parsers to register them
 import src.core.parser.python_parser

@@ -17,13 +17,13 @@ class ASTEngine(BaseEngine):
         score = 0.0
         details = {}
         if self.use_deep_analysis and parsed_a.get('ast') and parsed_b.get('ast'):
-            from src.core.similarity.deep_analysis import compare_codes_deep
+            from src.engines.similarity.deep_analysis import compare_codes_deep
             deep_result = compare_codes_deep(parsed_a, parsed_b, language)
             score = deep_result.get('combined_score', 0.0)
             details = {'tree_edit_distance': deep_result.get('tree_edit_distance', 1.0),
                        'tree_kernel': deep_result.get('tree_kernel_similarity', 0.0)}
         else:
-            from src.core.similarity.ast_similarity import ASTSimilarity
+            from src.engines.similarity.ast_similarity import ASTSimilarity
             score = ASTSimilarity().compare(parsed_a, parsed_b)
             details = {'algorithm': 'ast_similarity'}
         return EngineResult(score=score, details=details, confidence=0.85)

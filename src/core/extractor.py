@@ -21,7 +21,7 @@ class FeatureExtractor:
     def _compute_ast_similarity(self, a: str, b: str) -> float:
         """Compute AST structural similarity."""
         try:
-            from src.core.similarity.ast_similarity import ASTSimilarity
+            from src.engines.similarity.ast_similarity import ASTSimilarity
             return ASTSimilarity().compare({'raw': a, 'tokens': self._tokenize(a)}, {'raw': b, 'tokens': self._tokenize(b)})
         except:
             return 0.0
@@ -29,7 +29,7 @@ class FeatureExtractor:
     def _compute_fingerprint_similarity(self, a: str, b: str) -> float:
         """Compute token/fingerprint similarity."""
         try:
-            from src.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+            from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
             engine = EnhancedWinnowingSimilarity()
             return engine.compare({'raw': a, 'tokens': self._tokenize(a)}, {'raw': b, 'tokens': self._tokenize(b)})
         except:
@@ -38,7 +38,7 @@ class FeatureExtractor:
     def _compute_embedding_similarity(self, a: str, b: str) -> float:
         """Compute AI embedding similarity."""
         try:
-            from src.core.similarity.embedding_similarity import EmbeddingSimilarity
+            from src.engines.similarity.embedding_similarity import EmbeddingSimilarity
             return EmbeddingSimilarity().compare({'raw': a}, {'raw': b})
         except:
             return 0.0

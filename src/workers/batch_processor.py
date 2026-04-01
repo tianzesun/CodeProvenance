@@ -388,7 +388,7 @@ try:
         """
         try:
             # Import similarity engine
-            from src.core.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+            from src.engines.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
             
             # Get code content (would be fetched from storage in real implementation)
             code_a = ""  # Would be: storage.get_file(file_a)

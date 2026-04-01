@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 import hashlib
 
-from src.core.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+from src.engines.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
 from src.utils.ai_detection import detect_ai_code
 
 

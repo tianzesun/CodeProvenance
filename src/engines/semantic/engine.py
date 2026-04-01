@@ -10,7 +10,7 @@ class SemanticEngine(BaseEngine):
 
     def compare(self, code_a: str, code_b: str, language: str = 'auto', **kwargs) -> EngineResult:
         try:
-            from src.core.similarity.embedding_similarity import EmbeddingSimilarity
+            from src.engines.similarity.embedding_similarity import EmbeddingSimilarity
             score = EmbeddingSimilarity(model_name=self.model_name).compare({'raw': code_a}, {'raw': code_b})
             return EngineResult(score=score, details={'algorithm': 'embedding', 'model': self.model_name}, confidence=0.75)
         except Exception:

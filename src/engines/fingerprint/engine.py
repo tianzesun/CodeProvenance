@@ -10,7 +10,7 @@ class FingerprintEngine(BaseEngine):
         self.t = t
 
     def compare(self, code_a: str, code_b: str, language: str = 'auto', **kwargs) -> EngineResult:
-        from src.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+        from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
         from src.core.parser.base_parser import ParserFactory
         parser_a = ParserFactory.get_parser(language)
         parser_b = ParserFactory.get_parser(language)
