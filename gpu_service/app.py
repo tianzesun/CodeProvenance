@@ -1,55 +1,78 @@
 """FastAPI entry point for GPU inference service."""
 import uuid
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, HTTPException
 from .schemas import CompareRequest, BatchRequest, TaskResponse
-from .queue import enqueue, get_result, enqueue_batch
+
+logger = logging.getLogger("gpu_service")
 
 app = FastAPI(title="CodeProvenance GPU Service", version="1.0")
 
-# Store for synchronous mode (no queue)
+# Lazy model loading
 _model = None
+_model_error = None
 
 def get_model():
-    global _model
-    if _model is None:
+    """Lazy load model. Returns None if dependencies missing."""
+    global _model, _model_error
+    if _model is not None:
+        return _model
+    if _model_error:
+        return None
+    try:
         from .model import CodeBERTModel
         _model = CodeBERTModel()
-    return _model
+        return _model
+    except Exception as e:
+        _model_error = str(e)
+        logger.warning(f"Model not loaded: {e}")
+        return None
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "CodeProvenance GPU"}
+    model_ok = get_model() is not None
+    return {"status": "ok", "service": "CodeProvenance GPU", "model_loaded": model_ok}
 
 @app.post("/compare", response_model=TaskResponse)
 async def compare(req: CompareRequest):
-    """Submit a comparison task (async)."""
+    """Submit async comparison task."""
+    from .queue import enqueue
     task_id = str(uuid.uuid4())
-    enqueue({"id": task_id, "code_a": req.code_a, "code_b": req.code_b})
+    try:
+        enqueue({"id": task_id, "code_a": req.code_a, "code_b": req.code_b})
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Redis not available")
     return {"task_id": task_id}
 
 @app.post("/compare/batch")
 async def compare_batch(req: BatchRequest):
-    """Submit batch comparison (async)."""
+    """Submit async batch comparison."""
+    from .queue import enqueue
     ids = []
-    for p in req.pairs:
-        task_id = str(uuid.uuid4())
-        enqueue({"id": task_id, "code_a": p.code_a, "code_b": p.code_b})
-        ids.append(task_id)
+    try:
+        for p in req.pairs:
+            task_id = str(uuid.uuid4())
+            enqueue({"id": task_id, "code_a": p.code_a, "code_b": p.code_b})
+            ids.append(task_id)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Redis not available")
     return {"task_ids": ids}
 
 @app.get("/result/{task_id}")
 async def get(task_id: str):
-    """Get result by task_id."""
+    """Get async result."""
+    from .queue import get_result
     result = get_result(task_id)
     if result is None:
         return {"status": "processing"}
     return {"status": "done", "result": result}
 
-# Synchronous endpoints (for small-scale use)
 @app.post("/predict")
 async def predict(req: CompareRequest):
-    """Synchronous single comparison (no queue)."""
+    """Sync single comparison (no queue)."""
     model = get_model()
+    if model is None:
+        raise HTTPException(status_code=503, detail=f"Model not available: {_model_error}")
     sims = model.similarity_batch([{"code_a": req.code_a, "code_b": req.code_b}])
     score = sims[0]
     risk = "CRITICAL" if score >= 0.9 else "HIGH" if score >= 0.75 else "MEDIUM" if score >= 0.5 else "LOW"
@@ -57,8 +80,10 @@ async def predict(req: CompareRequest):
 
 @app.post("/predict/batch")
 async def predict_batch(req: BatchRequest):
-    """Synchronous batch comparison (no queue)."""
+    """Sync batch comparison (no queue)."""
     model = get_model()
+    if model is None:
+        raise HTTPException(status_code=503, detail=f"Model not available: {_model_error}")
     pairs = [{"code_a": p.code_a, "code_b": p.code_b} for p in req.pairs]
     scores = model.similarity_batch(pairs)
     results = []
