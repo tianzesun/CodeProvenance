@@ -1,4 +1,4 @@
-# CodeProvenance Deployment Guide
+# IntegrityDesk Deployment Guide
 
 ## Staging Deployment Instructions
 

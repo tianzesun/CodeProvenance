@@ -1,5 +1,5 @@
 """
-Batch Processing Module for CodeProvenance.
+Batch Processing Module for IntegrityDesk.
 
 Provides distributed batch similarity computation using Celery workers.
 """

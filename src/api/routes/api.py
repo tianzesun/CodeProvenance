@@ -1,5 +1,5 @@
 """
-Main API router for CodeProvenance.
+Main API router for IntegrityDesk.
 """
 
 from fastapi import APIRouter
@@ -23,7 +23,7 @@ async def root():
     Root endpoint returning API information.
     """
     return {
-        "name": "CodeProvenance API",
+        "name": "IntegrityDesk API",
         "version": "1.0.0",
         "description": "Software Similarity Detection Service",
         "docs_url": "/docs",

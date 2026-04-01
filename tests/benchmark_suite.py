@@ -1,5 +1,5 @@
 """
-Benchmark Suite for CodeProvenance.
+Benchmark Suite for IntegrityDesk.
 
 Provides standardized test cases and accuracy metrics for evaluating
 similarity detection performance.
@@ -501,7 +501,7 @@ class BenchmarkSuite:
         """Format report as plain text."""
         lines = [
             "=" * 60,
-            "CodeProvenance Benchmark Report",
+            "IntegrityDesk Benchmark Report",
             "=" * 60,
             "",
             "OVERALL METRICS",
@@ -579,7 +579,7 @@ class BenchmarkSuite:
     def _format_markdown(self, report: BenchmarkReport) -> str:
         """Format report as Markdown."""
         lines = [
-            "# CodeProvenance Benchmark Report",
+            "# IntegrityDesk Benchmark Report",
             "",
             "## Summary",
             "",
@@ -631,7 +631,7 @@ def example_similarity_function(code_a: str, code_b: str) -> float:
     Example similarity function for testing.
     
     This is a simple implementation for demonstration.
-    In practice, use CodeProvenance's actual similarity engine.
+    In practice, use IntegrityDesk's actual similarity engine.
     """
     if not code_a or not code_b:
         return 0.0

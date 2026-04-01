@@ -1,5 +1,5 @@
 """
-Authentication tests for CodeProvenance API.
+Authentication tests for IntegrityDesk API.
 """
 import pytest
 from fastapi.testclient import TestClient

@@ -82,7 +82,7 @@ def start_api():
     from fastapi import FastAPI
     from pydantic import BaseModel
     
-    app = FastAPI(title="CodeProvenance GPU Service", version="1.0")
+    app = FastAPI(title="IntegrityDesk GPU Service", version="1.0")
     
     class CompareRequest(BaseModel):
         code_a: str

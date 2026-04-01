@@ -1,8 +1,8 @@
-# CodeProvenance - Database Design Document
+# IntegrityDesk - Database Design Document
 
 ## Overview
 
-This document details the database architecture for CodeProvenance, a B2B SaaS similarity detection engine. We use a hybrid approach with PostgreSQL for primary data and Redis for caching/queuing.
+This document details the database architecture for IntegrityDesk, a B2B SaaS similarity detection engine. We use a hybrid approach with PostgreSQL for primary data and Redis for caching/queuing.
 
 ## Database Technology Choices
 

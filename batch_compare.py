@@ -186,7 +186,7 @@ def _write_html_report(pairs, output_path, threshold, names, n_students):
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CodeProvenance — Plagiarism Report</title>
+<title>IntegrityDesk — Plagiarism Report</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
          max-width: 960px; margin: 40px auto; padding: 0 20px; color: #333; }}
@@ -204,7 +204,7 @@ def _write_html_report(pairs, output_path, threshold, names, n_students):
 </style>
 </head>
 <body>
-<h1>📋 CodeProvenance — Plagiarism Report</h1>
+<h1>📋 IntegrityDesk — Plagiarism Report</h1>
 <div class="summary">
   <div class="stat">
     <div class="stat-value">{n_students}</div>

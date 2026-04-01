@@ -1,5 +1,5 @@
 """
-Alembic environment configuration for CodeProvenance database migrations.
+Alembic environment configuration for IntegrityDesk database migrations.
 """
 
 from logging.config import fileConfig

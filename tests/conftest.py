@@ -1,5 +1,5 @@
 """
-Pytest configuration for CodeProvenance tests.
+Pytest configuration for IntegrityDesk tests.
 """
 import pytest
 import asyncio

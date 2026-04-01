@@ -1,4 +1,4 @@
-"""BigCloneBench runner for CodeProvenance."""
+"""BigCloneBench runner for IntegrityDesk."""
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from benchmark.runners.base_runner import BaseRunner, BenchmarkPair

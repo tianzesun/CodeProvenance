@@ -16,7 +16,7 @@ def create_app(weights: Optional[Dict] = None, threshold: float = 0.5) -> FastAP
     Container.init(weights, threshold)
     
     # Create FastAPI app (API is transport ONLY)
-    app = FastAPI(title="CodeProvenance", version="1.0")
+    app = FastAPI(title="IntegrityDesk", version="1.0")
     
     # Register routes (API delegates to application use cases)
     from src.api.routes import health

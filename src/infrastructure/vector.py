@@ -1,5 +1,5 @@
 """
-Vector Similarity Search Module for CodeProvenance.
+Vector Similarity Search Module for IntegrityDesk.
 
 Provides semantic similarity search using PostgreSQL pgvector extension.
 Enables fast approximate nearest neighbor (ANN) search across code embeddings.

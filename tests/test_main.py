@@ -1,5 +1,5 @@
 """
-Basic tests for CodeProvenance main application.
+Basic tests for IntegrityDesk main application.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +14,7 @@ def test_root_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert "message" in data
-    assert "Welcome to CodeProvenance API" in data["message"]
+    assert "Welcome to IntegrityDesk API" in data["message"]
 
 
 def test_health_endpoint():
@@ -45,4 +45,4 @@ def test_openapi_json():
     assert response.status_code == 200
     data = response.json()
     assert "openapi" in data
-    assert data["info"]["title"] == "CodeProvenance"
+    assert data["info"]["title"] == "IntegrityDesk"

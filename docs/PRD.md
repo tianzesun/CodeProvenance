@@ -1,4 +1,4 @@
-# CodeProvenance - Product Requirements Document
+# IntegrityDesk - Product Requirements Document
 
 **Version**: 2.0  
 **Last Updated**: 2026-03-31  
@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-**CodeProvenance** is an enterprise-grade code plagiarism detection system designed to surpass industry leaders (MOSS, Copyleaks, Turnitin) by combining:
+**IntegrityDesk** is an enterprise-grade code plagiarism detection system designed to surpass industry leaders (MOSS, Copyleaks, Turnitin) by combining:
 
 - **MOSS-style Winnowing** for fast fingerprinting
 - **AST + Graph Matching** for structural similarity
@@ -409,7 +409,7 @@ GET  /api/v1/usage            # Usage metrics
 
 ## 10. Competitive Analysis
 
-| Feature | CodeProvenance | MOSS | Copyleaks | Turnitin |
+| Feature | IntegrityDesk | MOSS | Copyleaks | Turnitin |
 |---------|---------------|------|-----------|----------|
 | **Winnowing** | ✅ | ✅ | ❌ | ❌ |
 | **AST Analysis** | ✅ | ✅ | Basic | ❌ |
@@ -456,5 +456,5 @@ GET  /api/v1/usage            # Usage metrics
 
 ### C. Contact
 - **Email**: support@codeprovenance.io
-- **GitHub**: https://github.com/tianzesun/CodeProvenance
+- **GitHub**: https://github.com/tianzesun/IntegrityDesk
 - **Documentation**: https://docs.codeprovenance.io

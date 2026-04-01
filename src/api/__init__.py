@@ -1,3 +1,3 @@
 """
-API package for CodeProvenance.
+API package for IntegrityDesk.
 """

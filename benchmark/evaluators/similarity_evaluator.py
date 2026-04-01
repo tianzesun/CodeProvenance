@@ -61,7 +61,7 @@ class SimilarityEvaluator:
         return best['threshold'], best.get(metric, 0)
 
     @staticmethod
-    def save_metrics(metrics: Dict[str, Any], output_path: Path, tool: str = "CodeProvenance") -> None:
+    def save_metrics(metrics: Dict[str, Any], output_path: Path, tool: str = "IntegrityDesk") -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w') as f:
             json.dump({'tool_name': tool, 'evaluated_at': datetime.now().isoformat(), 'metrics': metrics}, f, indent=2)

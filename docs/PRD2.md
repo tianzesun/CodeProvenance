@@ -23,7 +23,7 @@ Web 后端服务架构（CRUD + async task）
 
 二、你现在缺失的“系统级模块”
 
-要成为真正的 UniGuard / CodeProvenance，你必须新增 4个“上层系统模块”：
+要成为真正的 UniGuard / IntegrityDesk，你必须新增 4个“上层系统模块”：
 
 1️⃣ Benchmark System（评估系统）🔥【最重要】
 
@@ -99,7 +99,7 @@ pipeline/
 
 这是我建议你直接采用的版本：
 
-CodeProvenance/
+IntegrityDesk/
 ├── src/
 │   ├── api/
 │   ├── services/

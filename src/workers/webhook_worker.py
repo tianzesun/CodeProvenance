@@ -1,5 +1,5 @@
 """
-Webhook delivery worker for CodeProvenance.
+Webhook delivery worker for IntegrityDesk.
 Runs as a background process to deliver webhook events.
 """
 import asyncio

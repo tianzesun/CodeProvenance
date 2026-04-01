@@ -84,7 +84,7 @@ class TestWebhookDeliveryService:
         assert 'X-Webhook-Signature' in headers
         assert 'X-Webhook-Timestamp' in headers
         assert 'User-Agent' in headers
-        assert headers['User-Agent'] == 'CodeProvenance/1.0'
+        assert headers['User-Agent'] == 'IntegrityDesk/1.0'
     
     def test_signature_verification(self):
         """Test signature verification (simulating receiver)."""

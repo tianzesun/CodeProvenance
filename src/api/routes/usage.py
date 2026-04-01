@@ -1,5 +1,5 @@
 """
-Usage metering endpoints for CodeProvenance API.
+Usage metering endpoints for IntegrityDesk API.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session

@@ -15,7 +15,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "service": "CodeProvenance"
+        "service": "IntegrityDesk"
     }
 
 @router.get("/ping")

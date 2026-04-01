@@ -1438,7 +1438,7 @@ def prototype_workflow():
 | **Website**       | https://www.codeguardpro.com                |
 | **Documentation** | https://docs.codeguardpro.com               |
 | **API Reference** | https://api.codeguardpro.com/docs           |
-| **GitHub**        | https://github.com/tianzesun/CodeProvenance |
+| **GitHub**        | https://github.com/tianzesun/IntegrityDesk |
 | **Support Email** | support@codeguardpro.com                    |
 | **Sales Email**   | sales@codeguardpro.com                      |
 | **Status Page**   | https://status.codeguardpro.com             |

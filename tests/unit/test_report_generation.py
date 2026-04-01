@@ -89,7 +89,7 @@ class TestReportGenerator:
         
         assert '<!DOCTYPE html>' in header
         assert '<title>Test Report</title>' in header
-        assert 'CodeProvenance' in header
+        assert 'IntegrityDesk' in header
         assert 'container' in header
         assert 'card' in header
     
@@ -150,7 +150,7 @@ class TestReportGenerator:
         assert '</div>' in footer
         assert '</body>' in footer
         assert '</html>' in footer
-        assert 'CodeProvenance' in footer
+        assert 'IntegrityDesk' in footer
     
     def test_full_html_generation(self):
         """Test complete HTML report generation."""

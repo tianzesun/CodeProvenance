@@ -30,8 +30,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/tianzesun/CodeProvenance.git
-cd CodeProvenance
+git clone https://github.com/tianzesun/IntegrityDesk.git
+cd IntegrityDesk
 
 # Start all services
 docker-compose up -d
@@ -300,7 +300,7 @@ jobs:
 ### Project Structure
 
 ```
-CodeProvenance/
+IntegrityDesk/
 ├── src/
 │   ├── api/              # REST API endpoints
 │   │   ├── routes/       # API route handlers
@@ -415,8 +415,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ```bash
 # Fork and clone the repository
-git clone https://github.com/YOUR_USERNAME/CodeProvenance.git
-cd CodeProvenance
+git clone https://github.com/YOUR_USERNAME/IntegrityDesk.git
+cd IntegrityDesk
 
 # Create a feature branch
 git checkout -b feature/amazing-feature
@@ -456,7 +456,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 | **Website**       | https://www.codeguardpro.com                |
 | **Documentation** | https://docs.codeguardpro.com               |
 | **API Reference** | https://api.codeguardpro.com/docs           |
-| **GitHub**        | https://github.com/tianzesun/CodeProvenance |
+| **GitHub**        | https://github.com/tianzesun/IntegrityDesk |
 | **Support Email** | support@codeguardpro.com                    |
 | **Sales Email**   | sales@codeguardpro.com                      |
 | **Status Page**   | https://status.codeguardpro.com             |

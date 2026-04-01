@@ -19,19 +19,19 @@ async def lifespan(app: FastAPI):
     RESULTS_DIR.mkdir(exist_ok=True)
     yield
 
-app = FastAPI(title="CodeProvenance", version="1.0", lifespan=lifespan)
+app = FastAPI(title="IntegrityDesk", version="1.0", lifespan=lifespan)
 
 class AnalysisRequest(BaseModel):
     threshold: float = 0.5
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return """<html><head><title>CodeProvenance</title><style>
+    return """<html><head><title>IntegrityDesk</title><style>
     body { font-family: Arial, sans-serif; margin: 40px; }
     form { max-width: 600px; margin: 0 auto; }
     .threshold { margin: 20px 0; }
     </style></head><body>
-    <h1>CodeProvenance - Plagiarism Detection</h1>
+    <h1>IntegrityDesk - Plagiarism Detection</h1>
     <form action="/upload" method="post" enctype="multipart/form-data">
         <input type="file" name="files" multiple accept=".py,.java,.c,.cpp,.js,.ts" required><br><br>
         <div class="threshold">Threshold: <input type="range" name="threshold" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('val').textContent=this.value"><span id="val">0.5</span></div>

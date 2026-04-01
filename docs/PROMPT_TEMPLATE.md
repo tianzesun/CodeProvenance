@@ -1,4 +1,4 @@
-# AI Prompt Templates for CodeProvenance
+# AI Prompt Templates for IntegrityDesk
 
 ## Quick Start Prompts
 
@@ -10,14 +10,14 @@ Read .ai-rules.md and .cursorrules before making any changes.
 ### New Feature
 ```
 Read .ai-rules.md and .cursorrules before starting.
-Implement a new feature in CodeProvenance: [describe feature]
+Implement a new feature in IntegrityDesk: [describe feature]
 Follow all rules in .ai-rules.md
 ```
 
 ### Bug Fix
 ```
 Read .ai-rules.md and .cursorrules before starting.
-Fix bug in CodeProvenance: [describe bug]
+Fix bug in IntegrityDesk: [describe bug]
 Follow all rules in .ai-rules.md including error handling and testing
 ```
 
@@ -33,7 +33,7 @@ Check for: type hints, error handling, no hardcoded values, security issues, tes
 ## Full Prompt (Copy & Paste)
 
 ```
-You are working on CodeProvenance, a software similarity detection service.
+You are working on IntegrityDesk, a software similarity detection service.
 
 IMPORTANT: Read these files before starting ANY task:
 - .ai-rules.md (coding rules and standards)

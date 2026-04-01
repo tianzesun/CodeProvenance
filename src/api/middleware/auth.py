@@ -1,5 +1,5 @@
 """
-Authentication middleware for CodeProvenance API.
+Authentication middleware for IntegrityDesk API.
 Handles API key validation and tenant context setting.
 """
 import hashlib

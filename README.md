@@ -1,18 +1,18 @@
-# CodeProvenance
+# IntegrityDesk
 
 > **Next-Generation Academic Integrity Platform — A Modern MOSS Replacement**
 
-CodeProvenance is a production-ready code similarity detection system designed for educational institutions. It uses multi-engine analysis to detect plagiarism, code theft, and AI-generated submissions with professional-grade accuracy, explainability, and actionable reporting.
+IntegrityDesk is a production-ready code similarity detection system designed for educational institutions. It uses multi-engine analysis to detect plagiarism, code theft, and AI-generated submissions with professional-grade accuracy, explainability, and actionable reporting.
 
 ---
 
-## 🎯 Why CodeProvenance?
+## 🎯 Why IntegrityDesk?
 
-Traditional tools like MOSS and JPlag use single algorithms and provide minimal context. CodeProvenance combines **6 different similarity engines** with **multi-engine fusion**, **ML-learned weights**, and a **teacher review workflow** — delivering actionable intelligence, not just scores.
+Traditional tools like MOSS and JPlag use single algorithms and provide minimal context. IntegrityDesk combines **6 different similarity engines** with **multi-engine fusion**, **ML-learned weights**, and a **teacher review workflow** — delivering actionable intelligence, not just scores.
 
 ### 📊 Feature Comparison
 
-| Feature | MOSS | JPlag | CodeProvenance |
+| Feature | MOSS | JPlag | IntegrityDesk |
 |---------|------|-------|----------------|
 | Engines | 1 (Winnowing) | 1-3 | 6 (AST + Fingerprint + N-gram + Embedding + Execution + Token) |
 | Weight Learning | Manual | Manual | ML (Logistic Regression) |
@@ -72,7 +72,7 @@ Teacher decisions feed back into the system:
 ## 📁 Architecture
 
 ```
-CodeProvenance/
+IntegrityDesk/
 ├── src/
 │   ├── application/services/
 │   │   ├── batch_detection_service.py    # File ingestion + all-pairs comparison
@@ -169,7 +169,7 @@ score = similarity.compare(
 
 ## 🏛️ Designed for Universities
 
-### What CodeProvenance Offers
+### What IntegrityDesk Offers
 
 - **Institutional Reports**: Custom-branded PDF/HTML reports for academic integrity committees
 - **Course-Level Analysis**: Separate models for different courses and programming languages
@@ -213,4 +213,4 @@ For deployment, support, or feature requests, please open an issue on GitHub.
 
 ---
 
-**CodeProvenance** — From "Did they copy?" to "Here's the evidence."
+**IntegrityDesk** — From "Did they copy?" to "Here's the evidence."

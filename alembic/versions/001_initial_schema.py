@@ -1,5 +1,5 @@
 """
-Initial schema for CodeProvenance database.
+Initial schema for IntegrityDesk database.
 
 Revision ID: 001
 Revises: 

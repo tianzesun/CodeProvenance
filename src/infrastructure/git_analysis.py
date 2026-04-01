@@ -1,5 +1,5 @@
 """
-Git History Analysis Module for CodeProvenance.
+Git History Analysis Module for IntegrityDesk.
 
 Detects plagiarism through Git history analysis:
 - Code origin detection (who wrote it first)

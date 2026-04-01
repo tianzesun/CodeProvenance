@@ -1,1 +1,1 @@
-"""Benchmark System for CodeProvenance."""
+"""Benchmark System for IntegrityDesk."""

@@ -1,5 +1,5 @@
 """
-Database utility layer for CodeProvenance.
+Database utility layer for IntegrityDesk.
 
 This module provides high-level database operations and helper functions
 for common database tasks.

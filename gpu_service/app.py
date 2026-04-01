@@ -6,7 +6,7 @@ from .schemas import CompareRequest, BatchRequest, TaskResponse
 
 logger = logging.getLogger("gpu_service")
 
-app = FastAPI(title="CodeProvenance GPU Service", version="1.0")
+app = FastAPI(title="IntegrityDesk GPU Service", version="1.0")
 
 # Lazy model loading
 _model = None
@@ -31,7 +31,7 @@ def get_model():
 @app.get("/health")
 async def health():
     model_ok = get_model() is not None
-    return {"status": "ok", "service": "CodeProvenance GPU", "model_loaded": model_ok}
+    return {"status": "ok", "service": "IntegrityDesk GPU", "model_loaded": model_ok}
 
 @app.post("/compare", response_model=TaskResponse)
 async def compare(req: CompareRequest):

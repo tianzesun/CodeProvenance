@@ -107,7 +107,7 @@ class BaseRunner(ABC):
                 tn += 1
         return BenchmarkResult(
             benchmark_name=self.name,
-            tool_name="CodeProvenance",
+            tool_name="IntegrityDesk",
             total_pairs=len(pairs),
             true_positives=tp,
             false_positives=fp,

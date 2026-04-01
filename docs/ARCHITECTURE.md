@@ -1,8 +1,8 @@
-# CodeProvenance - Architecture Design Document
+# IntegrityDesk - Architecture Design Document
 
 ## Executive Summary
 
-This document outlines the architectural decisions for CodeProvenance, a B2B SaaS similarity detection engine. We address three key questions: **Do we need AI?**, **Do we need a database?**, and **Do we need RAG?**
+This document outlines the architectural decisions for IntegrityDesk, a B2B SaaS similarity detection engine. We address three key questions: **Do we need AI?**, **Do we need a database?**, and **Do we need RAG?**
 
 ---
 
@@ -168,7 +168,7 @@ RAG (Retrieval-Augmented Generation) combines:
 
 ### 3.2 Why RAG is NOT Needed
 
-| RAG Use Case | CodeProvenance Need | Why Not |
+| RAG Use Case | IntegrityDesk Need | Why Not |
 |--------------|---------------------|---------|
 | **Q&A over code** | Not a feature | We compare, not explain |
 | **Code documentation** | Not a feature | We detect similarity |

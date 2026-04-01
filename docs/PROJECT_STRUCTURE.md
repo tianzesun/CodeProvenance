@@ -1,7 +1,7 @@
-# CodeProvenance Project Structure
+# IntegrityDesk Project Structure
 
 ```
-CodeProvenance/
+IntegrityDesk/
 ├── src/
 │   ├── api/                 # REST API layer
 │   ├── services/            # Business logic
