@@ -1,4 +1,3 @@
-"""Evaluation Offline - Benchmark, threshold tuning, model comparison.
-
-RESEARCH ONLY. Never called by production scoring path.
-"""
+"""Evaluation Lab - Offline batch + feedback loop."""
+from src.evaluation_lab.feedback_loop import ThresholdOptimizer, FeedbackLoopPipeline, ThresholdConfig, PRPoint
+__all__ = ['ThresholdOptimizer', 'FeedbackLoopPipeline', 'ThresholdConfig', 'PRPoint']
