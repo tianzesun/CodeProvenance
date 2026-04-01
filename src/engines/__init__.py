@@ -1,15 +1,15 @@
-"""Engines - pure computation, stateless only."""
+"""Engines - unified computation layer."""
 from src.engines.base_engine import BaseEngine, EngineResult
-
-__all__ = ['BaseEngine', 'EngineResult', 'BaseSimilarityAlgorithm', 'SimilarityEngine', 'FusionEngine']
+__all__ = ['BaseEngine', 'EngineResult', 'BaseSimilarityAlgorithm', 'SimilarityEngine', 'FusionEngine', 'FeatureExtractor']
 
 def __getattr__(name):
     if name == 'FusionEngine':
-        from src.engines.fusion import FusionEngine
+        from src.engines.scoring import FusionEngine
         return FusionEngine
+    if name == 'FeatureExtractor':
+        from src.engines.features import FeatureExtractor
+        return FeatureExtractor
     if name in ('BaseSimilarityAlgorithm', 'SimilarityEngine'):
-        from src.engines.similarity import BaseSimilarityAlgorithm, SimilarityEngine
-        if name == 'BaseSimilarityAlgorithm':
-            return BaseSimilarityAlgorithm
-        return SimilarityEngine
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        from src.engines.similarity import BaseSimilarityAlgorithm
+        return BaseSimilarityAlgorithm
+    raise AttributeError(name)
