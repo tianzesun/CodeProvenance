@@ -9,7 +9,7 @@ Implements classification rules from FN.md spec:
 """
 from typing import Dict, List, Any
 
-from src.analysis.fn_classifier.taxonomy import FNCategory, label
+from src.evaluation_dataset.fn_classifier.taxonomy import FNCategory, label
 
 
 class RuleEngine:

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import re
 import math
 
-from src.analysis.fn_classifier.taxonomy import (
+from src.evaluation_dataset.fn_classifier.taxonomy import (
     FNCategory, FNResult, FNAnalysis, SUBCATEGORIES, label
 )
 
