@@ -1,55 +1,35 @@
-import React, { useState } from "react";
-import DualHeatmap from "./components/DualHeatmap";
+import React, { useState, useMemo } from "react";
+import SideBySideDiff from "./components/SideBySideDiff";
 import EvidenceSidebar from "./components/EvidenceSidebar";
 import RiskSummaryCard from "./components/RiskSummaryCard";
 
-// Demo data with full code and regions
+/**
+ * IntegrityDesk - Visual Forensic Code Analysis System
+ * 
+ * This is NOT a plagiarism detector - it produces forensic evidence.
+ * Professors/committees make judgments, not the system.
+ */
+
+// Demo data from backend diff_generator.py format
 const DEMO_DATA = {
-  a_code: `def calculate_average(data):
-    total = sum(data)
-    count = len(data)
-    return total / count
-
-def calculate_sum(data):
-    total = 0
-    for item in data:
-        total += item
-    return total
-`,
-  b_code: `def compute_mean(values):
-    total = sum(values)
-    count = len(values)
-    return total / count
-
-def compute_total(values):
-    total = 0
-    for v in values:
-        total += v
-    return total
-`,
-  summary: { total_blocks: 2, risk_level: "HIGH" },
+  summary: { total_blocks: 2, risk_level: "HIGH", confidence: 0.91 },
   diff: {
     total_matches: 2,
     regions: [
-      {
-        a_range: [1, 4], b_range: [1, 4], confidence: 0.95, type: "ast",
+      { a_range: [1, 4], b_range: [1, 4], confidence: 0.95, type: "ast",
         a_snippet: "def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count",
         b_snippet: "def compute_mean(values):\n    total = sum(values)\n    count = len(values)\n    return total / count",
-        explanation: "Structural similarity detected (AST node alignment). Control flow and logic structure are similar, which is strong evidence of copying."
-      },
-      {
-        a_range: [5, 9], b_range: [5, 9], confidence: 0.88, type: "fused",
+        explanation: "Structural similarity detected (AST node alignment). Control flow and logic structure are similar, which is strong evidence of copying." },
+      { a_range: [7, 12], b_range: [7, 12], confidence: 0.88, type: "fused",
         a_snippet: "def calculate_sum(data):\n    total = 0\n    for item in data:\n        total += item\n    return total",
         b_snippet: "def compute_total(values):\n    total = 0\n    for v in values:\n        total += v\n    return total",
-        explanation: "Combined structural + lexical similarity detected. Multiple independent engines confirm match — strong evidence."
-      }
+        explanation: "Combined structural + lexical similarity detected. Multiple independent engines confirm match." }
     ]
   }
 };
 
 export default function App() {
   const [selected, setSelected] = useState(null);
-  const [data] = useState(DEMO_DATA);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -61,19 +41,15 @@ export default function App() {
       </header>
 
       <div className="max-w-7xl mx-auto p-4">
-        <RiskSummaryCard summary={data.summary} />
+        <RiskSummaryCard summary={DEMO_DATA.summary} />
 
-        <div className="mt-4 mb-4">
-          <DualHeatmap
-            data={data.diff}
-            codeA={data.a_code}
-            codeB={data.b_code}
-            onSelectRegion={setSelected}
-          />
-        </div>
-
-        <div className="mt-4">
-          <EvidenceSidebar selected={selected} regions={data.diff.regions} />
+        <div className="grid grid-cols-12 gap-4 mt-4">
+          <div className="col-span-12 lg:col-span-9">
+            <SideBySideDiff data={DEMO_DATA.diff} onSelectRegion={setSelected} />
+          </div>
+          <div className="col-span-12 lg:col-span-3">
+            <EvidenceSidebar selected={selected} regions={DEMO_DATA.diff.regions} />
+          </div>
         </div>
       </div>
     </div>
