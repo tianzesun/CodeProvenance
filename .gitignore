@@ -106,3 +106,8 @@ benchmark/data/codesearchnet_java/
 benchmark/data/codesearchnet_misc/
 benchmark/data/poj104/
 benchmark/data/codexglue_defect/
+
+###############
+# Model Caches
+###############
+.unixcoder_cache/

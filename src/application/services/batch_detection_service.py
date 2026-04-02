@@ -6,10 +6,13 @@ Phase 1 features:
 - Similarity matrix with ranked suspicious pairs
 - Basic report (which pairs scored above threshold)
 """
+import logging
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
 import json
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ComparisonResult:
@@ -51,7 +54,12 @@ class BatchDetectionService:
             for f in folder.rglob(f"*{ext}"):
                 try:
                     submissions[f.name] = f.read_text(encoding='utf-8')
-                except: pass
+                except UnicodeDecodeError as exc:
+                    logger.warning("Skipping file %s: encoding error: %s", f.name, exc)
+                except OSError as exc:
+                    logger.warning("Skipping file %s: I/O error: %s", f.name, exc)
+                except Exception as exc:
+                    logger.warning("Skipping file %s: unexpected error: %s", f.name, exc)
         return submissions
     
     def compare_all_pairs(self, submissions: Dict[str, str]) -> List[ComparisonResult]:

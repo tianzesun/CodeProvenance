@@ -168,14 +168,16 @@ class SimilarityEngine:
         return result
 
 
-# Register built-in algorithms
-def register_builtin_algorithms(engine: SimilarityEngine):
-    """
-    Register all built-in similarity algorithms with the engine.
-    
-    Args:
-        engine: SimilarityEngine instance to register algorithms with
-    """
+# Cached singleton for built-in algorithm instances to avoid recreating on every call.
+_builtins = None
+
+
+def _get_builtin_algorithms() -> Dict[str, BaseSimilarityAlgorithm]:
+    """Lazily create and cache all built-in algorithm instances."""
+    global _builtins
+    if _builtins is not None:
+        return _builtins
+
     from .token_similarity import TokenSimilarity
     from .ngram_similarity import NgramSimilarity
     from .ast_similarity import ASTSimilarity
@@ -185,22 +187,51 @@ def register_builtin_algorithms(engine: SimilarityEngine):
     # Use UniXcoder (local GPU) — falls back to OpenAI EmbeddingSimilarity if unavailable
     try:
         from .unixcoder_similarity import UniXcoderSimilarity
-        embedding_engine = UniXcoderSimilarity()
+        embedding_engine: BaseSimilarityAlgorithm = UniXcoderSimilarity()
+    except ImportError:
+        from .embedding_similarity import EmbeddingSimilarity
+        embedding_engine = EmbeddingSimilarity()
     except Exception:
         from .embedding_similarity import EmbeddingSimilarity
         embedding_engine = EmbeddingSimilarity()
 
-    # Add algorithms with default weights (higher = more important)
-    engine.add_algorithm(EnhancedWinnowingSimilarity(), weight=1.5)
-    engine.add_algorithm(TokenSimilarity(), weight=1.0)
-    engine.add_algorithm(NgramSimilarity(), weight=1.0)
-    engine.add_algorithm(ASTSimilarity(), weight=2.0)        # Highest weight for AST
-    engine.add_algorithm(ExecutionSimilarity(), weight=1.5)  # Execution-based
-    engine.add_algorithm(embedding_engine, weight=0.5)       # Semantic (local GPU)
-    
-    # Graph-based similarity (CFG + DFG structural comparison)
+    _builtins = {
+        "winnowing": EnhancedWinnowingSimilarity(),
+        "token": TokenSimilarity(),
+        "ngram": NgramSimilarity(),
+        "ast": ASTSimilarity(),
+        "execution": ExecutionSimilarity(),
+        "embedding": embedding_engine,
+    }
+
+    # Graph-based similarity (CFG + DFG structural comparison) — optional
     try:
         from .graph_similarity import GraphSimilarity
-        engine.add_algorithm(GraphSimilarity(), weight=1.5)
+        _builtins["graph"] = GraphSimilarity()
     except Exception:
-        pass  # Graph similarity requires graph module
+        pass
+
+    return _builtins
+
+
+# Register built-in algorithms
+def register_builtin_algorithms(engine: SimilarityEngine) -> None:
+    """Register all built-in similarity algorithms with the engine.
+
+    Shared algorithm instances are reused across calls via a module-level cache.
+
+    Args:
+        engine: SimilarityEngine instance to register algorithms with
+    """
+    default_weights: Dict[str, float] = {
+        "winnowing": 1.5,
+        "token": 1.0,
+        "ngram": 1.0,
+        "ast": 2.0,
+        "execution": 1.5,
+        "embedding": 0.5,
+        "graph": 1.5,
+    }
+
+    for algo_name, algo in _get_builtin_algorithms().items():
+        engine.add_algorithm(algo, weight=default_weights.get(algo_name, 1.0))

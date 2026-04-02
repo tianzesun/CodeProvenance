@@ -21,6 +21,15 @@ import json
 import random
 from dataclasses import dataclass, field
 
+from benchmark.datasets.schema import (
+    DatasetContract,
+    DatasetMetadata,
+    CloneType,
+    Difficulty,
+    CodePair,
+    CanonicalDataset,
+)
+
 
 @dataclass
 class ClonePair:
@@ -78,7 +87,7 @@ class BCBSample:
         return {"pairs": pairs}
 
 
-class BigCloneBenchDataset:
+class BigCloneBenchDataset(DatasetContract):
     """
     Loads and processes BigCloneBench dataset.
 
@@ -104,32 +113,84 @@ class BigCloneBenchDataset:
         self._pairs_cache: List[ClonePair] = []
         self._non_clone_pairs_cache: List[NonClonePair] = []
         self._source_cache: Dict[str, str] = {}
+    
+    @property
+    def metadata(self) -> DatasetMetadata:
+        """Return dataset metadata.
+        
+        Returns:
+            DatasetMetadata with all required fields.
+        """
+        # Get actual size from loaded pairs or estimate
+        size = len(self._pairs_cache) + len(self._non_clone_pairs_cache)
+        if size == 0:
+            size = 55000  # Default estimate for BigCloneBench
+        
+        return DatasetMetadata(
+            name="BigCloneBench",
+            version="bceval_2024",
+            language="java",
+            clone_types=[CloneType.TYPE_1, CloneType.TYPE_2, CloneType.TYPE_3, CloneType.TYPE_4],
+            difficulty=Difficulty.HARD,
+            size=size,
+            source="https://onedrive.live.com/?id=52477620-3894-4497-9E1E-26609C1E2A75",
+            license="Academic use only",
+            ground_truth_format="binary",
+            description="Industry-standard Java clone detection benchmark with 55,000+ pairs across 4 clone types"
+        )
 
     def load(self, clone_types: Optional[List[int]] = None,
              max_pairs: Optional[int] = None,
-             max_non_clones: int = 10000) -> BCBSample:
+             max_non_clones: int = 10000,
+             **kwargs) -> CanonicalDataset:
         """Load clone pairs and non-clone pairs from the dataset.
 
         Args:
             clone_types: Filter to specific clone types (1-4)
             max_pairs: Maximum number of clone pairs to load
             max_non_clones: Maximum number of non-clone pairs
+            **kwargs: Additional arguments (unused)
 
         Returns:
-            BCBSample with loaded pairs and source codes
+            CanonicalDataset with loaded pairs
         """
-        clone_pairs = self.load_clone_pairs(clone_types, max_pairs)
-        non_clone_pairs = self.load_non_clones(max_non_clones)
-
-        # Count by clone type
-        clone_counts = {}
-        for cp in clone_pairs:
-            clone_counts[cp.clone_type] = clone_counts.get(cp.clone_type, 0) + 1
-
-        return BCBSample(
-            clone_pairs=clone_pairs,
-            non_clone_pairs=non_clone_pairs,
-            clone_counts=clone_counts,
+        clone_pairs_raw = self.load_clone_pairs(clone_types, max_pairs)
+        non_clone_pairs_raw = self.load_non_clones(max_non_clones)
+        
+        # Convert to CodePair format
+        pairs: List[CodePair] = []
+        
+        # Add clone pairs
+        for cp in clone_pairs_raw:
+            code_a = self.get_source_code(cp.file1, cp.file1_start, cp.file1_end) or ""
+            code_b = self.get_source_code(cp.file2, cp.file2_start, cp.file2_end) or ""
+            pairs.append(CodePair(
+                id_a=cp.file1,
+                id_b=cp.file2,
+                code_a=code_a,
+                code_b=code_b,
+                label=cp.label,
+                clone_type=cp.clone_type,
+            ))
+        
+        # Add non-clone pairs
+        for ncp in non_clone_pairs_raw:
+            code_a = self.get_source_code(ncp.file1) or ""
+            code_b = self.get_source_code(ncp.file2) or ""
+            pairs.append(CodePair(
+                id_a=ncp.file1,
+                id_b=ncp.file2,
+                code_a=code_a,
+                code_b=code_b,
+                label=ncp.label,
+                clone_type=0,
+            ))
+        
+        return CanonicalDataset(
+            name="BigCloneBench",
+            version="bceval_2024",
+            pairs=pairs,
+            metadata=self.metadata,
         )
 
     def load_clone_pairs(self, clone_types: Optional[List[int]] = None,

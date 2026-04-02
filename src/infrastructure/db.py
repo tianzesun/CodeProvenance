@@ -15,7 +15,7 @@ from src.models.database import (
     Tenant, ApiKey, Job, Submission, SimilarityResult,
     WebhookEvent, UsageMetric, AuditLog
 )
-from src.config.database import get_db, set_tenant_context, clear_tenant_context
+from src.config.database import get_db, set_tenant_context, clear_tenant_context, SessionLocal
 
 
 class TenantService:

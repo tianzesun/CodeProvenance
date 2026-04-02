@@ -5,7 +5,37 @@ Provides diagnostic intelligence for similarity detection:
 - Error attribution: Per-pair decomposition of score errors
 - Threshold stability: Robustness analysis across threshold range
 - Failure clustering: Group similar failure patterns into attack surfaces
+
+Note: This module has been elevated to benchmark.forensics for enhanced
+forensic intelligence capabilities. The original imports are maintained
+for backward compatibility.
 """
+# Import from forensics module for enhanced capabilities
+from benchmark.forensics.causal import (
+    CausalRankingEngine,
+    CausalRankingReport,
+    ImprovementCandidate,
+    RootCauseAttributor,
+    RootCause,
+)
+from benchmark.forensics.attribution import (
+    ErrorAnalyzer,
+    ErrorCategory,
+    ErrorReport,
+    FailurePatternDetector,
+    FailurePattern,
+    FailurePatternReport,
+)
+from benchmark.forensics.clone_taxonomy import (
+    CloneTypeClassifier,
+    CloneType,
+    CloneTypeReport,
+    TechniqueDetector,
+    TechniqueType,
+    TechniqueReport,
+)
+
+# Legacy imports for backward compatibility
 from benchmark.analysis.failure_analysis import (
     FailureAnalyzer,
     FailureCase,
@@ -29,19 +59,39 @@ from benchmark.analysis.stability_analysis import (
 )
 
 __all__ = [
-    # Failure analysis
+    # Forensics - Causal analysis
+    "CausalRankingEngine",
+    "CausalRankingReport",
+    "ImprovementCandidate",
+    "RootCauseAttributor",
+    "RootCause",
+    # Forensics - Attribution
+    "ErrorAnalyzer",
+    "ErrorCategory",
+    "ErrorReport",
+    "FailurePatternDetector",
+    "FailurePattern",
+    "FailurePatternReport",
+    # Forensics - Clone taxonomy
+    "CloneTypeClassifier",
+    "CloneType",
+    "CloneTypeReport",
+    "TechniqueDetector",
+    "TechniqueType",
+    "TechniqueReport",
+    # Legacy - Failure analysis
     "FailureAnalyzer",
     "FailureCase",
     "FailureCategory",
     "FailureReport",
     "failure_to_improvement_map",
-    # Error attribution
+    # Legacy - Error attribution
     "ErrorAttributionModel",
     "ErrorAttribution",
     "AttributionReport",
     "ComponentEffectiveness",
     "CloneTypeAttribution",
-    # Stability and clustering
+    # Legacy - Stability and clustering
     "ThresholdStabilityAnalyzer",
     "FailureClusterAnalyzer",
     "ThresholdStabilityReport",

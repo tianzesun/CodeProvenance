@@ -140,8 +140,7 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         if embedding_a is None or embedding_b is None:
             # Fallback to token similarity if embedding fails
             from .token_similarity import TokenSimilarity
-            token_sim = TokenSimilarity()
-            return token_sim.compare(parsed_a, parsed_b)
+            return TokenSimilarity().compare(parsed_a, parsed_b)
         
         # Calculate cosine similarity
         try:
@@ -163,8 +162,7 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         except Exception:
             # If anything goes wrong, fall back to token similarity
             from .token_similarity import TokenSimilarity
-            token_sim = TokenSimilarity()
-            return token_sim.compare(parsed_a, parsed_b)
+            return TokenSimilarity().compare(parsed_a, parsed_b)
 
 
 # Register the parser with the factory (this would be done in __init__.py)
