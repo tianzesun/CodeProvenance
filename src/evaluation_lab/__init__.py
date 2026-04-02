@@ -1,3 +1,12 @@
-"""Evaluation Lab - Offline batch + feedback loop."""
-from src.evaluation_lab.feedback_loop import ThresholdOptimizer, FeedbackLoopPipeline, ThresholdConfig, PRPoint
-__all__ = ['ThresholdOptimizer', 'FeedbackLoopPipeline', 'ThresholdConfig', 'PRPoint']
+"""Evaluation Lab - offline benchmarking and parameter tuning."""
+
+from .auto_tuner import AutoTuner, TuningResult, TuningConfig
+from .benchmark import BenchmarkRunner, BenchmarkResult
+
+__all__ = [
+    "AutoTuner",
+    "TuningResult",
+    "TuningConfig",
+    "BenchmarkRunner",
+    "BenchmarkResult",
+]

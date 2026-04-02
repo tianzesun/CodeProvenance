@@ -61,9 +61,6 @@ def _run_benchmark(config: Dict[str, Any]) -> Dict[str, Any]:
         Results dictionary with metrics and metadata.
     """
     from benchmark.pipeline.config import BenchmarkConfig
-    from benchmark.pipeline.loader import CanonicalDataset, CodePair
-    from benchmark.pipeline.runner import BenchmarkRunner
-    from benchmark.registry import registry
     
     # Build BenchmarkConfig from dict
     bench_config = BenchmarkConfig.from_dict(config)
@@ -95,6 +92,7 @@ def _run_synthetic_benchmark(
         SyntheticDatasetGenerator,
     )
     from benchmark.pipeline.loader import CodePair, CanonicalDataset
+    from benchmark.pipeline.runner import BenchmarkRunner
     
     # Generate synthetic dataset
     gen_config = dataset_config.get("generator", {})
@@ -146,7 +144,7 @@ def _run_synthetic_benchmark(
         "run_id": f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         "config_hash": config.config_hash(),
         "engine": config.engine.name,
-        "dataset": dataset_name,
+        "dataset": synthetic.name,
         "dataset_stats": synthetic.stats(),
         "success": result.success,
     }
@@ -239,8 +237,12 @@ def _compare_single(args: argparse.Namespace) -> None:
     with open(args.file_b, 'r', encoding='utf-8') as f:
         code_b = f.read()
     
+    # engine.name is a property, not a method
+    engine_name = engine.name if hasattr(engine, 'name') else args.engine
+    if callable(engine_name):
+        engine_name = engine_name()
     score = engine.compare(code_a, code_b)
-    print(f"Engine: {engine.name()}")
+    print(f"Engine: {engine_name}")
     print(f"Similarity: {score:.4f}")
 
 

@@ -34,6 +34,7 @@ class SimilarityResult:
     score: float  # [0, 1]
     label: Optional[int] = None
     engine_name: str = ""
+    clone_type: int = 0  # 1-4 for clones, 0 for non-clone
 
 
 @dataclass
@@ -167,11 +168,20 @@ class SimilarityStage(PipelineStage):
         code_a, code_b, engine = input_data
         score = engine.compare(code_a.raw_code, code_b.raw_code)
         
+        # engine.name is a property, not a method
+        engine_name = ""
+        if hasattr(engine, 'name'):
+            name_attr = getattr(engine, 'name')
+            engine_name = name_attr() if callable(name_attr) else name_attr
+        
+        clone_type = config.get("clone_type", 0)
+        
         return SimilarityResult(
             id_a=code_a.code_id,
             id_b=code_b.code_id,
             score=score,
-            engine_name=engine.name() if hasattr(engine, 'name') else ""
+            engine_name=engine_name,
+            clone_type=clone_type
         )
 
 
@@ -292,22 +302,76 @@ class ReportingStage(PipelineStage):
         from datetime import datetime
         
         metrics, extra_info = input_data
-        output_dir = config.get("output_dir", "reports/json")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         paths = {}
         
+        # JSON report (authoritative)
         if config.get("output", {}).get("json", True):
+            output_dir = config.get("output_dir", "reports/json")
             from benchmark.reporting import JSONReportWriter
             writer = JSONReportWriter(f"{output_dir}/benchmark_{timestamp}.json")
+            
+            report_data = {
+                "precision": metrics.precision,
+                "recall": metrics.recall,
+                "f1": metrics.f1,
+                "accuracy": metrics.accuracy,
+                "map_score": metrics.map_score,
+                "mrr_score": metrics.mrr_score,
+                "threshold": metrics.threshold,
+                "tp": metrics.tp,
+                "fp": metrics.fp,
+                "tn": metrics.tn,
+                "fn": metrics.fn,
+            }
+            
+            # Add clone type breakdown if available
+            clone_type_results = extra_info.get("clone_type_breakdown")
+            if clone_type_results:
+                report_data["clone_type_breakdown"] = clone_type_results
+            
             paths["json"] = writer.write(
-                results={
-                    "precision": metrics.precision,
-                    "recall": metrics.recall,
-                    "f1": metrics.f1,
-                    "accuracy": metrics.accuracy,
+                results=report_data,
+                metadata={
+                    "threshold": metrics.threshold,
+                    "config_hash": config.get("config_hash", ""),
+                    "engine": extra_info.get("engine", ""),
+                    "dataset": extra_info.get("dataset", ""),
+                }
+            )
+        
+        # HTML report (human readable)
+        if config.get("output", {}).get("html", False):
+            html_output_dir = config.get("html_output_dir", "reports/html")
+            from benchmark.reporting import HTMLReportWriter
+            html_path = f"{html_output_dir}/report_{timestamp}.html"
+            writer = HTMLReportWriter(html_path)
+            
+            results_dict = {
+                'summary': {
+                    'precision': metrics.precision,
+                    'recall': metrics.recall,
+                    'f1': metrics.f1,
+                    'accuracy': metrics.accuracy,
+                    'map_score': metrics.map_score,
+                    'mrr_score': metrics.mrr_score,
+                    'threshold': metrics.threshold,
                 },
-                metadata={"threshold": metrics.threshold, "config_hash": config.get("config_hash", "")}
+                'engine_results': [{
+                    'engine_name': extra_info.get("engine", "unknown"),
+                    'precision': metrics.precision,
+                    'recall': metrics.recall,
+                    'f1': metrics.f1,
+                    'accuracy': metrics.accuracy,
+                }]
+            }
+            
+            title = f"Benchmark Report - {extra_info.get('engine', 'unknown')} on {extra_info.get('dataset', 'unknown')}"
+            paths["html"] = writer.write(
+                title=title,
+                results=results_dict,
+                metadata=config
             )
         
         return paths

@@ -100,3 +100,9 @@ benchmark/data/bigclonebench/bcb.h2.db
 benchmark/data/bigclonebench/bcb.trace.db
 benchmark/data/bigclonebench/bcb_reduced/
 benchmark/data/kaggle_student_code/*.py
+benchmark/data/codexglue_clone/
+benchmark/data/codesearchnet/
+benchmark/data/codesearchnet_java/
+benchmark/data/codesearchnet_misc/
+benchmark/data/poj104/
+benchmark/data/codexglue_defect/

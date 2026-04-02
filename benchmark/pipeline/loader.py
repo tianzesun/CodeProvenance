@@ -5,7 +5,7 @@ This ensures datasets are pluggable and comparable.
 """
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -26,6 +26,7 @@ class CodePair:
     code_b: str
     label: int  # 1 = clone/plagiarism, 0 = non-clone
     clone_type: int = 0  # 1-4 for BigCloneBench, 0 otherwise
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class CanonicalDataset:
@@ -71,6 +72,17 @@ class CanonicalDataset:
                 queries[pair.id_a] = []
             queries[pair.id_a].append((pair.id_b, 0.0, pair.label))
         return queries
+
+    def get_clone_type_map(self) -> Dict[Tuple[str, str], int]:
+        """Get mapping of pair IDs to clone type.
+        
+        Returns:
+            Dict mapping (id_a, id_b) -> clone_type.
+        """
+        return {
+            (p.id_a, p.id_b): p.clone_type
+            for p in self.pairs
+        }
 
 
 class DatasetLoader(ABC):

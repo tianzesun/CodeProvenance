@@ -197,3 +197,10 @@ def register_builtin_algorithms(engine: SimilarityEngine):
     engine.add_algorithm(ASTSimilarity(), weight=2.0)        # Highest weight for AST
     engine.add_algorithm(ExecutionSimilarity(), weight=1.5)  # Execution-based
     engine.add_algorithm(embedding_engine, weight=0.5)       # Semantic (local GPU)
+    
+    # Graph-based similarity (CFG + DFG structural comparison)
+    try:
+        from .graph_similarity import GraphSimilarity
+        engine.add_algorithm(GraphSimilarity(), weight=1.5)
+    except Exception:
+        pass  # Graph similarity requires graph module
