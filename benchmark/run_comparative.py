@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
 from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from benchmark.normalization.canonicalizer import CanonicalComparePipeline, Canonicalizer
+from benchmark.normalizer.canonicalizer import CanonicalComparePipeline, Canonicalizer
 from benchmark.analysis.error_attribution import ErrorAttributionModel
 
 

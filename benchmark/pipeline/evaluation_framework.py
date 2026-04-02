@@ -20,7 +20,7 @@ from benchmark.metrics.significance import (
     mcnemar_test,
     add_significance_to_results,
 )
-from benchmark.normalization.identifier_normalizer import normalize_identifiers
+from benchmark.normalizer.identifier_normalizer import normalize_identifiers
 
 
 # =============================================================================
