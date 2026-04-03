@@ -362,6 +362,66 @@ class CrossDatasetEvaluator:
                 datasets_evaluated=len(results),
                 per_dataset=per_ds,
             )
-            aggregates.append(agg)
+        aggregates.append(agg)
 
         return aggregates
+
+    def run_significance_tests(self, alpha: float = 0.05) -> List[Dict[str, Any]]:
+        """Run pairwise McNemar significance tests between all tools."""
+        try:
+            from scipy import stats
+        except ImportError:
+            return []
+        import itertools
+
+        tool_names = list(self._tools.keys())
+        results = []
+
+        for t1, t2 in itertools.combinations(tool_names, 2):
+            preds_t1 = []
+            preds_t2 = []
+
+            for ds_name in self._registry.list_datasets():
+                try:
+                    ds = self._registry.load(ds_name)
+                except Exception:
+                    continue
+                if len(ds) == 0:
+                    continue
+
+                t1_obj = self._tools[t1]
+                t2_obj = self._tools[t2]
+
+                for pair in ds.pairs:
+                    code_a = getattr(pair, "code_a", "")
+                    code_b = getattr(pair, "code_b", "")
+                    s1 = t1_obj.compare(code_a, code_b)
+                    s2 = t2_obj.compare(code_a, code_b)
+                    preds_t1.append(1 if s1 >= 0.5 else 0)
+                    preds_t2.append(1 if s2 >= 0.5 else 0)
+
+            if len(preds_t1) < 10:
+                continue
+
+            b01 = sum(1 for a, b in zip(preds_t1, preds_t2) if a == 1 and b == 0)
+            b10 = sum(1 for a, b in zip(preds_t1, preds_t2) if a == 0 and b == 1)
+
+            if b01 + b10 == 0:
+                p_val = 1.0
+                chi2 = 0.0
+            else:
+                chi2 = (abs(b01 - b10) - 1) ** 2 / (b01 + b10)
+                p_val = 1.0 - stats.chi2.cdf(chi2, 1)
+
+            results.append({
+                "tool_a": t1,
+                "tool_b": t2,
+                "b01": b01,
+                "b10": b10,
+                "chi2": round(chi2, 4),
+                "p_value": round(p_val, 4),
+                "significant": p_val < alpha,
+                "n_pairs": len(preds_t1),
+            })
+
+        return results

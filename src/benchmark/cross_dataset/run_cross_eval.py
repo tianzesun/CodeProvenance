@@ -5,7 +5,7 @@ Usage:
     python -m benchmark.cross_dataset.run_cross_eval [--datasets DS1 DS2] [--tools T1 T2]
 
 Example:
-    python -m benchmark.cross_dataset.run_cross_eval --tools jaccard line_overlap
+    python -m benchmark.cross_dataset.run_cross_eval --tools moss jplag dolos integritydesk
 """
 from __future__ import annotations
 
@@ -71,11 +71,25 @@ def main():
         default=True,
         help="Include baseline tools (jaccard, line_overlap)",
     )
+    parser.add_argument(
+        "--significance",
+        action="store_true",
+        help="Run statistical significance tests (McNemar)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility",
+    )
     args = parser.parse_args()
 
     from benchmark.cross_dataset.dataset_registry import DatasetRegistry
-    from benchmark.cross_dataset.tool_adapters import JaccardToolAdapter, LineOverlapToolAdapter
+    from benchmark.cross_dataset.dataset_catalog import DatasetCatalog
+    from benchmark.cross_dataset.tool_adapters import ALL_TOOLS
     from benchmark.cross_dataset.cross_eval import CrossDatasetEvaluator
+
+    DatasetCatalog.register_all()
 
     registry = DatasetRegistry.get_instance()
     evaluator = CrossDatasetEvaluator(registry=registry)
@@ -99,24 +113,20 @@ def main():
         except Exception:
             pass
 
-    if args.include_baselines:
-        evaluator.register_tool("jaccard", JaccardToolAdapter())
-        evaluator.register_tool("line_overlap", LineOverlapToolAdapter())
-
-    try:
-        from benchmark.cross_dataset.tool_adapters import EngineToolAdapter
-        from src.engines.base_engine import BaseEngine
-        from src.engines.registry import registry as engine_registry
-
-        for engine_name in engine_registry.list_engines():
+    if args.include_baselines or not args.tools:
+        for tool_name, tool_cls in ALL_TOOLS.items():
             try:
-                engine = engine_registry.get(engine_name)
-                if engine is not None:
-                    evaluator.register_tool_from_engine(engine, name=engine_name)
+                evaluator.register_tool(tool_name, tool_cls())
             except Exception:
                 pass
-    except Exception:
-        pass
+
+    if args.tools:
+        for tool_name in args.tools:
+            if tool_name in ALL_TOOLS:
+                try:
+                    evaluator.register_tool(tool_name, ALL_TOOLS[tool_name]())
+                except Exception:
+                    pass
 
     report = evaluator.run(
         dataset_names=args.datasets,
@@ -127,6 +137,14 @@ def main():
         output_path=args.output,
         verbose=True,
     )
+
+    if args.significance and len(report.all_results) > 1:
+        sig_results = evaluator.run_significance_tests()
+        if sig_results:
+            print("\n--- Statistical Significance Tests (McNemar) ---")
+            for s in sig_results:
+                marker = " *" if s["significant"] else ""
+                print(f"  {s['tool_a']} vs {s['tool_b']}: chi2={s['chi2']:.2f}, p={s['p_value']:.4f}{marker}")
 
     return 0 if report.num_datasets > 0 else 1
 
