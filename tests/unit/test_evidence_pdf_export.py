@@ -12,6 +12,7 @@ from src.infrastructure.reporting.visualizations import (
     generate_ai_probability_chart,
     generate_engine_radar_chart,
     generate_confusion_matrix_image,
+    generate_qr_code,
 )
 from src.infrastructure.reporting.evidence_pdf_exporter import (
     EvidenceChainPdfExporter,
@@ -127,6 +128,15 @@ class TestVisualizationGenerators:
     def test_confusion_matrix_returns_base64_uri(self):
         uri = generate_confusion_matrix_image(tp=42, fp=5, tn=48, fn=5)
         assert uri.startswith("data:image/png;base64,")
+
+    def test_qr_code_returns_base64_uri(self):
+        uri = generate_qr_code("https://example.com/report/123")
+        assert uri.startswith("data:image/png;base64,")
+
+    def test_qr_code_scannable_size(self):
+        uri = generate_qr_code("https://example.com/test", size=300)
+        assert uri.startswith("data:image/png;base64,")
+        assert len(uri) > 500
 
 
 class TestEvidenceChainPdfExporter:

@@ -35,6 +35,7 @@ from src.infrastructure.reporting.visualizations import (
     generate_ai_probability_chart,
     generate_engine_radar_chart,
     generate_confusion_matrix_image,
+    generate_qr_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,7 @@ class EvidenceChainPdfExporter:
             "flags": case_data.get("flags", []),
             "recommendation": case_data.get("recommendation"),
             "appeal_points": case_data.get("appeal_points", []),
-            "qr_code_image": case_data.get("qr_code_image"),
+            "qr_code_image": self._generate_qr_code(case_data),
         }
 
     def _generate_heatmap(self, case_data: Dict[str, Any]) -> Optional[str]:
@@ -330,3 +331,12 @@ class EvidenceChainPdfExporter:
         if prob < 0.70:
             return "orange"
         return "red"
+
+    def _generate_qr_code(self, case_data: Dict[str, Any]) -> Optional[str]:
+        """Generate QR code linking to the web version of the report."""
+        web_url = case_data.get("web_report_url")
+        if web_url:
+            return generate_qr_code(web_url)
+        case_id = case_data.get("case_id", "unknown")
+        default_url = f"https://integritydesk.example.com/reports/{case_id}"
+        return generate_qr_code(default_url)

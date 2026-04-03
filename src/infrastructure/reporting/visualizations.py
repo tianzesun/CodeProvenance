@@ -316,3 +316,31 @@ def generate_confusion_matrix_image(
     img_uri = _save_fig_to_base64(fig)
     plt.close(fig)
     return img_uri
+
+
+def generate_qr_code(
+    url: str,
+    size: int = 200,
+    border: int = 2,
+) -> str:
+    """Generate a QR code as base64 PNG."""
+    import qrcode
+    import qrcode.image.pil
+    import base64
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=border,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white", image_factory=qrcode.image.pil.PilImage)
+    img = img.resize((size, size))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    return f"data:image/png;base64,{img_b64}"
