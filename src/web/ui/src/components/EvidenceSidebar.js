@@ -29,10 +29,34 @@ export default function EvidenceSidebar({ selected, regions }) {
         <span className="ml-2 text-sm capitalize">{selected.type}</span>
       </div>
 
-      {/* Explanation */}
+      {/* Engine Arbitration */}
+      <div className="pt-2 border-t">
+        <span className="text-sm font-semibold text-gray-600">Statistical Arbitration:</span>
+        <div className="space-y-1 mt-1">
+          {selected.evidence && selected.evidence.map((ev, idx) => (
+            <div key={idx} className="flex justify-between text-xs">
+              <span className="text-gray-500">{ev.name}:</span>
+              <span className="font-mono">{ev.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Engine Diagnosis */}
       <div>
-        <span className="text-sm font-semibold text-gray-600">Explanation:</span>
-        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{selected.explanation}</p>
+        <span className="text-sm font-semibold text-gray-600">Engine Diagnosis:</span>
+        <div className="space-y-1 mt-1">
+          {selected.explanation && Array.isArray(selected.explanation) ? (
+            selected.explanation.map((exp, idx) => (
+              <div key={idx} className="text-xs bg-gray-50 p-1 rounded border">
+                <span className="font-semibold uppercase">{exp.engine}:</span> {exp.score} 
+                <span className="text-gray-400 ml-2">(contrib: {exp.contribution})</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-gray-700 leading-relaxed">{selected.explanation}</p>
+          )}
+        </div>
       </div>
 
       {/* Line Ranges */}

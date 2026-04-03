@@ -124,3 +124,33 @@ def ndcg_at_k(
         ndcgs.append(ndcg)
     
     return sum(ndcgs) / len(ndcgs) if ndcgs else 0.0
+
+
+def reciprocal_rank_fusion(
+    engine_results: List[Dict[str, float]],
+    k: int = 60
+) -> Dict[str, float]:
+    """
+    Combines rankings from multiple engines using Reciprocal Rank Fusion (RRF).
+    
+    RRF score for a document d is:
+    RRFscore(d) = sum_{r in rankings} 1 / (k + rank(d, r))
+    
+    Args:
+        engine_results: List of dictionaries mapping doc_id to similarity score.
+        k: Smoothing constant (default 60 as per literature).
+        
+    Returns:
+        Dictionary mapping doc_id to fused RRF score.
+    """
+    rrf_scores: Dict[str, float] = {}
+    
+    for engine_scores in engine_results:
+        # Sort documents by score to get rankings
+        sorted_docs = sorted(engine_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        for rank, (doc_id, _) in enumerate(sorted_docs):
+            # Rank is 1-based
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (k + rank + 1))
+            
+    return rrf_scores

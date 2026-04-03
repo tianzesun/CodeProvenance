@@ -81,10 +81,14 @@ class DashboardService:
         from src.engines.features.feature_extractor import FeatureExtractor
         from src.engines.scoring.fusion_engine import FusionEngine
         from src.domain.decision import DecisionEngine
+        from src.evaluation.arbitration import BayesianArbitrator
+        from src.ml.fusion_model import HybridFusionModel
 
         self._feature_extractor = FeatureExtractor()
         self._fusion_engine = FusionEngine()
         self._decision_engine = DecisionEngine(threshold)
+        self._arbitrator = BayesianArbitrator()
+        self._hybrid_model = HybridFusionModel()
 
     def analyze_batch(self, submissions: Dict[str, str]) -> List[DetectionCase]:
         """Analyze all pairs and return sorted case list.
@@ -104,57 +108,50 @@ class DashboardService:
 
                 # Run detection
                 features = self._feature_extractor.extract(ca, cb)
-                fused = self._fusion_engine.fuse(features)
-                result = self._decision_engine.decide(fused.final_score)
+                feature_dict = features.as_dict()
+                
+                # Hybrid ML Fusion (New Feature)
+                ml_score = self._hybrid_model.predict_similarity(feature_dict)
+                explanations = self._hybrid_model.explain_prediction(feature_dict)
+                
+                # Statistical Arbitration (Risk 2)
+                arbitration = self._arbitrator.arbitrate(feature_dict)
+                
+                # Final Score (Consensus between ML and Arbitration)
+                final_score = (ml_score + arbitration.fused_score) / 2
+                
+                # Decision
+                result = self._decision_engine.decide(final_score)
 
                 case = DetectionCase(
                     submission_a=fa,
                     submission_b=fb,
-                    score=fused,
-                    risk_level=_risk_level(fused),
-                    top_features=_top_features(features),
+                    score=final_score,
+                    risk_level=_risk_level(final_score),
+                    top_features=_top_features(feature_dict),
                     explanation=[
                         {
                             "engine": name,
                             "score": round(value, 3),
+                            "contribution": round(arbitration.engine_contributions.get(name, 0.0), 3)
                         }
-                        for name, value in features.items()
+                        for name, value in feature_dict.items()
                     ],
-                    evidence=[],
+                    evidence=[
+                        {"name": "Agreement Index", "value": round(arbitration.agreement_index, 3)},
+                        {"name": "Uncertainty", "value": round(arbitration.uncertainty, 3)},
+                        {"name": "ML Insights", "value": " | ".join(explanations) if explanations else "None"}
+                    ],
                 )
                 cases.append(case)
 
         cases.sort(key=lambda x: x.score, reverse=True)
         return cases
 
-    @staticmethod
-    def get_summary(cases: List[DetectionCase]) -> Dict[str, Any]:
-        """Return aggregate statistics for a list of cases."""
-        total = len(cases)
-        critical = sum(1 for c in cases if c.risk_level == "CRITICAL")
-        high = sum(1 for c in cases if c.risk_level == "HIGH")
-        medium = sum(1 for c in cases if c.risk_level == "MEDIUM")
-        low = sum(1 for c in cases if c.risk_level == "LOW")
-        return {
-            "total": total,
-            "critical": critical,
-            "high": high,
-            "medium": medium,
-            "low": low,
-            "high_risk": critical + high,
-        }
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-_ENGINE_CLASS_NAMES: Dict[str, str] = {
-    "ast": "ASTSimilarity",
-    "fingerprint": "TokenSimilarity",
-    "embedding": "CodeBERTSimilarity",
-    "ngram": "NgramSimilarity",
-    "winnowing": "EnhancedWinnowingSimilarity",
-}
 
 
 def _extract_features(code_a: str, code_b: str) -> Dict[str, float]:

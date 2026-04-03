@@ -284,34 +284,43 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         }
         self.normalize_variables = normalize_variables
     
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
         """
         Compare two parsed code representations using AST analysis.
         
-        Args:
-            parsed_a: First parsed code representation
-            parsed_b: Second parsed code representation
-            
         Returns:
-            Similarity score between 0.0 and 1.0
+            A Finding object containing scores and evidence.
         """
+        from src.engines.features.stylometry import StylometryExtractor, compare_stylometry
+
         ast_a = self._extract_ast(parsed_a)
         ast_b = self._extract_ast(parsed_b)
         
+        raw_a = parsed_a.get('raw', '')
+        raw_b = parsed_b.get('raw', '')
+
         if ast_a is None or ast_b is None:
-            return 0.0
-        
+            return Finding(engine=self.name, score=0.0, confidence=1.0)
+            
         if self.normalize_variables:
             ast_a.normalize_variable_names()
             ast_b.normalize_variable_names()
         
+        # 1. AST Metrics
         ted_score = self._tree_edit_distance_similarity(ast_a, ast_b)
         cfg_score = self._cfg_similarity(parsed_a, parsed_b)
         dfg_score = self._dfg_similarity(parsed_a, parsed_b)
         pattern_score = self._pattern_similarity(ast_a, ast_b)
         complexity_score = self._complexity_similarity(ast_a, ast_b)
         
-        final_score = (
+        # 2. Stylometry (New Feature)
+        stylometry_extractor = StylometryExtractor()
+        feat_a = stylometry_extractor.extract(raw_a)
+        feat_b = stylometry_extractor.extract(raw_b)
+        stylometry_score = compare_stylometry(feat_a, feat_b)
+        
+        # 3. Weighted Sum
+        score = (
             ted_score * self.weights['ted'] +
             cfg_score * self.weights['cfg'] +
             dfg_score * self.weights['dfg'] +
@@ -319,7 +328,30 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             complexity_score * self.weights['complexity']
         )
         
-        return min(1.0, max(0.0, final_score))
+        # 4. Stylometry Adjustment (Boost/Penalty)
+        # If stylometry is very different, reduce the score to avoid FP
+        if stylometry_score < 0.4:
+            score *= 0.8
+        
+        # 5. Evidence Blocks
+        evidence = []
+        if score > 0.6:
+            evidence.append(EvidenceBlock(
+                engine=self.name,
+                score=score,
+                confidence=0.9,
+                a_snippet="AST structural alignment detected",
+                b_snippet="AST structural alignment detected",
+                transformation_notes=["Tree edit distance", "CFG/DFG isomorphism"]
+            ))
+
+        return Finding(
+            engine=self.name,
+            score=min(1.0, max(0.0, score)),
+            confidence=0.92,
+            evidence_blocks=evidence,
+            methodology="Comprehensive AST analysis including TED, CFG/DFG overlap, and stylometry."
+        )
     
     def _extract_ast(self, parsed: Dict[str, Any]) -> Optional[ASTNode]:
         """Extract AST from parsed code representation."""

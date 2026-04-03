@@ -19,6 +19,16 @@ class FeatureVector:
     ngram: float = 0.0
     winnowing: float = 0.0
 
+    def as_dict(self) -> Dict[str, float]:
+        """Convert FeatureVector to a dictionary."""
+        return {
+            "ast": self.ast,
+            "fingerprint": self.fingerprint,
+            "embedding": self.embedding,
+            "ngram": self.ngram,
+            "winnowing": self.winnowing,
+        }
+
 
 class FeatureExtractor:
     """Extracts a FeatureVector from a pair of source code strings.

@@ -8,7 +8,10 @@ class FusedScore:
     """Result of fused multi-engine similarity scoring."""
     final_score: float
     confidence: float = 0.8
+    uncertainty: float = 0.0
+    agreement_index: float = 1.0
     components: Dict[str, float] = field(default_factory=dict)
+    contributions: Dict[str, float] = field(default_factory=dict)
 
 
 # Default weights across all 5 engines
@@ -29,14 +32,16 @@ class FusionEngine:
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
+        from src.evaluation.arbitration import BayesianArbitrator
         self.weights: Dict[str, float] = dict(weights or DEFAULT_WEIGHTS)
         # Normalize weights so they sum to 1.0
         total = sum(self.weights.values())
         if total > 0:
             self.weights = {k: v / total for k, v in self.weights.items()}
+        self._arbitrator = BayesianArbitrator(engine_prior_precisions={k: v*20 for k, v in self.weights.items()})
 
     def fuse(self, features: "FeatureVector") -> FusedScore:
-        """Combine engine outputs into a single similarity score.
+        """Combine engine outputs into a single similarity score using Bayesian arbitration.
 
         Args:
             features: A FeatureVector containing scores from each engine.
@@ -44,28 +49,16 @@ class FusionEngine:
         Returns:
             A FusedScore with the combined score, confidence, and per-engine breakdown.
         """
-        score = 0.0
-        components: Dict[str, float] = {}
-
-        engine_names = ["ast", "fingerprint", "embedding", "ngram", "winnowing"]
-        for engine in engine_names:
-            weight = self.weights.get(engine, 0.0)
-            value = getattr(features, engine, 0.0)
-            score += weight * value
-            components[engine] = round(value, 4)
-
-        # Clamp final score to [0, 1]
-        final_score = round(max(0.0, min(1.0, score)), 4)
-
-        # Simple confidence model: higher when more engines agree
-        non_zero = sum(1 for v in components.values() if v > 0.0)
-        total_engines = len([w for w in self.weights.values() if w > 0.0])
-        confidence = round(non_zero / max(total_engines, 1), 4) if total_engines else 0.0
+        engine_scores = features.as_dict()
+        arbitration = self._arbitrator.arbitrate(engine_scores)
 
         return FusedScore(
-            final_score=final_score,
-            confidence=confidence,
-            components=components,
+            final_score=arbitration.fused_score,
+            confidence=arbitration.agreement_index, # Confidence derived from consensus
+            uncertainty=arbitration.uncertainty,
+            agreement_index=arbitration.agreement_index,
+            components=engine_scores,
+            contributions=arbitration.engine_contributions
         )
 
     def get_weights(self) -> Dict[str, float]:

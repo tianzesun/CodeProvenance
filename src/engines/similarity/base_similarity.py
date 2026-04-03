@@ -9,28 +9,32 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 
 
+from src.domain.models import Finding, EvidenceBlock
+
+
 class BaseSimilarityAlgorithm(ABC):
     """
     Abstract base class for similarity algorithms.
     
     Each algorithm should implement the compare method to calculate
-    similarity between two parsed code representations.
+    similarity between two parsed code representations and return a Finding.
     """
     
-    def __init__(self, name: str):
+    def __init__(self, name: str, methodology: str = ""):
         self.name = name
+        self.methodology = methodology
     
     @abstractmethod
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
         """
-        Compare two parsed code representations and return similarity score.
+        Compare two parsed code representations and return a Finding.
         
         Args:
             parsed_a: First parsed code representation
             parsed_b: Second parsed code representation
             
         Returns:
-            Similarity score between 0.0 and 1.0
+            A Finding object containing scores and evidence
         """
         pass
     
@@ -77,34 +81,26 @@ class SimilarityEngine:
     def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Dict[str, Any]:
         """
         Compare two parsed code representations using all algorithms.
-        
-        Args:
-            parsed_a: First parsed code representation
-            parsed_b: Second parsed code representation
-            
-        Returns:
-            Dictionary containing:
-            - overall_score: Weighted average of all algorithm scores
-            - individual_scores: Dictionary of algorithm names to scores
-            - confidence_interval: Estimated confidence interval
-            - deep_analysis: Deep analysis results (if enabled)
         """
         if not self.algorithms:
             return {
                 'overall_score': 0.0,
+                'findings': [],
                 'individual_scores': {},
                 'confidence_interval': {'lower': 0.0, 'upper': 0.0, 'confidence': 0.0}
             }
         
+        findings: List[Finding] = []
         individual_scores = {}
         weighted_sum = 0.0
         total_weight = 0.0
         
         for algorithm in self.algorithms:
             try:
-                score = algorithm.compare(parsed_a, parsed_b)
-                # Ensure score is in valid range
-                score = max(0.0, min(1.0, score))
+                finding = algorithm.compare(parsed_a, parsed_b)
+                findings.append(finding)
+                
+                score = max(0.0, min(1.0, finding.score))
                 algorithm_name = algorithm.get_name()
                 individual_scores[algorithm_name] = score
                 
@@ -112,32 +108,28 @@ class SimilarityEngine:
                 weighted_sum += score * weight
                 total_weight += weight
             except Exception as e:
-                # If an algorithm fails, log the error and continue with score 0
                 algorithm_name = algorithm.get_name()
                 individual_scores[algorithm_name] = 0.0
-                # In a real implementation, you'd log this error
         
-        # Calculate overall score
         overall_score = weighted_sum / total_weight if total_weight > 0 else 0.0
         
-        # Calculate simple confidence interval based on score variance
         scores = list(individual_scores.values())
         if len(scores) > 1:
             std_dev = np.std(scores)
-            margin = 1.96 * std_dev / np.sqrt(len(scores))  # 95% confidence
+            margin = 1.96 * std_dev / np.sqrt(len(scores))
             lower = max(0.0, overall_score - margin)
             upper = min(1.0, overall_score + margin)
         else:
-            # Single algorithm or no variance
             lower = upper = overall_score
         
         result = {
             'overall_score': overall_score,
+            'findings': [f.to_dict() for f in findings],
             'individual_scores': individual_scores,
             'confidence_interval': {
                 'lower': lower,
                 'upper': upper,
-                'confidence': 0.95  # Fixed for now
+                'confidence': 0.95
             }
         }
         

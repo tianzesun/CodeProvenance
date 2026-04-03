@@ -12,18 +12,34 @@ import RiskSummaryCard from "./components/RiskSummaryCard";
 
 // Demo data from backend diff_generator.py format
 const DEMO_DATA = {
-  summary: { total_blocks: 2, risk_level: "HIGH", confidence: 0.91 },
+  summary: { total_blocks: 2, risk_level: "HIGH", confidence: 0.91, agreement_index: 0.85 },
   diff: {
     total_matches: 2,
     regions: [
       { a_range: [1, 4], b_range: [1, 4], confidence: 0.95, type: "ast",
         a_snippet: "def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count",
         b_snippet: "def compute_mean(values):\n    total = sum(values)\n    count = len(values)\n    return total / count",
-        explanation: "Structural similarity detected (AST node alignment). Control flow and logic structure are similar, which is strong evidence of copying." },
+        explanation: [
+          { engine: "ast", score: 0.95, contribution: 0.4 },
+          { engine: "ngram", score: 0.82, contribution: 0.3 }
+        ],
+        evidence: [
+          { name: "Agreement Index", value: 0.88 },
+          { name: "Uncertainty", value: 0.05 }
+        ]
+      },
       { a_range: [7, 12], b_range: [7, 12], confidence: 0.88, type: "fused",
         a_snippet: "def calculate_sum(data):\n    total = 0\n    for item in data:\n        total += item\n    return total",
         b_snippet: "def compute_total(values):\n    total = 0\n    for v in values:\n        total += v\n    return total",
-        explanation: "Combined structural + lexical similarity detected. Multiple independent engines confirm match." }
+        explanation: [
+          { engine: "fingerprint", score: 0.91, contribution: 0.35 },
+          { engine: "embedding", score: 0.85, contribution: 0.25 }
+        ],
+        evidence: [
+          { name: "Agreement Index", value: 0.92 },
+          { name: "Uncertainty", value: 0.04 }
+        ]
+      }
     ]
   }
 };

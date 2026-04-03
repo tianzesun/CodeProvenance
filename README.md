@@ -8,7 +8,18 @@ IntegrityDesk is a production-ready code similarity detection system designed fo
 
 ## 🎯 Why IntegrityDesk?
 
-Traditional tools like MOSS and JPlag use single algorithms and provide minimal context. IntegrityDesk combines **6 different similarity engines** with **multi-engine fusion**, **ML-learned weights**, and a **teacher review workflow** — delivering actionable intelligence, not just scores.
+Traditional tools like MOSS and JPlag use single algorithms and provide minimal context. IntegrityDesk combines **6 different similarity engines** with **Bayesian Arbitration**, **Hybrid ML Fusion**, and **Stylometric Analysis** — delivering actionable intelligence with publication-grade credibility.
+
+### 📊 Scientific Benchmarking Infrastructure
+
+IntegrityDesk is designed as a defensible scientific benchmarking infrastructure for code similarity research:
+
+- **Bayesian Arbitration Layer**: Replaces simple weighted averages with a statistical model that accounts for engine variance and uncertainty.
+- **Hybrid ML Fusion**: A Random Forest-based fusion model combining AST, Stylometry, and Semantic Embeddings (Targeting F1 > 0.92).
+- **Code Stylometry**: Tracks 10+ stylistic markers (naming habits, comment density, etc.) to distinguish author identity and reduce False Positives.
+- **Semantic Analysis**: Deep black-box execution comparison to detect behavioral clones (Type 4) that bypass syntactic analysis.
+- **Dataset Governance**: Mandatory SHA-256 fingerprinting and cross-dataset deduplication to prevent experimental contamination.
+- **ACM/IEEE-Style Reporting**: Generates formal HTML reports with cryptographic signatures, ideal for academic review and appeals.
 
 ### 📊 Feature Comparison
 

@@ -459,34 +459,35 @@ class ExecutionSimilarity(BaseSimilarityAlgorithm):
         self.max_test_cases = max_test_cases
     
     def compare(self, parsed_a: Dict[str, Any], 
-                parsed_b: Dict[str, Any]) -> float:
+                parsed_b: Dict[str, Any]) -> Finding:
         """
         Compare two code samples by executing and comparing outputs.
         
-        Args:
-            parsed_a: First parsed code representation
-            parsed_b: Second parsed code representation
-            
         Returns:
-            Similarity score between 0.0 and 1.0
+            A Finding object containing scores and evidence.
         """
         code_a = self._extract_code(parsed_a)
         code_b = self._extract_code(parsed_b)
         language = parsed_a.get('language', parsed_b.get('language', 'python'))
         
         if not code_a or not code_b:
-            return 0.0
+            return Finding(engine=self.name, score=0.0, confidence=1.0)
         
         # Check if code is executable (has main logic)
         if not self._is_executable(code_a, language) or not self._is_executable(code_b, language):
-            return 0.5  # Assume similar if can't execute
+            return Finding(
+                engine=self.name, 
+                score=0.5, 
+                confidence=0.5, 
+                metadata={"reason": "not_executable"}
+            )
         
         # Generate test cases
         test_cases = self.test_generator.generate_test_cases(code_a, language)
         test_cases = test_cases[:self.max_test_cases]
         
         if not test_cases:
-            return 0.5  # Default similarity
+            return Finding(engine=self.name, score=0.5, confidence=0.5)
         
         # Execute both codes on each test case
         matching = 0
@@ -511,10 +512,29 @@ class ExecutionSimilarity(BaseSimilarityAlgorithm):
                     )
                     matching += similarity
         
+        score = matching / total if total > 0 else 0.5
         if executed_successfully == 0:
-            return 0.5  # Couldn't execute, assume neutral
-        
-        return matching / total
+            score = 0.5
+            
+        # Evidence
+        evidence = []
+        if score > 0.8:
+            evidence.append(EvidenceBlock(
+                engine=self.name,
+                score=score,
+                confidence=0.9,
+                a_snippet="Identical behavior on test cases",
+                b_snippet="Identical behavior on test cases",
+                transformation_notes=["Semantic behavior match (Type 4)"]
+            ))
+
+        return Finding(
+            engine=self.name,
+            score=min(1.0, max(0.0, score)),
+            confidence=0.88,
+            evidence_blocks=evidence,
+            methodology="Black-box execution comparison using sandbox isolation."
+        )
     
     def _extract_code(self, parsed: Dict[str, Any]) -> str:
         """Extract source code from parsed representation."""

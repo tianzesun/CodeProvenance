@@ -81,6 +81,22 @@ class EvidenceBlock:
     a_snippet: str = ""
     b_snippet: str = ""
     transformation_notes: List[str] = field(default_factory=list)  # e.g., "variable renamed"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engine": self.engine,
+            "score": round(self.score, 3),
+            "confidence": round(self.confidence, 3),
+            "a_start_line": self.a_start_line,
+            "a_end_line": self.a_end_line,
+            "b_start_line": self.b_start_line,
+            "b_end_line": self.b_end_line,
+            "a_snippet": self.a_snippet,
+            "b_snippet": self.b_snippet,
+            "transformation_notes": self.transformation_notes,
+            "metadata": self.metadata
+        }
 
 
 @dataclass
@@ -91,6 +107,17 @@ class Finding:
     confidence: float
     evidence_blocks: List[EvidenceBlock] = field(default_factory=list)
     methodology: str = ""  # How this engine works (for transparency)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engine": self.engine,
+            "score": round(self.score, 3),
+            "confidence": round(self.confidence, 3),
+            "evidence_blocks": [b.to_dict() for b in self.evidence_blocks],
+            "methodology": self.methodology,
+            "metadata": self.metadata
+        }
 
 
 # ─────────────────────────────────────────────
