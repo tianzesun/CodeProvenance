@@ -1,0 +1,75 @@
+# Dataset Configuration for Benchmark v2
+# Drives the entire dataset generation pipeline
+
+seed: 42
+languages: ["python"]
+
+dataset:
+  total_pairs: 4000
+
+distribution:
+  type1: 200
+  type2: 200
+  type3: 200
+  type4_easy: 200
+  type4_medium: 200
+  type4_hard: 200
+  negative_easy: 400
+  negative_hard: 400
+
+constraints:
+  min_tokens: 20
+  max_tokens: 300
+  min_lines: 5
+  max_lines: 50
+
+# Clone type definitions
+clone_types:
+  type1:
+    name: "Exact Clone"
+    description: "Identical code with only whitespace/comment changes"
+    difficulty: "easy"
+    
+  type2:
+    name: "Renamed Clone"
+    description: "Same structure with renamed identifiers"
+    difficulty: "easy"
+    
+  type3:
+    name: "Structural Clone"
+    description: "Same logic with structural changes (reorder, dead code)"
+    difficulty: "medium"
+    
+  type4_easy:
+    name: "Semantic Easy"
+    description: "Same logic with partial token overlap"
+    difficulty: "medium"
+    
+  type4_medium:
+    name: "Semantic Medium"
+    description: "Refactored structure, same functionality"
+    difficulty: "hard"
+    
+  type4_hard:
+    name: "Semantic Hard"
+    description: "LLM-transformed or algorithm variation"
+    difficulty: "very_hard"
+
+# Negative sample definitions
+negatives:
+  easy:
+    name: "Easy Negative"
+    description: "Completely unrelated code"
+    difficulty: "easy"
+    
+  hard:
+    name: "Hard Negative"
+    description: "Near-miss with partial similarity"
+    difficulty: "hard"
+
+# Output configuration
+output:
+  format: "json"
+  path: "benchmark/data/generated/dataset.json"
+  include_metadata: true
+  cache_llm: true

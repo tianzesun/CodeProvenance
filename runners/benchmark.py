@@ -22,7 +22,7 @@ class BenchmarkRunner(ExecutionPlugin):
             Benchmark results dictionary.
         """
         # Import here to avoid circular imports
-        from benchmark.runners import (
+        from src.benchmark.runners import (
             CoreBenchmarkRunner,
             FullBenchmarkRunner,
             ThreeLayerBenchmarkRunner,

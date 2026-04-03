@@ -309,16 +309,44 @@ class ExternalDatasetLoader:
 
         pairs: List[CodePair] = []
         pair_id = 0
-        csv_path = dataset_path / "train.csv"
-        if csv_path.exists():
+        # Try different CSV file names
+        csv_files = ["train.csv", "cheating_dataset.csv", "cheating_features_dataset.csv"]
+        csv_path = None
+        for csv_name in csv_files:
+            candidate = dataset_path / csv_name
+            if candidate.exists():
+                csv_path = candidate
+                break
+        
+        if csv_path and csv_path.exists():
             with open(csv_path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     if max_pairs and pair_id >= max_pairs:
                         break
-                    code_a = row.get("source", "") or row.get("code_a", "")
-                    code_b = row.get("target", "") or row.get("code_b", "")
-                    label = int(row.get("similarity", row.get("label", 0)))
+                    # Handle different column name formats
+                    code_a = row.get("source", "") or row.get("code_a", "") or row.get("File_1", "")
+                    code_b = row.get("target", "") or row.get("code_b", "") or row.get("File_2", "")
+                    label = int(row.get("similarity", row.get("label", row.get("Label", 0))))
+                    
+                    # Read code from files if paths are provided
+                    if code_a.endswith(".py"):
+                        file_a = dataset_path / code_a
+                        if file_a.exists():
+                            try:
+                                with open(file_a, "r", encoding="utf-8") as code_file:
+                                    code_a = code_file.read()
+                            except Exception:
+                                pass
+                    if code_b.endswith(".py"):
+                        file_b = dataset_path / code_b
+                        if file_b.exists():
+                            try:
+                                with open(file_b, "r", encoding="utf-8") as code_file:
+                                    code_b = code_file.read()
+                            except Exception:
+                                pass
+                    
                     pairs.append(CodePair(
                         id_a=f"kaggle_{pair_id}_a",
                         code_a=code_a,

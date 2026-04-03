@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from benchmark.pipeline.loader import CanonicalDataset, CodePair
 from benchmark.pipeline.stages import SimilarityResult
-from benchmark.metrics.significance import (
+from benchmark.evaluation.metrics.significance import (
     bootstrap_confidence_interval,
     mcnemar_test,
     add_significance_to_results,

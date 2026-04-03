@@ -242,6 +242,7 @@ class ErrorAnalyzer:
         fp_cases: List[Tuple[float, int, int, str, str]] = []
         fn_cases: List[Tuple[float, int, int, str, str]] = []
         tp_by_type: Dict[int, int] = {}
+        fp_by_type: Dict[int, int] = {}
         fn_by_type: Dict[int, int] = {}
         
         for i, (score, label, clone_type, code_a, code_b) in enumerate(results):

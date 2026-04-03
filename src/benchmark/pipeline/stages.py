@@ -239,8 +239,9 @@ class MetricsStage(PipelineStage):
         input_data: List[SimilarityResult],
         config: Dict[str, Any]
     ) -> MetricsResult:
-        from benchmark.metrics import precision, recall, f1_score, accuracy
-        from benchmark.metrics import mean_average_precision, mean_reciprocal_rank
+        from benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
+        from benchmark.evaluation.metrics import mean_average_precision, mean_reciprocal_rank
+        import numpy as np
         
         # Classification metrics
         tp = sum(1 for r in input_data if r.score >= config.get("threshold", 0.5) and r.label == 1)
@@ -253,15 +254,40 @@ class MetricsStage(PipelineStage):
         f1 = f1_score(prec, rec)
         acc = accuracy(tp, tn, fp, fn)
         
-        # Ranking metrics
+        # Ranking metrics - aggregate per query
         query_results = {}
         for r in input_data:
             if r.id_a not in query_results:
                 query_results[r.id_a] = []
             query_results[r.id_a].append((r.id_b, r.score, r.label or 0))
         
-        map_score = mean_average_precision(query_results)
-        mrr_score = mean_reciprocal_rank(query_results)
+        # Compute MAP and MRR across all queries
+        ap_scores = []
+        mrr_scores = []
+        
+        for query_id, results in query_results.items():
+            # Sort by score descending
+            results_sorted = sorted(results, key=lambda x: x[1], reverse=True)
+            
+            # Average Precision for this query
+            relevant = [r for r in results_sorted if r[2] == 1]
+            if relevant:
+                precisions = []
+                num_relevant = 0
+                for i, (_, _, label) in enumerate(results_sorted):
+                    if label == 1:
+                        num_relevant += 1
+                        precisions.append(num_relevant / (i + 1))
+                ap_scores.append(np.mean(precisions))
+                
+                # Reciprocal Rank for this query
+                for i, (_, _, label) in enumerate(results_sorted):
+                    if label == 1:
+                        mrr_scores.append(1.0 / (i + 1))
+                        break
+        
+        map_score = float(np.mean(ap_scores)) if ap_scores else 0.0
+        mrr_score = float(np.mean(mrr_scores)) if mrr_scores else 0.0
         
         return MetricsResult(
             precision=prec,

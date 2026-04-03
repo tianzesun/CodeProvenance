@@ -34,7 +34,7 @@ from benchmark.pipeline.stages import (
     ParsedCode,
 )
 from benchmark.registry import registry
-from benchmark.analysis.clone_type_breakdown import (
+from benchmark.forensics.clone_type_breakdown import (
     CloneTypeBreakdown,
     analyze_clone_type_breakdown,
 )
@@ -315,7 +315,7 @@ class BenchmarkRunner:
                 else:
                     fn += 1
 
-            from benchmark.metrics import precision, recall, f1_score
+            from benchmark.evaluation.metrics import precision, recall, f1_score
             prec = precision(tp, fp)
             rec = recall(tp, fn)
             f1 = f1_score(prec, rec)

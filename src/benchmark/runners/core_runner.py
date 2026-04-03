@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 
 from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
 from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from benchmark.metrics import compute_classification_metrics, mean_average_precision, mean_reciprocal_rank
+from benchmark.evaluation.metrics import compute_average_precision
 
 
 class CoreBenchmarkRunner:
@@ -86,15 +86,54 @@ class CoreBenchmarkRunner:
             else:
                 fn += 1
         
-        classification = compute_classification_metrics(tp, fp, tn, fn)
+        # Manual classification metrics calculation
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
+        
+        classification = {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "accuracy": accuracy
+        }
         
         query_results: Dict[str, List[Tuple[str, float, int]]] = {}
         for i, (score, label) in enumerate(scores):
             q_id = f"q_{i // 10}"
             query_results.setdefault(q_id, []).append((f"d_{i}", score, label))
         
-        map_score = mean_average_precision(query_results)
-        mrr_score = mean_reciprocal_rank(query_results)
+        # MAP and MRR calculation
+        ap_sum = 0.0
+        mrr_sum = 0.0
+        query_count = 0
+        
+        for q_id, results in query_results.items():
+            # Sort by score descending
+            sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
+            
+            # Calculate Average Precision
+            hits = 0
+            ap = 0.0
+            for rank, (doc_id, score, label) in enumerate(sorted_results, 1):
+                if label == 1:
+                    hits += 1
+                    ap += hits / rank
+            
+            if hits > 0:
+                ap_sum += ap / hits
+            
+            # Calculate MRR
+            for rank, (doc_id, score, label) in enumerate(sorted_results, 1):
+                if label == 1:
+                    mrr_sum += 1.0 / rank
+                    break
+            
+            query_count += 1
+        
+        map_score = ap_sum / query_count if query_count > 0 else 0.0
+        mrr_score = mrr_sum / query_count if query_count > 0 else 0.0
         
         return {
             "precision": round(classification["precision"], 4),
@@ -123,8 +162,11 @@ class CoreBenchmarkRunner:
                     tn += 1
                 else:
                     fn += 1
-            classification = compute_classification_metrics(tp, fp, tn, fn)
-            if classification["f1"] > best_f1:
-                best_f1 = classification["f1"]
+            precision_t = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall_t = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1_t = 2 * precision_t * recall_t / (precision_t + recall_t) if (precision_t + recall_t) > 0 else 0.0
+            
+            if f1_t > best_f1:
+                best_f1 = f1_t
                 best_threshold = t
         return best_threshold, best_f1

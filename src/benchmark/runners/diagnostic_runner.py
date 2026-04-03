@@ -9,8 +9,7 @@ from typing import Any, Dict, List
 
 from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
 from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from benchmark.analysis.error_attribution import ErrorAttributionModel
-from benchmark.analysis.stability_analysis import ThresholdStabilityAnalyzer, FailureClusterAnalyzer
+from benchmark.forensics import ErrorAttributionModel, ThresholdStabilityAnalyzer, FailureClusterAnalyzer
 
 
 class DiagnosticBenchmarkRunner:

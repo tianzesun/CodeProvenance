@@ -5,6 +5,7 @@ Provides forensic intelligence for similarity detection:
 - Attribution: Error categorization and failure pattern detection
 - Clone taxonomy: Clone type classification and technique detection
 - Visualizations: Token heatmaps, AST alignment, causal graphs
+- Stability analysis: Threshold stability and failure clustering
 
 This module elevates analysis to forensics by providing:
 - Strategic intelligence for detector improvement
@@ -25,15 +26,30 @@ from benchmark.forensics.attribution import (
     FailurePatternDetector,
     FailurePattern,
 )
+from benchmark.forensics.attribution.error_attribution import (
+    ErrorAttributionModel,
+    ErrorAttributionReport,
+)
 from benchmark.forensics.clone_taxonomy import (
     CloneTypeClassifier,
-    TechniqueDetector,
-    TechniqueType,
+    CloneType,
+    CloneTypeReport,
 )
 from benchmark.forensics.visualizations import (
     TokenHeatmapGenerator,
     ASTAlignmentVisualizer,
     CausalGraphGenerator,
+)
+from benchmark.forensics.stability_analysis import (
+    ThresholdStabilityAnalyzer,
+    FailureClusterAnalyzer,
+    StabilityReport,
+    ClusterReport,
+    FailureCluster,
+)
+from benchmark.forensics.clone_type_breakdown import (
+    CloneTypeBreakdown,
+    analyze_clone_type_breakdown,
 )
 
 __all__ = [
@@ -48,6 +64,8 @@ __all__ = [
     "ErrorCategory",
     "FailurePatternDetector",
     "FailurePattern",
+    "ErrorAttributionModel",
+    "ErrorAttributionReport",
     # Clone taxonomy
     "CloneTypeClassifier",
     "TechniqueDetector",
@@ -56,4 +74,10 @@ __all__ = [
     "TokenHeatmapGenerator",
     "ASTAlignmentVisualizer",
     "CausalGraphGenerator",
+    # Stability analysis
+    "ThresholdStabilityAnalyzer",
+    "FailureClusterAnalyzer",
+    "StabilityReport",
+    "ClusterReport",
+    "FailureCluster",
 ]
