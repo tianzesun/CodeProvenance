@@ -1,55 +1,61 @@
 """
-Engines Layer - Multi-engine similarity detection with fusion.
+Engines Module - Runtime Execution Engine
 
-Provides:
-1. Feature extraction from code pairs
-2. Multiple similarity engines (AST, Token, N-gram, Embedding, Execution, Winnowing)
-3. Fusion scoring combining all engines
-4. ML-based weight learning
+This module provides runtime execution logic only.
+It does NOT contain business logic, algorithms, or ML models.
 
-USAGE:
-    from src.engines import MultiEngineSimilarity
-    engine = MultiEngineSimilarity()
-    result = engine.compare(code_a, code_b)
-    # Returns: {score, confidence, features, label}
+Responsibility: Scheduler, execution context, parallelism
 """
-from src.engines.scoring.fusion_engine import FusedScore
-from src.engines.registry import EngineRegistry
-from src.engines.base import BaseSimilarityEngine, BaseFeatureExtractor
 
-__all__ = ['MultiEngineSimilarity', 'FusedScore', 'EngineRegistry',
-           'BaseSimilarityEngine', 'BaseFeatureExtractor']
+from typing import Dict, Any, List, Optional
+from abc import ABC, abstractmethod
 
 
-class MultiEngineSimilarity:
-    """Production multi-engine similarity detection."""
-    FEATURE_NAMES = ["ast", "fingerprint", "embedding", "ngram", "winnowing"]
+class ExecutionEngine(ABC):
+    """Base class for all execution engines."""
     
-    def __init__(self, weights=None, threshold=0.5):
-        from src.engines.features.feature_extractor import FeatureExtractor
-        from src.engines.scoring.fusion_engine import FusionEngine
-        from src.domain.decision import DecisionEngine
-        self.extractor = FeatureExtractor()
-        self.fusion = FusionEngine(weights)
-        self.decision = DecisionEngine(threshold)
+    @abstractmethod
+    def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a task."""
+        pass
     
-    def compare(self, code_a, code_b, code_dict=None):
-        """Compare two code samples.
-        
-        Args:
-            code_a: First code sample
-            code_b: Second code sample
-            code_dict: Optional {"A": submission_a_name, "B": submission_b_name}
-        """
-        features = self.extractor.extract(code_a, code_b)
-        fused = self.fusion.fuse(features)
-        result = self.decision.decide(fused.final_score)
-        feature_dict = {k: v for k, v in zip(self.FEATURE_NAMES,
-                        self.extractor.to_features(features))}
-        return {
-            "score": fused.final_score,
-            "confidence": result.confidence,
-            "features": feature_dict,
-            "label": result.final_verdict,
-            "threshold_version": "V1",
-        }
+    @abstractmethod
+    def get_status(self) -> str:
+        """Get engine status."""
+        pass
+
+
+class EngineRegistry:
+    """Registry for execution engines."""
+    
+    def __init__(self):
+        self._engines: Dict[str, ExecutionEngine] = {}
+    
+    def register(self, name: str, engine: ExecutionEngine) -> None:
+        """Register an execution engine."""
+        self._engines[name] = engine
+    
+    def get(self, name: str) -> Optional[ExecutionEngine]:
+        """Get an execution engine by name."""
+        return self._engines.get(name)
+    
+    def list_engines(self) -> List[str]:
+        """List all registered engines."""
+        return list(self._engines.keys())
+
+
+# Global engine registry
+registry = EngineRegistry()
+
+
+def get_engine(name: str) -> Optional[ExecutionEngine]:
+    """Get an execution engine by name."""
+    return registry.get(name)
+
+
+def register_engine(name: str):
+    """Decorator to register an execution engine."""
+    def decorator(cls):
+        registry.register(name, cls())
+        return cls
+    return decorator

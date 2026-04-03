@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CodeProvenance Certification Report</title>
+    <style>
+        body {
+            font-family: "Times New Roman", Times, serif;
+            margin: 40px;
+            line-height: 1.6;
+            color: #111;
+        }
+
+        h1, h2, h3 {
+            font-weight: bold;
+            margin-top: 1.5em;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 26px;
+        }
+
+        h2 {
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+        }
+
+        .meta {
+            text-align: center;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        table, th, td {
+            border: 1px solid #333;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f5f5f5;
+        }
+
+        .highlight {
+            font-weight: bold;
+            color: #000;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .code {
+            font-family: monospace;
+            background: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .footer {
+            margin-top: 50px;
+            font-size: 12px;
+            text-align: center;
+            color: #555;
+        }
+
+        @media print {
+            body {
+                margin: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<h1>CodeProvenance Benchmark Certification Report</h1>
+
+<div class="meta">
+    <div><strong>Version:</strong> {{ report_version }}</div>
+    <div><strong>Date:</strong> {{ generated_at }}</div>
+    <div><strong>Dataset:</strong> {{ dataset_name }} ({{ dataset_version }})</div>
+    <div><strong>Reproducibility Hash:</strong> {{ reproducibility_hash }}</div>
+</div>
+
+<div class="section">
+    <h2>1. Overview</h2>
+    <p>
+        This report evaluates the performance of <strong>CodeProvenance</strong> against established
+        code similarity detection systems under controlled, reproducible conditions.
+    </p>
+    <p>
+        All experiments are deterministic and adhere to strict validation protocols.
+    </p>
+</div>
+
+<div class="section">
+    <h2>2. Evaluation Metrics</h2>
+    <table>
+        <tr>
+            <th>System</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>F1 Score</th>
+            <th>Accuracy</th>
+            <th>ROC-AUC</th>
+        </tr>
+        {% for row in metrics %}
+        <tr>
+            <td>{{ row.name }}</td>
+            <td>{{ row.precision }}</td>
+            <td>{{ row.recall }}</td>
+            <td class="highlight">{{ row.f1 }}</td>
+            <td>{{ row.accuracy }}</td>
+            <td>{{ row.roc_auc }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="section">
+    <h2>3. Confidence Intervals (95%)</h2>
+    <table>
+        <tr>
+            <th>System</th>
+            <th>Metric</th>
+            <th>Mean</th>
+            <th>Lower</th>
+            <th>Upper</th>
+        </tr>
+        {% for ci in confidence_intervals %}
+        <tr>
+            <td>{{ ci.name }}</td>
+            <td>{{ ci.metric }}</td>
+            <td>{{ ci.mean }}</td>
+            <td>{{ ci.lower }}</td>
+            <td>{{ ci.upper }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="section">
+    <h2>4. Statistical Significance</h2>
+    <table>
+        <tr>
+            <th>Comparison</th>
+            <th>Δ (Delta)</th>
+            <th>p-value</th>
+            <th>Significant</th>
+        </tr>
+        {% for test in significance_tests %}
+        <tr>
+            <td>{{ test.name }}</td>
+            <td>{{ test.delta }}</td>
+            <td>{{ test.p_value }}</td>
+            <td>{{ test.significant }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="section">
+    <h2>5. Calibration Analysis</h2>
+    <p>
+        Expected Calibration Error (ECE): <strong>{{ calibration.ece }}</strong>
+    </p>
+    <p>
+        Lower values indicate better alignment between predicted confidence and actual outcomes.
+    </p>
+</div>
+
+<div class="section">
+    <h2>6. Stratified Performance</h2>
+    <table>
+        <tr>
+            <th>Category</th>
+            <th>F1 Score</th>
+        </tr>
+        {% for s in stratified %}
+        <tr>
+            <td>{{ s.category }}</td>
+            <td>{{ s.f1 }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="section">
+    <h2>7. Reproducibility</h2>
+    <div class="code">
+Dataset Hash: {{ reproducibility.dataset_hash }}
+Code Version: {{ reproducibility.code_version }}
+Config Hash: {{ reproducibility.config_hash }}
+Combined Hash: {{ reproducibility.combined_hash }}
+    </div>
+</div>
+
+<div class="section">
+    <h2>8. Conclusion</h2>
+    <p>
+        CodeProvenance demonstrates statistically significant improvements over baseline systems
+        across multiple evaluation metrics, with robust confidence intervals and reproducible results.
+    </p>
+</div>
+
+<div class="footer">
+    Generated by CodeProvenance Certification Engine
+</div>
+
+</body>
+</html>

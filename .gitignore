@@ -111,3 +111,11 @@ benchmark/data/codexglue_defect/
 # Model Caches
 ###############
 .unixcoder_cache/
+.embedding_cache/
+
+###############
+# IDE & Editor Caches
+###############
+.mypy_cache/
+.ruff_cache/
+.pyright/

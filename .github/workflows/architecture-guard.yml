@@ -1,0 +1,48 @@
+name: Architecture Guard
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  architecture-check:
+    name: Strict Architecture Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Run strict architecture guard
+        run: python bootstrap/architecture_guard.py
+      
+      - name: Architecture check passed
+        if: success()
+        run: echo "✅ Architecture check passed!"
+  
+  architecture-test:
+    name: Architecture Tests
+    runs-on: ubuntu-latest
+    needs: architecture-check
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install pytest
+      
+      - name: Run architecture tests
+        run: pytest tests/test_architecture.py -v

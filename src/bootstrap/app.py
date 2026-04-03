@@ -1,42 +1,124 @@
-"""Application Factory - ONLY place where everything is wired."""
-from typing import Dict, Optional
-from fastapi import FastAPI
+"""
+Single Execution Lifecycle - Bootstrap Entry Point
 
-def create_app(weights: Optional[Dict] = None, threshold: float = 0.5) -> FastAPI:
-    """Create and wire the entire application.
+This module provides the canonical entry point for the entire system.
+All initialization flows through here to ensure consistency.
+"""
+
+import sys
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.config.database import DatabaseConfig
+from src.infrastructure.db import DatabaseManager
+from src.domain.models import Base
+from src.application.pipeline.detection_pipeline import DetectionPipeline
+from src.engines.registry import registry
+
+
+class Application:
+    """Single execution lifecycle manager."""
     
-    This is the SINGLE composition root for the system.
-    """
-    # Initialize architecture guard (import enforcement)
-    from src.bootstrap.architecture_guard import ArchitectureGuard
-    ArchitectureGuard.install_guard()
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        self.db_manager: Optional[DatabaseManager] = None
+        self.pipeline: Optional[DetectionPipeline] = None
+        self._initialized = False
     
-    # Initialize dependency container
-    from src.bootstrap.container import Container
-    Container.init(weights, threshold)
+    def initialize(self) -> None:
+        """Initialize all components in correct order."""
+        if self._initialized:
+            return
+        
+        # 1. Configuration
+        self._init_config()
+        
+        # 2. Database
+        self._init_database()
+        
+        # 3. Domain models
+        self._init_domain()
+        
+        # 4. Engines
+        self._init_engines()
+        
+        # 5. Pipeline
+        self._init_pipeline()
+        
+        self._initialized = True
     
-    # Create FastAPI app (API is transport ONLY)
-    app = FastAPI(title="IntegrityDesk", version="1.0.0")
+    def _init_config(self) -> None:
+        """Initialize configuration."""
+        from src.config.database import DatabaseConfig
+        self.db_config = DatabaseConfig()
     
-    # Register main API router (includes jobs, submissions, results, webhooks, usage, health)
-    # Note: These modules require database infrastructure; kept commented until DB is configured
-    # from src.api.routes.api import api_router
-    # app.include_router(api_router, prefix="/api/v1")
+    def _init_database(self) -> None:
+        """Initialize database connection."""
+        self.db_manager = DatabaseManager(self.db_config)
+        self.db_manager.initialize()
     
-    # Register dashboard routes for teacher review UI (temporarily disabled - needs DashboardService)
-    # from src.api.routes import dashboard
-    # app.include_router(dashboard.router)
+    def _init_domain(self) -> None:
+        """Initialize domain models."""
+        # Create tables if needed
+        Base.metadata.create_all(self.db_manager.engine)
     
-    # Register analysis routes (temporarily disabled - requires database setup)
-    # from src.api.routes import analyze
-    # app.include_router(analyze.router, prefix="/api")
+    def _init_engines(self) -> None:
+        """Initialize detection engines."""
+        # Engines are auto-registered via decorators
+        pass
     
-    # Register health check route
-    from src.api.routes import health
-    app.include_router(health.router, prefix="/health")
+    def _init_pipeline(self) -> None:
+        """Initialize detection pipeline."""
+        self.pipeline = DetectionPipeline(
+            db_manager=self.db_manager,
+            config=self.config
+        )
     
-    # Register root endpoint
-    from src.api.routes.root import router as root_router
-    app.include_router(root_router)
+    def run(self, input_data: Any) -> Any:
+        """Run the main application logic."""
+        if not self._initialized:
+            self.initialize()
+        
+        return self.pipeline.execute(input_data)
     
-    return app
+    def shutdown(self) -> None:
+        """Clean shutdown of all components."""
+        if self.db_manager:
+            self.db_manager.close()
+        
+        self._initialized = False
+
+
+# Global application instance
+_app_instance: Optional[Application] = None
+
+
+def get_application(config: Optional[Dict[str, Any]] = None) -> Application:
+    """Get the global application instance (singleton)."""
+    global _app_instance
+    
+    if _app_instance is None:
+        _app_instance = Application(config)
+        _app_instance.initialize()
+    
+    return _app_instance
+
+
+def main():
+    """Main entry point for the application."""
+    app = get_application()
+    
+    try:
+        # Example usage
+        result = app.run({"test": "data"})
+        print(f"Result: {result}")
+    finally:
+        app.shutdown()
+
+
+if __name__ == "__main__":
+    main()
