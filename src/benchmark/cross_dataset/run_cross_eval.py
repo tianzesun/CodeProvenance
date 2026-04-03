@@ -13,10 +13,9 @@ import argparse
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = PROJECT_ROOT / "src"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(SRC_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
 def main():
@@ -74,7 +73,7 @@ def main():
     )
     args = parser.parse_args()
 
-    from benchmark.cross_dataset.unified_format import DatasetRegistry
+    from benchmark.cross_dataset.dataset_registry import DatasetRegistry
     from benchmark.cross_dataset.tool_adapters import JaccardToolAdapter, LineOverlapToolAdapter
     from benchmark.cross_dataset.cross_eval import CrossDatasetEvaluator
 
@@ -87,6 +86,8 @@ def main():
         "codexglue_defect",
         "codesearchnet_python",
         "kaggle",
+        "human_eval",
+        "mbpp",
     ]
     for ds_name in external_datasets:
         try:

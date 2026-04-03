@@ -18,12 +18,25 @@ class DatasetRegistry:
         - Lazy loading on demand
         - Listing available datasets
         - Loading from existing CanonicalDataset via adapter
+        - Singleton pattern via get_instance()
     """
+
+    _instance: Optional["DatasetRegistry"] = None
 
     def __init__(self):
         self._loaders: Dict[str, Callable[..., UnifiedDataset]] = {}
         self._metadata: Dict[str, Dict[str, Any]] = {}
         self._cache: Dict[str, UnifiedDataset] = {}
+
+    @classmethod
+    def get_instance(cls) -> "DatasetRegistry":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        cls._instance = None
 
     def register(
         self,
@@ -31,38 +44,42 @@ class DatasetRegistry:
         loader: Callable[..., UnifiedDataset],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Register a dataset loader.
-
-        Args:
-            name: Unique dataset identifier
-            loader: Callable that returns a UnifiedDataset
-            metadata: Optional dataset metadata (language, description, etc.)
-        """
         self._loaders[name] = loader
         self._metadata[name] = metadata or {}
 
     def register_external_loader(
         self,
         name: str,
-        external_loader,
-        method_name: str,
+        data_root: str = "data/datasets",
+        split: str = "test",
+        max_pairs: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Register an adapter for ExternalDatasetLoader methods.
-
-        Args:
-            name: Dataset name in registry
-            external_loader: ExternalDatasetLoader instance
-            method_name: Method name to call (e.g., 'load_poj104')
-            metadata: Optional metadata
-        """
-        def loader(**kwargs) -> UnifiedDataset:
-            from benchmark.pipeline.loader import CanonicalDataset
-            method = getattr(external_loader, method_name)
-            canonical = method(**kwargs)
+        """Register an external dataset loader."""
+        import importlib.util
+        def wrapper(**kwargs) -> UnifiedDataset:
+            project_root = Path(__file__).resolve().parents[3]
+            src = project_root / "src"
+            loader_mod_path = src / "benchmark" / "pipeline" / "loader.py"
+            external_mod_path = src / "benchmark" / "pipeline" / "external_loader.py"
+            import sys
+            loader_spec = importlib.util.spec_from_file_location("bp_loader", loader_mod_path)
+            loader_mod = importlib.util.module_from_spec(loader_spec)
+            sys.modules["bp_loader"] = loader_mod
+            sys.modules["benchmark.pipeline.loader"] = loader_mod
+            loader_spec.loader.exec_module(loader_mod)
+            ext_spec = importlib.util.spec_from_file_location("bp_external", external_mod_path)
+            ext_mod = importlib.util.module_from_spec(ext_spec)
+            ext_spec.loader.exec_module(ext_mod)
+            ExternalDatasetLoader = ext_mod.ExternalDatasetLoader
+            ext = ExternalDatasetLoader(data_root=data_root, seed=42)
+            canonical = ext.load_by_name(name, split=split, max_pairs=max_pairs)
             return UnifiedDataset.from_canonical(canonical, name=name)
-
-        self.register(name, loader, metadata)
+        meta = metadata or {}
+        meta["data_root"] = data_root
+        meta["split"] = split
+        meta["max_pairs"] = max_pairs
+        self.register(name, wrapper, meta)
 
     def register_canonical_adapter(
         self,
@@ -70,73 +87,86 @@ class DatasetRegistry:
         canonical_loader: Callable,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Register a loader that returns CanonicalDataset (auto-converts).
-
-        Args:
-            name: Dataset name
-            canonical_loader: Callable returning CanonicalDataset
-            metadata: Optional metadata
-        """
         def loader(**kwargs) -> UnifiedDataset:
             canonical = canonical_loader(**kwargs)
             return UnifiedDataset.from_canonical(canonical, name=name)
-
         self.register(name, loader, metadata)
 
-    def get(self, name: str, **kwargs) -> UnifiedDataset:
-        """Load a dataset by name.
-
-        Args:
-            name: Registered dataset name
-            **kwargs: Arguments passed to the loader
-
-        Returns:
-            UnifiedDataset instance
-
-        Raises:
-            KeyError: If dataset not found
-        """
-        if name in self._cache:
+    def load(self, name: str, use_cache: bool = True, **kwargs) -> UnifiedDataset:
+        if use_cache and name in self._cache:
             return self._cache[name]
-
         if name not in self._loaders:
-            raise KeyError(
-                f"Dataset '{name}' not found in registry. "
-                f"Available: {list(self._loaders.keys())}"
+            raise ValueError(
+                f"Dataset '{name}' not registered. "
+                f"Available: {self.list_datasets()}"
             )
-
         dataset = self._loaders[name](**kwargs)
-        self._cache[name] = dataset
+        if use_cache:
+            self._cache[name] = dataset
         return dataset
 
+    def get(self, name: str, **kwargs) -> UnifiedDataset:
+        return self.load(name, **kwargs)
+
     def clear_cache(self) -> None:
-        """Clear all cached datasets."""
         self._cache.clear()
 
-    def list_datasets(self) -> List[Dict[str, Any]]:
-        """List all registered datasets with metadata.
-
-        Returns:
-            List of dicts with name and metadata for each dataset
-        """
-        result = []
-        for name in sorted(self._loaders.keys()):
-            meta = dict(self._metadata.get(name, {}))
-            meta["name"] = name
-            if name in self._cache:
-                ds = self._cache[name]
-                meta["size"] = len(ds)
-                meta["positive_ratio"] = ds.positive_ratio
-            result.append(meta)
-        return result
+    def list_datasets(self) -> List[str]:
+        return sorted(self._loaders.keys())
 
     def has(self, name: str) -> bool:
-        """Check if a dataset is registered."""
         return name in self._loaders
 
     def names(self) -> List[str]:
-        """Return sorted list of registered dataset names."""
         return sorted(self._loaders.keys())
+
+    def get_metadata(self, name: str) -> Dict[str, Any]:
+        if name not in self._loaders:
+            return {}
+        return dict(self._metadata.get(name, {}))
+
+    def load_all(
+        self,
+        names: Optional[List[str]] = None,
+        use_cache: bool = True,
+        **kwargs,
+    ) -> Dict[str, UnifiedDataset]:
+        if names is None:
+            names = self.list_datasets()
+        result = {}
+        for name in names:
+            try:
+                result[name] = self.load(name, use_cache=use_cache, **kwargs)
+            except Exception as e:
+                print(f"Warning: Failed to load dataset '{name}': {e}")
+        return result
+
+    def has(self, name: str) -> bool:
+        return name in self._loaders
+
+    def names(self) -> List[str]:
+        return sorted(self._loaders.keys())
+
+    def get_metadata(self, name: str) -> Dict[str, Any]:
+        if name not in self._loaders:
+            return {}
+        return dict(self._metadata.get(name, {}))
+
+    def load_all(
+        self,
+        names: Optional[List[str]] = None,
+        use_cache: bool = True,
+        **kwargs,
+    ) -> Dict[str, UnifiedDataset]:
+        if names is None:
+            names = self.list_datasets()
+        result = {}
+        for name in names:
+            try:
+                result[name] = self.load(name, use_cache=use_cache, **kwargs)
+            except Exception as e:
+                print(f"Warning: Failed to load dataset '{name}': {e}")
+        return result
 
 
 def build_default_registry(

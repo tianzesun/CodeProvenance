@@ -5,7 +5,9 @@ Normalizes all datasets into ONE format with fields:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 
@@ -48,7 +50,6 @@ class UnifiedDataset:
 
     @property
     def label_counts(self) -> Dict[int, int]:
-        """Count of pairs per label."""
         counts: Dict[int, int] = {}
         for p in self.pairs:
             counts[p.label] = counts.get(p.label, 0) + 1
@@ -56,7 +57,6 @@ class UnifiedDataset:
 
     @property
     def type_counts(self) -> Dict[int, int]:
-        """Count of pairs per clone type."""
         counts: Dict[int, int] = {}
         for p in self.pairs:
             counts[p.type] = counts.get(p.type, 0) + 1
@@ -64,31 +64,47 @@ class UnifiedDataset:
 
     @property
     def positive_ratio(self) -> float:
-        """Fraction of positive (clone) pairs."""
         if not self.pairs:
             return 0.0
         return sum(1 for p in self.pairs if p.label == 1) / len(self.pairs)
 
-    def get_arrays(self) -> tuple:
-        """Get arrays suitable for sklearn metrics.
+    @property
+    def labels(self) -> List[int]:
+        return [p.label for p in self.pairs]
 
-        Returns:
-            (y_true, y_scores_placeholder) where y_true is labels array.
-        """
+    @property
+    def positive_count(self) -> int:
+        return sum(1 for p in self.pairs if p.label == 1)
+
+    @property
+    def negative_count(self) -> int:
+        return sum(1 for p in self.pairs if p.label == 0)
+
+    def get_arrays(self) -> tuple:
         y_true = [p.label for p in self.pairs]
         return y_true
 
+    def to_dicts(self) -> List[Dict[str, Any]]:
+        return [
+            {"id": p.id, "code_a": p.code_a, "code_b": p.code_b,
+             "label": p.label, "type": p.type, "source": p.source}
+            for p in self.pairs
+        ]
+
+    def save(self, path: str) -> None:
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "name": self.name, "metadata": self.metadata,
+            "total_pairs": len(self.pairs),
+            "positive": self.positive_count, "negative": self.negative_count,
+            "pairs": self.to_dicts(),
+        }
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
     @classmethod
     def from_canonical(cls, canonical, name: str = "") -> "UnifiedDataset":
-        """Convert from existing CanonicalDataset format.
-
-        Args:
-            canonical: CanonicalDataset with pairs attribute
-            name: Override dataset name
-
-        Returns:
-            UnifiedDataset instance
-        """
         pairs = []
         ds_name = name or getattr(canonical, "name", "unknown")
         for cp in canonical.pairs:
@@ -107,3 +123,7 @@ class UnifiedDataset:
             language=getattr(canonical, "language", ""),
             version=getattr(canonical, "version", "1.0"),
         )
+
+
+# Alias for backward compatibility with cross_eval.py
+UnifiedBenchmarkDataset = UnifiedDataset

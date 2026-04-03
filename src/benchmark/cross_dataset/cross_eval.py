@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from benchmark.cross_dataset.unified_format import UnifiedBenchmarkDataset, DatasetRegistry
+from benchmark.cross_dataset.unified_format import UnifiedBenchmarkDataset
+from benchmark.cross_dataset.dataset_registry import DatasetRegistry
 from benchmark.cross_dataset.tool_adapters import ToolAdapter
 from benchmark.cross_dataset.eval_runner import EvaluationRunner, EvaluationResult
 
