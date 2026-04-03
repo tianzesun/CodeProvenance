@@ -83,12 +83,14 @@ class DashboardService:
         from src.domain.decision import DecisionEngine
         from src.evaluation.arbitration import BayesianArbitrator
         from src.ml.fusion_model import HybridFusionModel
+        from src.engines.ai.transformer_detector import AIDetectionLayer
 
         self._feature_extractor = FeatureExtractor()
         self._fusion_engine = FusionEngine()
         self._decision_engine = DecisionEngine(threshold)
         self._arbitrator = BayesianArbitrator()
         self._hybrid_model = HybridFusionModel()
+        self._ai_layer = AIDetectionLayer()
 
     def analyze_batch(self, submissions: Dict[str, str]) -> List[DetectionCase]:
         """Analyze all pairs and return sorted case list.
@@ -106,23 +108,24 @@ class DashboardService:
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
 
-                # Run detection
+                # Run similarity detection
                 features = self._feature_extractor.extract(ca, cb)
                 feature_dict = features.as_dict()
                 
-                # Hybrid ML Fusion (New Feature)
+                # AI & Stylometry Analysis (New Forensic Tier)
+                ai_a = self._ai_layer.analyze(ca)
+                ai_b = self._ai_layer.analyze(cb)
+                
+                # Hybrid ML Fusion
                 ml_score = self._hybrid_model.predict_similarity(feature_dict)
                 explanations = self._hybrid_model.explain_prediction(feature_dict)
                 
-                # Statistical Arbitration (Risk 2)
+                # Statistical Arbitration
                 arbitration = self._arbitrator.arbitrate(feature_dict)
                 
-                # Final Score (Consensus between ML and Arbitration)
+                # Final Score
                 final_score = (ml_score + arbitration.fused_score) / 2
                 
-                # Decision
-                result = self._decision_engine.decide(final_score)
-
                 case = DetectionCase(
                     submission_a=fa,
                     submission_b=fb,
@@ -140,7 +143,9 @@ class DashboardService:
                     evidence=[
                         {"name": "Agreement Index", "value": round(arbitration.agreement_index, 3)},
                         {"name": "Uncertainty", "value": round(arbitration.uncertainty, 3)},
-                        {"name": "ML Insights", "value": " | ".join(explanations) if explanations else "None"}
+                        {"name": "ML Insights", "value": " | ".join(explanations) if explanations else "None"},
+                        {"name": "AI Prob (A/B)", "value": f"{round(ai_a['ai_probability'], 2)} / {round(ai_b['ai_probability'], 2)}"},
+                        {"name": "Detection Decision", "value": f"{ai_a['decision']} / {ai_b['decision']}"}
                     ],
                 )
                 cases.append(case)

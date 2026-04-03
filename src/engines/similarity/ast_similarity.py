@@ -54,24 +54,33 @@ class ASTNode:
         return 1 + self.parent.depth()
     
     def normalize_variable_names(self):
-        """Normalize variable names for renaming resistance."""
+        """
+        Thoroughly normalize identifier names for renaming resistance.
+        Handles variables, functions, arguments, and class names.
+        """
         var_counter = [0]
         var_map: Dict[str, str] = {}
         
-        # Common keywords to skip
+        # Comprehensive keywords to skip
         skip_keywords = {
             'if', 'else', 'elif', 'for', 'while', 'return', 'def', 
             'class', 'import', 'from', 'try', 'except', 'finally',
             'with', 'as', 'yield', 'lambda', 'pass', 'break', 'continue',
             'raise', 'assert', 'del', 'global', 'nonlocal', 'in', 'not',
-            'and', 'or', 'is', 'True', 'False', 'None'
+            'and', 'or', 'is', 'True', 'False', 'None', 'self', 'cls',
+            'range', 'len', 'print', 'list', 'dict', 'set', 'str', 'int',
+            'float', 'bool', 'object', 'type', 'enumerate', 'zip', 'map',
+            'filter', 'all', 'any', 'sum', 'min', 'max', 'sorted'
         }
         
+        # Node types that represent user-defined identifiers
+        identifier_nodes = {'IDENTIFIER', 'VARIABLE', 'FUNCTION_NAME', 'CLASS_NAME', 'PARAMETER'}
+        
         def _normalize(node: 'ASTNode'):
-            if (node.node_type == 'IDENTIFIER' or node.node_type == 'VARIABLE') and node.value:
+            if node.node_type in identifier_nodes and node.value:
                 if node.value not in skip_keywords:
                     if node.value not in var_map:
-                        var_map[node.value] = f'var_{var_counter[0]}'
+                        var_map[node.value] = f'v{var_counter[0]}'
                         var_counter[0] += 1
                     node.value = var_map[node.value]
             for child in node.children:
@@ -242,6 +251,41 @@ class TreeEditDistance:
         return result
 
 
+class ProgramDependencyGraph:
+    """
+    Combines Control Flow Graph (CFG) and Data Flow Graph (DFG).
+    This captures the semantic structure of the code, making it 
+    resistant to statement reordering and junk code insertion.
+    """
+    
+    def __init__(self, cfg: ControlFlowGraph, dfg: DataFlowGraph):
+        self.cfg = cfg
+        self.dfg = dfg
+
+    def to_signature(self) -> str:
+        """
+        Combine CFG and DFG signatures.
+        The signature is invariant to variable renaming (if AST was normalized).
+        """
+        cfg_sig = self.cfg.to_signature()
+        dfg_sig = self.dfg.to_signature()
+        combined = f"cfg:{cfg_sig};dfg:{dfg_sig}"
+        return hashlib.sha256(combined.encode()).hexdigest()
+
+    def compare(self, other: 'ProgramDependencyGraph') -> float:
+        """Compare two PDGs for structural similarity."""
+        # Weighted average of CFG and DFG similarity
+        cfg_score = self._set_similarity(set(self.cfg.edges), set(other.cfg.edges))
+        dfg_score = self._set_similarity(set(self.dfg.dependencies), set(other.dfg.dependencies))
+        return cfg_score * 0.4 + dfg_score * 0.6
+
+    def _set_similarity(self, set_a: set, set_b: set) -> float:
+        if not set_a and not set_b:
+            return 1.0
+        common = len(set_a.intersection(set_b))
+        total = len(set_a.union(set_b))
+        return common / total if total > 0 else 0.0
+
 class ASTSimilarity(BaseSimilarityAlgorithm):
     """
     Enhanced AST-based similarity algorithm.
@@ -308,8 +352,17 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         
         # 1. AST Metrics
         ted_score = self._tree_edit_distance_similarity(ast_a, ast_b)
-        cfg_score = self._cfg_similarity(parsed_a, parsed_b)
-        dfg_score = self._dfg_similarity(parsed_a, parsed_b)
+        
+        cfg_a = self._extract_cfg(parsed_a)
+        cfg_b = self._extract_cfg(parsed_b)
+        dfg_a = self._extract_dfg(parsed_a)
+        dfg_b = self._extract_dfg(parsed_b)
+        
+        pdg_a = ProgramDependencyGraph(cfg_a, dfg_a)
+        pdg_b = ProgramDependencyGraph(cfg_b, dfg_b)
+        
+        pdg_score = pdg_a.compare(pdg_b)
+        
         pattern_score = self._pattern_similarity(ast_a, ast_b)
         complexity_score = self._complexity_similarity(ast_a, ast_b)
         
@@ -321,11 +374,10 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         
         # 3. Weighted Sum
         score = (
-            ted_score * self.weights['ted'] +
-            cfg_score * self.weights['cfg'] +
-            dfg_score * self.weights['dfg'] +
-            pattern_score * self.weights['pattern'] +
-            complexity_score * self.weights['complexity']
+            ted_score * 0.25 +
+            pdg_score * 0.35 + # PDG has higher weight for robustness
+            pattern_score * 0.20 +
+            complexity_score * 0.20
         )
         
         # 4. Stylometry Adjustment (Boost/Penalty)
