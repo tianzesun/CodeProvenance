@@ -64,7 +64,7 @@ class EvidenceChainPdfExporter:
         pdf_path = exporter.export(case_data)
     """
 
-    SYSTEM_VERSION = "IntegrityDesk v2.5 Forensic Engine"
+    SYSTEM_VERSION = "IntegrityDesk v2.6 Forensic Engine"
 
     def __init__(
         self,
@@ -84,35 +84,19 @@ class EvidenceChainPdfExporter:
         case_data: Dict[str, Any],
         output_path: Optional[Path] = None,
     ) -> Optional[Path]:
-        """
-        Generate a complete evidence chain PDF.
-
-        Args:
-            case_data: Dictionary containing all case information.
-            output_path: Optional output path. Defaults to output_dir/case_id.pdf.
-
-        Returns:
-            Path to generated PDF, or None if generation failed.
-        """
+        """Generate a complete evidence chain PDF."""
         if PDF_BACKEND is None:
-            logger.error(
-                "No PDF backend available. Install weasyprint or pdfkit."
-            )
+            logger.error("No PDF backend available. Install weasyprint or pdfkit.")
             return None
 
-        # Build context with visualizations
         context = self._build_context(case_data)
-
-        # Render HTML
         html_content = self.template.render(**context)
 
-        # Determine output path
         case_id = case_data.get("case_id", "unknown")
         if output_path is None:
             output_path = self.output_dir / f"evidence_{case_id}.pdf"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert to PDF
         try:
             if PDF_BACKEND == "weasyprint":
                 weasyprint.HTML(string=html_content).write_pdf(str(output_path))
@@ -156,49 +140,12 @@ class EvidenceChainPdfExporter:
         now = datetime.datetime.now()
         timestamp = now.strftime("%Y-%m-%d %H:%M")
 
-        # Digital signature
         payload = json.dumps(case_data, sort_keys=True, default=str).encode()
         report_hash = hashlib.sha256(payload).hexdigest()
 
-        # Extract core fields
         similarity_score = case_data.get("similarity_score", 0.0)
         ai_probability = case_data.get("ai_probability", 0.0)
         consensus_index = case_data.get("consensus_index", 0.0)
-
-        risk_level = self._risk_label(similarity_score)
-        ai_label = self._ai_label(ai_probability)
-        consensus_label = self._consensus_label(consensus_index)
-
-        # Generate visualizations
-        heatmap_image = self._generate_heatmap(case_data)
-        diff_image = self._generate_diff(case_data)
-        ai_chart_image = self._generate_ai_chart(case_data)
-        radar_image = self._generate_radar(case_data)
-        confusion_image = self._generate_confusion_matrix(case_data)
-
-        # Evidence pairs for side-by-side display
-        evidence_pairs = self._extract_evidence_pairs(case_data)
-
-        # Tool comparison
-        tool_comparison = self._extract_tool_comparison(case_data)
-
-        # Significance statement
-        significance_statement = case_data.get("significance_statement", "")
-
-        # External tools
-        external_tools = case_data.get("external_tools", [])
-
-        # AI details
-        ai_details = case_data.get("ai_details", [])
-
-        # Confusion stats
-        confusion_stats = case_data.get("confusion_stats", {})
-
-        # Key conclusions
-        key_conclusions = case_data.get("key_conclusions", [])
-
-        # Dataset hash
-        dataset_hash = case_data.get("dataset_hash", "N/A")
 
         return {
             "case_id": case_data.get("case_id", "N/A"),
@@ -209,28 +156,41 @@ class EvidenceChainPdfExporter:
             "report_date": timestamp,
             "investigator": case_data.get("investigator", "N/A"),
             "system_version": self.SYSTEM_VERSION,
+            "submission_id": case_data.get("submission_id", "N/A"),
             "similarity_score": similarity_score,
             "ai_probability": ai_probability,
             "consensus_index": consensus_index,
             "ci_margin": case_data.get("ci_margin", 0.03),
             "n_bootstrap": case_data.get("n_bootstrap", 1000),
-            "risk_level": risk_level,
-            "ai_label": ai_label,
-            "consensus_label": consensus_label,
-            "heatmap_image": heatmap_image,
-            "diff_image": diff_image,
-            "ai_chart_image": ai_chart_image,
-            "radar_image": radar_image,
-            "confusion_matrix_image": confusion_image,
-            "evidence_pairs": evidence_pairs,
-            "tool_comparison": tool_comparison,
-            "significance_statement": significance_statement,
-            "external_tools": external_tools,
-            "ai_details": ai_details,
-            "confusion_stats": confusion_stats,
-            "key_conclusions": key_conclusions,
-            "dataset_hash": dataset_hash,
+            "risk_level": self._risk_label(similarity_score),
+            "ai_label": self._ai_label(ai_probability),
+            "consensus_label": self._consensus_label(consensus_index),
+            "similarity_color": self._turnitin_color(similarity_score),
+            "ai_color": self._ai_color(ai_probability),
+            "heatmap_image": self._generate_heatmap(case_data),
+            "diff_image": self._generate_diff(case_data),
+            "ai_chart_image": self._generate_ai_chart(case_data),
+            "radar_image": self._generate_radar(case_data),
+            "confusion_matrix_image": self._generate_confusion_matrix(case_data),
+            "evidence_pairs": self._extract_evidence_pairs(case_data),
+            "tool_comparison": self._extract_tool_comparison(case_data),
+            "match_sources": case_data.get("match_sources", []),
+            "significance_statement": case_data.get("significance_statement", ""),
+            "external_tools": case_data.get("external_tools", []),
+            "ai_details": self._enrich_ai_details(case_data.get("ai_details", [])),
+            "ai_text_highlights": case_data.get("ai_text_highlights", []),
+            "ai_disclaimer": case_data.get("ai_disclaimer", ""),
+            "confusion_stats": case_data.get("confusion_stats", {}),
+            "key_conclusions": case_data.get("key_conclusions", []),
+            "dataset_hash": case_data.get("dataset_hash", "N/A"),
             "report_hash": report_hash,
+            "submission_stats": case_data.get("submission_stats"),
+            "class_trends": case_data.get("class_trends"),
+            "filters_applied": case_data.get("filters_applied", []),
+            "flags": case_data.get("flags", []),
+            "recommendation": case_data.get("recommendation"),
+            "appeal_points": case_data.get("appeal_points", []),
+            "qr_code_image": case_data.get("qr_code_image"),
         }
 
     def _generate_heatmap(self, case_data: Dict[str, Any]) -> Optional[str]:
@@ -267,10 +227,8 @@ class EvidenceChainPdfExporter:
         stats = case_data.get("confusion_stats", {})
         if "tp" in stats:
             return generate_confusion_matrix_image(
-                stats.get("tp", 0),
-                stats.get("fp", 0),
-                stats.get("tn", 0),
-                stats.get("fn", 0),
+                stats.get("tp", 0), stats.get("fp", 0),
+                stats.get("tn", 0), stats.get("fn", 0),
             )
         return None
 
@@ -284,10 +242,12 @@ class EvidenceChainPdfExporter:
                 "similarity": p.get("similarity", 0.0),
                 "engine": p.get("engine", "Unknown"),
                 "risk": self._risk_label(p.get("similarity", 0.0)),
+                "color": self._turnitin_color(p.get("similarity", 0.0)),
                 "a_lines": p.get("a_lines", "—"),
                 "b_lines": p.get("b_lines", "—"),
                 "code_a": p.get("code_a", ""),
                 "code_b": p.get("code_b", ""),
+                "match_details": p.get("match_details", []),
             })
         return result
 
@@ -295,17 +255,31 @@ class EvidenceChainPdfExporter:
         tools = case_data.get("tool_comparison", [])
         result = []
         for t in tools:
+            sim = t.get("similarity", 0.0)
             result.append({
                 "name": t.get("name", "Unknown"),
-                "similarity": t.get("similarity", 0.0),
+                "similarity": sim,
                 "precision": t.get("precision", 0.0),
                 "recall": t.get("recall", 0.0),
                 "f1": t.get("f1", 0.0),
                 "ci_lower": t.get("ci_lower", 0.0),
                 "ci_upper": t.get("ci_upper", 0.0),
-                "risk": self._risk_label(t.get("similarity", 0.0)),
+                "risk": self._risk_label(sim),
+                "color": self._turnitin_color(sim),
             })
         return result
+
+    def _enrich_ai_details(self, ai_details: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched = []
+        for d in ai_details:
+            prob = d.get("probability", 0.0)
+            enriched.append({
+                "name": d.get("name", "Unknown"),
+                "probability": prob,
+                "confidence": d.get("confidence", 0.0),
+                "color": self._ai_color(prob),
+            })
+        return enriched
 
     @staticmethod
     def _risk_label(score: float) -> str:
@@ -332,3 +306,27 @@ class EvidenceChainPdfExporter:
         if index > 0.5:
             return "Moderate Consensus"
         return "Weak Consensus"
+
+    @staticmethod
+    def _turnitin_color(score: float) -> str:
+        """Turnitin-style color coding: Blue/Green/Yellow/Orange/Red."""
+        if score < 0.01:
+            return "blue"
+        if score < 0.25:
+            return "green"
+        if score < 0.50:
+            return "yellow"
+        if score < 0.75:
+            return "orange"
+        return "red"
+
+    @staticmethod
+    def _ai_color(prob: float) -> str:
+        """Color coding for AI probability."""
+        if prob < 0.20:
+            return "green"
+        if prob < 0.40:
+            return "yellow"
+        if prob < 0.70:
+            return "orange"
+        return "red"

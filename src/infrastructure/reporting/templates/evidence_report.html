@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Academic Integrity Investigation Report — {{ case_id }}</title>
+    <title>Academic Integrity Evidence Report — {{ case_id }}</title>
     <style>
-        /* ── Reset & base ────────────────────────────────────── */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Georgia', 'Times New Roman', serif;
@@ -13,8 +12,6 @@
             font-size: 10pt;
             line-height: 1.5;
         }
-
-        /* ── Page / print settings ───────────────────────────── */
         @page {
             size: A4;
             margin: 18mm 15mm 20mm 15mm;
@@ -24,8 +21,32 @@
                 color: #999;
             }
         }
-
-        /* ── Cover page ──────────────────────────────────────── */
+        .color-blue { color: #0070c0; }
+        .color-green { color: #2e7d32; }
+        .color-yellow { color: #f57f17; }
+        .color-orange { color: #e65100; }
+        .color-red { color: #b71c1c; }
+        .bg-blue { background-color: #e3f2fd; }
+        .bg-green { background-color: #e8f5e9; }
+        .bg-yellow { background-color: #fff8e1; }
+        .bg-orange { background-color: #fff3e0; }
+        .bg-red { background-color: #ffebee; }
+        .similarity-bar {
+            height: 14px;
+            border-radius: 7px;
+            background: #e0e0e0;
+            overflow: hidden;
+            margin: 6px 0;
+        }
+        .similarity-fill {
+            height: 100%;
+            border-radius: 7px;
+        }
+        .fill-blue { background: #0070c0; }
+        .fill-green { background: #2e7d32; }
+        .fill-yellow { background: #f57f17; }
+        .fill-orange { background: #e65100; }
+        .fill-red { background: #b71c1c; }
         .cover {
             page-break-after: always;
             display: flex;
@@ -76,8 +97,6 @@
             color: #555;
             width: 35%;
         }
-
-        /* ── Section headings ────────────────────────────────── */
         h2 {
             font-size: 13pt;
             color: #1e3a5f;
@@ -91,8 +110,6 @@
             color: #333;
             margin: 14px 0 6px 0;
         }
-
-        /* ── Summary cards ───────────────────────────────────── */
         .summary-grid {
             display: flex;
             gap: 12px;
@@ -123,12 +140,6 @@
             font-size: 8pt;
             color: #666;
         }
-        .risk-critical .value { color: #dc3545; }
-        .risk-high .value { color: #fd7e14; }
-        .risk-medium .value { color: #ffc107; }
-        .risk-low .value { color: #28a745; }
-
-        /* ── Tables ──────────────────────────────────────────── */
         table.data {
             width: 100%;
             border-collapse: collapse;
@@ -149,8 +160,6 @@
             border-bottom: 1px solid #e5e5e5;
         }
         table.data tr:nth-child(even) td { background: #f9f9f9; }
-
-        /* ── Badge ───────────────────────────────────────────── */
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -163,8 +172,35 @@
         .badge-high { background: #fff3e0; color: #e65100; }
         .badge-medium { background: #fff8e1; color: #f57f17; }
         .badge-low { background: #e8f5e9; color: #2e7d32; }
-
-        /* ── Images ──────────────────────────────────────────── */
+        .badge-info { background: #e3f2fd; color: #0d47a1; }
+        .source-type {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 7pt;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .source-internet { background: #e3f2fd; color: #1565c0; }
+        .source-student { background: #f3e5f5; color: #7b1fa2; }
+        .source-publication { background: #e8f5e9; color: #2e7d32; }
+        .source-crossref { background: #fff3e0; color: #e65100; }
+        .match-exact { background: #ffebee; border-left: 3px solid #b71c1c; }
+        .match-semantic { background: #fff3e0; border-left: 3px solid #e65100; }
+        .match-structural { background: #fff8e1; border-left: 3px solid #f57f17; }
+        .match-boilerplate { background: #e3f2fd; border-left: 3px solid #1565c0; }
+        .ai-highlight {
+            background: #fce4ec;
+            border-bottom: 2px solid #e91e63;
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+        .ai-paraphrase {
+            background: #f3e5f5;
+            border-bottom: 2px solid #9c27b0;
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
         .chart-img {
             width: 100%;
             max-width: 600px;
@@ -173,8 +209,6 @@
             border: 1px solid #e0e0e0;
             border-radius: 4px;
         }
-
-        /* ── Code block ──────────────────────────────────────── */
         .code-block {
             background: #f5f5f5;
             border: 1px solid #ddd;
@@ -188,8 +222,6 @@
             word-break: break-all;
             margin: 6px 0;
         }
-
-        /* ── Side-by-side diff ───────────────────────────────── */
         .diff-grid {
             display: flex;
             gap: 8px;
@@ -216,11 +248,26 @@
             max-height: 260px;
             overflow: hidden;
         }
-        .diff-added { background: #e6ffec; }
-        .diff-removed { background: #ffebe9; }
-        .diff-context { background: #fff; }
-
-        /* ── Signature block ─────────────────────────────────── */
+        .match-block {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .match-block-header {
+            background: #f5f5f5;
+            padding: 6px 10px;
+            font-size: 8pt;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .match-block-body {
+            padding: 8px 10px;
+            font-size: 8.5pt;
+            line-height: 1.5;
+        }
         .signature-block {
             margin-top: 30px;
             padding-top: 15px;
@@ -238,8 +285,6 @@
             text-align: center;
             font-size: 8pt;
         }
-
-        /* ── Footer watermark ────────────────────────────────── */
         .watermark {
             text-align: center;
             font-size: 7pt;
@@ -247,8 +292,6 @@
             margin-top: 20px;
             font-style: italic;
         }
-
-        /* ── Hash bar ────────────────────────────────────────── */
         .hash-bar {
             background: #f0f0f0;
             border: 1px solid #ddd;
@@ -260,23 +303,47 @@
             word-break: break-all;
             margin: 10px 0;
         }
-
-        /* ── Utility ─────────────────────────────────────────── */
-        .text-center { text-align: center; }
-        .mt-8 { margin-top: 8px; }
-        .mt-16 { margin-top: 16px; }
-        .mb-8 { margin-bottom: 8px; }
+        .qr-section { text-align: center; margin: 16px 0; }
+        .qr-code { width: 100px; height: 100px; border: 1px solid #ddd; border-radius: 4px; }
+        .qr-caption { font-size: 7pt; color: #888; margin-top: 4px; }
+        .recommendation-box {
+            border: 2px solid #1e3a5f;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 12px 0;
+            background: #f0f4f8;
+        }
+        .recommendation-box h4 { font-size: 10pt; color: #1e3a5f; margin-bottom: 6px; }
+        .recommendation-box p { font-size: 9pt; color: #333; margin: 4px 0; }
+        .appeal-box {
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 12px 0;
+            background: #fffde7;
+        }
+        .appeal-box h4 { font-size: 9pt; color: #f57f17; margin-bottom: 6px; }
+        .appeal-box ul { margin-left: 16px; font-size: 8.5pt; color: #555; }
+        .appeal-box li { margin: 3px 0; }
+        .flag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 7.5pt;
+            font-weight: bold;
+            margin: 2px;
+        }
+        .flag-warning { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+        .flag-danger { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
+        .flag-info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
     </style>
 </head>
 <body>
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- COVER PAGE                                                   -->
-<!-- ════════════════════════════════════════════════════════════ -->
 <div class="cover">
     <div class="cover-logo">IntegrityDesk</div>
-    <div class="cover-version">Forensic Evidence Engine v2.5</div>
-    <h1>Academic Integrity<br>Investigation Report</h1>
+    <div class="cover-version">Forensic Evidence Engine v2.6</div>
+    <h1>Academic Integrity<br>Evidence Report</h1>
     <div class="cover-meta">
         <table>
             <tr><td>Case ID</td><td>{{ case_id }}</td></tr>
@@ -287,26 +354,27 @@
             <tr><td>Report Date</td><td>{{ report_date }}</td></tr>
             <tr><td>Investigator</td><td>{{ investigator }}</td></tr>
             <tr><td>System Version</td><td>{{ system_version }}</td></tr>
+            <tr><td>Submission ID</td><td>{{ submission_id }}</td></tr>
         </table>
     </div>
 </div>
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- EXECUTIVE SUMMARY                                            -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<h2>1. Executive Summary</h2>
+<h2>1. Overall Similarity Score</h2>
 
 <div class="summary-grid">
-    <div class="summary-card risk-{{ risk_level|lower }}">
-        <div class="label">Overall Similarity</div>
-        <div class="value">{{ "%.1f"|format(similarity_score * 100) }}%</div>
+    <div class="summary-card">
+        <div class="label">Similarity Index</div>
+        <div class="value color-{{ similarity_color }}">{{ "%.0f"|format(similarity_score * 100) }}%</div>
+        <div class="similarity-bar">
+            <div class="similarity-fill fill-{{ similarity_color }}" style="width: {{ similarity_score * 100 }}%"></div>
+        </div>
         <div class="sub">
             <span class="badge badge-{{ risk_level|lower }}">{{ risk_level }}</span>
         </div>
     </div>
     <div class="summary-card">
         <div class="label">AI Generation Probability</div>
-        <div class="value">{{ "%.1f"|format(ai_probability * 100) }}%</div>
+        <div class="value color-{{ ai_color }}">{{ "%.0f"|format(ai_probability * 100) }}%</div>
         <div class="sub">{{ ai_label }}</div>
     </div>
     <div class="summary-card">
@@ -316,10 +384,18 @@
     </div>
     <div class="summary-card">
         <div class="label">Confidence Interval</div>
-        <div class="value">±{{ "%.2f"|format(ci_margin * 100) }}%</div>
+        <div class="value">±{{ "%.1f"|format(ci_margin * 100) }}%</div>
         <div class="sub">95% CI, n={{ n_bootstrap }} bootstrap</div>
     </div>
 </div>
+
+{% if submission_stats %}
+<div style="margin: 12px 0; font-size: 9pt;">
+    <strong>Submission Details:</strong>
+    {{ submission_stats.word_count }} words | {{ submission_stats.line_count }} lines |
+    {{ submission_stats.file_count }} files | Submitted: {{ submission_stats.submitted_at }}
+</div>
+{% endif %}
 
 {% if key_conclusions %}
 <h3>Key Conclusions</h3>
@@ -330,12 +406,47 @@
 </ul>
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- TOOL COMPARISON TABLE                                        -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<h2>2. Tool Comparison &amp; Statistical Significance</h2>
+<h2>2. Match Overview</h2>
+
+{% if match_sources %}
+<p style="font-size: 9pt; color: #666; margin-bottom: 8px;">
+    {{ match_sources|length }} sources matched | Sorted by similarity (highest first)
+</p>
+<table class="data">
+    <thead>
+        <tr>
+            <th style="width: 30px;">#</th>
+            <th>Source</th>
+            <th style="width: 70px;">Match %</th>
+            <th style="width: 80px;">Type</th>
+            <th style="width: 60px;">Blocks</th>
+            <th style="width: 60px;">Words</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for src in match_sources %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+                <strong>{{ src.name }}</strong>
+                {% if src.url %}<br><span style="font-size: 7.5pt; color: #888;">{{ src.url }}</span>{% endif %}
+            </td>
+            <td>
+                <span class="color-{{ src.color }}">{{ "%.0f"|format(src.similarity * 100) }}%</span>
+            </td>
+            <td>
+                <span class="source-type source-{{ src.type|lower }}">{{ src.type }}</span>
+            </td>
+            <td>{{ src.match_blocks }}</td>
+            <td>{{ src.word_count }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 
 {% if tool_comparison %}
+<h3>Tool Comparison</h3>
 <table class="data">
     <thead>
         <tr>
@@ -352,11 +463,11 @@
     {% for tool in tool_comparison %}
         <tr>
             <td><strong>{{ tool.name }}</strong></td>
-            <td>{{ "%.2f"|format(tool.similarity * 100) }}%</td>
-            <td>{{ "%.2f"|format(tool.precision * 100) }}%</td>
-            <td>{{ "%.2f"|format(tool.recall * 100) }}%</td>
-            <td>{{ "%.2f"|format(tool.f1 * 100) }}%</td>
-            <td>[{{ "%.2f"|format(tool.ci_lower * 100) }}%, {{ "%.2f"|format(tool.ci_upper * 100) }}%]</td>
+            <td class="color-{{ tool.color }}">{{ "%.0f"|format(tool.similarity * 100) }}%</td>
+            <td>{{ "%.0f"|format(tool.precision * 100) }}%</td>
+            <td>{{ "%.0f"|format(tool.recall * 100) }}%</td>
+            <td>{{ "%.0f"|format(tool.f1 * 100) }}%</td>
+            <td>[{{ "%.0f"|format(tool.ci_lower * 100) }}%, {{ "%.0f"|format(tool.ci_upper * 100) }}%]</td>
             <td><span class="badge badge-{{ tool.risk|lower }}">{{ tool.risk }}</span></td>
         </tr>
     {% endfor %}
@@ -370,9 +481,6 @@
 </p>
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- SIMILARITY HEATMAP                                           -->
-<!-- ════════════════════════════════════════════════════════════ -->
 <h2>3. Similarity Heatmap</h2>
 {% if heatmap_image %}
 <img class="chart-img" src="{{ heatmap_image }}" alt="Similarity Heatmap">
@@ -380,10 +488,31 @@
 <p style="color: #999; font-style: italic;">Heatmap not available.</p>
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- AI DETECTION RESULTS                                         -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<h2>4. AI Generation Analysis</h2>
+{% if class_trends %}
+<h3>Class/Assignment Context</h3>
+<table class="data">
+    <thead><tr><th>Metric</th><th>This Student</th><th>Class Average</th><th>Class Median</th><th>Percentile</th></tr></thead>
+    <tbody>
+        <tr>
+            <td>Similarity Score</td>
+            <td><strong>{{ "%.0f"|format(class_trends.student_similarity * 100) }}%</strong></td>
+            <td>{{ "%.0f"|format(class_trends.avg_similarity * 100) }}%</td>
+            <td>{{ "%.0f"|format(class_trends.median_similarity * 100) }}%</td>
+            <td>{{ class_trends.similarity_percentile }}th</td>
+        </tr>
+        <tr>
+            <td>AI Probability</td>
+            <td><strong>{{ "%.0f"|format(class_trends.student_ai * 100) }}%</strong></td>
+            <td>{{ "%.0f"|format(class_trends.avg_ai * 100) }}%</td>
+            <td>{{ "%.0f"|format(class_trends.median_ai * 100) }}%</td>
+            <td>{{ class_trends.ai_percentile }}th</td>
+        </tr>
+    </tbody>
+</table>
+{% endif %}
+
+<h2>4. AI Writing Analysis</h2>
+
 {% if ai_chart_image %}
 <img class="chart-img" src="{{ ai_chart_image }}" alt="AI Probability Chart">
 {% endif %}
@@ -397,7 +526,7 @@
     {% for model in ai_details %}
         <tr>
             <td>{{ model.name }}</td>
-            <td>{{ "%.1f"|format(model.probability * 100) }}%</td>
+            <td class="color-{{ model.color }}">{{ "%.0f"|format(model.probability * 100) }}%</td>
             <td>{{ "%.2f"|format(model.confidence) }}</td>
             <td>
                 {% if model.probability > 0.7 %}
@@ -414,9 +543,31 @@
 </table>
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CODE DIFF EVIDENCE                                           -->
-<!-- ════════════════════════════════════════════════════════════ -->
+{% if ai_text_highlights %}
+<h3>AI-Generated Text Segments</h3>
+<p style="font-size: 8pt; color: #666; margin-bottom: 8px;">
+    <span class="ai-highlight" style="display: inline-block; padding: 0 4px;">Pink</span> = Likely AI-generated
+    <span class="ai-paraphrase" style="display: inline-block; padding: 0 4px; margin-left: 8px;">Purple</span> = Likely AI-paraphrased
+</p>
+{% for segment in ai_text_highlights %}
+<div class="match-block {{ 'match-exact' if segment.type == 'generated' else 'match-semantic' }}">
+    <div class="match-block-header">
+        <span>{{ segment.type|title }} - Lines {{ segment.start_line }}-{{ segment.end_line }}</span>
+        <span class="badge badge-{{ 'critical' if segment.probability > 0.7 else 'medium' }}">{{ "%.0f"|format(segment.probability * 100) }}% AI</span>
+    </div>
+    <div class="match-block-body">
+        <div class="code-block">{{ segment.text }}</div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if ai_disclaimer %}
+<div style="font-size: 7.5pt; color: #888; font-style: italic; margin: 8px 0; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+    <strong>Disclaimer:</strong> {{ ai_disclaimer }}
+</div>
+{% endif %}
+
 <h2>5. Code Comparison Evidence</h2>
 
 {% if diff_image %}
@@ -427,10 +578,9 @@
 {% for pair in evidence_pairs %}
 <h3>{{ pair.file_a }} ↔ {{ pair.file_b }}</h3>
 <p style="font-size: 8.5pt; color: #555;">
-    Similarity: <strong>{{ "%.1f"|format(pair.similarity * 100) }}%</strong>
-    &nbsp;|&nbsp; Engine: {{ pair.engine }}
-    &nbsp;|&nbsp;
-    <span class="badge badge-{{ pair.risk|lower }}">{{ pair.risk }}</span>
+    Similarity: <strong class="color-{{ pair.color }}">{{ "%.0f"|format(pair.similarity * 100) }}%</strong>
+    | Engine: {{ pair.engine }}
+    | <span class="badge badge-{{ pair.risk|lower }}">{{ pair.risk }}</span>
 </p>
 
 <div class="diff-grid">
@@ -443,20 +593,41 @@
         <div class="diff-panel-body">{{ pair.code_b }}</div>
     </div>
 </div>
+
+{% if pair.match_details %}
+<h4>Line-Level Match Details</h4>
+{% for match in pair.match_details %}
+<div class="match-block {{ 'match-exact' if match.type == 'exact' else 'match-semantic' if match.type == 'semantic' else 'match-structural' if match.type == 'structural' else 'match-boilerplate' }}">
+    <div class="match-block-header">
+        <span>Match #{{ loop.index }}: {{ match.type|title }} match</span>
+        <span>Lines {{ match.a_start }}-{{ match.a_end }} → {{ match.b_start }}-{{ match.b_end }}</span>
+    </div>
+    <div class="match-block-body">
+        <div class="diff-grid">
+            <div class="diff-panel">
+                <div class="diff-panel-body" style="max-height: 120px;">{{ match.code_a }}</div>
+            </div>
+            <div class="diff-panel">
+                <div class="diff-panel-body" style="max-height: 120px;">{{ match.code_b }}</div>
+            </div>
+        </div>
+        {% if match.transformation %}
+        <p style="font-size: 7.5pt; color: #888; margin-top: 4px;">
+            Transformation: {{ match.transformation }}
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% endif %}
 {% endfor %}
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- ENGINE PERFORMANCE RADAR                                     -->
-<!-- ════════════════════════════════════════════════════════════ -->
 {% if radar_image %}
 <h2>6. Engine Performance Overview</h2>
 <img class="chart-img" src="{{ radar_image }}" alt="Engine Radar Chart">
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CONFUSION MATRIX                                             -->
-<!-- ════════════════════════════════════════════════════════════ -->
 {% if confusion_matrix_image %}
 <h2>7. Classification Performance</h2>
 <img class="chart-img" src="{{ confusion_matrix_image }}" alt="Confusion Matrix">
@@ -468,15 +639,12 @@
         <tr><td>False Positives</td><td>{{ confusion_stats.fp }}</td></tr>
         <tr><td>True Negatives</td><td>{{ confusion_stats.tn }}</td></tr>
         <tr><td>False Negatives</td><td>{{ confusion_stats.fn }}</td></tr>
-        <tr><td>Accuracy</td><td>{{ "%.2f"|format(confusion_stats.accuracy * 100) }}%</td></tr>
+        <tr><td>Accuracy</td><td>{{ "%.0f"|format(confusion_stats.accuracy * 100) }}%</td></tr>
     </tbody>
 </table>
 {% endif %}
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- EXTERNAL TOOL EVIDENCE                                       -->
-<!-- ════════════════════════════════════════════════════════════ -->
 {% if external_tools %}
 <h2>8. External Tool Evidence</h2>
 <table class="data">
@@ -504,10 +672,58 @@
 </table>
 {% endif %}
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- METADATA & ANTI-TAMPER                                       -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<h2>9. Report Integrity &amp; Metadata</h2>
+<h2>9. Filters &amp; Flags</h2>
+
+{% if filters_applied %}
+<h3>Filters Applied</h3>
+<div style="margin: 6px 0;">
+{% for f in filters_applied %}
+    <span class="flag flag-info">{{ f }}</span>
+{% endfor %}
+</div>
+{% endif %}
+
+{% if flags %}
+<h3>Flags Raised</h3>
+<div style="margin: 6px 0;">
+{% for flag in flags %}
+    <span class="flag {{ 'flag-danger' if flag.severity == 'high' else 'flag-warning' }}">
+        {{ flag.message }}
+    </span>
+{% endfor %}
+</div>
+{% else %}
+<p style="font-size: 8.5pt; color: #888; font-style: italic;">No flags raised.</p>
+{% endif %}
+
+{% if recommendation %}
+<h2>10. Recommendation</h2>
+<div class="recommendation-box">
+    <h4>Recommended Action</h4>
+    <p><strong>{{ recommendation.action }}</strong></p>
+    {% if recommendation.reasoning %}
+    <p style="margin-top: 6px;">{{ recommendation.reasoning }}</p>
+    {% endif %}
+    {% if recommendation.severity %}
+    <p style="margin-top: 6px;">
+        Severity: <span class="badge badge-{{ recommendation.severity|lower }}">{{ recommendation.severity }}</span>
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if appeal_points %}
+<div class="appeal-box">
+    <h4>Potential Appeal Points (for student defense)</h4>
+    <ul>
+    {% for point in appeal_points %}
+        <li>{{ point }}</li>
+    {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<h2>11. Report Integrity &amp; Metadata</h2>
 
 <table class="data">
     <tbody>
@@ -527,9 +743,13 @@
     </span>
 </div>
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- SIGNATURE AREA                                               -->
-<!-- ════════════════════════════════════════════════════════════ -->
+{% if qr_code_image %}
+<div class="qr-section">
+    <img class="qr-code" src="{{ qr_code_image }}" alt="QR Code">
+    <div class="qr-caption">Scan to view interactive report online (password protected)</div>
+</div>
+{% endif %}
+
 <div class="signature-block">
     <div>
         <div class="signature-line">Investigator Signature</div>
@@ -543,7 +763,7 @@
 
 <div class="watermark">
     Confidential – Academic Integrity Committee Only<br>
-    Generated by IntegrityDesk Forensic Evidence Engine v2.5
+    Generated by IntegrityDesk Forensic Evidence Engine v2.6
 </div>
 
 </body>

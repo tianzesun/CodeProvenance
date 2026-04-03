@@ -143,7 +143,7 @@ class TestEvidenceChainPdfExporter:
         assert html_path is not None
         assert html_path.exists()
         content = html_path.read_text()
-        assert "Academic Integrity Investigation Report" in content
+        assert "Academic Integrity Evidence Report" in content
         assert "John Doe" in content
         assert "CS101" in content
         assert "TEST-2026-001" in content
@@ -215,11 +215,11 @@ class TestEvidenceChainIntegration:
         content = html_path.read_text()
 
         required_sections = [
-            "Cover",
-            "Executive Summary",
-            "Tool Comparison",
+            "Evidence Report",
+            "Overall Similarity Score",
+            "Match Overview",
             "Similarity Heatmap",
-            "AI Generation Analysis",
+            "AI Writing Analysis",
             "Code Comparison Evidence",
             "Report Integrity",
             "Investigator Signature",
