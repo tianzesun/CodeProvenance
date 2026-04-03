@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Academic Integrity Investigation Report — {{ case_id }}</title>
+    <style>
+        /* ── Reset & base ────────────────────────────────────── */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            color: #1a1a1a;
+            background: #fff;
+            font-size: 10pt;
+            line-height: 1.5;
+        }
+
+        /* ── Page / print settings ───────────────────────────── */
+        @page {
+            size: A4;
+            margin: 18mm 15mm 20mm 15mm;
+            @bottom-center {
+                content: "Confidential – Academic Integrity Committee Only  |  Page " counter(page) " of " counter(pages);
+                font-size: 7pt;
+                color: #999;
+            }
+        }
+
+        /* ── Cover page ──────────────────────────────────────── */
+        .cover {
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 90vh;
+            text-align: center;
+            border-bottom: 3px solid #1e3a5f;
+            padding-bottom: 40px;
+        }
+        .cover-logo {
+            font-size: 14pt;
+            font-weight: bold;
+            color: #1e3a5f;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .cover-version {
+            font-size: 8pt;
+            color: #888;
+            margin-bottom: 40px;
+        }
+        .cover h1 {
+            font-size: 22pt;
+            color: #1e3a5f;
+            margin-bottom: 30px;
+            line-height: 1.3;
+        }
+        .cover-meta {
+            width: 70%;
+            text-align: left;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+        .cover-meta table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .cover-meta td {
+            padding: 5px 10px;
+            font-size: 10pt;
+            vertical-align: top;
+        }
+        .cover-meta td:first-child {
+            font-weight: bold;
+            color: #555;
+            width: 35%;
+        }
+
+        /* ── Section headings ────────────────────────────────── */
+        h2 {
+            font-size: 13pt;
+            color: #1e3a5f;
+            border-bottom: 2px solid #1e3a5f;
+            padding-bottom: 4px;
+            margin: 24px 0 12px 0;
+            page-break-after: avoid;
+        }
+        h3 {
+            font-size: 11pt;
+            color: #333;
+            margin: 14px 0 6px 0;
+        }
+
+        /* ── Summary cards ───────────────────────────────────── */
+        .summary-grid {
+            display: flex;
+            gap: 12px;
+            margin: 12px 0;
+            flex-wrap: wrap;
+        }
+        .summary-card {
+            flex: 1;
+            min-width: 140px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            text-align: center;
+            background: #f9fafb;
+        }
+        .summary-card .label {
+            font-size: 7.5pt;
+            text-transform: uppercase;
+            color: #777;
+            letter-spacing: 0.5px;
+        }
+        .summary-card .value {
+            font-size: 20pt;
+            font-weight: bold;
+            margin: 4px 0;
+        }
+        .summary-card .sub {
+            font-size: 8pt;
+            color: #666;
+        }
+        .risk-critical .value { color: #dc3545; }
+        .risk-high .value { color: #fd7e14; }
+        .risk-medium .value { color: #ffc107; }
+        .risk-low .value { color: #28a745; }
+
+        /* ── Tables ──────────────────────────────────────────── */
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0 16px 0;
+            font-size: 9pt;
+        }
+        table.data th {
+            background: #1e3a5f;
+            color: #fff;
+            padding: 6px 8px;
+            text-align: left;
+            font-size: 8pt;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        table.data td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        table.data tr:nth-child(even) td { background: #f9f9f9; }
+
+        /* ── Badge ───────────────────────────────────────────── */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 7.5pt;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .badge-critical { background: #fde8e8; color: #b91c1c; }
+        .badge-high { background: #fff3e0; color: #e65100; }
+        .badge-medium { background: #fff8e1; color: #f57f17; }
+        .badge-low { background: #e8f5e9; color: #2e7d32; }
+
+        /* ── Images ──────────────────────────────────────────── */
+        .chart-img {
+            width: 100%;
+            max-width: 600px;
+            display: block;
+            margin: 10px auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+
+        /* ── Code block ──────────────────────────────────────── */
+        .code-block {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 7.5pt;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 6px 0;
+        }
+
+        /* ── Side-by-side diff ───────────────────────────────── */
+        .diff-grid {
+            display: flex;
+            gap: 8px;
+            margin: 8px 0;
+        }
+        .diff-panel {
+            flex: 1;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .diff-panel-header {
+            background: #e8e8e8;
+            padding: 4px 8px;
+            font-size: 8pt;
+            font-weight: bold;
+            color: #333;
+        }
+        .diff-panel-body {
+            font-family: 'Courier New', monospace;
+            font-size: 7pt;
+            line-height: 1.35;
+            padding: 6px;
+            max-height: 260px;
+            overflow: hidden;
+        }
+        .diff-added { background: #e6ffec; }
+        .diff-removed { background: #ffebe9; }
+        .diff-context { background: #fff; }
+
+        /* ── Signature block ─────────────────────────────────── */
+        .signature-block {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #ccc;
+            display: flex;
+            justify-content: space-between;
+            font-size: 8pt;
+            color: #666;
+        }
+        .signature-line {
+            width: 200px;
+            border-top: 1px solid #333;
+            margin-top: 30px;
+            padding-top: 4px;
+            text-align: center;
+            font-size: 8pt;
+        }
+
+        /* ── Footer watermark ────────────────────────────────── */
+        .watermark {
+            text-align: center;
+            font-size: 7pt;
+            color: #bbb;
+            margin-top: 20px;
+            font-style: italic;
+        }
+
+        /* ── Hash bar ────────────────────────────────────────── */
+        .hash-bar {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 6px 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 7.5pt;
+            color: #555;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+
+        /* ── Utility ─────────────────────────────────────────── */
+        .text-center { text-align: center; }
+        .mt-8 { margin-top: 8px; }
+        .mt-16 { margin-top: 16px; }
+        .mb-8 { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- COVER PAGE                                                   -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="cover">
+    <div class="cover-logo">IntegrityDesk</div>
+    <div class="cover-version">Forensic Evidence Engine v2.5</div>
+    <h1>Academic Integrity<br>Investigation Report</h1>
+    <div class="cover-meta">
+        <table>
+            <tr><td>Case ID</td><td>{{ case_id }}</td></tr>
+            <tr><td>Student Name</td><td>{{ student_name }}</td></tr>
+            <tr><td>Student ID</td><td>{{ student_id }}</td></tr>
+            <tr><td>Course</td><td>{{ course }}</td></tr>
+            <tr><td>Assignment</td><td>{{ assignment }}</td></tr>
+            <tr><td>Report Date</td><td>{{ report_date }}</td></tr>
+            <tr><td>Investigator</td><td>{{ investigator }}</td></tr>
+            <tr><td>System Version</td><td>{{ system_version }}</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- EXECUTIVE SUMMARY                                            -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>1. Executive Summary</h2>
+
+<div class="summary-grid">
+    <div class="summary-card risk-{{ risk_level|lower }}">
+        <div class="label">Overall Similarity</div>
+        <div class="value">{{ "%.1f"|format(similarity_score * 100) }}%</div>
+        <div class="sub">
+            <span class="badge badge-{{ risk_level|lower }}">{{ risk_level }}</span>
+        </div>
+    </div>
+    <div class="summary-card">
+        <div class="label">AI Generation Probability</div>
+        <div class="value">{{ "%.1f"|format(ai_probability * 100) }}%</div>
+        <div class="sub">{{ ai_label }}</div>
+    </div>
+    <div class="summary-card">
+        <div class="label">Engine Consensus</div>
+        <div class="value">{{ "%.2f"|format(consensus_index) }}</div>
+        <div class="sub">{{ consensus_label }}</div>
+    </div>
+    <div class="summary-card">
+        <div class="label">Confidence Interval</div>
+        <div class="value">±{{ "%.2f"|format(ci_margin * 100) }}%</div>
+        <div class="sub">95% CI, n={{ n_bootstrap }} bootstrap</div>
+    </div>
+</div>
+
+{% if key_conclusions %}
+<h3>Key Conclusions</h3>
+<ul style="margin-left: 20px; font-size: 9.5pt;">
+{% for conclusion in key_conclusions %}
+    <li>{{ conclusion }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- TOOL COMPARISON TABLE                                        -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>2. Tool Comparison &amp; Statistical Significance</h2>
+
+{% if tool_comparison %}
+<table class="data">
+    <thead>
+        <tr>
+            <th>Tool</th>
+            <th>Similarity</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>F1 Score</th>
+            <th>95% CI</th>
+            <th>Assessment</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for tool in tool_comparison %}
+        <tr>
+            <td><strong>{{ tool.name }}</strong></td>
+            <td>{{ "%.2f"|format(tool.similarity * 100) }}%</td>
+            <td>{{ "%.2f"|format(tool.precision * 100) }}%</td>
+            <td>{{ "%.2f"|format(tool.recall * 100) }}%</td>
+            <td>{{ "%.2f"|format(tool.f1 * 100) }}%</td>
+            <td>[{{ "%.2f"|format(tool.ci_lower * 100) }}%, {{ "%.2f"|format(tool.ci_upper * 100) }}%]</td>
+            <td><span class="badge badge-{{ tool.risk|lower }}">{{ tool.risk }}</span></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if significance_statement %}
+<p style="font-size: 9pt; margin: 8px 0;">
+    <strong>Statistical Finding:</strong> {{ significance_statement }}
+</p>
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SIMILARITY HEATMAP                                           -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>3. Similarity Heatmap</h2>
+{% if heatmap_image %}
+<img class="chart-img" src="{{ heatmap_image }}" alt="Similarity Heatmap">
+{% else %}
+<p style="color: #999; font-style: italic;">Heatmap not available.</p>
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- AI DETECTION RESULTS                                         -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>4. AI Generation Analysis</h2>
+{% if ai_chart_image %}
+<img class="chart-img" src="{{ ai_chart_image }}" alt="AI Probability Chart">
+{% endif %}
+
+{% if ai_details %}
+<table class="data">
+    <thead>
+        <tr><th>Model</th><th>AI Probability</th><th>Confidence</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+    {% for model in ai_details %}
+        <tr>
+            <td>{{ model.name }}</td>
+            <td>{{ "%.1f"|format(model.probability * 100) }}%</td>
+            <td>{{ "%.2f"|format(model.confidence) }}</td>
+            <td>
+                {% if model.probability > 0.7 %}
+                    <span class="badge badge-critical">Likely AI-Generated</span>
+                {% elif model.probability > 0.4 %}
+                    <span class="badge badge-medium">Uncertain</span>
+                {% else %}
+                    <span class="badge badge-low">Likely Human-Written</span>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CODE DIFF EVIDENCE                                           -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>5. Code Comparison Evidence</h2>
+
+{% if diff_image %}
+<img class="chart-img" src="{{ diff_image }}" alt="Code Diff">
+{% endif %}
+
+{% if evidence_pairs %}
+{% for pair in evidence_pairs %}
+<h3>{{ pair.file_a }} ↔ {{ pair.file_b }}</h3>
+<p style="font-size: 8.5pt; color: #555;">
+    Similarity: <strong>{{ "%.1f"|format(pair.similarity * 100) }}%</strong>
+    &nbsp;|&nbsp; Engine: {{ pair.engine }}
+    &nbsp;|&nbsp;
+    <span class="badge badge-{{ pair.risk|lower }}">{{ pair.risk }}</span>
+</p>
+
+<div class="diff-grid">
+    <div class="diff-panel">
+        <div class="diff-panel-header">{{ pair.file_a }} (Lines {{ pair.a_lines }})</div>
+        <div class="diff-panel-body">{{ pair.code_a }}</div>
+    </div>
+    <div class="diff-panel">
+        <div class="diff-panel-header">{{ pair.file_b }} (Lines {{ pair.b_lines }})</div>
+        <div class="diff-panel-body">{{ pair.code_b }}</div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- ENGINE PERFORMANCE RADAR                                     -->
+<!-- ════════════════════════════════════════════════════════════ -->
+{% if radar_image %}
+<h2>6. Engine Performance Overview</h2>
+<img class="chart-img" src="{{ radar_image }}" alt="Engine Radar Chart">
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CONFUSION MATRIX                                             -->
+<!-- ════════════════════════════════════════════════════════════ -->
+{% if confusion_matrix_image %}
+<h2>7. Classification Performance</h2>
+<img class="chart-img" src="{{ confusion_matrix_image }}" alt="Confusion Matrix">
+{% if confusion_stats %}
+<table class="data">
+    <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+    <tbody>
+        <tr><td>True Positives</td><td>{{ confusion_stats.tp }}</td></tr>
+        <tr><td>False Positives</td><td>{{ confusion_stats.fp }}</td></tr>
+        <tr><td>True Negatives</td><td>{{ confusion_stats.tn }}</td></tr>
+        <tr><td>False Negatives</td><td>{{ confusion_stats.fn }}</td></tr>
+        <tr><td>Accuracy</td><td>{{ "%.2f"|format(confusion_stats.accuracy * 100) }}%</td></tr>
+    </tbody>
+</table>
+{% endif %}
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- EXTERNAL TOOL EVIDENCE                                       -->
+<!-- ════════════════════════════════════════════════════════════ -->
+{% if external_tools %}
+<h2>8. External Tool Evidence</h2>
+<table class="data">
+    <thead>
+        <tr><th>Tool</th><th>Status</th><th>Result Summary</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+    {% for tool in external_tools %}
+        <tr>
+            <td><strong>{{ tool.name }}</strong></td>
+            <td>
+                {% if tool.status == "success" %}
+                    <span class="badge badge-low">Executed</span>
+                {% elif tool.status == "skipped" %}
+                    <span class="badge badge-medium">Skipped</span>
+                {% else %}
+                    <span class="badge badge-critical">Failed</span>
+                {% endif %}
+            </td>
+            <td>{{ tool.summary }}</td>
+            <td style="font-size: 8pt; color: #666;">{{ tool.details }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- METADATA & ANTI-TAMPER                                       -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>9. Report Integrity &amp; Metadata</h2>
+
+<table class="data">
+    <tbody>
+        <tr><td style="font-weight: bold; width: 35%;">Report ID</td><td>{{ case_id }}</td></tr>
+        <tr><td style="font-weight: bold;">Generated</td><td>{{ report_date }}</td></tr>
+        <tr><td style="font-weight: bold;">System Version</td><td>{{ system_version }}</td></tr>
+        <tr><td style="font-weight: bold;">Dataset Hash</td><td style="font-family: monospace; font-size: 8pt;">{{ dataset_hash }}</td></tr>
+        <tr><td style="font-weight: bold;">Report SHA-256</td><td style="font-family: monospace; font-size: 8pt;">{{ report_hash }}</td></tr>
+    </tbody>
+</table>
+
+<div class="hash-bar">
+    <strong>Integrity Hash:</strong> {{ report_hash }}<br>
+    <span style="font-size: 7pt; color: #888;">
+        Verify this report has not been altered by recomputing the SHA-256 hash
+        of the original case data. Any modification will produce a different hash.
+    </span>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SIGNATURE AREA                                               -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="signature-block">
+    <div>
+        <div class="signature-line">Investigator Signature</div>
+        <p style="margin-top: 4px;">{{ investigator }}</p>
+    </div>
+    <div>
+        <div class="signature-line">Committee Chair</div>
+        <p style="margin-top: 4px;">Date: _______________</p>
+    </div>
+</div>
+
+<div class="watermark">
+    Confidential – Academic Integrity Committee Only<br>
+    Generated by IntegrityDesk Forensic Evidence Engine v2.5
+</div>
+
+</body>
+</html>

@@ -12,7 +12,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
-from scipy import stats
+try:
+    from scipy import stats
+except ImportError:
+    stats = None
 
 
 class MetricType(Enum):
@@ -204,9 +207,9 @@ class StatisticalTest:
         """Perform paired t-test."""
         if len(scores1) != len(scores2):
             raise ValueError("Score lists must have same length")
-        
+        if stats is None:
+            raise ImportError("scipy is required for paired_t_test")
         t_stat, p_value = stats.ttest_rel(scores1, scores2)
-        
         return {
             "t_statistic": t_stat,
             "p_value": p_value,
@@ -219,7 +222,8 @@ class StatisticalTest:
         """Perform Wilcoxon signed-rank test."""
         if len(scores1) != len(scores2):
             raise ValueError("Score lists must have same length")
-        
+        if stats is None:
+            raise ImportError("scipy is required for wilcoxon_test")
         statistic, p_value = stats.wilcoxon(scores1, scores2)
         
         return {

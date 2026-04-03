@@ -47,6 +47,25 @@ def main() -> int:
     layer_parser = subparsers.add_parser("layers", help="Run three-layer benchmark")
     layer_parser.add_argument("--output", default="reports/three_layer")
     
+    # Competitor benchmark (head-to-head vs MOSS, JPlag, Dolos, etc.)
+    comp_vs_parser = subparsers.add_parser(
+        "competitor",
+        help="Run head-to-head benchmark vs MOSS, JPlag, Dolos, Copyleaks, Turnitin",
+    )
+    comp_vs_parser.add_argument("--type1", type=int, default=50)
+    comp_vs_parser.add_argument("--type2", type=int, default=50)
+    comp_vs_parser.add_argument("--type3", type=int, default=50)
+    comp_vs_parser.add_argument("--type4", type=int, default=50)
+    comp_vs_parser.add_argument("--negative", type=int, default=200)
+    comp_vs_parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap samples for CIs")
+    comp_vs_parser.add_argument("--threshold", type=float, default=0.50, help="Classification threshold")
+    comp_vs_parser.add_argument("--seed", type=int, default=42)
+    comp_vs_parser.add_argument("--output", default="reports/competitor")
+    comp_vs_parser.add_argument(
+        "--format", choices=["all", "json", "markdown", "html"], default="all",
+        help="Report output format",
+    )
+
     # Full benchmark
     full_parser = subparsers.add_parser("full", help="Run full benchmark suite")
     full_parser.add_argument("--type1", type=int, default=50)
@@ -92,6 +111,31 @@ def main() -> int:
         runner = ThreeLayerBenchmarkRunner(output_dir=args.output)
         runner.run()
     
+    elif args.command == "competitor":
+        from benchmark.competitors.runner import CompetitorBenchmarkRunner
+        from benchmark.competitors.report import CompetitorComparisonReport
+        runner = CompetitorBenchmarkRunner(
+            output_dir=args.output, threshold=args.threshold,
+        )
+        result = runner.run(
+            n_type1=args.type1, n_type2=args.type2,
+            n_type3=args.type3, n_type4=args.type4,
+            n_negative=args.negative,
+            seed=args.seed,
+            n_bootstrap=args.bootstrap,
+        )
+        # Generate reports
+        report = CompetitorComparisonReport(result)
+        fmt = args.format
+        if fmt in ("all", "markdown"):
+            md_path = report.save_markdown(f"{args.output}/comparison_report.md")
+            print(f"  Markdown report: {md_path}")
+        if fmt in ("all", "html"):
+            html_path = report.save_html(f"{args.output}/comparison_report.html")
+            print(f"  HTML report:     {html_path}")
+        if fmt == "all":
+            print(f"  JSON data:       {args.output}/{result.run_id}.json")
+
     elif args.command == "full":
         from benchmark.runners.full_runner import FullBenchmarkRunner
         runner = FullBenchmarkRunner(output_dir=args.output)

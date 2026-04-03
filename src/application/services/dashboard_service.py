@@ -84,6 +84,8 @@ class DashboardService:
         from src.evaluation.arbitration import BayesianArbitrator
         from src.ml.fusion_model import HybridFusionModel
         from src.engines.ai.transformer_detector import AIDetectionLayer
+        from src.application.services.behavioral_analysis import KeystrokeAnalysisService
+        from src.infrastructure.indexing.web_search import WebSearchService
 
         self._feature_extractor = FeatureExtractor()
         self._fusion_engine = FusionEngine()
@@ -91,20 +93,23 @@ class DashboardService:
         self._arbitrator = BayesianArbitrator()
         self._hybrid_model = HybridFusionModel()
         self._ai_layer = AIDetectionLayer()
+        self._behavioral_service = KeystrokeAnalysisService()
+        self._web_search = WebSearchService()
 
-    def analyze_batch(self, submissions: Dict[str, str]) -> List[DetectionCase]:
-        """Analyze all pairs and return sorted case list.
-
-        Args:
-            submissions: Mapping from filename to source code content.
-
-        Returns:
-            List of DetectionCase objects sorted by decreasing risk.
-        """
+    def analyze_batch(self, submissions: Dict[str, str], keystrokes: Optional[Dict[str, List[Any]]] = None) -> List[DetectionCase]:
+        """Analyze all pairs and return sorted case list."""
         cases: List[DetectionCase] = []
 
         files = list(submissions.keys())
         for i, fa in enumerate(files):
+            # 1. Individual Behavioral Check
+            behavioral_a = {}
+            if keystrokes and fa in keystrokes:
+                behavioral_a = self._behavioral_service.analyze_session(keystrokes[fa])
+                
+            # 2. Web-Scale Search (Individual)
+            web_results_a = self._web_search.perform_full_web_scan(submissions[fa], "python")
+            
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
 
@@ -145,7 +150,9 @@ class DashboardService:
                         {"name": "Uncertainty", "value": round(arbitration.uncertainty, 3)},
                         {"name": "ML Insights", "value": " | ".join(explanations) if explanations else "None"},
                         {"name": "AI Prob (A/B)", "value": f"{round(ai_a['ai_probability'], 2)} / {round(ai_b['ai_probability'], 2)}"},
-                        {"name": "Detection Decision", "value": f"{ai_a['decision']} / {ai_b['decision']}"}
+                        {"name": "Detection Decision", "value": f"{ai_a['decision']} / {ai_b['decision']}"},
+                        {"name": "Behavioral Anomaly (A)", "value": f"{behavioral_a.get('behavioral_anomaly_score', 0.0):.2f}"},
+                        {"name": "Web Max Similarity (A)", "value": f"{web_results_a.get('max_web_similarity', 0.0):.2f}"}
                     ],
                 )
                 cases.append(case)

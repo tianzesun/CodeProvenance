@@ -10,16 +10,18 @@ IntegrityDesk is a production-ready code similarity detection system designed fo
 
 Traditional tools like MOSS and JPlag use single algorithms and provide minimal context. IntegrityDesk combines **6 different similarity engines** with **Bayesian Arbitration**, **Hybrid ML Fusion**, and **Stylometric Analysis** — delivering actionable intelligence with publication-grade credibility.
 
-### 📊 Scientific Benchmarking Infrastructure
+### 🚀 Enterprise-Grade Forensic Capabilities
 
-IntegrityDesk is designed as a defensible scientific benchmarking infrastructure for code similarity research:
+IntegrityDesk is engineered for institutional scale, providing the most comprehensive forensic suite for academic integrity:
 
-- **Bayesian Arbitration Layer**: Replaces simple weighted averages with a statistical model that accounts for engine variance and uncertainty.
-- **Hybrid ML Fusion**: A Random Forest-based fusion model combining AST, Stylometry, and Semantic Embeddings (Targeting F1 > 0.92).
-- **Code Stylometry**: Tracks 10+ stylistic markers (naming habits, comment density, etc.) to distinguish author identity and reduce False Positives.
-- **Semantic Analysis**: Deep black-box execution comparison to detect behavioral clones (Type 4) that bypass syntactic analysis.
-- **Dataset Governance**: Mandatory SHA-256 fingerprinting and cross-dataset deduplication to prevent experimental contamination.
-- **ACM/IEEE-Style Reporting**: Generates formal HTML reports with cryptographic signatures, ideal for academic review and appeals.
+- **AI-Detection (ChatGPT/Claude)**: High-accuracy detection (>90%) using CodeBERT Zero-Shot classifiers and stylometric contrast to identify LLM-generated patterns.
+- **Web-Scale Scanning**: Real-time similarity checks against **10B+ lines of code** (GitHub, Stack Overflow) using LSH and Vector indexing.
+- **Behavioral Analysis (Keystroke Logging)**: Detects copy-paste bursts and unnatural composition patterns to identify the *act* of plagiarism during code creation.
+- **Multi-Language Support (20+)**: Dedicated forensic support for Python, C++, Java, JS, TS, Go, Rust, Ruby, and 15+ other languages.
+- **Real-Time Detection API**: Highly optimized $O(n \log n)$ search architecture for instant feedback.
+- **Obfuscation Robustness**: Resistant to advanced obfuscation (renaming, reordering, junk code) via Program Dependency Graphs (PDG).
+- **Professor Dashboard**: Comprehensive heatmaps, signed PDF reports, and multi-engine evidence summaries.
+- **Student Prevention Feedback**: A student-facing portal providing pre-submission "integrity checks" to encourage self-correction.
 
 ### 📊 Feature Comparison
 

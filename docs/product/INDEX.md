@@ -23,11 +23,11 @@ Welcome to our product documentation. Whether you are an educator reviewing stud
 - **Report Interpretation**: Understanding the Agreement Index and Uncertainty Margin.
 - **Forensic Case Management**: Building a chain of evidence for disciplinary committees.
 
-### 🌐 [API Reference](API_REFERENCE.md)
+### 🌐 [API & Integrations](API_REFERENCE.md)
 *Technical documentation for developers.*
 - **REST API**: Full OpenAPI specification for submission and retrieval.
+- **Canvas LMS Integration**: [LTI 1.3 Step-by-Step Guide](CANVAS_INTEGRATION.md).
 - **Webhooks**: Real-time event notifications for automated workflows.
-- **LMS Integration**: Connecting with Canvas, Moodle, and Blackboard.
 
 ### ⚖️ [Governance & Reproducibility](GOVERNANCE.md)
 *Standards for experimental integrity.*
