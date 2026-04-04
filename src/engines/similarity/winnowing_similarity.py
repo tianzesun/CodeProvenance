@@ -104,9 +104,19 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
         Returns:
             Similarity score between 0.0 and 1.0
         """
-        # Get tokens for fingerprinting
+        # Get tokens for fingerprinting, fall back to raw code tokenization
         tokens_a = parsed_a.get('tokens', [])
         tokens_b = parsed_b.get('tokens', [])
+        
+        # If no tokens provided, tokenize raw code
+        if not tokens_a:
+            raw_a = parsed_a.get('raw', '')
+            if raw_a:
+                tokens_a = self._tokenize_raw_code(raw_a)
+        if not tokens_b:
+            raw_b = parsed_b.get('raw', '')
+            if raw_b:
+                tokens_b = self._tokenize_raw_code(raw_b)
         
         if not tokens_a and not tokens_b:
             return 1.0
@@ -141,6 +151,22 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
         )
         
         return min(1.0, max(0.0, final_similarity))
+    
+    def _tokenize_raw_code(self, raw: str) -> List[Dict]:
+        """Tokenize raw source code into a list of token dicts."""
+        tokens = []
+        for word in re.findall(r'[a-zA-Z_]\w*|[^\s\w]', raw):
+            if re.match(r'^(if|else|elif|for|while|return|def|class|import|from|try|except|finally|with|as|in|not|and|or|is|yield|break|continue|pass|raise|lambda|assert|del|global|nonlocal)$', word):
+                tokens.append({'type': 'KEYWORD', 'value': word})
+            elif re.match(r'^[A-Z][A-Z0-9_]*$', word):
+                tokens.append({'type': 'VARIABLE', 'value': word})
+            elif re.match(r'^[a-z_]\w*$', word):
+                tokens.append({'type': 'VARIABLE', 'value': word})
+            elif re.match(r'^[0-9]+$', word):
+                tokens.append({'type': 'LITERAL', 'value': word})
+            else:
+                tokens.append({'type': 'OPERATOR', 'value': word})
+        return tokens
     
     def _normalize_tokens(self, tokens: List[Dict]) -> List[Dict]:
         """

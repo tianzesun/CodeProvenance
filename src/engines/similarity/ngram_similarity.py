@@ -16,7 +16,7 @@ class NgramSimilarity(BaseSimilarityAlgorithm):
     Effective for detecting similar code despite whitespace changes, renaming, etc.
     """
     
-    def __init__(self, n: int = 3):
+    def __init__(self, n: int = 8):
         super().__init__("ngram")
         self.n = n
     
@@ -71,14 +71,14 @@ class NgramSimilarity(BaseSimilarityAlgorithm):
         Returns:
             String content for n-gram generation
         """
-        # Try to get reconstructed content from tokens, or use a placeholder
         tokens = parsed.get('tokens', [])
         if tokens:
-            # Join tokens with spaces to approximate original content
             return ' '.join(tokens)
         
-        # Fallback: if we had the original content, we'd use it
-        # For now, return empty string to trigger fallback behavior
+        raw = parsed.get('raw', '')
+        if raw:
+            return re.sub(r'\s+', ' ', raw.strip())
+        
         return ""
     
     def _get_ngrams(self, text: str, n: int) -> List[str]:

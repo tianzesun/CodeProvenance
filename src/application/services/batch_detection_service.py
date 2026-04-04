@@ -79,11 +79,13 @@ class BatchDetectionService:
                         score=fused.final_score,
                         risk_level=_risk_level(fused.final_score),
                         features={
-                            "ast": features.ast,
-                            "fingerprint": features.fingerprint,
-                            "embedding": features.embedding,
-                            "ngram": features.ngram,
-                            "winnowing": features.winnowing,
+                            k: v for k, v in {
+                                "ast": features.ast,
+                                "fingerprint": features.fingerprint,
+                                "embedding": features.embedding,
+                                "ngram": features.ngram,
+                                "winnowing": features.winnowing,
+                            }.items() if v is not None
                         })
                     results.append(pair_result)
         

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dataclasses import dataclass
 
@@ -11,23 +11,31 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FeatureVector:
-    """Similarity scores from each detection engine."""
+    """Similarity scores from each detection engine.
 
-    ast: float = 0.0
-    fingerprint: float = 0.0
-    embedding: float = 0.0
-    ngram: float = 0.0
-    winnowing: float = 0.0
+    A score of None means the engine failed to run (missing dependency,
+    parsing error, etc.) and should be excluded from fusion.
+    """
+
+    ast: Optional[float] = None
+    fingerprint: Optional[float] = None
+    embedding: Optional[float] = None
+    ngram: Optional[float] = None
+    winnowing: Optional[float] = None
 
     def as_dict(self) -> Dict[str, float]:
-        """Convert FeatureVector to a dictionary."""
-        return {
-            "ast": self.ast,
-            "fingerprint": self.fingerprint,
-            "embedding": self.embedding,
-            "ngram": self.ngram,
-            "winnowing": self.winnowing,
-        }
+        """Convert FeatureVector to a dictionary, excluding failed engines."""
+        result = {}
+        for name, score in [
+            ("ast", self.ast),
+            ("fingerprint", self.fingerprint),
+            ("embedding", self.embedding),
+            ("ngram", self.ngram),
+            ("winnowing", self.winnowing),
+        ]:
+            if score is not None:
+                result[name] = score
+        return result
 
 
 class FeatureExtractor:
@@ -79,7 +87,7 @@ class FeatureExtractor:
 
     # ── Private engine helpers ──────────────────────────────────
 
-    def _run_ast(self, a: str, b: str) -> float:
+    def _run_ast(self, a: str, b: str) -> Optional[float]:
         try:
             if self._ast_engine is None:
                 from src.engines.similarity.ast_similarity import ASTSimilarity
@@ -90,9 +98,9 @@ class FeatureExtractor:
             )
         except Exception as exc:
             logger.debug("AST engine unavailable: %s", exc)
-            return 0.0
+            return None
 
-    def _run_fingerprint(self, a: str, b: str) -> float:
+    def _run_fingerprint(self, a: str, b: str) -> Optional[float]:
         try:
             if self._token_engine is None:
                 from src.engines.similarity.token_similarity import TokenSimilarity
@@ -103,9 +111,9 @@ class FeatureExtractor:
             )
         except Exception as exc:
             logger.debug("Token/Fingerprint engine unavailable: %s", exc)
-            return 0.0
+            return None
 
-    def _run_embedding(self, a: str, b: str) -> float:
+    def _run_embedding(self, a: str, b: str) -> Optional[float]:
         # Primary: UniXcoder (local, GPU-friendly)
         try:
             if self._unixcoder_engine is None:
@@ -123,9 +131,9 @@ class FeatureExtractor:
             return self._fallback_embedding.compare({"raw": a}, {"raw": b})
         except Exception as exc:
             logger.debug("OpenAI embedding fallback also failed: %s", exc)
-            return 0.0
+            return None
 
-    def _run_ngram(self, a: str, b: str) -> float:
+    def _run_ngram(self, a: str, b: str) -> Optional[float]:
         try:
             if self._ngram_engine is None:
                 from src.engines.similarity.ngram_similarity import NgramSimilarity
@@ -136,9 +144,9 @@ class FeatureExtractor:
             )
         except Exception as exc:
             logger.debug("N-gram engine unavailable: %s", exc)
-            return 0.0
+            return None
 
-    def _run_winnowing(self, a: str, b: str) -> float:
+    def _run_winnowing(self, a: str, b: str) -> Optional[float]:
         try:
             if self._winnowing_engine is None:
                 from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
@@ -149,4 +157,4 @@ class FeatureExtractor:
             )
         except Exception as exc:
             logger.debug("Winnowing engine unavailable: %s", exc)
-            return 0.0
+            return None
