@@ -37,14 +37,14 @@ help:
 # For UNIX-like systems, delete the MSDOS section below.
 
 ################################################################
-# For UNIX-like systems
+ # For UNIX-like systems
 
-SYSTEM =	UNIX
+ SYSTEM =	UNIX
 
-# Locations
-DIR =		/home/dick
-BINDIR =	$(DIR)/bin.`$(DIR)/bin/arch`
-MAN1DIR =	$(DIR)/man/man1
+ # Locations
+ DIR =		/usr/local
+ BINDIR =	$(DIR)/bin
+ MAN1DIR =	$(DIR)/man/man1
 
 # Commands
 COPY =		cp -p
@@ -57,10 +57,10 @@ GROFF =		groff -man
 # File names
 NULLFILE =	/dev/null
 
-################################################################
-# For MSDOS + MinGW
+ ################################################################
+ # For MSDOS + MinGW - DISABLED for Linux
 
-SYSTEM =	MSDOS
+# SYSTEM =	MSDOS
 
 # Locations
 DIR =		C:/BIN
@@ -203,7 +203,7 @@ test:		sim.res stream.res percentages.res version.res
 
 #	B I N A R I E S
 
-BINARIES =	sim_c$(EXE) sim_c++$(EXE) sim_java$(EXE) sim_pasc$(EXE) \
+BINARIES =	sim_c$(EXE) sim_cxx$(EXE) sim_java$(EXE) sim_pasc$(EXE) \
 		sim_m2$(EXE) sim_lisp$(EXE) sim_mira$(EXE) sim_text$(EXE) \
 		sim_8086$(EXE)
 
@@ -287,7 +287,7 @@ sim_c$(EXE):	$(SIM_SRC) $(PROP_SRC) clang.l $(LEX_HDR)
 sim_text$(EXE):	$(SIM_SRC) $(PROP_SRC) textlang.l $(LEX_HDR)
 		make GEN_LANG=text sim_gen$(EXE)
 
-sim_c++$(EXE):	$(SIM_SRC) $(PROP_SRC) c++lang.l $(LEX_HDR)
+sim_cxx$(EXE):	$(SIM_SRC) $(PROP_SRC) c++lang.l $(LEX_HDR)
 		make GEN_LANG=c++ sim_gen$(EXE)
 
 sim_java$(EXE):	$(SIM_SRC) $(PROP_SRC) javalang.l $(LEX_HDR)
@@ -369,100 +369,100 @@ DOCS +=		$(SPC).pdf
 chklat:
 		chklat *.tex
 
-# Installation
-install_all:	install			# just a synonym
-install:	$(MAN1DIR)/sim.1 \
-		$(BINDIR)/sim_c$(EXE) \
-		$(BINDIR)/sim_text$(EXE) \
-		$(BINDIR)/sim_c++$(EXE) \
-		$(BINDIR)/sim_java$(EXE) \
-		$(BINDIR)/sim_pasc$(EXE) \
-		$(BINDIR)/sim_m2$(EXE) \
-		$(BINDIR)/sim_lisp$(EXE) \
-		$(BINDIR)/sim_mira$(EXE) \
-		$(BINDIR)/sim_8086$(EXE)
-
-$(MAN1D)/sim.1:	sim.1
-		$(COPY) sim.1 $@
-
-$(BINDIR)/sim_c$(EXE):	sim_c$(EXE)
-		$(COPY) sim_c$(EXE) $@
-
-$(BINDIR)/sim_text$(EXE):	sim_text$(EXE)
-		$(COPY) sim_text$(EXE) $@
-
-$(BINDIR)/sim_c++$(EXE):	sim_c++$(EXE)
-		$(COPY) sim_c++$(EXE) $@
-
-$(BINDIR)/sim_java$(EXE):	sim_java$(EXE)
-		$(COPY) sim_java$(EXE) $@
-
-$(BINDIR)/sim_pasc$(EXE):	sim_pasc$(EXE)
-		$(COPY) sim_pasc$(EXE) $@
-
-$(BINDIR)/sim_m2$(EXE):	sim_m2$(EXE)
-		$(COPY) sim_m2$(EXE) $@
-
-$(BINDIR)/sim_lisp$(EXE):	sim_lisp$(EXE)
-		$(COPY) sim_lisp$(EXE) $@
-
-$(BINDIR)/sim_mira$(EXE):	sim_mira$(EXE)
-		$(COPY) sim_mira$(EXE) $@
-
-$(BINDIR)/sim_8086$(EXE):	sim_8086$(EXE)
-		$(COPY) sim_8086$(EXE) $@
-
-# Clean-up
-
-.PHONY:		clean fresh
-clean:
-		-rm -f *.o
-		-rm -f $(GEN_GRB)
-		-rm -f $(RES_GRB)
-		-rm -f *.aux *.log *.out
-		-rm -f a.out a.exe sim.txt core mon.out
-
-fresh:		clean
-		-rm -f *.exe
-
-#	D E P E N D E N C I E S
-
-# DO NOT DELETE THIS LINE -- make depend depends on it.
-ForEachFile.o: ForEachFile.c ForEachFile.h fname.h
-Malloc.o: Malloc.c any_int.h Malloc.h
-add_run.o: add_run.c global.h text.h runs.h percentages.h options.h \
- add_run.h
-any_int.o: any_int.c any_int.h
-compare.o: compare.c global.h text.h token.h tokenarray.h hash.h \
- properties.h options.h add_run.h compare.h debug.par
-count_sim_dup.o: count_sim_dup.c
-debug.o: debug.c debug.h
-fname.o: fname.c fname.h
-global.o: global.c global.h
-hash.o: hash.c system.par debug.par global.h options.h text.h Malloc.h \
- any_int.h token.h properties.h tokenarray.h hash.h
-idf.o: idf.c system.par token.h idf.h
-lang.o: lang.c token.h properties.h idf.h lex.h lang.h
-lex.o: lex.c lex.h
-newargs.o: newargs.c global.h ForEachFile.h fname.h Malloc.h newargs.h
-options.o: options.c options.h settings.par global.h
-pass1.o: pass1.c debug.par global.h text.h token.h tokenarray.h lang.h \
- options.h pass1.h
-pass2.o: pass2.c debug.par global.h token.h text.h lang.h pass2.h \
- sortlist.bdy
-pass3.o: pass3.c system.par debug.par global.h options.h fname.h utf8.h \
- text.h token.h runs.h percentages.h pass3.h
-percentages.o: percentages.c debug.par global.h text.h options.h Malloc.h \
- percentages.h sortlist.bdy
-properties.o: properties.c global.h options.h token.h properties.h
-runs.o: runs.c global.h text.h runs.h Malloc.h debug.par sortlist.bdy
-sim.o: sim.c global.h options.h newargs.h token.h tokenarray.h text.h \
- compare.h pass1.h pass2.h pass3.h percentages.h stream.h lang.h Malloc.h \
- any_int.h
-sim_gen.o: sim_gen.c global.h options.h token.h properties.h idf.h lex.h \
- lang.h
-stream.o: stream.c system.par global.h token.h lang.h fname.h stream.h
-text.o: text.c stream.h Malloc.h text.h
-token.o: token.c token.h any_int.h
-tokenarray.o: tokenarray.c global.h Malloc.h token.h tokenarray.h
-utf8.o: utf8.c utf8.h
+# # # Installation
+# # install_all:	install			# just a synonym
+# # install:	$(MAN1DIR)/sim.1 \
+# # 		$(BINDIR)/sim_c$(EXE) \
+# # 		$(BINDIR)/sim_text$(EXE) \
+# # 		$(BINDIR)/sim_cxx$(EXE) \
+# # 		$(BINDIR)/sim_java$(EXE) \
+# # 		$(BINDIR)/sim_pasc$(EXE) \
+# # 		$(BINDIR)/sim_m2$(EXE) \
+# # 		$(BINDIR)/sim_lisp$(EXE) \
+# # 		$(BINDIR)/sim_mira$(EXE) \
+# # 		$(BINDIR)/sim_8086$(EXE)
+# # 
+# # $(MAN1D)/sim.1:	sim.1
+# # 		$(COPY) sim.1 $@
+# # 
+# # $(BINDIR)/sim_c$(EXE):	sim_c$(EXE)
+# # 		$(COPY) sim_c$(EXE) $@
+# # 
+# # $(BINDIR)/sim_text$(EXE):	sim_text$(EXE)
+# # 		$(COPY) sim_text$(EXE) $@
+# # 
+# # $(BINDIR)/sim_cxx$(EXE):	sim_cxx$(EXE)
+# # 		$(COPY) sim_cxx$(EXE) $@
+# # 
+# # $(BINDIR)/sim_java$(EXE):	sim_java$(EXE)
+# # 		$(COPY) sim_java$(EXE) $@
+# # 
+# # $(BINDIR)/sim_pasc$(EXE):	sim_pasc$(EXE)
+# # 		$(COPY) sim_pasc$(EXE) $@
+# # 
+# # $(BINDIR)/sim_m2$(EXE):	sim_m2$(EXE)
+# # 		$(COPY) sim_m2$(EXE) $@
+# # 
+# # $(BINDIR)/sim_lisp$(EXE):	sim_lisp$(EXE)
+# # 		$(COPY) sim_lisp$(EXE) $@
+# # 
+# # $(BINDIR)/sim_mira$(EXE):	sim_mira$(EXE)
+# # 		$(COPY) sim_mira$(EXE) $@
+# # 
+# # $(BINDIR)/sim_8086$(EXE):	sim_8086$(EXE)
+# # 		$(COPY) sim_8086$(EXE) $@
+# # 
+# # # Clean-up
+# # 
+# # .PHONY:		clean fresh
+# # clean:
+# # 		-rm -f *.o
+# # 		-rm -f $(GEN_GRB)
+# # 		-rm -f $(RES_GRB)
+# # 		-rm -f *.aux *.log *.out
+# # 		-rm -f a.out a.exe sim.txt core mon.out
+# # 
+# # fresh:		clean
+# # 		-rm -f *.exe
+# # 
+# # #	D E P E N D E N C I E S
+# # 
+# # # DO NOT DELETE THIS LINE -- make depend depends on it.
+# # ForEachFile.o: ForEachFile.c ForEachFile.h fname.h
+# # Malloc.o: Malloc.c any_int.h Malloc.h
+# # add_run.o: add_run.c global.h text.h runs.h percentages.h options.h \
+# #  add_run.h
+# # any_int.o: any_int.c any_int.h
+# # compare.o: compare.c global.h text.h token.h tokenarray.h hash.h \
+# #  properties.h options.h add_run.h compare.h debug.par
+# # count_sim_dup.o: count_sim_dup.c
+# # debug.o: debug.c debug.h
+# # fname.o: fname.c fname.h
+# # global.o: global.c global.h
+# # hash.o: hash.c system.par debug.par global.h options.h text.h Malloc.h \
+# #  any_int.h token.h properties.h tokenarray.h hash.h
+# # idf.o: idf.c system.par token.h idf.h
+# # lang.o: lang.c token.h properties.h idf.h lex.h lang.h
+# # lex.o: lex.c lex.h
+# # newargs.o: newargs.c global.h ForEachFile.h fname.h Malloc.h newargs.h
+# # options.o: options.c options.h settings.par global.h
+# # pass1.o: pass1.c debug.par global.h text.h token.h tokenarray.h lang.h \
+# #  options.h pass1.h
+# # pass2.o: pass2.c debug.par global.h token.h text.h lang.h pass2.h \
+# #  sortlist.bdy
+# # pass3.o: pass3.c system.par debug.par global.h options.h fname.h utf8.h \
+# #  text.h token.h runs.h percentages.h pass3.h
+# # percentages.o: percentages.c debug.par global.h text.h options.h Malloc.h \
+# #  percentages.h sortlist.bdy
+# # properties.o: properties.c global.h options.h token.h properties.h
+# # runs.o: runs.c global.h text.h runs.h Malloc.h debug.par sortlist.bdy
+# # sim.o: sim.c global.h options.h newargs.h token.h tokenarray.h text.h \
+# #  compare.h pass1.h pass2.h pass3.h percentages.h stream.h lang.h Malloc.h \
+# #  any_int.h
+# # sim_gen.o: sim_gen.c global.h options.h token.h properties.h idf.h lex.h \
+# #  lang.h
+# # stream.o: stream.c system.par global.h token.h lang.h fname.h stream.h
+# # text.o: text.c stream.h Malloc.h text.h
+# # token.o: token.c token.h any_int.h
+# # tokenarray.o: tokenarray.c global.h Malloc.h token.h tokenarray.h
+# # utf8.o: utf8.c utf8.h
