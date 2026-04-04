@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install --upgrade pip
+          ./venv/bin/pip install -r requirements.txt
+          ./venv/bin/pip install flask
+
+      - name: Run imports check
+        run: |
+          ./venv/bin/python -c "
+          import sys; sys.path.insert(0, 'src')
+          from benchmark.pipeline import BenchmarkRunner, BenchmarkConfig
+          from benchmark.pipeline.external_loader import ExternalDatasetLoader
+          from benchmark.similarity.engines import HybridEngine, TokenWinnowingEngine
+          from benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
+          from benchmark.registry import registry
+          print('All imports OK')
+          "
+
+      - name: Run unit tests
+        run: |
+          ./venv/bin/python -c "
+          import sys; sys.path.insert(0, 'src')
+          from benchmark.pipeline.runner import BenchmarkRunner, BenchmarkRunResult
+          from benchmark.pipeline.config import BenchmarkConfig, EngineConfig, OutputConfig, ThresholdConfig
+          from benchmark.pipeline.loader import CanonicalDataset, CodePair
+
+          runner = BenchmarkRunner(seed=42)
+          config = BenchmarkConfig(
+              engine=EngineConfig(name='hybrid'),
+              threshold=ThresholdConfig(optimize=True),
+              output=OutputConfig(json=False, html=False, leaderboard=False),
+          )
+
+          # Test with balanced dataset
+          pairs = []
+          for i in range(4):
+              pairs.append(CodePair(id_a=f'a{i}', id_b=f'b{i}', code_a=f'def foo{i}(): return {i}', code_b=f'def foo{i}(): return {i}', label=1))
+          for i in range(4):
+              pairs.append(CodePair(id_a=f'na{i}', id_b=f'nb{i}', code_a=f'x = {i}', code_b=f'y = {i+100}', label=0))
+
+          ds = CanonicalDataset(name='test', version='1.0', pairs=pairs)
+          result = runner.run(ds, config)
+          assert result.success, f'Benchmark failed: {result.error}'
+          assert result.metrics.f1 > 0, f'F1 should be > 0, got {result.metrics.f1}'
+          print(f'Test passed: F1={result.metrics.f1:.4f}')
+
+          # Test validation
+          empty = CanonicalDataset(name='e', version='1.0', pairs=[])
+          r = runner.run(empty, config)
+          assert not r.success, 'Empty dataset should fail'
+          print('Validation test passed')
+          "
+
+      - name: Run benchmark (POJ-104)
+        run: |
+          ./venv/bin/python run_external_benchmark.py poj104 50
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install --upgrade pip
+          ./venv/bin/pip install -r requirements.txt
+          ./venv/bin/pip install flask
+
+      - name: Dashboard smoke test
+        run: |
+          timeout 10 ./venv/bin/python -c "
+          import sys, os, threading, time
+          sys.path.insert(0, 'src')
+          os.environ['WERKZEUG_RUN_MAIN'] = 'true'
+
+          from web_dashboard import app
+          def run_server():
+              app.run(host='127.0.0.1', port=5555)
+          t = threading.Thread(target=run_server, daemon=True)
+          t.start()
+          time.sleep(2)
+
+          import urllib.request
+          for path in ['/', '/api/engines', '/api/datasets', '/api/leaderboard', '/api/reports']:
+              resp = urllib.request.urlopen(f'http://127.0.0.1:5555{path}')
+              assert resp.status == 200, f'{path} returned {resp.status}'
+              print(f'{path}: OK ({resp.status})')
+          print('Dashboard smoke test passed')
+          "
