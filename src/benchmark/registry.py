@@ -92,8 +92,9 @@ class EngineRegistry:
         score = engine.compare(code1, code2)
     """
     
-    _engines: Dict[str, Type] = {}
-    _instances: Dict[str, Any] = {}
+    def __init__(self):
+        self._engines: Dict[str, Type] = {}
+        self._instances: Dict[str, Any] = {}
     
     def register(
         self,

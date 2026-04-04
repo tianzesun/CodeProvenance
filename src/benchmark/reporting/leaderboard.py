@@ -17,9 +17,11 @@ class LeaderboardEntry:
     precision: float
     recall: float
     f1: float
+    accuracy: float = 0.0
     map_score: float = 0.0
     mrr_score: float = 0.0
     ndcg: float = 0.0
+    threshold: float = 0.5
     timestamp: str = ""
     config: Dict[str, Any] = field(default_factory=dict)
     version: str = ""
@@ -42,6 +44,18 @@ class Leaderboard:
         self.path = Path(path)
         self.entries: List[LeaderboardEntry] = []
         self._load()
+    
+    @classmethod
+    def load(cls, path: str = "reports/leaderboard/leaderboard.json") -> "Leaderboard":
+        """Load leaderboard from file, creating if it doesn't exist.
+        
+        Args:
+            path: Path to leaderboard JSON file.
+            
+        Returns:
+            Leaderboard instance.
+        """
+        return cls(path)
     
     def _load(self) -> None:
         """Load existing leaderboard data."""
@@ -96,14 +110,17 @@ class Leaderboard:
         Returns:
             Path to saved file.
         """
+        import fcntl
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "last_updated": datetime.now().isoformat(),
-            "total_entries": len(self.entries),
-            "entries": [asdict(e) for e in self.entries]
-        }
         with open(self.path, 'w') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            data = {
+                "last_updated": datetime.now().isoformat(),
+                "total_entries": len(self.entries),
+                "entries": [asdict(e) for e in self.entries]
+            }
             json.dump(data, f, indent=2)
+            fcntl.flock(f, fcntl.LOCK_UN)
         return str(self.path)
     
     def to_report(self, metric: str = "f1") -> Dict[str, Any]:

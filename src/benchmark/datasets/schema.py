@@ -134,6 +134,7 @@ class CodePair:
         code_b: Second code snippet.
         label: Ground truth label (1 for clone, 0 for non-clone).
         clone_type: Clone type (1-4 for clones, 0 for non-clone).
+        metadata: Optional metadata dictionary.
     """
     id_a: str
     id_b: str
@@ -141,6 +142,7 @@ class CodePair:
     code_b: str
     label: int
     clone_type: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -152,11 +154,15 @@ class CanonicalDataset:
         version: Dataset version.
         pairs: List of code pairs.
         metadata: Dataset metadata.
+        submissions: Optional list of individual code submissions.
+        language: Primary programming language of the dataset.
     """
     name: str
     version: str
     pairs: List[CodePair] = field(default_factory=list)
     metadata: Optional[DatasetMetadata] = None
+    submissions: List[Any] = field(default_factory=list)
+    language: str = "unknown"
     
     def get_ground_truth(self) -> Dict[tuple, int]:
         """Get ground truth mapping.

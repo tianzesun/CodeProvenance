@@ -301,6 +301,7 @@ class ErrorAnalyzer:
                     name=type_name,
                     count=fn_count + fp_count,
                     avg_score=sum(type_scores) / len(type_scores) if type_scores else 0.0,
+                    avg_error=sum(abs(s - threshold) for s in type_scores) / len(type_scores) if type_scores else 0.0,
                 )
         
         # Build error breakdown by confidence level

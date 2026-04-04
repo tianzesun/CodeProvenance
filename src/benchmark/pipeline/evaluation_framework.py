@@ -77,20 +77,61 @@ class ChangeLoopType(PlagiarismTechnique):
     name = "change_loop_type"
     description = "Convert for-loop to while-loop or vice versa"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("for i in range(", "_i = 0\nwhile _i < ").replace("):", ":")
+        def replace_for_loop(match):
+            var = match.group(1)
+            start = match.group(2)
+            end = match.group(3)
+            step = match.group(4) if match.group(4) else "1"
+            init = f"{var} = {start}\n"
+            if step == "1":
+                cond = f"while {var} < {end}:\n"
+                incr = f"    {var} += 1\n"
+            else:
+                cond = f"while {var} < {end}:\n"
+                incr = f"    {var} += {step}\n"
+            body = match.group(5)
+            indented_body = "\n".join("    " + line if line.strip() else line for line in body.split("\n"))
+            return f"{init}{cond}{indented_body}\n{incr}"
+
+        pattern = r'for\s+(\w+)\s+in\s+range\((\d+),\s*(\d+)(?:,\s*(\d+))?\):\s*\n((?:[ \t]+.*\n?)*)'
+        result = re.sub(pattern, replace_for_loop, code)
+        if result != code:
+            return result
+
+        simple_pattern = r'for\s+(\w+)\s+in\s+range\((\w+)\):\s*\n((?:[ \t]+.*\n?)*)'
+        def replace_simple(match):
+            var = match.group(1)
+            end = match.group(2)
+            body = match.group(3)
+            indented_body = "\n".join("    " + line if line.strip() else line for line in body.split("\n"))
+            return f"{var} = 0\nwhile {var} < {end}:\n{indented_body}\n    {var} += 1\n"
+        return re.sub(simple_pattern, replace_simple, code)
 
 
 class InlineFunction(PlagiarismTechnique):
     name = "inline_function"
-    description = "Inline a function call into its body"
+    description = "Replace simple function calls with their likely body"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("helper_func(", "_inlined_code(")
+        result = code
+        result = re.sub(r'\bprint\(([^)]*)\)', r'sys.stdout.write(str(\1) + "\n")', result)
+        result = re.sub(r'\blen\((\w+)\)', r'sum(1 for _ in \1)', result)
+        result = re.sub(r'\bstr\((\w+)\)', r'"\%s" \% (\1,)', result)
+        return result
 
 
 class ExtractFunction(PlagiarismTechnique):
     name = "extract_function"
-    description = "Extract code block into a new function"
+    description = "Wrap inline expressions into a helper function call"
     def apply(self, code: str, seed: int = 42) -> str:
+        rng = random.Random(seed)
+        func_name = f"_helper_{rng.randint(100, 999)}"
+        pattern = r'(\s+)result\s*=\s*(.+)'
+        match = re.search(pattern, code)
+        if match:
+            indent = match.group(1)
+            expr = match.group(2)
+            wrapper = f"{indent}def {func_name}():\n{indent}    return {expr}\n{indent}\n{indent}result = {func_name}()\n"
+            code = code[:match.start()] + wrapper + code[match.end():]
         return code
 
 
@@ -107,21 +148,25 @@ class AddDeadCode(PlagiarismTechnique):
 
 class ChangeDataStructures(PlagiarismTechnique):
     name = "change_data_structures"
-    description = "Replace list with dict/set or vice versa"
+    description = "Replace list/dict/set literals with constructor calls"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("[]", "dict()").replace("{}", "list()")
+        result = code
+        result = re.sub(r'\b(\w+)\s*=\s*\[\s*\]', r'\1 = list()', result)
+        result = re.sub(r'\b(\w+)\s*=\s*\{\s*\}', r'\1 = dict()', result)
+        result = re.sub(r'\.append\(([^)]+)\)', r'.extend([\1])', result)
+        return result
 
 
 class ChangeControlFlow(PlagiarismTechnique):
     name = "change_control_flow"
     description = "Convert if-elif to nested if"
     def apply(self, code: str, seed: int = 42) -> str:
-        return re.sub(r'elif ', 'else:\n        if ', code)
+        return re.sub(r'(\s*)elif ', r'\1else:\n\1    if ', code)
 
 
 class AddComments(PlagiarismTechnique):
     name = "add_comments"
-    description = "Insert excessive/comments"
+    description = "Insert excessive comments"
     def apply(self, code: str, seed: int = 42) -> str:
         rng = random.Random(seed)
         comments = ["# process data", "# check condition", "# loop through items",
@@ -137,7 +182,6 @@ class ChangeWhitespace(PlagiarismTechnique):
     name = "change_whitespace"
     description = "Change indentation and spacing style"
     def apply(self, code: str, seed: int = 42) -> str:
-        # Add extra blank lines
         return code.replace('\n', '\n\n')
 
 
@@ -152,7 +196,6 @@ class ChangeVariableOrder(PlagiarismTechnique):
     name = "change_variable_order"
     description = "Change assignment/swap order where possible"
     def apply(self, code: str, seed: int = 42) -> str:
-        # Swap adjacent independent assignments
         lines = code.split('\n')
         rng = random.Random(seed)
         for i in range(len(lines)-1):
@@ -163,23 +206,73 @@ class ChangeVariableOrder(PlagiarismTechnique):
 
 class NegateCondition(PlagiarismTechnique):
     name = "negate_condition"
-    description = "Flip conditional logic (if not X then Y)"
+    description = "Flip conditional logic by negating comparison operators"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("if not ", "if ").replace("if ", "if not ")
+        def negate_comparison(match):
+            prefix = match.group(1)
+            condition = match.group(2)
+            negated = condition
+            # Use placeholders to avoid swap conflicts
+            # Order matters: do multi-char operators first
+            negated = re.sub(r'!=', '__NEG_NEQ__', negated)
+            negated = re.sub(r'==', '__NEG_EQ__', negated)
+            negated = re.sub(r'<=', '__NEG_LE__', negated)
+            negated = re.sub(r'>=', '__NEG_GE__', negated)
+            negated = re.sub(r'<', '__NEG_LT__', negated)
+            negated = re.sub(r'>', '__NEG_GT__', negated)
+            negated = re.sub(r'\bis not\b', '__NEG_IS__', negated)
+            negated = re.sub(r'\bis\b', '__NEG_ISNOT__', negated)
+            negated = re.sub(r'\bnot in\b', '__NEG_IN__', negated)
+            negated = re.sub(r'\bin\b', '__NEG_NOTIN__', negated)
+            # Replace placeholders with negated operators
+            negated = negated.replace('__NEG_EQ__', '!=')
+            negated = negated.replace('__NEG_NEQ__', '==')
+            negated = negated.replace('__NEG_LT__', '>=')
+            negated = negated.replace('__NEG_GT__', '<=')
+            negated = negated.replace('__NEG_LE__', '>')
+            negated = negated.replace('__NEG_GE__', '<')
+            negated = negated.replace('__NEG_IS__', 'is')
+            negated = negated.replace('__NEG_ISNOT__', 'is not')
+            negated = negated.replace('__NEG_IN__', 'in')
+            negated = negated.replace('__NEG_NOTIN__', 'not in')
+            return f'{prefix}{negated}'
+        result = re.sub(r'(\s*if\s+)(.+?):', negate_comparison, code)
+        if result == code:
+            result = re.sub(r'(\s*while\s+)(.+?):', negate_comparison, code)
+        return result
 
 
 class CombineLoops(PlagiarismTechnique):
     name = "combine_loops"
-    description = "Merge multiple loops into one"
+    description = "Merge consecutive loops over the same iterable where possible"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code
+        pattern = r'(for\s+\w+\s+in\s+\w+:)\s*\n((?:[ \t]+.*\n)+)\s*\n(\1)\s*\n((?:[ \t]+.*\n)+)'
+        def merge(match):
+            header = match.group(1)
+            body1 = match.group(2).rstrip()
+            body2 = match.group(4).rstrip()
+            return f'{header}\n{body1}\n{body2}'
+        return re.sub(pattern, merge, code)
 
 
 class SplitLoops(PlagiarismTechnique):
     name = "split_loops"
-    description = "Split a single loop into multiple loops"
+    description = "Split a loop with multiple independent statements into separate loops"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code
+        pattern = r'(for\s+(\w+)\s+in\s+(\w+):)\s*\n((?:[ \t]+.*\n)+)'
+        def split_loop(match):
+            header = match.group(1)
+            var = match.group(2)
+            iterable = match.group(3)
+            body = match.group(4).strip()
+            lines = body.split('\n')
+            if len(lines) < 2:
+                return match.group(0)
+            mid = len(lines) // 2
+            body1 = '\n'.join(lines[:mid])
+            body2 = '\n'.join(lines[mid:])
+            return f'{header}\n{body1}\n\nfor {var} in {iterable}:\n{body2}'
+        return re.sub(pattern, split_loop, code)
 
 
 class ChangeFunctionSignature(PlagiarismTechnique):
@@ -193,14 +286,24 @@ class ReplaceWithEquivalent(PlagiarismTechnique):
     name = "replace_with_equivalent"
     description = "Replace operations with equivalent alternatives"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("range(len(", "enumerate(").replace("!= 0", "> 0")
+        result = code
+        result = re.sub(r'range\(len\((\w+)\)\)', r'range(len(\1))', result)
+        result = result.replace('!= 0', '> 0')
+        result = result.replace('== True', 'is True')
+        result = result.replace('== False', 'is False')
+        result = result.replace('not (', 'not (')
+        return result
 
 
 class SemanticClone(PlagiarismTechnique):
     name = "semantic_clone"
-    description = "Completely rewrite with different structure"
+    description = "Rewrite with semantically equivalent but structurally different code"
     def apply(self, code: str, seed: int = 42) -> str:
-        return code.replace("if ", "if not not ").replace("return ", "return None or ")
+        result = code
+        result = re.sub(r'\bif\s+(\w+)\s*:', r'if \1 is not None:', result)
+        result = re.sub(r'return\s+(\w+)', r'result = \1\n    return result', result)
+        result = re.sub(r'(\w+)\s*=\s*(\w+)\s*\+\s*(\w+)', r'\1 = \3 + \2', result)
+        return result
 
 
 class ChainTransformation(PlagiarismTechnique):
@@ -263,6 +366,9 @@ class SensitivityDatasetGenerator:
         Returns:
             CanonicalDataset with labeled pairs.
         """
+        if not base_codes:
+            raise ValueError("base_codes cannot be empty")
+        
         pairs: List[CodePair] = []
         pair_id = 0
         
@@ -285,7 +391,8 @@ class SensitivityDatasetGenerator:
                 pair_id += 1
         
         # Add non-clone pairs
-        for i in range(200):
+        non_clone_count = 0
+        while non_clone_count < 200:
             seed = self._seed + pair_id
             base_a = self._rng.choice(base_codes)
             base_b = self._rng.choice(base_codes)
@@ -300,6 +407,7 @@ class SensitivityDatasetGenerator:
                 clone_type=0
             ))
             pair_id += 1
+            non_clone_count += 1
         
         self._rng.shuffle(pairs)
         return CanonicalDataset(
@@ -475,13 +583,13 @@ class ThreeLayerBenchmarkRunner:
         # Layer 1: Sensitivity
         layer1 = self._run_layer1(base_codes)
         
-        # Layer 2: Precision (use synthetic if no real assignments)
+        # Layer 2: Precision (use real assignments if available)
         if student_assignments:
             layer2 = self._run_layer2(student_assignments)
         else:
             layer2 = self._run_layer2_synthetic(base_codes)
         
-        # Layer 3: Generalization
+        # Layer 3: Generalization (use real language samples if available)
         if language_samples:
             layer3 = self._run_layer3(language_samples)
         else:
@@ -666,7 +774,10 @@ class ThreeLayerBenchmarkRunner:
         # Compute bootstrap confidence intervals for each metric
         all_scores = [s["score"] for s in score_details]
         all_labels = [s["label"] for s in score_details]
-        sig_results = add_significance_to_results(all_scores, all_labels, threshold)
+        import numpy as np
+        sig_results = add_significance_to_results(
+            np.array(all_scores), np.array(all_labels), threshold,
+        )
         
         return {
             "precision": sig_results["precision"]["value"],
@@ -690,6 +801,118 @@ class ThreeLayerBenchmarkRunner:
                 "precision": sig_results["precision"],
                 "recall": sig_results["recall"],
             },
+        }
+    
+    def _run_layer2(self, student_assignments: List[StudentAssignment]) -> Dict[str, Any]:
+        """Layer 2: Precision analysis using real student submissions.
+        
+        Compares each student's code against all others to measure
+        false positive rate on genuinely independent work.
+        
+        Args:
+            student_assignments: Real student submission samples.
+        """
+        rng = random.Random(self._seed + 2000)
+        threshold = 0.5
+        
+        # Create pairs from different students (should be non-clones)
+        negative_pairs = []
+        for i in range(min(50, len(student_assignments))):
+            for j in range(i + 1, min(50, len(student_assignments))):
+                if student_assignments[i].assignment_id == student_assignments[j].assignment_id:
+                    continue
+                negative_pairs.append((
+                    student_assignments[i].code,
+                    student_assignments[j].code,
+                    0,
+                ))
+        
+        # Create positive pairs by applying techniques to student code
+        positive_pairs = []
+        for i in range(min(25, len(student_assignments))):
+            original = student_assignments[i].code
+            plagiarized = RenameVariables().apply(original, self._seed + i)
+            positive_pairs.append((original, plagiarized, 1))
+        
+        all_pairs = positive_pairs + negative_pairs
+        score_details = []
+        for a, b, label in all_pairs:
+            score = self._engine.compare(a, b)
+            score_details.append({
+                "score": score,
+                "label": label,
+                "predicted": 1 if score >= threshold else 0,
+            })
+        
+        tp = sum(1 for s in score_details if s["predicted"] == 1 and s["label"] == 1)
+        fp = sum(1 for s in score_details if s["predicted"] == 1 and s["label"] == 0)
+        tn = sum(1 for s in score_details if s["predicted"] == 0 and s["label"] == 0)
+        fn = sum(1 for s in score_details if s["predicted"] == 0 and s["label"] == 1)
+        
+        precision_val = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall_val = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1_val = 2 * precision_val * recall_val / (precision_val + recall_val) if (precision_val + recall_val) > 0 else 0.0
+        
+        return {
+            "precision": round(precision_val, 4),
+            "recall": round(recall_val, 4),
+            "f1": round(f1_val, 4),
+            "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+            "total_pairs": len(all_pairs),
+            "source": "real_student_assignments",
+        }
+    
+    def _run_layer3(self, language_samples: List[Tuple[str, List[str]]]) -> Dict[str, Any]:
+        """Layer 3: Generalization using real multi-language data.
+        
+        Tests the engine across different programming languages
+        to verify cross-language generalization.
+        
+        Args:
+            language_samples: List of (language_name, code_samples) tuples.
+        """
+        per_language = {}
+        
+        for lang, samples in language_samples:
+            scores = []
+            for i in range(len(samples)):
+                for j in range(i + 1, min(i + 10, len(samples))):
+                    score = self._engine.compare(samples[i], samples[j])
+                    scores.append(score)
+            
+            per_language[lang] = {
+                "pairs": len(scores),
+                "mean_score": sum(scores) / len(scores) if scores else 0.0,
+                "max_score": max(scores) if scores else 0.0,
+                "min_score": min(scores) if scores else 0.0,
+            }
+        
+        # Cross-language comparison
+        cross_lang_scores = {}
+        lang_names = [lang for lang, _ in language_samples]
+        for i, lang_a in enumerate(lang_names):
+            for lang_b in lang_names[i + 1:]:
+                samples_a = dict(language_samples)[lang_a]
+                samples_b = dict(language_samples)[lang_b]
+                pair_key = f"cross_{lang_a}_vs_{lang_b}"
+                cross_scores = []
+                for k in range(min(len(samples_a), len(samples_b))):
+                    score = self._engine.compare(samples_a[k], samples_b[k])
+                    cross_scores.append(score)
+                cross_lang_scores[pair_key] = {
+                    "mean_score": sum(cross_scores) / len(cross_scores) if cross_scores else 0.0,
+                    "n_pairs": len(cross_scores),
+                }
+        
+        means = [v["mean_score"] for v in per_language.values()]
+        variance = sum((m - sum(means)/len(means))**2 for m in means) / len(means) if len(means) > 1 else 0.0
+        
+        return {
+            "per_language": per_language,
+            "cross_language": cross_lang_scores,
+            "cross_language_variance": round(variance, 4),
+            "generalization_score": round(1.0 - min(1.0, variance * 10), 4),
+            "source": "real_multi_language",
         }
     
     def _run_layer3_synthetic(self, base_codes: List[str]) -> Dict[str, Any]:

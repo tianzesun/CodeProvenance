@@ -7,6 +7,9 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field
 
+# Re-export canonical definitions from schema.py
+from benchmark.datasets.schema import CodePair, CanonicalDataset
+
 
 @dataclass
 class CodeSample:
@@ -14,75 +17,7 @@ class CodeSample:
     id: str
     code: str
     language: str = "java"
-    metadata: Dict[str, Any] = None
-
-
-@dataclass
-class CodePair:
-    """A pair of code samples with ground truth label."""
-    id_a: str
-    code_a: str
-    id_b: str
-    code_b: str
-    label: int  # 1 = clone/plagiarism, 0 = non-clone
-    clone_type: int = 0  # 1-4 for BigCloneBench, 0 otherwise
     metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-class CanonicalDataset:
-    """Canonical dataset format for the pipeline.
-    
-    All dataset loaders must convert to this format.
-    """
-    def __init__(
-        self,
-        name: str,
-        version: str,
-        pairs: List[CodePair],
-        submissions: Optional[List[CodeSample]] = None
-    ):
-        self.name = name
-        self.version = version
-        self.pairs = pairs
-        self.submissions = submissions or []
-    
-    def __len__(self) -> int:
-        return len(self.pairs)
-    
-    def get_ground_truth(self) -> Dict[Tuple[str, str], int]:
-        """Get ground truth as (id_a, id_b) -> label mapping.
-        
-        Returns:
-            Ground truth dictionary.
-        """
-        return {
-            (p.id_a, p.id_b): p.label
-            for p in self.pairs
-        }
-    
-    def get_query_results(self) -> Dict[str, List[Tuple[str, float, int]]]:
-        """Get data formatted for ranking evaluation.
-        
-        Returns:
-            Dict mapping query_id to list of (doc_id, score, relevance).
-        """
-        queries = {}
-        for pair in self.pairs:
-            if pair.id_a not in queries:
-                queries[pair.id_a] = []
-            queries[pair.id_a].append((pair.id_b, 0.0, pair.label))
-        return queries
-
-    def get_clone_type_map(self) -> Dict[Tuple[str, str], int]:
-        """Get mapping of pair IDs to clone type.
-        
-        Returns:
-            Dict mapping (id_a, id_b) -> clone_type.
-        """
-        return {
-            (p.id_a, p.id_b): p.clone_type
-            for p in self.pairs
-        }
 
 
 class DatasetLoader(ABC):

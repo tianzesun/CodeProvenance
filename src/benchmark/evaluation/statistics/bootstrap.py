@@ -253,6 +253,7 @@ def _stratified_sample(
         boot_indices = rng.choice(cls_indices, size=n_cls, replace=True)
         indices.extend(boot_indices)
     
+    rng.shuffle(indices)
     return np.array(indices)
 
 

@@ -166,9 +166,79 @@ class SimilarityStage(PipelineStage):
         config: Dict[str, Any]
     ) -> SimilarityResult:
         code_a, code_b, engine = input_data
-        score = engine.compare(code_a.raw_code, code_b.raw_code)
         
-        # engine.name is a property, not a method
+        max_code_size = config.get("max_code_size", 1024 * 1024)  # 1MB default
+        if len(code_a.raw_code) > max_code_size:
+            raise ValueError(
+                f"Code A ({code_a.code_id}) exceeds max size "
+                f"({len(code_a.raw_code)} > {max_code_size} bytes)"
+            )
+        if len(code_b.raw_code) > max_code_size:
+            raise ValueError(
+                f"Code B ({code_b.code_id}) exceeds max size "
+                f"({len(code_b.raw_code)} > {max_code_size} bytes)"
+            )
+        
+        if not code_a.raw_code.strip() and not code_b.raw_code.strip():
+            return SimilarityResult(
+                id_a=code_a.code_id,
+                id_b=code_b.code_id,
+                score=1.0,
+                engine_name="",
+                clone_type=config.get("clone_type", 0),
+            )
+        if not code_a.raw_code.strip() or not code_b.raw_code.strip():
+            return SimilarityResult(
+                id_a=code_a.code_id,
+                id_b=code_b.code_id,
+                score=0.0,
+                engine_name="",
+                clone_type=config.get("clone_type", 0),
+            )
+        
+        score = engine.compare(code_a.raw_code, code_b.raw_code)
+        score = max(0.0, min(1.0, score))
+        
+        engine_name = ""
+        if hasattr(engine, 'name'):
+            name_attr = getattr(engine, 'name')
+            engine_name = name_attr() if callable(name_attr) else name_attr
+        
+        clone_type = config.get("clone_type", 0)
+        
+        return SimilarityResult(
+            id_a=code_a.code_id,
+            id_b=code_b.code_id,
+            score=score,
+            engine_name=engine_name,
+            clone_type=clone_type
+        )
+        if len(code_b.raw_code) > max_code_size:
+            raise ValueError(
+                f"Code B ({code_b.code_id}) exceeds max size "
+                f"({len(code_b.raw_code)} > {max_code_size} bytes)"
+            )
+        
+        if not code_a.raw_code.strip() and not code_b.raw_code.strip():
+            return SimilarityResult(
+                id_a=code_a.code_id,
+                id_b=code_b.code_id,
+                score=1.0,
+                engine_name="",
+                clone_type=config.get("clone_type", 0),
+            )
+        if not code_a.raw_code.strip() or not code_b.raw_code.strip():
+            return SimilarityResult(
+                id_a=code_a.code_id,
+                id_b=code_b.code_id,
+                score=0.0,
+                engine_name="",
+                clone_type=config.get("clone_type", 0),
+            )
+        
+        score = engine.compare(code_a.raw_code, code_b.raw_code)
+        score = max(0.0, min(1.0, score))
+        
         engine_name = ""
         if hasattr(engine, 'name'):
             name_attr = getattr(engine, 'name')
@@ -212,11 +282,20 @@ class EvaluationStage(PipelineStage):
         results, ground_truth = input_data
         threshold = config.get("threshold", 0.5)
         
+        evaluated = []
         for result in results:
             key = (result.id_a, result.id_b)
-            result.label = ground_truth.get(key, ground_truth.get((result.id_b, result.id_a), 0))
+            label = ground_truth.get(key, ground_truth.get((result.id_b, result.id_a), 0))
+            evaluated.append(SimilarityResult(
+                id_a=result.id_a,
+                id_b=result.id_b,
+                score=result.score,
+                engine_name=result.engine_name,
+                clone_type=result.clone_type,
+                label=label,
+            ))
         
-        return results
+        return evaluated
 
 
 class MetricsStage(PipelineStage):
@@ -240,14 +319,14 @@ class MetricsStage(PipelineStage):
         config: Dict[str, Any]
     ) -> MetricsResult:
         from benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
-        from benchmark.evaluation.metrics import mean_average_precision, mean_reciprocal_rank
-        import numpy as np
+        
+        threshold = config.get("threshold", 0.5)
         
         # Classification metrics
-        tp = sum(1 for r in input_data if r.score >= config.get("threshold", 0.5) and r.label == 1)
-        fp = sum(1 for r in input_data if r.score >= config.get("threshold", 0.5) and r.label == 0)
-        tn = sum(1 for r in input_data if r.score < config.get("threshold", 0.5) and r.label == 0)
-        fn = sum(1 for r in input_data if r.score < config.get("threshold", 0.5) and r.label == 1)
+        tp = sum(1 for r in input_data if r.score >= threshold and r.label == 1)
+        fp = sum(1 for r in input_data if r.score >= threshold and r.label == 0)
+        tn = sum(1 for r in input_data if r.score < threshold and r.label == 0)
+        fn = sum(1 for r in input_data if r.score < threshold and r.label == 1)
         
         prec = precision(tp, fp)
         rec = recall(tp, fn)
@@ -278,7 +357,7 @@ class MetricsStage(PipelineStage):
                     if label == 1:
                         num_relevant += 1
                         precisions.append(num_relevant / (i + 1))
-                ap_scores.append(np.mean(precisions))
+                ap_scores.append(sum(precisions) / len(precisions))
                 
                 # Reciprocal Rank for this query
                 for i, (_, _, label) in enumerate(results_sorted):
@@ -286,8 +365,8 @@ class MetricsStage(PipelineStage):
                         mrr_scores.append(1.0 / (i + 1))
                         break
         
-        map_score = float(np.mean(ap_scores)) if ap_scores else 0.0
-        mrr_score = float(np.mean(mrr_scores)) if mrr_scores else 0.0
+        map_score = sum(ap_scores) / len(ap_scores) if ap_scores else 0.0
+        mrr_score = sum(mrr_scores) / len(mrr_scores) if mrr_scores else 0.0
         
         return MetricsResult(
             precision=prec,
@@ -399,5 +478,27 @@ class ReportingStage(PipelineStage):
                 results=results_dict,
                 metadata=config
             )
+        
+        # Leaderboard (append to shared file)
+        if config.get("output", {}).get("leaderboard", False):
+            leaderboard_dir = config.get("leaderboard_output_dir", "reports/leaderboard")
+            from pathlib import Path
+            Path(leaderboard_dir).mkdir(parents=True, exist_ok=True)
+            leaderboard_path = f"{leaderboard_dir}/leaderboard.json"
+            
+            from benchmark.reporting import Leaderboard, LeaderboardEntry
+            leaderboard = Leaderboard.load(leaderboard_path)
+            leaderboard.add(LeaderboardEntry(
+                engine=extra_info.get("engine", "unknown"),
+                dataset=extra_info.get("dataset", "unknown"),
+                precision=metrics.precision,
+                recall=metrics.recall,
+                f1=metrics.f1,
+                accuracy=metrics.accuracy,
+                threshold=metrics.threshold,
+                timestamp=timestamp,
+            ))
+            leaderboard.save()
+            paths["leaderboard"] = leaderboard_path
         
         return paths

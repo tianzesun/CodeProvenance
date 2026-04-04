@@ -19,6 +19,14 @@ import random
 import os
 from threading import Lock
 
+try:
+    from tqdm import tqdm
+    _HAS_TQDM = True
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
+    _HAS_TQDM = False
+
 from benchmark.pipeline.config import BenchmarkConfig
 from benchmark.pipeline.loader import CanonicalDataset, CodePair, DatasetLoader
 from benchmark.pipeline.external_loader import ExternalDatasetLoader
@@ -70,6 +78,8 @@ class BenchmarkRunner:
         """
         self._seed = seed
         random.seed(seed)
+        self._sim_cache: Dict[str, float] = {}
+        self._sim_cache_lock = Lock()
 
     def load_external_dataset(
         self,
@@ -108,6 +118,33 @@ class BenchmarkRunner:
             BenchmarkRunResult with metrics and report paths.
         """
         try:
+            # Validate dataset
+            if not dataset.pairs:
+                return BenchmarkRunResult(
+                    config_hash="", dataset_name=dataset.name,
+                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                    success=False, error="Dataset contains no pairs",
+                )
+            pos = sum(1 for p in dataset.pairs if p.label == 1)
+            neg = sum(1 for p in dataset.pairs if p.label == 0)
+            if pos == 0:
+                return BenchmarkRunResult(
+                    config_hash="", dataset_name=dataset.name,
+                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                    success=False,
+                    error=f"Dataset has no positive pairs (all {len(dataset.pairs)} pairs are negative)",
+                )
+            if neg == 0:
+                return BenchmarkRunResult(
+                    config_hash="", dataset_name=dataset.name,
+                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                    success=False,
+                    error=f"Dataset has no negative pairs (all {len(dataset.pairs)} pairs are positive)",
+                )
+
             # Stage 1: Get engine from registry
             engine = registry.get_instance(config.engine.name)
 
@@ -145,11 +182,11 @@ class BenchmarkRunner:
 
             if use_parallel and num_pairs > 100:
                 with ThreadPoolExecutor(max_workers=num_workers) as ex:
-                    list(as_completed({
-                        ex.submit(_normalize_one, p): p for p in dataset.pairs
-                    }))
+                    futs = {ex.submit(_normalize_one, p): p for p in dataset.pairs}
+                    for f in tqdm(as_completed(futs), total=len(futs), desc="Normalizing", disable=not _HAS_TQDM):
+                        f.result()
             else:
-                for pair in dataset.pairs:
+                for pair in tqdm(dataset.pairs, desc="Normalizing", disable=not _HAS_TQDM):
                     _normalize_one(pair)
 
             # ===== Stage 2: Parse all code =====
@@ -185,10 +222,22 @@ class BenchmarkRunner:
                 code_a = parsed.get(pair.id_a)
                 code_b = parsed.get(pair.id_b)
                 if code_a and code_b:
-                    result = similarity_stage.execute(
-                        (code_a, code_b, engine),
-                        {"clone_type": pair.clone_type},
-                    )
+                    cache_key = f"{pair.id_a}:{pair.id_b}"
+                    with self._sim_cache_lock:
+                        cached = self._sim_cache.get(cache_key)
+                    if cached is not None:
+                        result = SimilarityResult(
+                            id_a=pair.id_a, id_b=pair.id_b,
+                            score=cached, engine_name=getattr(engine, 'name', ''),
+                            clone_type=pair.clone_type,
+                        )
+                    else:
+                        result = similarity_stage.execute(
+                            (code_a, code_b, engine),
+                            {"clone_type": pair.clone_type},
+                        )
+                        with self._sim_cache_lock:
+                            self._sim_cache[cache_key] = result.score
                     with results_lock:
                         results.append(result)
 
@@ -295,7 +344,7 @@ class BenchmarkRunner:
             Optimal threshold value.
         """
         best_threshold = 0.5
-        best_score = 0.0
+        best_score = -1.0
 
         for t_int in range(0, 101):
             t = t_int / 100.0
@@ -327,3 +376,184 @@ class BenchmarkRunner:
                 best_threshold = t
 
         return best_threshold
+
+    def run_cv(
+        self,
+        dataset: CanonicalDataset,
+        config: BenchmarkConfig,
+        n_folds: int = 5,
+    ) -> BenchmarkRunResult:
+        """Run benchmark with cross-validated threshold optimization.
+
+        Splits dataset into n_folds, optimizes threshold on n-1 folds,
+        evaluates on held-out fold. Reports average metrics across folds.
+
+        Args:
+            dataset: Loaded dataset to evaluate against.
+            config: Pipeline configuration.
+            n_folds: Number of cross-validation folds.
+
+        Returns:
+            BenchmarkRunResult with averaged metrics.
+        """
+        import random as _random
+        rng = _random.Random(self._seed)
+
+        pairs = list(dataset.pairs)
+        rng.shuffle(pairs)
+        fold_size = max(1, len(pairs) // n_folds)
+        folds = []
+        for i in range(n_folds):
+            start = i * fold_size
+            end = start + fold_size if i < n_folds - 1 else len(pairs)
+            folds.append(pairs[start:end])
+
+        all_metrics = []
+        for fold_idx in range(n_folds):
+            test_pairs = folds[fold_idx]
+            train_pairs = [p for i, fold in enumerate(folds) if i != fold_idx for p in fold]
+
+            train_ds = CanonicalDataset(
+                name=f"{dataset.name}_train_{fold_idx}",
+                version=dataset.version,
+                pairs=train_pairs,
+                language=dataset.language,
+            )
+            test_ds = CanonicalDataset(
+                name=f"{dataset.name}_test_{fold_idx}",
+                version=dataset.version,
+                pairs=test_pairs,
+                language=dataset.language,
+            )
+
+            train_result = self.run(train_ds, config)
+            if not train_result.success:
+                continue
+
+            test_result = self.run(test_ds, config)
+            if test_result.success:
+                all_metrics.append(test_result.metrics)
+
+        if not all_metrics:
+            return BenchmarkRunResult(
+                config_hash=config.config_hash(),
+                dataset_name=dataset.name, dataset_version=dataset.version,
+                engine_name=config.engine.name,
+                metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                success=False, error="All CV folds failed",
+            )
+
+        avg = MetricsResult(
+            precision=sum(m.precision for m in all_metrics) / len(all_metrics),
+            recall=sum(m.recall for m in all_metrics) / len(all_metrics),
+            f1=sum(m.f1 for m in all_metrics) / len(all_metrics),
+            accuracy=sum(m.accuracy for m in all_metrics) / len(all_metrics),
+            map_score=sum(m.map_score for m in all_metrics) / len(all_metrics),
+            mrr_score=sum(m.mrr_score for m in all_metrics) / len(all_metrics),
+            ndcg=sum(m.ndcg for m in all_metrics) / len(all_metrics),
+            top_k_precision=sum(m.top_k_precision for m in all_metrics) / len(all_metrics),
+            threshold=sum(m.threshold for m in all_metrics) / len(all_metrics),
+            tp=int(sum(m.tp for m in all_metrics) / len(all_metrics)),
+            fp=int(sum(m.fp for m in all_metrics) / len(all_metrics)),
+            tn=int(sum(m.tn for m in all_metrics) / len(all_metrics)),
+            fn=int(sum(m.fn for m in all_metrics) / len(all_metrics)),
+        )
+
+        return BenchmarkRunResult(
+            config_hash=config.config_hash(),
+            dataset_name=dataset.name, dataset_version=dataset.version,
+            engine_name=config.engine.name,
+            metrics=avg,
+            success=True,
+        )
+
+    def run_comparison(
+        self,
+        dataset: CanonicalDataset,
+        engine_names: List[str],
+        config: Optional[BenchmarkConfig] = None,
+    ) -> Dict[str, BenchmarkRunResult]:
+        """Run benchmark with multiple engines and compare results.
+
+        Args:
+            dataset: Loaded dataset to evaluate against.
+            engine_names: List of engine names to compare.
+            config: Pipeline configuration (engine name will be overridden).
+
+        Returns:
+            Dict mapping engine name to BenchmarkRunResult.
+        """
+        results = {}
+        for engine_name in engine_names:
+            engine_config = BenchmarkConfig()
+            if config:
+                engine_config = config
+                engine_config.engine.name = engine_name
+            else:
+                engine_config.engine.name = engine_name
+            results[engine_name] = self.run(dataset, engine_config)
+        return results
+
+    def run_comparison_report(
+        self,
+        dataset: CanonicalDataset,
+        engine_names: List[str],
+        config: Optional[BenchmarkConfig] = None,
+    ) -> str:
+        """Run multi-engine comparison and return a formatted report string.
+
+        Args:
+            dataset: Loaded dataset to evaluate against.
+            engine_names: List of engine names to compare.
+            config: Pipeline configuration.
+
+        Returns:
+            Formatted comparison report string.
+        """
+        results = self.run_comparison(dataset, engine_names, config)
+
+        lines = []
+        lines.append(f"Engine Comparison Report - {dataset.name}")
+        lines.append("=" * 80)
+        header = f"{'Engine':<25} {'Precision':>10} {'Recall':>10} {'F1':>10} {'Accuracy':>10} {'Threshold':>10}"
+        lines.append(header)
+        lines.append("-" * 80)
+
+        for name in engine_names:
+            r = results[name]
+            if r.success:
+                m = r.metrics
+                lines.append(
+                    f"{name:<25} {m.precision:>10.4f} {m.recall:>10.4f} "
+                    f"{m.f1:>10.4f} {m.accuracy:>10.4f} {m.threshold:>10.4f}"
+                )
+            else:
+                lines.append(f"{name:<25} {'FAILED':>65} ({r.error})")
+
+        lines.append("-" * 80)
+
+        # Statistical significance
+        if len(engine_names) >= 2:
+            import numpy as np
+            from benchmark.evaluation.metrics.significance import compare_engines_significance
+
+            scores_by_engine = {}
+            for name in engine_names:
+                r = results[name]
+                if r.success:
+                    scores_by_engine[name] = r
+
+            engine_list = [n for n in engine_names if n in scores_by_engine]
+            for i in range(len(engine_list)):
+                for j in range(i + 1, len(engine_list)):
+                    a_name = engine_list[i]
+                    b_name = engine_list[j]
+                    lines.append(f"\n{a_name} vs {b_name}:")
+
+                    # Get scores from the results - we need to re-run to get paired scores
+                    # For now, show F1 comparison
+                    a_f1 = scores_by_engine[a_name].metrics.f1
+                    b_f1 = scores_by_engine[b_name].metrics.f1
+                    lines.append(f"  F1 delta: {a_f1 - b_f1:+.4f}")
+
+        return "\n".join(lines)

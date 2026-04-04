@@ -31,7 +31,8 @@ class JPlagNormalizer(BaseNormalizer):
                 pass
         elif json_file:
             try:
-                data = json.load(open(json_file))
+                with open(json_file) as f:
+                    data = json.load(f)
                 for c in data.get("comparisons", []):
                     f1, f2 = c.get("name1",""), c.get("name2","")
                     sim = float(c.get("similarity", 0))

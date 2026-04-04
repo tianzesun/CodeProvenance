@@ -241,7 +241,7 @@ def compare_engines_significance(
     )
     
     # McNemar's test
-    mcnemar_result = mcnemar_test(y_true, scores_a, scores_b)
+    mcnemar_result = mcnemar_test(y_true, pred_a, pred_b)
     
     # Point estimates
     f1_a = f1_fn(y_true, pred_a)

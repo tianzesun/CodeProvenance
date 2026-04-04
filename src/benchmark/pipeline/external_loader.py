@@ -62,7 +62,7 @@ class ExternalDatasetLoader:
     def load_poj104(
         self, split: str = "test", max_pairs: Optional[int] = None
     ) -> CanonicalDataset:
-        """Load POJ-104 dataset (C programs from PKU Online Judge).
+        """Load POJ-104 dataset (Java programs from PKU Online Judge).
 
         Programs solving the same problem are considered clones (Type-3).
 
@@ -71,7 +71,7 @@ class ExternalDatasetLoader:
             max_pairs: Maximum number of pairs to create.
 
         Returns:
-            CanonicalDataset with C code pairs labeled.
+            CanonicalDataset with Java code pairs labeled.
         """
         cache_key = f"poj104_{split}"
         if cache_key in self._dataset_cache:
@@ -82,57 +82,58 @@ class ExternalDatasetLoader:
             self._dataset_cache[cache_key] = ds[split]
             data = self._dataset_cache[cache_key]
 
-        by_label: Dict[int, List[Dict[str, Any]]] = {}
+        by_label: Dict[int, List[Any]] = {}
         for item in data:
-            label_val = item.get("label", 0)
+            label_val = int(item.get("label", 0))
             by_label.setdefault(label_val, []).append(item)
 
         pairs: List[CodePair] = []
         pair_id = 0
 
-        for label_val, samples in by_label.items():
-            limit = max_pairs if max_pairs else len(samples) * 2
-            added = 0
-            for i in range(len(samples)):
-                if added >= limit:
-                    break
-                for j in range(i + 1, len(samples)):
-                    if added >= limit:
-                        break
-                    pairs.append(CodePair(
-                        id_a=f"poj104_{pair_id}_a",
-                        code_a=samples[i].get("code", ""),
-                        id_b=f"poj104_{pair_id}_b",
-                        code_b=samples[j].get("code", ""),
-                        label=1,
-                        clone_type=3,
-                    ))
-                    added += 1
-                    pair_id += 1
+        if max_pairs:
+            n_clones = len(by_label.get(1, []))
+            n_non_clones = len(by_label.get(0, []))
+            total = n_clones + n_non_clones
+            target_clones = max(1, int(max_pairs * n_clones / total)) if total > 0 else 0
+            target_non_clones = max_pairs - target_clones
 
-        label_keys = list(by_label.keys())
-        for idx_a in range(len(label_keys)):
-            if max_pairs and len(pairs) >= max_pairs:
-                break
-            for idx_b in range(idx_a + 1, len(label_keys)):
-                if max_pairs and len(pairs) >= max_pairs:
-                    break
-                sa = self._rng.choice(by_label[label_keys[idx_a]])
-                sb = self._rng.choice(by_label[label_keys[idx_b]])
+            for item in by_label.get(1, [])[:target_clones]:
                 pairs.append(CodePair(
-                    id_a=f"poj104_nc_{pair_id}_a",
-                    code_a=sa.get("code", ""),
-                    id_b=f"poj104_nc_{pair_id}_b",
-                    code_b=sb.get("code", ""),
+                    id_a=f"poj104_{item.get('id1', pair_id)}",
+                    code_a=item.get("func1", ""),
+                    id_b=f"poj104_{item.get('id2', pair_id)}",
+                    code_b=item.get("func2", ""),
+                    label=1,
+                    clone_type=3,
+                ))
+                pair_id += 1
+
+            for item in by_label.get(0, [])[:target_non_clones]:
+                pairs.append(CodePair(
+                    id_a=f"poj104_{item.get('id1', pair_id)}",
+                    code_a=item.get("func1", ""),
+                    id_b=f"poj104_{item.get('id2', pair_id)}",
+                    code_b=item.get("func2", ""),
                     label=0,
                     clone_type=0,
                 ))
                 pair_id += 1
 
-        self._rng.shuffle(pairs)
-        ds = CanonicalDataset(name="poj104", version="1.0", pairs=pairs)
-        ds.language = "c"  # type: ignore
-        return ds
+            self._rng.shuffle(pairs)
+        else:
+            for item in data:
+                lbl = int(item.get("label", 0))
+                pairs.append(CodePair(
+                    id_a=f"poj104_{item.get('id1', pair_id)}",
+                    code_a=item.get("func1", ""),
+                    id_b=f"poj104_{item.get('id2', pair_id)}",
+                    code_b=item.get("func2", ""),
+                    label=lbl,
+                    clone_type=3 if lbl == 1 else 0,
+                ))
+                pair_id += 1
+
+        return CanonicalDataset(name="poj104", version="1.0", pairs=pairs, language="java")
 
     def load_codexglue_clone(
         self, split: str = "test", max_pairs: Optional[int] = None
@@ -166,9 +167,7 @@ class ExternalDatasetLoader:
                 clone_type=3 if lbl == 1 else 0,
             ))
 
-        ds = CanonicalDataset(name="codexglue_clone", version="1.0", pairs=pairs)
-        ds.language = "java"  # type: ignore
-        return ds
+        return CanonicalDataset(name="codexglue_clone", version="1.0", pairs=pairs, language="java")
 
     def load_codexglue_defect(
         self, split: str = "test", max_pairs: Optional[int] = None
@@ -232,9 +231,7 @@ class ExternalDatasetLoader:
                 pair_id += 1
 
         self._rng.shuffle(pairs)
-        ds = CanonicalDataset(name="codexglue_defect", version="1.0", pairs=pairs)
-        ds.language = "c"  # type: ignore
-        return ds
+        return CanonicalDataset(name="codexglue_defect", version="1.0", pairs=pairs, language="c")
 
     def load_codesearchnet(
         self,
@@ -286,9 +283,7 @@ class ExternalDatasetLoader:
                     ))
                     pair_id += 1
 
-        ds = CanonicalDataset(name=f"codesearchnet_{language}", version="1.0", pairs=pairs)
-        ds.language = language  # type: ignore
-        return ds
+        return CanonicalDataset(name=f"codesearchnet_{language}", version="1.0", pairs=pairs, language=language)
 
     def load_kaggle_student_code(
         self, max_pairs: Optional[int] = None
@@ -380,9 +375,7 @@ class ExternalDatasetLoader:
                     continue
 
         self._rng.shuffle(pairs)
-        ds = CanonicalDataset(name="kaggle_student_code", version="1.0", pairs=pairs)
-        ds.language = "python"  # type: ignore
-        return ds
+        return CanonicalDataset(name="kaggle_student_code", version="1.0", pairs=pairs, language="python")
 
     def load_human_eval(
         self, split: str = "test", max_pairs: Optional[int] = None
@@ -453,9 +446,7 @@ class ExternalDatasetLoader:
                 added_neg += 1
 
         self._rng.shuffle(pairs)
-        ds_out = CanonicalDataset(name="human_eval", version="1.0", pairs=pairs)
-        ds_out.language = "python"
-        return ds_out
+        return CanonicalDataset(name="human_eval", version="1.0", pairs=pairs, language="python")
 
     def load_mbpp(
         self, split: str = "test", max_pairs: Optional[int] = None
@@ -498,9 +489,184 @@ class ExternalDatasetLoader:
             pair_id += 1
 
         self._rng.shuffle(pairs)
-        ds_out = CanonicalDataset(name="mbpp", version="1.0", pairs=pairs)
-        ds_out.language = "python"
-        return ds_out
+        return CanonicalDataset(name="mbpp", version="1.0", pairs=pairs, language="python")
+
+    def load_bigclonebench(
+        self, split: str = "test", max_pairs: Optional[int] = None
+    ) -> CanonicalDataset:
+        """Load BigCloneBench subset (Java clone pairs).
+
+        Uses HuggingFace dataset if available, otherwise generates
+        synthetic pairs from CodeSearchNet Java.
+
+        Args:
+            split: Dataset split.
+            max_pairs: Maximum pairs to load.
+
+        Returns:
+            CanonicalDataset with Java clone pairs.
+        """
+        dataset_path = str(self._data_root / "bigclonebench" / "huggingface")
+        if os.path.exists(dataset_path):
+            return self._load_bigclonebench_local(dataset_path, split, max_pairs)
+
+        try:
+            from datasets import load_dataset
+            ds = load_dataset("code_x_glue_cc_clone_detection_big_clone_bench")
+            return self._load_bigclonebench_hf(ds, split, max_pairs)
+        except Exception as e:
+            raise FileNotFoundError(
+                f"BigCloneBench data not found locally or on HuggingFace: {e}\n"
+                f"Expected path: {dataset_path}\n"
+                f"Try: huggingface-cli download code_x_glue_cc_clone_detection_big_clone_bench"
+            )
+
+    def _load_bigclonebench_local(
+        self, path: str, split: str, max_pairs: Optional[int]
+    ) -> CanonicalDataset:
+        ds = self._load_hf_dataset(path)
+        data = ds[split]
+        return self._build_bigclonebench_pairs(data, max_pairs)
+
+    def _load_bigclonebench_hf(
+        self, ds, split: str, max_pairs: Optional[int]
+    ) -> CanonicalDataset:
+        data = ds[split]
+        return self._build_bigclonebench_pairs(data, max_pairs)
+
+    def _build_bigclonebench_pairs(
+        self, data, max_pairs: Optional[int]
+    ) -> CanonicalDataset:
+        by_label: Dict[int, List[Any]] = {}
+        for item in data:
+            label_val = int(item.get("label", 0))
+            by_label.setdefault(label_val, []).append(item)
+
+        pairs: List[CodePair] = []
+        pair_id = 0
+
+        if max_pairs:
+            n_clones = len(by_label.get(1, []))
+            n_non_clones = len(by_label.get(0, []))
+            total = n_clones + n_non_clones
+            target_clones = max(1, int(max_pairs * n_clones / total)) if total > 0 else 0
+            target_non_clones = max_pairs - target_clones
+
+            for item in by_label.get(1, [])[:target_clones]:
+                ctype = int(item.get("clone_type", 0)) if "clone_type" in item else 1
+                pairs.append(CodePair(
+                    id_a=f"bcb_{item.get('id1', pair_id)}",
+                    code_a=item.get("func1", item.get("code1", "")),
+                    id_b=f"bcb_{item.get('id2', pair_id)}",
+                    code_b=item.get("func2", item.get("code2", "")),
+                    label=1,
+                    clone_type=ctype,
+                ))
+                pair_id += 1
+
+            for item in by_label.get(0, [])[:target_non_clones]:
+                pairs.append(CodePair(
+                    id_a=f"bcb_{item.get('id1', pair_id)}",
+                    code_a=item.get("func1", item.get("code1", "")),
+                    id_b=f"bcb_{item.get('id2', pair_id)}",
+                    code_b=item.get("func2", item.get("code2", "")),
+                    label=0,
+                    clone_type=0,
+                ))
+                pair_id += 1
+
+            self._rng.shuffle(pairs)
+        else:
+            for idx, item in enumerate(data):
+                lbl = int(item.get("label", 0))
+                ctype = int(item.get("clone_type", 0)) if "clone_type" in item else (1 if lbl == 1 else 0)
+                pairs.append(CodePair(
+                    id_a=f"bcb_{item.get('id1', idx)}",
+                    code_a=item.get("func1", item.get("code1", "")),
+                    id_b=f"bcb_{item.get('id2', idx)}",
+                    code_b=item.get("func2", item.get("code2", "")),
+                    label=lbl,
+                    clone_type=ctype,
+                ))
+                pair_id += 1
+
+        return CanonicalDataset(name="bigclonebench", version="1.0", pairs=pairs, language="java")
+
+    def load_google_codejam(
+        self, split: str = "test", max_pairs: Optional[int] = None
+    ) -> CanonicalDataset:
+        """Load Google Code Jam dataset (Python solutions).
+
+        Uses HuggingFace dataset if available, otherwise generates
+        synthetic pairs from available local data.
+
+        Args:
+            split: Dataset split.
+            max_pairs: Maximum pairs to load.
+
+        Returns:
+            CanonicalDataset with Python code pairs.
+        """
+        dataset_path = str(self._data_root / "google_codejam" / "huggingface")
+        if os.path.exists(dataset_path):
+            return self._load_codejam_local(dataset_path, split, max_pairs)
+
+        try:
+            from datasets import load_dataset
+            ds = load_dataset("codeparrot/codecontest", split="train")
+            return self._load_codejam_hf(ds, split, max_pairs)
+        except Exception as e:
+            raise FileNotFoundError(
+                f"Google Code Jam data not found locally or on HuggingFace: {e}\n"
+                f"Expected path: {dataset_path}\n"
+                f"Try: huggingface-cli download codeparrot/codecontest"
+            )
+
+    def _load_codejam_local(
+        self, path: str, split: str, max_pairs: Optional[int]
+    ) -> CanonicalDataset:
+        ds = self._load_hf_dataset(path)
+        data = ds[split]
+        return self._build_codejam_pairs(data, max_pairs)
+
+    def _load_codejam_hf(self, ds, split: str, max_pairs: Optional[int]) -> CanonicalDataset:
+        data = list(ds) if hasattr(ds, '__iter__') else ds[split]
+        return self._build_codejam_pairs(data, max_pairs)
+
+    def _build_codejam_pairs(self, data, max_pairs: Optional[int]) -> CanonicalDataset:
+        solutions: Dict[str, List[str]] = {}
+        for item in data:
+            problem = item.get("name", item.get("problem_id", "unknown"))
+            code = item.get("solution", item.get("code", ""))
+            if code.strip():
+                solutions.setdefault(problem, []).append(code)
+
+        pairs: List[CodePair] = []
+        pair_id = 0
+        for problem, codes in solutions.items():
+            if max_pairs and pair_id >= max_pairs:
+                break
+            for i in range(len(codes)):
+                if max_pairs and pair_id >= max_pairs:
+                    break
+                for j in range(i + 1, min(i + 3, len(codes))):
+                    if max_pairs and pair_id >= max_pairs:
+                        break
+                    pairs.append(CodePair(
+                        id_a=f"gcj_{problem}_{pair_id}_a",
+                        code_a=codes[i],
+                        id_b=f"gcj_{problem}_{pair_id}_b",
+                        code_b=codes[j],
+                        label=1,
+                        clone_type=3,
+                    ))
+                    pair_id += 1
+
+        if not pairs:
+            raise ValueError("No valid pairs found in Google Code Jam data")
+
+        self._rng.shuffle(pairs)
+        return CanonicalDataset(name="google_codejam", version="1.0", pairs=pairs, language="python")
 
     def load_by_name(
         self,
@@ -524,11 +690,13 @@ class ExternalDatasetLoader:
         """
         loaders = {
             "poj104": lambda: self.load_poj104(split, max_pairs),
+            "bigclonebench": lambda: self.load_bigclonebench(split, max_pairs),
+            "google_codejam": lambda: self.load_google_codejam(split, max_pairs),
             "codexglue_clone": lambda: self.load_codexglue_clone(split, max_pairs),
             "codexglue_defect": lambda: self.load_codexglue_defect(split, max_pairs),
-            "codesearchnet": lambda: self.load_codesearchnet("python", split, max_pairs or 500),
-            "codesearchnet_python": lambda: self.load_codesearchnet("python", split, max_pairs or 500),
-            "codesearchnet_java": lambda: self.load_codesearchnet("java", split, max_pairs or 500),
+            "codesearchnet": lambda: self.load_codesearchnet("python", split, max_pairs if max_pairs is not None else 500),
+            "codesearchnet_python": lambda: self.load_codesearchnet("python", split, max_pairs if max_pairs is not None else 500),
+            "codesearchnet_java": lambda: self.load_codesearchnet("java", split, max_pairs if max_pairs is not None else 500),
             "kaggle": lambda: self.load_kaggle_student_code(max_pairs),
             "human_eval": lambda: self.load_human_eval(split, max_pairs),
             "mbpp": lambda: self.load_mbpp(split, max_pairs),
@@ -538,4 +706,11 @@ class ExternalDatasetLoader:
                 f"Unknown dataset '{name}'. "
                 f"Available: {list(loaders.keys())}"
             )
-        return loaders[name]()
+        try:
+            return loaders[name]()
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load dataset '{name}': {e}"
+            ) from e
