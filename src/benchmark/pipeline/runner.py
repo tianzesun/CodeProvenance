@@ -47,6 +47,20 @@ from benchmark.forensics.clone_type_breakdown import (
     analyze_clone_type_breakdown,
 )
 
+# Auto-load plugins
+try:
+    import plugins
+    plugins.load_plugins()
+except ImportError:
+    pass
+
+# Auto-load plugins
+try:
+    import plugins
+    plugins.load_plugins()
+except ImportError:
+    pass
+
 
 def _parse_code_single(args):
     """Top-level function for ProcessPoolExecutor (must be picklable).

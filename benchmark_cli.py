@@ -291,5 +291,79 @@ output:
     click.echo(f"Config written to {output}")
 
 
+@cli.command("list-plugins")
+def list_plugins():
+    """List installed plugins."""
+    try:
+        import plugins
+        loaded = plugins.load_plugins()
+    except ImportError:
+        loaded = []
+
+    plugins_dir = os.path.join(os.path.dirname(__file__), "plugins")
+    click.echo(f"Plugins directory: {plugins_dir}")
+    click.echo()
+
+    if os.path.exists(plugins_dir):
+        py_files = [f for f in os.listdir(plugins_dir) if f.endswith(".py") and not f.startswith("_")]
+        if py_files:
+            click.echo("Plugin files:")
+            for f in sorted(py_files):
+                status = "✓ loaded" if f[:-3] in loaded else "✗ failed"
+                click.echo(f"  {f:<30} {status}")
+        else:
+            click.echo("No plugin files found.")
+    else:
+        click.echo("Plugins directory does not exist.")
+
+    click.echo()
+    click.echo(f"Total engines registered: {len(registry.list_engines())}")
+
+
+@cli.command("plugin-create")
+@click.argument("name")
+def plugin_create(name):
+    """Create a new plugin template."""
+    plugins_dir = os.path.join(os.path.dirname(__file__), "plugins")
+    os.makedirs(plugins_dir, exist_ok=True)
+
+    filepath = os.path.join(plugins_dir, f"{name}.py")
+    if os.path.exists(filepath):
+        click.echo(f"Plugin '{name}' already exists at {filepath}", err=True)
+        sys.exit(1)
+
+    class_name = "".join(w.capitalize() for w in name.split("_")) + "Engine"
+    template = f'''"""{name} detection engine plugin."""
+from benchmark.similarity.base_engine import BaseSimilarityEngine
+
+
+class {class_name}(BaseSimilarityEngine):
+    """Custom detection engine: {name}."""
+
+    def name(self) -> str:
+        return "{name}"
+
+    def description(self) -> str:
+        return "Custom {name} detection engine"
+
+    def compare(self, code1: str, code2: str) -> float:
+        """Compute similarity between two code snippets.
+
+        Args:
+            code1: First code snippet.
+            code2: Second code snippet.
+
+        Returns:
+            Similarity score between 0.0 and 1.0.
+        """
+        # TODO: Implement your similarity logic here
+        return 0.5
+'''
+    with open(filepath, "w") as f:
+        f.write(template)
+    click.echo(f"Plugin template created: {filepath}")
+    click.echo("Edit the file and run 'benchmark list-plugins' to verify.")
+
+
 if __name__ == "__main__":
     cli()

@@ -23,6 +23,13 @@ from benchmark.pipeline.config import EngineConfig, OutputConfig, ThresholdConfi
 from benchmark.pipeline.external_loader import ExternalDatasetLoader
 from benchmark.registry import registry
 
+# Auto-load plugins
+try:
+    import plugins
+    plugins.load_plugins()
+except ImportError:
+    pass
+
 app = Flask(__name__)
 
 # Shared state
@@ -103,6 +110,13 @@ def _run_benchmark_task(task_id, engine, dataset, pairs, split):
     except Exception as e:
         _running_benchmarks[task_id]["status"] = "failed"
         _running_benchmarks[task_id]["error"] = str(e)
+
+
+# ---- Dashboard Route ----
+
+@app.route("/")
+def dashboard():
+    return render_template_string(DASHBOARD_TEMPLATE)
 
 
 # ---- API Routes ----
@@ -210,6 +224,54 @@ def api_compare():
             } if result.success else None,
         }
     return jsonify({"results": results, "dataset": dataset, "pairs": len(ds.pairs)})
+
+
+@app.route("/api/export/csv")
+def api_export_csv():
+    """Export leaderboard data as CSV."""
+    import csv
+    import io
+    data = _load_leaderboard()
+    entries = data.get("entries", [])
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Engine", "Dataset", "Precision", "Recall", "F1", "Accuracy", "Threshold", "Timestamp"])
+    for e in entries:
+        writer.writerow([
+            e.get("engine", ""), e.get("dataset", ""),
+            e.get("precision", ""), e.get("recall", ""),
+            e.get("f1", ""), e.get("accuracy", ""),
+            e.get("threshold", ""), e.get("timestamp", ""),
+        ])
+    output.seek(0)
+    from flask import Response
+    return Response(output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=leaderboard.csv"})
+
+
+@app.route("/api/export/markdown")
+def api_export_markdown():
+    """Export leaderboard data as Markdown table."""
+    data = _load_leaderboard()
+    entries = data.get("entries", [])
+    lines = [
+        "# CodeProvenance Benchmark Leaderboard",
+        "",
+        f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        "",
+        "| # | Engine | Dataset | Precision | Recall | F1 | Accuracy | Timestamp |",
+        "|---|--------|---------|-----------|--------|-----|----------|-----------|",
+    ]
+    for i, e in enumerate(entries, 1):
+        lines.append(
+            f"| {i} | {e.get('engine','')} | {e.get('dataset','')} | "
+            f"{e.get('precision','—')} | {e.get('recall','—')} | "
+            f"{e.get('f1','—')} | {e.get('accuracy','—')} | "
+            f"{e.get('timestamp','—')} |"
+        )
+    from flask import Response
+    return Response("\n".join(lines), mimetype="text/markdown",
+                    headers={"Content-Disposition": "attachment; filename=leaderboard.md"})
 
 
 # ---- HTML Template (Artificial Analysis style) ----
@@ -744,9 +806,20 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
                 <button class="btn btn-outline btn-sm" onclick="loadLeaderboard()">
                     <span id="refresh-icon">↻</span>
                 </button>
-                <button class="btn btn-sm" onclick="openRunModal()" style="margin-left:auto;">
-                    <span style="margin-right:0.3rem;">+</span> Run Benchmark
-                </button>
+                <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                    <button class="btn btn-outline btn-sm" onclick="window.open('/api/export/csv','_blank')">↓ CSV</button>
+                    <button class="btn btn-outline btn-sm" onclick="window.open('/api/export/markdown','_blank')">↓ MD</button>
+                    <button class="btn btn-sm" onclick="openRunModal()">
+                        <span style="margin-right:0.3rem;">+</span> Run Benchmark
+                    </button>
+                </div>
+                <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                    <button class="btn btn-outline btn-sm" onclick="window.open('/api/export/csv','_blank')">↓ CSV</button>
+                    <button class="btn btn-outline btn-sm" onclick="window.open('/api/export/markdown','_blank')">↓ MD</button>
+                    <button class="btn btn-sm" onclick="openRunModal()">
+                        <span style="margin-right:0.3rem;">+</span> Run Benchmark
+                    </button>
+                </div>
             </div>
             <div class="table-container">
                 <div class="table-scroll">
