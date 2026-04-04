@@ -15,6 +15,9 @@ import {
   ChevronDown,
   ChevronUp,
   Building2,
+  CheckCircle2,
+  AlertCircle,
+  FileCode,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -42,7 +45,14 @@ export default function ResultsPage() {
     setLoading(false);
   };
 
-  if (loading) return <DashboardLayout><div className="p-8 flex justify-center"><div className="animate-spin w-8 h-8 border-4 border-slate-200 border-t-brand-600 rounded-full" /></div></DashboardLayout>;
+  if (loading) return (
+    <DashboardLayout>
+      <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="w-10 h-10 border-4 border-slate-200 border-t-brand-500 rounded-full animate-spin" />
+        <p className="text-sm text-slate-500 mt-4">Loading results...</p>
+      </div>
+    </DashboardLayout>
+  );
   if (!job) return null;
 
   const results = job.results || [];
@@ -64,30 +74,36 @@ export default function ResultsPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8 max-w-6xl">
+      <div className="p-6 lg:p-8">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500 mb-6">
-          <Link href="/" className="hover:text-brand-600">Dashboard</Link>
-          <span>/</span>
+          <Link href="/" className="hover:text-brand-600 transition-colors">Dashboard</Link>
+          <span className="text-slate-300">/</span>
           <span className="text-slate-900 font-medium">{job.course_name}</span>
         </div>
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">{job.course_name} -- {job.assignment_name}</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Case ID: {job.id} | {job.created_at?.slice(0, 16).replace('T', ' ')} | Threshold: {(job.threshold * 100).toFixed(0)}%
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{job.course_name}</h1>
+            </div>
+            <p className="text-slate-500">
+              {job.assignment_name}
+              <span className="mx-2 text-slate-300">|</span>
+              Case ID: <span className="font-mono text-slate-700">{job.id}</span>
+              <span className="mx-2 text-slate-300">|</span>
+              {job.created_at?.slice(0, 16).replace('T', ' ')}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <a href={`${API}/report/${id}/download`} className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
+            <a href={`${API}/report/${id}/download`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-all">
               <FileText size={16} /> HTML Report
             </a>
-            <a href={`${API}/report/${id}/download-json`} className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
+            <a href={`${API}/report/${id}/download-json`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-all">
               <Download size={16} /> JSON
             </a>
-            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors">
+            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20">
               <Building2 size={16} /> Committee Report
             </a>
           </div>
@@ -95,51 +111,61 @@ export default function ResultsPage() {
 
         {/* Alert banner */}
         {summary.suspicious_pairs > 0 && (
-          <div className="bg-amber-50 border border-amber-200 border-l-4 border-l-amber-500 rounded-lg p-4 mb-6 flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <p className="font-semibold text-amber-800">{summary.suspicious_pairs} flagged pair(s) detected above threshold</p>
-              <p className="text-sm text-amber-700">{critical.length} critical and {high.length} high-risk findings require review.</p>
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-8 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} className="text-amber-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-amber-900">{summary.suspicious_pairs} flagged pair(s) detected above {(job.threshold * 100).toFixed(0)}% threshold</p>
+                <p className="text-sm text-amber-700 mt-0.5">
+                  {critical.length} critical and {high.length} high-risk findings require review.
+                </p>
+              </div>
             </div>
-            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors shrink-0">
+            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20 shrink-0">
               <Shield size={14} /> Generate Committee Report
             </a>
           </div>
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <StatCard label="Submissions" value={job.file_count} />
-          <StatCard label="Pairs Compared" value={summary.total_pairs || 0} />
-          <StatCard label="Flagged Pairs" value={summary.suspicious_pairs || 0} color="red" />
-          <StatCard label="Critical Risk" value={critical.length} color="red" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard label="Submissions" value={job.file_count} gradient="from-blue-500 to-blue-600" bgLight="bg-blue-50" />
+          <StatCard label="Pairs Compared" value={summary.total_pairs || 0} gradient="from-slate-500 to-slate-600" bgLight="bg-slate-50" />
+          <StatCard label="Flagged Pairs" value={summary.suspicious_pairs || 0} gradient="from-amber-500 to-amber-600" bgLight="bg-amber-50" />
+          <StatCard label="Critical Risk" value={critical.length} gradient="from-red-500 to-red-600" bgLight="bg-red-50" />
         </div>
 
         {/* Risk distribution */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          <RiskCard count={critical.length} label="Critical (90%+)" color="red" />
-          <RiskCard count={high.length} label="High (75-89%)" color="amber" />
-          <RiskCard count={medium.length} label="Medium (50-74%)" color="yellow" />
-          <RiskCard count={low.length} label="Low (<50%)" color="green" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          <RiskCard count={critical.length} label="Critical" range="90%+" color="red" />
+          <RiskCard count={high.length} label="High" range="75-89%" color="amber" />
+          <RiskCard count={medium.length} label="Medium" range="50-74%" color="yellow" />
+          <RiskCard count={low.length} label="Low" range="<50%" color="green" />
         </div>
 
         {/* Results */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
-            <h2 className="font-semibold text-slate-900">Pairwise Similarity Results</h2>
-            <div className="flex gap-1">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="font-semibold text-slate-900">Pairwise Similarity Results</h2>
+              <p className="text-sm text-slate-500 mt-0.5">{results.length} pairs analyzed</p>
+            </div>
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
               {[
-                { key: 'all', label: `All (${results.length})` },
-                { key: 'critical', label: `Critical (${critical.length})` },
-                { key: 'high', label: `High (${high.length})` },
-                { key: 'flagged', label: `Flagged (${summary.suspicious_pairs || 0})` },
+                { key: 'all', label: `All` },
+                { key: 'flagged', label: `Flagged` },
+                { key: 'critical', label: `Critical` },
+                { key: 'high', label: `High` },
               ].map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => setFilter(tab.key)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                     filter === tab.key
-                      ? 'bg-brand-600 text-white'
-                      : 'text-slate-500 hover:bg-slate-100'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   {tab.label}
@@ -149,75 +175,100 @@ export default function ResultsPage() {
           </div>
 
           {filtered.length === 0 ? (
-            <div className="text-center py-16 text-slate-400">
-              <BarChart3 size={40} className="mx-auto mb-3" />
-              <p>No results match the selected filter.</p>
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
+                <CheckCircle2 size={28} className="text-emerald-500" />
+              </div>
+              <h3 className="font-semibold text-slate-900 mb-1">No matching results</h3>
+              <p className="text-sm text-slate-500">No pairs match the selected filter.</p>
             </div>
           ) : (
-            filtered.map((result, idx) => {
-              const risk = result.score >= 0.9 ? 'critical'
-                : result.score >= 0.75 ? 'high'
-                : result.score >= 0.5 ? 'medium' : 'low';
-              const riskColors = {
-                critical: 'bg-red-100 text-red-700',
-                high: 'bg-amber-100 text-amber-700',
-                medium: 'bg-yellow-100 text-yellow-700',
-                low: 'bg-green-100 text-green-700',
-              };
-              const features = result.features || {};
-              const featureEntries = Object.entries(features).sort((a, b) => b[1] - a[1]).slice(0, 5);
-              const isExpanded = expanded[idx];
+            <div className="divide-y divide-slate-50">
+              {filtered.map((result, idx) => {
+                const risk = result.score >= 0.9 ? 'critical'
+                  : result.score >= 0.75 ? 'high'
+                  : result.score >= 0.5 ? 'medium' : 'low';
+                const riskConfig = {
+                  critical: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', dot: 'bg-red-500' },
+                  high: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-500' },
+                  medium: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200', dot: 'bg-yellow-500' },
+                  low: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+                };
+                const rc = riskConfig[risk];
+                const features = result.features || {};
+                const featureEntries = Object.entries(features).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                const isExpanded = expanded[idx];
 
-              return (
-                <div key={idx} className="border-t border-slate-100 p-5 hover:bg-slate-50/50 transition-colors">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-semibold text-slate-900 text-sm">
-                      {result.file_a} <span className="text-slate-400 font-normal mx-1">vs</span> {result.file_b}
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${riskColors[risk]}`}>
-                      {risk.toUpperCase()} -- {(result.score * 100).toFixed(1)}%
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-                    {featureEntries.map(([name, value]) => {
-                      const barColor = value >= 0.75 ? 'bg-red-500' : value >= 0.5 ? 'bg-amber-500' : 'bg-green-500';
-                      return (
-                        <div key={name}>
-                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">{name}</div>
-                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-1">
-                            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${value * 100}%` }} />
+                return (
+                  <div key={idx} className="p-6 hover:bg-slate-50/50 transition-colors">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className={`w-2 h-8 rounded-full ${rc.dot}`} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                            <FileCode size={14} className="text-slate-400 shrink-0" />
+                            <span className="truncate">{result.file_a}</span>
+                            <span className="text-slate-300 font-normal shrink-0">vs</span>
+                            <span className="truncate">{result.file_b}</span>
                           </div>
-                          <div className="text-xs font-bold text-slate-700">{(value * 100).toFixed(1)}%</div>
                         </div>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    onClick={() => toggleCode(idx)}
-                    className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
-                  >
-                    <Code2 size={14} />
-                    {isExpanded ? 'Hide source comparison' : 'View source comparison'}
-                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  </button>
-
-                  {isExpanded && job.submissions && (
-                    <div className="mt-3 grid md:grid-cols-2 gap-3">
-                      <div className="border border-slate-200 rounded-lg overflow-hidden">
-                        <div className="px-3 py-1.5 bg-slate-50 text-xs font-semibold text-slate-600 border-b border-slate-200">{result.file_a}</div>
-                        <pre className="p-3 text-xs font-mono bg-slate-900 text-slate-200 overflow-x-auto max-h-64">{job.submissions[result.file_a]?.slice(0, 2000)}{job.submissions[result.file_a]?.length > 2000 ? '\n... [truncated]' : ''}</pre>
                       </div>
-                      <div className="border border-slate-200 rounded-lg overflow-hidden">
-                        <div className="px-3 py-1.5 bg-slate-50 text-xs font-semibold text-slate-600 border-b border-slate-200">{result.file_b}</div>
-                        <pre className="p-3 text-xs font-mono bg-slate-900 text-slate-200 overflow-x-auto max-h-64">{job.submissions[result.file_b]?.slice(0, 2000)}{job.submissions[result.file_b]?.length > 2000 ? '\n... [truncated]' : ''}</pre>
+                      <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${rc.bg} ${rc.text} shrink-0`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${rc.dot}`} />
+                        {risk.toUpperCase()} {(result.score * 100).toFixed(1)}%
                       </div>
                     </div>
-                  )}
-                </div>
-              );
-            })
+
+                    {featureEntries.length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-4">
+                        {featureEntries.map(([name, value]) => {
+                          const barColor = value >= 0.75 ? 'bg-red-500' : value >= 0.5 ? 'bg-amber-500' : 'bg-emerald-500';
+                          return (
+                            <div key={name}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{name}</span>
+                                <span className="text-xs font-bold text-slate-700">{(value * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${value * 100}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => toggleCode(idx)}
+                      className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1.5"
+                    >
+                      <Code2 size={14} />
+                      {isExpanded ? 'Hide source comparison' : 'View source comparison'}
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+
+                    {isExpanded && job.submissions && (
+                      <div className="mt-4 grid md:grid-cols-2 gap-4">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-xs font-semibold text-slate-600">{result.file_a}</span>
+                          </div>
+                          <pre className="p-4 text-xs font-mono bg-slate-900 text-slate-300 overflow-x-auto max-h-72 leading-relaxed">{job.submissions[result.file_a]?.slice(0, 2000)}{job.submissions[result.file_a]?.length > 2000 ? '\n\n// ... [truncated]' : ''}</pre>
+                        </div>
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span className="text-xs font-semibold text-slate-600">{result.file_b}</span>
+                          </div>
+                          <pre className="p-4 text-xs font-mono bg-slate-900 text-slate-300 overflow-x-auto max-h-72 leading-relaxed">{job.submissions[result.file_b]?.slice(0, 2000)}{job.submissions[result.file_b]?.length > 2000 ? '\n\n// ... [truncated]' : ''}</pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -225,26 +276,33 @@ export default function ResultsPage() {
   );
 }
 
-function StatCard({ label, value, color = 'brand' }) {
-  const colors = {
-    brand: 'text-slate-900',
-    red: 'text-red-600',
-  };
+function StatCard({ label, value, gradient, bgLight }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-2xl font-bold ${colors[color]}`}>{value}</div>
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-shadow group">
+      <div className="flex items-center justify-between mb-3">
+        <div className={`w-9 h-9 rounded-xl ${bgLight} flex items-center justify-center`}>
+          <div className={`w-2.5 h-2.5 rounded-full bg-gradient-to-br ${gradient}`} />
+        </div>
+      </div>
+      <div className="text-2xl font-bold text-slate-900 tracking-tight">{value}</div>
+      <div className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">{label}</div>
     </div>
   );
 }
 
-function RiskCard({ count, label, color }) {
-  const borderColors = { red: 'border-t-red-500', amber: 'border-t-amber-500', yellow: 'border-t-yellow-500', green: 'border-t-green-500' };
-  const textColors = { red: 'text-red-600', amber: 'text-amber-600', yellow: 'text-yellow-600', green: 'text-green-600' };
+function RiskCard({ count, label, range, color }) {
+  const config = {
+    red: { border: 'border-t-red-500', text: 'text-red-600', bg: 'bg-red-50' },
+    amber: { border: 'border-t-amber-500', text: 'text-amber-600', bg: 'bg-amber-50' },
+    yellow: { border: 'border-t-yellow-500', text: 'text-yellow-600', bg: 'bg-yellow-50' },
+    green: { border: 'border-t-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50' },
+  };
+  const c = config[color];
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 border-t-4 ${borderColors[color]} p-4`}>
-      <div className={`text-xl font-bold ${textColors[color]}`}>{count}</div>
-      <div className="text-xs text-slate-500 mt-0.5">{label}</div>
+    <div className={`bg-white rounded-xl border border-slate-200 border-t-4 ${c.border} p-4`}>
+      <div className={`text-xl font-bold ${c.text}`}>{count}</div>
+      <div className="text-xs font-medium text-slate-500 mt-0.5">{label}</div>
+      <div className="text-[10px] text-slate-400">{range}</div>
     </div>
   );
 }

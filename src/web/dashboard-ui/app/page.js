@@ -13,6 +13,12 @@ import {
   Clock,
   ArrowRight,
   Loader2,
+  Users,
+  TrendingUp,
+  FileSearch,
+  CheckCircle2,
+  AlertCircle,
+  ChevronRight,
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
@@ -35,180 +41,227 @@ export default function Home() {
     setLoading(false);
   };
 
-  const stats = {
-    total: jobs.length,
-    completed: jobs.filter((j) => j.status === 'completed').length,
-    flagged: jobs.reduce(
-      (sum, j) => sum + (j.summary?.suspicious_pairs || 0),
-      0
-    ),
-    critical: jobs.reduce(
-      (sum, j) =>
-        sum +
-        (j.results?.filter((r) => r.score >= 0.9).length || 0),
-      0
-    ),
-  };
+  const completedJobs = jobs.filter((j) => j.status === 'completed');
+  const totalFiles = completedJobs.reduce((s, j) => s + (j.file_count || 0), 0);
+  const totalFlagged = completedJobs.reduce(
+    (s, j) => s + (j.summary?.suspicious_pairs || 0), 0
+  );
+  const totalCritical = completedJobs.reduce(
+    (s, j) => s + (j.results?.filter((r) => r.score >= 0.9).length || 0), 0
+  );
+
+  const recentJobs = jobs.slice(0, 8);
 
   return (
     <DashboardLayout>
       <div className="p-6 lg:p-8">
-        {/* Header */}
+        {/* Welcome Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-500 mt-1">
-            Monitor your code similarity analyses and academic integrity cases.
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+            Welcome back
+          </h1>
+          <p className="text-slate-500 mt-1.5 text-base">
+            Monitor code similarity analyses and academic integrity cases across your courses.
           </p>
         </div>
 
-        {/* Stats */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard
             icon={FileCheck}
             label="Total Analyses"
-            value={stats.total}
-            color="brand"
+            value={jobs.length}
+            gradient="from-blue-500 to-blue-600"
+            bgLight="bg-blue-50"
           />
           <StatCard
-            icon={Shield}
-            label="Completed"
-            value={stats.completed}
-            color="green"
+            icon={Users}
+            label="Files Analyzed"
+            value={totalFiles}
+            gradient="from-emerald-500 to-emerald-600"
+            bgLight="bg-emerald-50"
           />
           <StatCard
             icon={AlertTriangle}
             label="Flagged Cases"
-            value={stats.flagged}
-            color="amber"
+            value={totalFlagged}
+            gradient="from-amber-500 to-amber-600"
+            bgLight="bg-amber-50"
           />
           <StatCard
-            icon={AlertTriangle}
+            icon={Shield}
             label="Critical Risk"
-            value={stats.critical}
-            color="red"
+            value={totalCritical}
+            gradient="from-red-500 to-red-600"
+            bgLight="bg-red-50"
           />
         </div>
 
         {/* Quick Actions */}
-        <div className="grid md:grid-cols-2 gap-4 mb-8">
+        <div className="grid md:grid-cols-3 gap-4 mb-8">
           <Link
             href="/upload"
-            className="group flex items-center gap-4 p-5 rounded-xl border border-slate-200 bg-white hover:border-brand-300 hover:shadow-md transition-all"
+            className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 hover:border-brand-300 hover:shadow-lg hover:shadow-brand-500/5 transition-all duration-300"
           >
-            <div className="w-12 h-12 rounded-xl bg-brand-50 flex items-center justify-center group-hover:bg-brand-100 transition-colors">
-              <Upload size={22} className="text-brand-600" />
-            </div>
-            <div className="flex-1">
-              <div className="font-semibold text-slate-900">New Analysis</div>
-              <div className="text-sm text-slate-500">
-                Upload files or a ZIP archive to check for similarity
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-brand-500/10 to-transparent rounded-bl-full" />
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center mb-4 shadow-lg shadow-brand-500/25">
+                <Upload size={20} className="text-white" />
               </div>
+              <h3 className="font-semibold text-slate-900 mb-1">New Analysis</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Upload individual files or a ZIP archive to check for code similarity
+              </p>
             </div>
-            <ArrowRight
-              size={18}
-              className="text-slate-400 group-hover:text-brand-600 group-hover:translate-x-1 transition-all"
-            />
+            <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 transition-all duration-300">
+              <ArrowRight size={18} className="text-brand-600" />
+            </div>
           </Link>
+
           <Link
             href="/benchmark"
-            className="group flex items-center gap-4 p-5 rounded-xl border border-slate-200 bg-white hover:border-brand-300 hover:shadow-md transition-all"
+            className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-500/5 transition-all duration-300"
           >
-            <div className="w-12 h-12 rounded-xl bg-violet-50 flex items-center justify-center group-hover:bg-violet-100 transition-colors">
-              <BarChart3 size={22} className="text-violet-600" />
-            </div>
-            <div className="flex-1">
-              <div className="font-semibold text-slate-900">Benchmark Tools</div>
-              <div className="text-sm text-slate-500">
-                Compare IntegrityDesk against other detection tools
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-violet-500/10 to-transparent rounded-bl-full" />
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-4 shadow-lg shadow-violet-500/25">
+                <BarChart3 size={20} className="text-white" />
               </div>
+              <h3 className="font-semibold text-slate-900 mb-1">Benchmark</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Compare IntegrityDesk against MOSS, JPlag, Dolos, and Codequiry
+              </p>
             </div>
-            <ArrowRight
-              size={18}
-              className="text-slate-400 group-hover:text-violet-600 group-hover:translate-x-1 transition-all"
-            />
+            <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 transition-all duration-300">
+              <ArrowRight size={18} className="text-violet-600" />
+            </div>
+          </Link>
+
+          <Link
+            href="/reports"
+            className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-500/5 transition-all duration-300"
+          >
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-slate-500/10 to-transparent rounded-bl-full" />
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center mb-4 shadow-lg shadow-slate-500/25">
+                <FileSearch size={20} className="text-white" />
+              </div>
+              <h3 className="font-semibold text-slate-900 mb-1">Reports</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                View, download, and generate committee-ready analysis reports
+              </p>
+            </div>
+            <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 transition-all duration-300">
+              <ArrowRight size={18} className="text-slate-600" />
+            </div>
           </Link>
         </div>
 
         {/* Recent Analyses */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900">Recent Analyses</h2>
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-slate-900 text-lg">Recent Analyses</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {completedJobs.length} completed analysis{completedJobs.length !== 1 ? 'es' : ''}
+              </p>
+            </div>
             <Link
               href="/reports"
-              className="text-sm text-brand-600 hover:text-brand-700 font-medium"
+              className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
             >
               View all
+              <ChevronRight size={14} />
             </Link>
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 size={24} className="animate-spin text-slate-400" />
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="w-10 h-10 border-4 border-slate-200 border-t-brand-500 rounded-full animate-spin" />
+              <p className="text-sm text-slate-500 mt-4">Loading analyses...</p>
             </div>
-          ) : jobs.length === 0 ? (
-            <div className="text-center py-16">
-              <Clock size={40} className="mx-auto text-slate-300 mb-3" />
-              <p className="text-slate-500">No analyses yet.</p>
+          ) : recentJobs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 px-6">
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
+                <Clock size={28} className="text-slate-300" />
+              </div>
+              <h3 className="font-semibold text-slate-900 mb-1">No analyses yet</h3>
+              <p className="text-sm text-slate-500 text-center max-w-sm mb-6">
+                Upload student submissions to detect code similarity and potential academic integrity issues.
+              </p>
               <Link
                 href="/upload"
-                className="text-sm text-brand-600 hover:text-brand-700 font-medium mt-1 inline-block"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/25"
               >
+                <Upload size={16} />
                 Start your first analysis
               </Link>
             </div>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="text-xs uppercase tracking-wider text-slate-500 bg-slate-50/50">
-                  <th className="text-left px-5 py-3 font-medium">Course</th>
-                  <th className="text-left px-5 py-3 font-medium">Assignment</th>
-                  <th className="text-left px-5 py-3 font-medium">Files</th>
-                  <th className="text-left px-5 py-3 font-medium">Flagged</th>
-                  <th className="text-left px-5 py-3 font-medium">Status</th>
-                  <th className="text-left px-5 py-3 font-medium">Date</th>
-                  <th className="px-5 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.slice(0, 10).map((job) => (
-                  <tr
-                    key={job.id}
-                    className="border-t border-slate-100 hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-5 py-3.5 font-medium text-slate-900 text-sm">
-                      {job.course_name}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">
-                      {job.assignment_name}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">
-                      {job.file_count}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <RiskBadge
-                        count={job.summary?.suspicious_pairs || 0}
-                      />
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={job.status} />
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-500">
-                      {job.created_at?.slice(0, 16).replace('T', ' ')}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      {job.status === 'completed' && (
-                        <Link
-                          href={`/results/${job.id}`}
-                          className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-                        >
-                          View
-                        </Link>
-                      )}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wider text-slate-400 bg-slate-50/80">
+                    <th className="text-left px-6 py-3.5 font-semibold">Course</th>
+                    <th className="text-left px-6 py-3.5 font-semibold">Assignment</th>
+                    <th className="text-center px-6 py-3.5 font-semibold">Files</th>
+                    <th className="text-center px-6 py-3.5 font-semibold">Flagged</th>
+                    <th className="text-left px-6 py-3.5 font-semibold">Status</th>
+                    <th className="text-left px-6 py-3.5 font-semibold">Date</th>
+                    <th className="px-6 py-3.5" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentJobs.map((job) => (
+                    <tr
+                      key={job.id}
+                      className="border-t border-slate-50 hover:bg-slate-50/60 transition-colors group"
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center shrink-0">
+                            <FileCheck size={14} className="text-brand-600" />
+                          </div>
+                          <span className="font-medium text-slate-900 text-sm truncate max-w-[200px]">
+                            {job.course_name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-600 max-w-[200px] truncate">
+                        {job.assignment_name}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 text-sm font-semibold text-slate-700">
+                          {job.file_count}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <RiskBadge count={job.summary?.suspicious_pairs || 0} />
+                      </td>
+                      <td className="px-6 py-4">
+                        <StatusBadge status={job.status} />
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-400 whitespace-nowrap">
+                        {job.created_at?.slice(0, 16).replace('T', ' ')}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {job.status === 'completed' ? (
+                          <Link
+                            href={`/results/${job.id}`}
+                            className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            View
+                            <ChevronRight size={14} />
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-slate-400">--</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -216,48 +269,43 @@ export default function Home() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }) {
-  const colors = {
-    brand: 'bg-brand-50 text-brand-600',
-    green: 'bg-green-50 text-green-600',
-    amber: 'bg-amber-50 text-amber-600',
-    red: 'bg-red-50 text-red-600',
-  };
+function StatCard({ icon: Icon, label, value, gradient, bgLight }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${colors[color]}`}>
-          <Icon size={18} />
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-shadow group">
+      <div className="flex items-center justify-between mb-4">
+        <div className={`w-10 h-10 rounded-xl ${bgLight} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+          <Icon size={18} className={`bg-gradient-to-br ${gradient} bg-clip-text text-transparent`} style={{ WebkitTextFillColor: 'transparent' }} />
         </div>
-        <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-          {label}
-        </span>
+        <TrendingUp size={14} className="text-slate-300" />
       </div>
-      <div className="text-2xl font-bold text-slate-900">{value}</div>
+      <div className="text-2xl font-bold text-slate-900 tracking-tight">{value}</div>
+      <div className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">{label}</div>
     </div>
   );
 }
 
 function StatusBadge({ status }) {
   const map = {
-    completed: 'bg-green-50 text-green-700',
-    processing: 'bg-blue-50 text-blue-700',
-    analyzing: 'bg-amber-50 text-amber-700',
-    failed: 'bg-red-50 text-red-700',
+    completed: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'Completed' },
+    processing: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'Processing' },
+    analyzing: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'Analyzing' },
+    failed: { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500', label: 'Failed' },
   };
+  const s = map[status] || { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400', label: status };
   return (
-    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${map[status] || 'bg-slate-100 text-slate-600'}`}>
-      {status}
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${s.bg} ${s.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {s.label}
     </span>
   );
 }
 
 function RiskBadge({ count }) {
   if (count === 0)
-    return <span className="text-xs text-slate-400">0</span>;
+    return <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-50 text-sm font-semibold text-slate-400">0</span>;
   if (count > 5)
-    return <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">{count}</span>;
+    return <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-red-50 text-sm font-bold text-red-600">{count}</span>;
   if (count > 2)
-    return <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">{count}</span>;
-  return <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">{count}</span>;
+    return <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-50 text-sm font-bold text-amber-600">{count}</span>;
+  return <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 text-sm font-bold text-emerald-600">{count}</span>;
 }
