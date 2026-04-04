@@ -274,6 +274,37 @@ def api_export_markdown():
                     headers={"Content-Disposition": "attachment; filename=leaderboard.md"})
 
 
+@app.route("/api/plugins")
+def api_plugins():
+    """List loaded plugins and available plugin files."""
+    import glob as _glob
+    plugins_dir = os.path.join(os.path.dirname(__file__), "plugins")
+    plugin_files = []
+    if os.path.exists(plugins_dir):
+        plugin_files = [os.path.basename(f) for f in _glob.glob(os.path.join(plugins_dir, "*.py")) if not os.path.basename(f).startswith("_")]
+
+    engines = registry.list_engines()
+    plugin_engines = []
+    builtin_engines = []
+    for name, cls in sorted(engines.items()):
+        info = {"name": name, "class": cls.__name__}
+        try:
+            instance = registry.get_instance(name)
+            info["description"] = getattr(instance, 'description', lambda: '')() if callable(getattr(instance, 'description', None)) else getattr(instance, 'description', '')
+        except Exception:
+            info["description"] = ''
+        if any(name == pf[:-3] for pf in plugin_files):
+            plugin_engines.append(info)
+        else:
+            builtin_engines.append(info)
+
+    return jsonify({
+        "plugin_files": sorted(plugin_files),
+        "plugin_engines": plugin_engines,
+        "builtin_engines": builtin_engines,
+    })
+
+
 # ---- HTML Template (Artificial Analysis style) ----
 
 DASHBOARD_TEMPLATE = """<!DOCTYPE html>
@@ -776,6 +807,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             <a onclick="showPage('compare')" id="nav-compare">Compare</a>
             <a onclick="showPage('run')" id="nav-run">Run</a>
             <a onclick="showPage('reports')" id="nav-reports">Reports</a>
+            <a onclick="showPage('plugins')" id="nav-plugins">Plugins</a>
         </div>
     </div>
 
@@ -899,6 +931,31 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
                     </table>
                 </div>
             </div>
+        </div>
+
+        <!-- Plugins Page -->
+        <div id="page-plugins" class="page">
+            <div class="filters-bar">
+                <div class="filter-group">
+                    <button class="btn btn-outline btn-sm" onclick="loadPlugins()">↻ Refresh</button>
+                </div>
+                <p style="color:var(--text-muted);font-size:0.8rem;margin-left:0.5rem;">Drop <code style="background:var(--surface-2);padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">.py</code> files in the <code style="background:var(--surface-2);padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">plugins/</code> directory</p>
+            </div>
+            <div id="plugins-grid" class="compare-grid"></div>
+        </div>
+    </div>
+            </div>
+        </div>
+
+        <!-- Plugins Page -->
+        <div id="page-plugins" class="page">
+            <div class="filters-bar">
+                <div class="filter-group">
+                    <button class="btn btn-outline btn-sm" onclick="loadPlugins()">↻ Refresh</button>
+                </div>
+                <p style="color:var(--text-muted);font-size:0.8rem;margin-left:0.5rem;">Drop <code style="background:var(--surface-2);padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">.py</code> files in the <code style="background:var(--surface-2);padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">plugins/</code> directory</p>
+            </div>
+            <div id="plugins-grid" class="compare-grid"></div>
         </div>
     </div>
 
@@ -1171,6 +1228,41 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
                     <td><a href="/reports/${r.file}" target="_blank" style="color:var(--accent-light);text-decoration:none;font-size:0.8rem;font-weight:500;">View →</a></td>
                 </tr>`).join('');
             }
+        }
+
+        async function loadPlugins() {
+            const res = await fetch('/api/plugins');
+            const data = await res.json();
+            const grid = document.getElementById('plugins-grid');
+            let html = '';
+
+            if (data.plugin_engines.length) {
+                html += '<h3 style="color:var(--text-dim);font-size:0.85rem;margin-bottom:0.75rem;grid-column:1/-1;">🔌 Plugin Engines</h3>';
+                data.plugin_engines.forEach((e, i) => {
+                    html += `<div class="compare-card" style="animation-delay:${i*0.1}s">
+                        <h4 style="color:var(--green);">${e.name}</h4>
+                        <div class="label">${e.description || 'Custom plugin engine'}</div>
+                        <div class="sub" style="margin-top:0.5rem;">Class: ${e.class}</div>
+                    </div>`;
+                });
+            }
+
+            if (data.builtin_engines.length) {
+                html += '<h3 style="color:var(--text-dim);font-size:0.85rem;margin:1rem 0 0.75rem;grid-column:1/-1;">⚙️ Built-in Engines</h3>';
+                data.builtin_engines.forEach((e, i) => {
+                    html += `<div class="compare-card" style="animation-delay:${(data.plugin_engines.length + i)*0.05}s;border-color:var(--border);">
+                        <h4>${e.name}</h4>
+                        <div class="label">${e.description || 'Built-in engine'}</div>
+                        <div class="sub" style="margin-top:0.5rem;">Class: ${e.class}</div>
+                    </div>`;
+                });
+            }
+
+            if (!html) {
+                html = '<div class="empty-state"><div class="icon">🔌</div><p>No engines registered</p></div>';
+            }
+
+            grid.innerHTML = html;
         }
 
         function openRunModal() { document.getElementById('run-modal').classList.add('show'); }
