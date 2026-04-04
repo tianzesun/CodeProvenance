@@ -12,7 +12,7 @@ Rules:
 3. One-way data flow - no backward dependencies
 4. Parallel execution support for large datasets
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass
 import random
@@ -46,6 +46,24 @@ from benchmark.forensics.clone_type_breakdown import (
     CloneTypeBreakdown,
     analyze_clone_type_breakdown,
 )
+
+
+def _parse_code_single(args):
+    """Top-level function for ProcessPoolExecutor (must be picklable).
+    
+    Args:
+        args: Tuple of (code_id, norm_code, parser_type).
+    
+    Returns:
+        Tuple of (code_id, ParsedCode).
+    """
+    code_id, norm_code, parser_type = args
+    stage = ParserStage()
+    result = stage.execute(
+        (code_id, norm_code),
+        {"type": parser_type},
+    )
+    return (code_id, result)
 
 
 @dataclass
@@ -202,15 +220,23 @@ class BenchmarkRunner:
                 with parsed_lock:
                     parsed[code_id] = result
 
-            if use_parallel:
+            parser_type = config.parser.type
+            if use_parallel and num_pairs > 20:
+                with ProcessPoolExecutor(max_workers=min(num_workers, os.cpu_count() or 4)) as ex:
+                    parse_args = [(cid, nc, parser_type) for cid, nc in all_code.items()]
+                    futs = {ex.submit(_parse_code_single, a): a[0] for a in parse_args}
+                    for f in tqdm(as_completed(futs), total=len(futs), desc="Parsing", disable=not _HAS_TQDM):
+                        cid, result = f.result()
+                        parsed[cid] = result
+            elif use_parallel:
                 with ThreadPoolExecutor(max_workers=num_workers) as ex:
                     futs = [
                         ex.submit(_parse_one, cid, nc) for cid, nc in all_code.items()
                     ]
-                    for f in as_completed(futs):
-                        f.result()  # propagate exceptions
+                    for f in tqdm(as_completed(futs), total=len(futs), desc="Parsing", disable=not _HAS_TQDM):
+                        f.result()
             else:
-                for cid, nc in all_code.items():
+                for cid, nc in tqdm(all_code.items(), desc="Parsing", disable=not _HAS_TQDM):
                     _parse_one(cid, nc)
 
             # ===== Stage 3: Compute similarity =====
@@ -385,8 +411,9 @@ class BenchmarkRunner:
     ) -> BenchmarkRunResult:
         """Run benchmark with cross-validated threshold optimization.
 
-        Splits dataset into n_folds, optimizes threshold on n-1 folds,
-        evaluates on held-out fold. Reports average metrics across folds.
+        Splits dataset into n_folds using stratified sampling to ensure
+        each fold has both positive and negative pairs. Optimizes threshold
+        on n-1 folds, evaluates on held-out fold. Reports average metrics.
 
         Args:
             dataset: Loaded dataset to evaluate against.
@@ -399,17 +426,113 @@ class BenchmarkRunner:
         import random as _random
         rng = _random.Random(self._seed)
 
-        pairs = list(dataset.pairs)
-        rng.shuffle(pairs)
-        fold_size = max(1, len(pairs) // n_folds)
-        folds = []
-        for i in range(n_folds):
-            start = i * fold_size
-            end = start + fold_size if i < n_folds - 1 else len(pairs)
-            folds.append(pairs[start:end])
+        pos_pairs = [p for p in dataset.pairs if p.label == 1]
+        neg_pairs = [p for p in dataset.pairs if p.label == 0]
+
+        # Determine feasible number of folds
+        min_class_size = min(len(pos_pairs), len(neg_pairs))
+        actual_folds = min(n_folds, min_class_size)
+        if actual_folds < 2:
+            return BenchmarkRunResult(
+                config_hash=config.config_hash(),
+                dataset_name=dataset.name, dataset_version=dataset.version,
+                engine_name=config.engine.name,
+                metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                success=False,
+                error=f"Dataset too small for {n_folds}-fold CV: "
+                      f"need at least 2 positive and 2 negative pairs "
+                      f"(have {len(pos_pairs)} pos, {len(neg_pairs)} neg)",
+            )
+
+        # Stratified split: shuffle each class separately, then distribute
+        rng.shuffle(pos_pairs)
+        rng.shuffle(neg_pairs)
+
+        pos_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
+        neg_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
+
+        for i, p in enumerate(pos_pairs):
+            pos_folds[i % actual_folds].append(p)
+        for i, p in enumerate(neg_pairs):
+            neg_folds[i % actual_folds].append(p)
+
+        folds = [pos_folds[i] + neg_folds[i] for i in range(actual_folds)]
 
         all_metrics = []
-        for fold_idx in range(n_folds):
+        for fold_idx in range(actual_folds):
+            test_pairs = folds[fold_idx]
+            train_pairs = [p for i, fold in enumerate(folds) if i != fold_idx for p in fold]
+
+            train_ds = CanonicalDataset(
+                name=f"{dataset.name}_train_{fold_idx}",
+                version=dataset.version,
+                pairs=train_pairs,
+                language=dataset.language,
+            )
+            test_ds = CanonicalDataset(
+                name=f"{dataset.name}_test_{fold_idx}",
+                version=dataset.version,
+                pairs=test_pairs,
+                language=dataset.language,
+            )
+
+            train_result = self.run(train_ds, config)
+            if not train_result.success:
+                continue
+
+            test_result = self.run(test_ds, config)
+            if test_result.success:
+                all_metrics.append(test_result.metrics)
+
+        if not all_metrics:
+            return BenchmarkRunResult(
+                config_hash=config.config_hash(),
+                dataset_name=dataset.name, dataset_version=dataset.version,
+                engine_name=config.engine.name,
+                metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                success=False, error="All CV folds failed",
+            )
+
+        avg = MetricsResult(
+            precision=sum(m.precision for m in all_metrics) / len(all_metrics),
+            recall=sum(m.recall for m in all_metrics) / len(all_metrics),
+            f1=sum(m.f1 for m in all_metrics) / len(all_metrics),
+            accuracy=sum(m.accuracy for m in all_metrics) / len(all_metrics),
+            map_score=sum(m.map_score for m in all_metrics) / len(all_metrics),
+            mrr_score=sum(m.mrr_score for m in all_metrics) / len(all_metrics),
+            ndcg=sum(m.ndcg for m in all_metrics) / len(all_metrics),
+            top_k_precision=sum(m.top_k_precision for m in all_metrics) / len(all_metrics),
+            threshold=sum(m.threshold for m in all_metrics) / len(all_metrics),
+            tp=int(sum(m.tp for m in all_metrics) / len(all_metrics)),
+            fp=int(sum(m.fp for m in all_metrics) / len(all_metrics)),
+            tn=int(sum(m.tn for m in all_metrics) / len(all_metrics)),
+            fn=int(sum(m.fn for m in all_metrics) / len(all_metrics)),
+        )
+
+        return BenchmarkRunResult(
+            config_hash=config.config_hash(),
+            dataset_name=dataset.name, dataset_version=dataset.version,
+            engine_name=config.engine.name,
+            metrics=avg,
+            success=True,
+        )
+
+        # Stratified split: shuffle each class separately, then distribute
+        rng.shuffle(pos_pairs)
+        rng.shuffle(neg_pairs)
+
+        pos_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
+        neg_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
+
+        for i, p in enumerate(pos_pairs):
+            pos_folds[i % actual_folds].append(p)
+        for i, p in enumerate(neg_pairs):
+            neg_folds[i % actual_folds].append(p)
+
+        folds = [pos_folds[i] + neg_folds[i] for i in range(actual_folds)]
+
+        all_metrics = []
+        for fold_idx in range(actual_folds):
             test_pairs = folds[fold_idx]
             train_pairs = [p for i, fold in enumerate(folds) if i != fold_idx for p in fold]
 
