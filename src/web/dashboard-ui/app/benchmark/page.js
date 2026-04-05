@@ -21,6 +21,11 @@ import {
   ChevronUp,
   Download,
   Code2,
+  Play,
+  FlaskConical,
+  Info,
+  FileText,
+  ArrowRight,
 } from 'lucide-react';
 import {
   BarChart,
@@ -31,37 +36,189 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
 } from 'recharts';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
 
 const TOOLS = [
-  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500' },
-  { id: 'moss', name: 'MOSS', desc: 'Token-based (Stanford)', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500' },
-  { id: 'jplag', name: 'JPlag', desc: 'AST structural (KIT)', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500' },
-  { id: 'dolos', name: 'Dolos', desc: 'Winnowing fingerprints', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500' },
-  { id: 'codequiry', name: 'Codequiry', desc: 'Semantic embeddings', color: '#dc2626', gradient: 'from-red-500 to-red-600', bgLight: 'bg-red-50', ring: 'ring-red-500' },
+  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion (AST + N-gram + Winnowing + Embedding + Token)', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', engines: ['AST', 'N-gram', 'Winnowing', 'Embedding', 'Token', 'Execution'] },
+  { id: 'moss', name: 'MOSS', desc: 'Token-based Jaccard similarity (Stanford)', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', engines: ['Token'] },
+  { id: 'jplag', name: 'JPlag', desc: 'AST structural comparison (KIT)', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', engines: ['AST'] },
+  { id: 'dolos', name: 'Dolos', desc: 'Winnowing fingerprint comparison', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', engines: ['Winnowing'] },
+  { id: 'codequiry', name: 'Codequiry', desc: 'Semantic embedding similarity', color: '#dc2626', gradient: 'from-red-500 to-red-600', bgLight: 'bg-red-50', ring: 'ring-red-500', engines: ['Embedding'] },
+];
+
+const TEST_CASES = [
+  {
+    id: 'identical',
+    label: 'Identical Files',
+    desc: 'Two copies of the same file',
+    expected: 0.95,
+    codeA: `def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val`,
+    codeB: `def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val`,
+  },
+  {
+    id: 'renamed',
+    label: 'Renamed Variables',
+    desc: 'Same logic, different variable/function names',
+    expected: 0.80,
+    codeA: `def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val`,
+    codeB: `def compute_mean(values):
+    total = sum(values)
+    count = len(values)
+    return total / count
+
+def find_maximum(values):
+    max_val = values[0]
+    for v in values:
+        if v > max_val:
+            max_val = v
+    return max_val`,
+  },
+  {
+    id: 'reordered',
+    label: 'Reordered Functions',
+    desc: 'Same functions in different order',
+    expected: 0.70,
+    codeA: `def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val
+
+def calculate_sum(data):
+    total = 0
+    for item in data:
+        total += item
+    return total`,
+    codeB: `def calculate_sum(data):
+    total = 0
+    for item in data:
+        total += item
+    return total
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val
+
+def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count`,
+  },
+  {
+    id: 'similar',
+    label: 'Similar Logic',
+    desc: 'Same algorithm, different implementation style',
+    expected: 0.50,
+    codeA: `def bubble_sort(arr):
+    n = len(arr)
+    for i in range(n):
+        for j in range(0, n-i-1):
+            if arr[j] > arr[j+1]:
+                arr[j], arr[j+1] = arr[j+1], arr[j]
+    return arr`,
+    codeB: `def sort_array(data):
+    n = len(data)
+    for i in range(n):
+        for j in range(0, n-i-1):
+            if data[j] > data[j+1]:
+                data[j], data[j+1] = data[j+1], data[j]
+    return data`,
+  },
+  {
+    id: 'unrelated',
+    label: 'Unrelated Files',
+    desc: 'Completely different code, same language',
+    expected: 0.10,
+    codeA: `import numpy as np
+
+def calculate_portfolio_returns(weights, returns_matrix):
+    weighted_returns = np.dot(weights, returns_matrix)
+    return weighted_returns
+
+def sharpe_ratio(returns, risk_free_rate=0.02):
+    excess_returns = returns - risk_free_rate
+    return np.mean(excess_returns) / np.std(excess_returns)`,
+    codeB: `from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route('/users', methods=['GET'])
+def get_users():
+    users = User.query.all()
+    return jsonify([{'id': u.id, 'username': u.username} for u in users])
+
+@app.route('/users', methods=['POST'])
+def create_user():
+    data = request.get_json()
+    user = User(username=data['username'], email=data['email'])
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({'id': user.id}), 201`,
+  },
 ];
 
 export default function BenchmarkPage() {
+  const [tab, setTab] = useState('quick');
   const [mode, setMode] = useState('individual');
   const [files, setFiles] = useState([]);
-  const [zipFile, setZipFile] = useState(null);
   const [selectedTools, setSelectedTools] = useState(TOOLS.map(t => t.id));
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   const [expandedPairs, setExpandedPairs] = useState({});
+  const [selectedTestCase, setSelectedTestCase] = useState(null);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
-    if (mode === 'individual') {
-      setFiles(Array.from(e.dataTransfer.files));
-    } else {
-      setZipFile(e.dataTransfer.files[0]);
-    }
-  }, [mode]);
+    setFiles(Array.from(e.dataTransfer.files));
+  }, []);
 
   const toggleTool = (id) => {
     setSelectedTools((prev) =>
@@ -72,7 +229,36 @@ export default function BenchmarkPage() {
   const selectAll = () => setSelectedTools(TOOLS.map(t => t.id));
   const deselectAll = () => setSelectedTools([]);
 
-  const runBenchmark = async () => {
+  const runQuickTest = async (testCase) => {
+    setSelectedTestCase(testCase.id);
+    setError('');
+    setRunning(true);
+    setResults(null);
+    setProgress(`Running "${testCase.label}" across ${selectedTools.length} tool(s)...`);
+
+    const blobA = new Blob([testCase.codeA], { type: 'text/plain' });
+    const blobB = new Blob([testCase.codeB], { type: 'text/plain' });
+    const fileA = new File([blobA], `${testCase.id}_a.py`, { type: 'text/plain' });
+    const fileB = new File([blobB], `${testCase.id}_b.py`, { type: 'text/plain' });
+
+    const formData = new FormData();
+    formData.append('files', fileA);
+    formData.append('files', fileB);
+    selectedTools.forEach((t) => formData.append('tools', t));
+
+    try {
+      const res = await axios.post(`${API}/api/benchmark`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setResults({ ...res.data, testCase });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Benchmark failed');
+    }
+    setRunning(false);
+    setProgress('');
+  };
+
+  const runUploadBenchmark = async () => {
     if (selectedTools.length === 0) {
       setError('Select at least one tool');
       return;
@@ -81,7 +267,7 @@ export default function BenchmarkPage() {
       setError('Upload at least 2 files');
       return;
     }
-    if (mode === 'zip' && !zipFile) {
+    if (mode === 'zip' && !files.length) {
       setError('Select a ZIP file');
       return;
     }
@@ -94,8 +280,6 @@ export default function BenchmarkPage() {
     const formData = new FormData();
     if (mode === 'individual') {
       files.forEach((f) => formData.append('files', f));
-    } else {
-      formData.append('file', zipFile);
     }
     selectedTools.forEach((t) => formData.append('tools', t));
 
@@ -120,18 +304,44 @@ export default function BenchmarkPage() {
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <Layers size={20} className="text-white" />
+              <FlaskConical size={20} className="text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Multi-Tool Comparison</h1>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Benchmark Suite</h1>
               <p className="text-slate-500 mt-0.5">
-                Run all detection tools on the same files and compare results side by side.
+                Test and compare plagiarism detection tools with known test cases or your own files.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Tool Selection */}
+        {/* Tab Switcher */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => { setTab('quick'); setResults(null); setSelectedTestCase(null); }}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              tab === 'quick'
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
+                : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <Play size={15} />
+            Quick Test Cases
+          </button>
+          <button
+            onClick={() => { setTab('upload'); setResults(null); setSelectedTestCase(null); }}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              tab === 'upload'
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
+                : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <UploadIcon size={15} />
+            Upload Files
+          </button>
+        </div>
+
+        {/* Tool Selection - Shared */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div>
@@ -141,7 +351,7 @@ export default function BenchmarkPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <button onClick={selectAll} className="text-xs font-medium text-brand-600 hover:text-brand-700 px-3 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
+              <button onClick={selectAll} className="text-xs font-medium text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
                 Select All
               </button>
               <button onClick={deselectAll} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">
@@ -172,7 +382,7 @@ export default function BenchmarkPage() {
                       <Zap size={16} className="text-white" />
                     </div>
                     <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{tool.desc}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 line-clamp-2">{tool.desc}</div>
                   </button>
                 );
               })}
@@ -180,139 +390,171 @@ export default function BenchmarkPage() {
           </div>
         </div>
 
-        {/* Upload Section */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <h2 className="font-semibold text-slate-900">Upload Assignments</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Upload student submissions to compare across all selected tools.
-            </p>
-          </div>
-          <div className="p-6">
-            {/* Mode Toggle */}
-            <div className="flex gap-2 mb-5">
-              <button
-                onClick={() => setMode('individual')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                  mode === 'individual'
-                    ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/25'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <FileUp size={15} />
-                Individual Files
-              </button>
-              <button
-                onClick={() => setMode('zip')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                  mode === 'zip'
-                    ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/25'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <FolderArchive size={15} />
-                ZIP Archive
-              </button>
-            </div>
-
-            {/* Drop Zone */}
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-all duration-200 cursor-pointer group"
-              onClick={() => {
-                if (mode === 'individual') document.getElementById('benchFileInput').click();
-                else document.getElementById('benchZipInput').click();
-              }}
-            >
-              <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-brand-50 transition-colors">
-                <UploadIcon size={24} className="text-slate-400 group-hover:text-brand-500 transition-colors" />
-              </div>
-              <p className="text-sm font-semibold text-slate-700 mb-1">
-                {mode === 'individual' ? 'Drop files here or click to browse' : 'Drop ZIP file here or click to browse'}
+        {/* Quick Test Cases */}
+        {tab === 'quick' && (
+          <div className="space-y-4 mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <Info size={16} className="text-slate-400" />
+              <p className="text-sm text-slate-500">
+                Click any test case to run it across all selected tools instantly. No file upload needed.
               </p>
-              <p className="text-xs text-slate-400">
-                {mode === 'individual' ? 'Python, Java, C/C++, JavaScript, Rust, Go, and 20+ languages' : 'All code files within the archive will be analyzed'}
-              </p>
-              <input id="benchFileInput" type="file" multiple accept=".py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift" className="hidden" onChange={(e) => setFiles(Array.from(e.target.files))} />
-              <input id="benchZipInput" type="file" accept=".zip" className="hidden" onChange={(e) => setZipFile(e.target.files[0])} />
             </div>
-
-            {/* File List */}
-            {(files.length > 0 || zipFile) && (
-              <div className="mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    {mode === 'individual' ? `${files.length} files` : 'Archive'}
-                  </span>
-                  {mode === 'individual' && files.length > 0 && (
-                    <button onClick={() => setFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">Clear all</button>
+            <div className="grid md:grid-cols-5 gap-3">
+              {TEST_CASES.map((tc) => (
+                <button
+                  key={tc.id}
+                  onClick={() => runQuickTest(tc)}
+                  disabled={running || selectedTools.length === 0}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    selectedTestCase === tc.id && running
+                      ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
+                      : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
+                  }`}
+                >
+                  {selectedTestCase === tc.id && running && (
+                    <div className="absolute top-2 right-2">
+                      <Loader2 size={14} className="text-violet-600 animate-spin" />
+                    </div>
                   )}
-                </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto scrollbar-thin pr-1">
-                  {mode === 'individual'
-                    ? files.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm group/file">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <div className="w-7 h-7 rounded-md bg-emerald-50 flex items-center justify-center shrink-0">
-                              <FileUp size={12} className="text-emerald-600" />
-                            </div>
-                            <span className="font-medium text-slate-700 truncate">{f.name}</span>
-                          </div>
-                          <span className="text-xs text-slate-400 ml-2">{(f.size / 1024).toFixed(1)} KB</span>
-                        </div>
-                      ))
-                    : zipFile && (
-                        <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <div className="w-7 h-7 rounded-md bg-amber-50 flex items-center justify-center shrink-0">
-                              <FolderArchive size={12} className="text-amber-600" />
-                            </div>
-                            <span className="font-medium text-slate-700 truncate">{zipFile.name}</span>
-                          </div>
-                          <span className="text-xs text-slate-400 ml-2">{(zipFile.size / 1024).toFixed(1)} KB</span>
-                        </div>
-                      )}
-                </div>
-              </div>
-            )}
-
-            {/* Error */}
-            {error && (
-              <div className="mt-4 flex items-start gap-3 p-4 bg-red-50 border border-red-100 rounded-xl">
-                <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
-                <p className="text-sm text-red-700">{error}</p>
-              </div>
-            )}
-
-            {/* Progress */}
-            {running && (
-              <div className="mt-4 flex items-center gap-3 p-4 bg-brand-50 border border-brand-100 rounded-xl">
-                <Loader2 size={18} className="text-brand-600 animate-spin shrink-0" />
-                <p className="text-sm text-brand-700 font-medium">{progress}</p>
-              </div>
-            )}
-
-            {/* Submit */}
-            <button
-              onClick={runBenchmark}
-              disabled={running || selectedTools.length === 0}
-              className="w-full mt-5 py-3.5 bg-gradient-to-r from-violet-600 to-brand-600 hover:from-violet-700 hover:to-brand-700 disabled:from-slate-300 disabled:to-slate-200 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/30 disabled:shadow-none"
-            >
-              {running ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  Running All Tools...
-                </>
-              ) : (
-                <>
-                  <BarChart3 size={18} />
-                  Run {selectedTools.length} Tool{selectedTools.length !== 1 ? 's' : ''} on {mode === 'individual' ? files.length : zipFile ? 'archive' : 0} File{mode === 'individual' && files.length !== 1 ? 's' : ''}
-                </>
-              )}
-            </button>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                    }`} />
+                    <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
+                  <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
+                  <div className="mt-3 flex items-center gap-1 text-xs font-medium text-violet-600 opacity-0 group-hover:opacity-100">
+                    Run test <ArrowRight size={12} />
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Upload Section */}
+        {tab === 'upload' && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <h2 className="font-semibold text-slate-900">Upload Assignments</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                Upload student submissions to compare across all selected tools.
+              </p>
+            </div>
+            <div className="p-6">
+              {/* Mode Toggle */}
+              <div className="flex gap-2 mb-5">
+                <button
+                  onClick={() => setMode('individual')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                    mode === 'individual'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <FileUp size={15} />
+                  Individual Files
+                </button>
+                <button
+                  onClick={() => setMode('zip')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                    mode === 'zip'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <FolderArchive size={15} />
+                  ZIP Archive
+                </button>
+              </div>
+
+              {/* Drop Zone */}
+              <div
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group"
+                onClick={() => document.getElementById('benchFileInput').click()}
+              >
+                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-50 transition-colors">
+                  <UploadIcon size={24} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                </div>
+                <p className="text-sm font-semibold text-slate-700 mb-1">
+                  {mode === 'individual' ? 'Drop files here or click to browse' : 'Drop ZIP file here or click to browse'}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {mode === 'individual' ? 'Python, Java, C/C++, JavaScript, Rust, Go, and 20+ languages' : 'All code files within the archive will be analyzed'}
+                </p>
+                <input id="benchFileInput" type="file" multiple accept=".py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift" className="hidden" onChange={(e) => setFiles(Array.from(e.target.files))} />
+              </div>
+
+              {/* File List */}
+              {files.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      {files.length} files selected
+                    </span>
+                    <button onClick={() => setFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">Clear all</button>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto scrollbar-thin pr-1">
+                    {files.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm group/file">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <div className="w-7 h-7 rounded-md bg-emerald-50 flex items-center justify-center shrink-0">
+                            <FileUp size={12} className="text-emerald-600" />
+                          </div>
+                          <span className="font-medium text-slate-700 truncate">{f.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          <span className="text-xs text-slate-400">{(f.size / 1024).toFixed(1)} KB</span>
+                          <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="opacity-0 group-hover/file:opacity-100 text-slate-300 hover:text-red-500 transition-all">
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="mt-4 flex items-start gap-3 p-4 bg-red-50 border border-red-100 rounded-xl">
+                  <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
+
+              {/* Progress */}
+              {running && (
+                <div className="mt-4 flex items-center gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                  <Loader2 size={18} className="text-blue-600 animate-spin shrink-0" />
+                  <p className="text-sm text-blue-700 font-medium">{progress}</p>
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                onClick={runUploadBenchmark}
+                disabled={running || selectedTools.length === 0 || (mode === 'individual' && files.length < 2)}
+                className="w-full mt-5 py-3.5 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 disabled:from-slate-300 disabled:to-slate-200 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/30 disabled:shadow-none"
+              >
+                {running ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Running All Tools...
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 size={18} />
+                    Run {selectedTools.length} Tool{selectedTools.length !== 1 ? 's' : ''} on {files.length} File{files.length !== 1 ? 's' : ''}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Results */}
         {results && <BenchmarkResults results={results} expandedPairs={expandedPairs} setExpandedPairs={setExpandedPairs} />}
@@ -322,7 +564,7 @@ export default function BenchmarkPage() {
 }
 
 function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
-  const { tool_scores, pair_results, summary } = results;
+  const { tool_scores, pair_results, summary, testCase } = results;
   const activeTools = Object.keys(tool_scores);
 
   const chartData = pair_results.map((pair) => {
@@ -330,6 +572,15 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
     activeTools.forEach((t) => {
       const tr = pair.tool_results?.find((r) => r.tool === t);
       d[t] = tr ? Math.round(tr.score * 1000) / 10 : 0;
+    });
+    return d;
+  });
+
+  const radarData = activeTools.map((tool) => {
+    const d = { tool: TOOLS.find(t => t.id === tool)?.name || tool };
+    pair_results.forEach((pair) => {
+      const tr = pair.tool_results?.find((r) => r.tool === tool);
+      d[pair.label] = tr ? Math.round(tr.score * 1000) / 10 : 0;
     });
     return d;
   });
@@ -348,6 +599,28 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
 
   return (
     <div className="space-y-6">
+      {/* Test Case Info */}
+      {testCase && (
+        <div className="bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 rounded-2xl p-5 flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+              <FlaskConical size={20} className="text-violet-600" />
+            </div>
+            <div>
+              <p className="font-semibold text-violet-900">Test Case: {testCase.label}</p>
+              <p className="text-sm text-violet-700 mt-0.5">
+                {testCase.desc} — Expected similarity: ~{(testCase.expected * 100).toFixed(0)}%
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-violet-600 bg-violet-100 px-3 py-1.5 rounded-lg">
+              Expected: {(testCase.expected * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 p-5">
@@ -370,12 +643,12 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
         </div>
         <div className="bg-white rounded-2xl border border-slate-200 p-5">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center">
-              <TrendingUp size={18} className="text-brand-600" />
+            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
+              <TrendingUp size={18} className="text-blue-600" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">IntegrityDesk Avg</span>
           </div>
-          <div className="text-2xl font-bold text-brand-600">{summary?.accuracy ? (summary.accuracy.integritydesk * 100).toFixed(1) : 0}%</div>
+          <div className="text-2xl font-bold text-blue-600">{summary?.accuracy ? (summary.accuracy.integritydesk * 100).toFixed(1) : 0}%</div>
         </div>
         <div className="bg-white rounded-2xl border border-slate-200 p-5">
           <div className="flex items-center gap-3 mb-3">
@@ -388,26 +661,60 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-900">Score Comparison Chart</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Similarity scores from each tool for every file pair</p>
+      {/* Charts Row */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Bar Chart */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-900">Score Comparison</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Similarity scores per file pair</p>
+          </div>
+          <div className="p-6">
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="pair" tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} domain={[0, 100]} />
+                  <Tooltip formatter={(value) => `${value.toFixed(1)}%`} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  {activeTools.map((tool) => (
+                    <Bar key={tool} dataKey={tool} fill={TOOL_COLORS[tool] || '#94a3b8'} radius={[4, 4, 0, 0]} name={TOOLS.find(t => t.id === tool)?.name || tool} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
-        <div className="p-6">
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="pair" tick={{ fontSize: 11, fill: '#64748b' }} />
-                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} domain={[0, 100]} label={{ value: 'Similarity %', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#94a3b8' }} />
-                <Tooltip formatter={(value) => `${value.toFixed(1)}%`} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                {activeTools.map((tool) => (
-                  <Bar key={tool} dataKey={tool} fill={TOOL_COLORS[tool] || '#94a3b8'} radius={[4, 4, 0, 0]} name={TOOLS.find(t => t.id === tool)?.name || tool} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+
+        {/* Radar Chart */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-900">Tool Radar</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Multi-dimensional tool comparison</p>
+          </div>
+          <div className="p-6">
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData}>
+                  <PolarGrid stroke="#e2e8f0" />
+                  <PolarAngleAxis dataKey="tool" tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                  <Tooltip formatter={(value) => `${value.toFixed(1)}%`} />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  {pair_results.map((pair, i) => (
+                    <Radar
+                      key={pair.label}
+                      name={pair.label}
+                      dataKey={pair.label}
+                      stroke={TOOL_COLORS.integritydesk}
+                      fill={TOOL_COLORS.integritydesk}
+                      fillOpacity={0.1 + i * 0.1}
+                    />
+                  ))}
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
       </div>
@@ -416,7 +723,7 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100">
           <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Click any pair to see individual tool scores and code comparison</p>
+          <p className="text-sm text-slate-500 mt-0.5">Click any pair to see individual tool scores</p>
         </div>
 
         {/* Table Header */}
@@ -462,15 +769,12 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
                   </div>
                   {activeTools.map((tool, ti) => {
                     const score = scores[ti];
-                    const toolInfo = TOOLS.find(t => t.id === tool);
                     return (
                       <div key={tool} className="col-span-2 text-center py-1 lg:py-0">
                         {score !== null ? (
-                          <div>
-                            <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${tool === 'integritydesk' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-600'}`}>
-                              {(score * 100).toFixed(1)}%
-                            </span>
-                          </div>
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${tool === 'integritydesk' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-600'}`}>
+                            {(score * 100).toFixed(1)}%
+                          </span>
                         ) : (
                           <span className="text-xs text-slate-300">N/A</span>
                         )}
@@ -490,7 +794,6 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
                   </div>
                 </button>
 
-                {/* Expanded Detail */}
                 {isExpanded && (
                   <div className="px-6 pb-5 bg-slate-50/50">
                     <div className="grid md:grid-cols-2 gap-4 mt-3">
@@ -507,17 +810,14 @@ function BenchmarkResults({ results, expandedPairs, setExpandedPairs }) {
                                 </div>
                                 <span className="text-sm font-semibold text-slate-900">{toolInfo.name}</span>
                               </div>
-                              <span className={`text-lg font-bold ${tr.tool === 'integritydesk' ? 'text-brand-600' : 'text-slate-700'}`}>
+                              <span className={`text-lg font-bold ${tr.tool === 'integritydesk' ? 'text-blue-600' : 'text-slate-700'}`}>
                                 {scorePct}%
                               </span>
                             </div>
                             <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-500"
-                                style={{
-                                  width: `${tr.score * 100}%`,
-                                  background: `linear-gradient(90deg, ${toolInfo.color}, ${toolInfo.color}dd)`,
-                                }}
+                                style={{ width: `${tr.score * 100}%`, background: `linear-gradient(90deg, ${toolInfo.color}, ${toolInfo.color}dd)` }}
                               />
                             </div>
                             <div className="flex items-center justify-between mt-2">
