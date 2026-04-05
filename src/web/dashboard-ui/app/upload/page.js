@@ -88,8 +88,8 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8">
-        <div className="max-w-3xl mx-auto">
+      <div className="p-4 lg:p-6">
+        <div className="">
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">New Analysis</h1>

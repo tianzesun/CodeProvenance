@@ -79,7 +79,7 @@ export default function ResultsPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8 max-w-[1440px] mx-auto">
+      <div className="p-4 lg:p-6 ">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500 mb-6 animate-fade-in">
           <Link href="/" className="hover:text-blue-600 transition-colors">Dashboard</Link>

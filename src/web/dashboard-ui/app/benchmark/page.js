@@ -203,6 +203,331 @@ def create_user():
   },
 ];
 
+const DATASETS = [
+  {
+    id: 'basic-clone',
+    name: 'Basic Clone Detection',
+    desc: '5 test cases: identical, renamed, reordered, similar, and unrelated code pairs',
+    icon: '🧪',
+    color: 'blue',
+    cases: TEST_CASES,
+  },
+  {
+    id: 'obfuscation',
+    name: 'Obfuscation Resistance',
+    desc: 'Test how well tools detect plagiarism through variable renaming, reordering, and comment changes',
+    icon: '🔍',
+    color: 'violet',
+    cases: [
+      {
+        id: 'obf-rename',
+        label: 'Variable Renaming',
+        desc: 'All identifiers renamed, same logic',
+        expected: 0.80,
+        codeA: `def calculate_average(data):
+    total = sum(data)
+    count = len(data)
+    return total / count
+
+def find_max(data):
+    max_val = data[0]
+    for item in data:
+        if item > max_val:
+            max_val = item
+    return max_val
+
+def bubble_sort(arr):
+    n = len(arr)
+    for i in range(n):
+        for j in range(0, n-i-1):
+            if arr[j] > arr[j+1]:
+                arr[j], arr[j+1] = arr[j+1], arr[j]
+    return arr`,
+        codeB: `def compute_mean(values):
+    total = sum(values)
+    cnt = len(values)
+    return total / cnt
+
+def find_maximum(vals):
+    mx = vals[0]
+    for v in vals:
+        if v > mx:
+            mx = v
+    return mx
+
+def sort_list(lst):
+    size = len(lst)
+    for i in range(size):
+        for j in range(0, size-i-1):
+            if lst[j] > lst[j+1]:
+                lst[j], lst[j+1] = lst[j+1], lst[j]
+    return lst`,
+      },
+      {
+        id: 'obf-reorder',
+        label: 'Function Reordering',
+        desc: 'Same functions in different order',
+        expected: 0.70,
+        codeA: `def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n-1)
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n+1):
+        a, b = b, a+b
+    return b
+
+def is_prime(n):
+    if n < 2:
+        return False
+    for i in range(2, int(n**0.5)+1):
+        if n % i == 0:
+            return False
+    return True`,
+        codeB: `def is_prime(n):
+    if n < 2:
+        return False
+    for i in range(2, int(n**0.5)+1):
+        if n % i == 0:
+            return False
+    return True
+
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n-1)
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n+1):
+        a, b = b, a+b
+    return b`,
+      },
+      {
+        id: 'obf-comments',
+        label: 'Comment/Whitespace Changes',
+        desc: 'Added comments, blank lines, and whitespace changes',
+        expected: 0.90,
+        codeA: `def binary_search(arr, target):
+    left = 0
+    right = len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1`,
+        codeB: `# Binary search implementation
+# Returns index of target or -1 if not found
+def binary_search(arr, target):
+    # Initialize search boundaries
+    left = 0
+    right = len(arr) - 1
+
+    # Continue while search space exists
+    while left <= right:
+        # Calculate midpoint
+        mid = (left + right) // 2
+
+        # Check if we found the target
+        if arr[mid] == target:
+            return mid
+        # Target is in the right half
+        elif arr[mid] < target:
+            left = mid + 1
+        # Target is in the left half
+        else:
+            right = mid - 1
+
+    # Target not found
+    return -1`,
+      },
+    ],
+  },
+  {
+    id: 'multi-file',
+    name: 'Multi-File Class',
+    desc: 'Simulated class of 6 student submissions with varying similarity levels',
+    icon: '👥',
+    color: 'emerald',
+    cases: [
+      {
+        id: 'class-1-2',
+        label: 'Student 1 vs Student 2',
+        desc: 'Direct copy with renamed variables',
+        expected: 0.85,
+        codeA: `class Stack:
+    def __init__(self):
+        self.items = []
+    def push(self, item):
+        self.items.append(item)
+    def pop(self):
+        return self.items.pop()
+    def is_empty(self):
+        return len(self.items) == 0
+    def peek(self):
+        return self.items[-1]`,
+        codeB: `class Stack:
+    def __init__(self):
+        self.elements = []
+    def push(self, element):
+        self.elements.append(element)
+    def pop(self):
+        return self.elements.pop()
+    def is_empty(self):
+        return len(self.elements) == 0
+    def peek(self):
+        return self.elements[-1]`,
+      },
+      {
+        id: 'class-3-4',
+        label: 'Student 3 vs Student 4',
+        desc: 'Similar algorithm, different style',
+        expected: 0.55,
+        codeA: `def linear_search(arr, target):
+    for i in range(len(arr)):
+        if arr[i] == target:
+            return i
+    return -1`,
+        codeB: `def search_list(data, key):
+    index = 0
+    while index < len(data):
+        if data[index] == key:
+            return index
+        index += 1
+    return -1`,
+      },
+      {
+        id: 'class-5-6',
+        label: 'Student 5 vs Student 6',
+        desc: 'Completely different implementations',
+        expected: 0.15,
+        codeA: `def merge_sort(arr):
+    if len(arr) <= 1:
+        return arr
+    mid = len(arr) // 2
+    left = merge_sort(arr[:mid])
+    right = merge_sort(arr[mid:])
+    return merge(left, right)
+
+def merge(left, right):
+    result = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            result.append(left[i])
+            i += 1
+        else:
+            result.append(right[j])
+            j += 1
+    result.extend(left[i:])
+    result.extend(right[j:])
+    return result`,
+        codeB: `def quick_sort(arr):
+    if len(arr) <= 1:
+        return arr
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    return quick_sort(left) + middle + quick_sort(right)`,
+      },
+    ],
+  },
+  {
+    id: 'java-clone',
+    name: 'Java Clone Detection',
+    desc: 'Java code pairs testing clone detection across languages',
+    icon: '☕',
+    color: 'amber',
+    cases: [
+      {
+        id: 'java-identical',
+        label: 'Identical Java',
+        desc: 'Two copies of the same Java class',
+        expected: 0.95,
+        codeA: `public class Calculator {
+    public int add(int a, int b) {
+        return a + b;
+    }
+    public int subtract(int a, int b) {
+        return a - b;
+    }
+    public int multiply(int a, int b) {
+        return a * b;
+    }
+    public double divide(int a, int b) {
+        if (b == 0) throw new ArithmeticException();
+        return (double) a / b;
+    }
+}`,
+        codeB: `public class Calculator {
+    public int add(int a, int b) {
+        return a + b;
+    }
+    public int subtract(int a, int b) {
+        return a - b;
+    }
+    public int multiply(int a, int b) {
+        return a * b;
+    }
+    public double divide(int a, int b) {
+        if (b == 0) throw new ArithmeticException();
+        return (double) a / b;
+    }
+}`,
+      },
+      {
+        id: 'java-renamed',
+        label: 'Renamed Java Methods',
+        desc: 'Same logic with renamed methods and variables',
+        expected: 0.75,
+        codeA: `public class LinkedList {
+    private Node head;
+    public void insert(int data) {
+        Node newNode = new Node(data);
+        newNode.next = head;
+        head = newNode;
+    }
+    public boolean contains(int data) {
+        Node current = head;
+        while (current != null) {
+            if (current.data == data) return true;
+            current = current.next;
+        }
+        return false;
+    }
+}`,
+        codeB: `public class SingleList {
+    private Node first;
+    public void add(int value) {
+        Node node = new Node(value);
+        node.next = first;
+        first = node;
+    }
+    public boolean hasValue(int value) {
+        Node temp = first;
+        while (temp != null) {
+            if (temp.data == value) return true;
+            temp = temp.next;
+        }
+        return false;
+    }
+}`,
+      },
+    ],
+  },
+];
+
 export default function BenchmarkPage() {
   const [tab, setTab] = useState('quick');
   const [mode, setMode] = useState('individual');
@@ -213,9 +538,13 @@ export default function BenchmarkPage() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   const [expandedPairs, setExpandedPairs] = useState({});
+  const [selectedDataset, setSelectedDataset] = useState('basic-clone');
   const [selectedTestCase, setSelectedTestCase] = useState(null);
 
-  const handleDrop = useCallback((e) => {
+  const activeDataset = DATASETS.find(d => d.id === selectedDataset) || DATASETS[0];
+  const activeCases = activeDataset?.cases || [];
+
+  const runQuickTest = async (testCase) => {
     e.preventDefault();
     setFiles(Array.from(e.dataTransfer.files));
   }, []);
@@ -299,7 +628,7 @@ export default function BenchmarkPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8">
+      <div className="p-4 lg:p-6">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
@@ -393,6 +722,39 @@ export default function BenchmarkPage() {
         {/* Quick Test Cases */}
         {tab === 'quick' && (
           <div className="space-y-4 mb-6">
+            {/* Dataset Selector */}
+            <div className="flex items-center gap-2 mb-2">
+              <FlaskConical size={16} className="text-violet-500" />
+              <span className="text-sm font-semibold text-slate-700">Choose Dataset:</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {DATASETS.map((ds) => {
+                const isActive = selectedDataset === ds.id;
+                return (
+                  <button
+                    key={ds.id}
+                    onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
+                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                      isActive
+                        ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20'
+                        : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
+                    }`}
+                  >
+                    {isActive && (
+                      <div className="absolute top-2 right-2">
+                        <CheckCircle2 size={14} className="text-violet-600" />
+                      </div>
+                    )}
+                    <div className="text-xl mb-2">{ds.icon}</div>
+                    <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
+                    <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
+                    <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Test Cases for Selected Dataset */}
             <div className="flex items-center gap-2 mb-2">
               <Info size={16} className="text-slate-400" />
               <p className="text-sm text-slate-500">
@@ -400,7 +762,56 @@ export default function BenchmarkPage() {
               </p>
             </div>
             <div className="grid md:grid-cols-5 gap-3">
-              {TEST_CASES.map((tc) => (
+              {activeCases.map((tc) => (
+                <button
+                  key={tc.id}
+                  onClick={() => runQuickTest(tc)}
+                  disabled={running || selectedTools.length === 0}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    selectedTestCase === tc.id && running
+                      ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
+                      : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
+                  }`}
+                >
+                  {selectedTestCase === tc.id && running && (
+                    <div className="absolute top-2 right-2">
+                      <Loader2 size={14} className="text-violet-600 animate-spin" />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                    }`} />
+                    <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
+                  <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
+                  <div className="mt-3 flex items-center gap-1 text-xs font-medium text-violet-600 opacity-0 group-hover:opacity-100">
+                    Run test <ArrowRight size={12} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+                    <div className="text-xl mb-2">{ds.icon}</div>
+                    <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
+                    <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
+                    <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Test Cases for Selected Dataset */}
+            <div className="flex items-center gap-2 mb-2">
+              <Info size={16} className="text-slate-400" />
+              <p className="text-sm text-slate-500">
+                Click any test case to run it across all selected tools instantly. No file upload needed.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-5 gap-3">
+              {activeCases.map((tc) => (
                 <button
                   key={tc.id}
                   onClick={() => runQuickTest(tc)}

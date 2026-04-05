@@ -86,7 +86,7 @@ export default function Home() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8 max-w-[1440px] mx-auto">
+      <div className="p-4 lg:p-6 ">
         {/* Top Bar */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8 animate-fade-in">
           <div>
