@@ -79,10 +79,10 @@ export default function Home() {
     low: Math.max(0, totalFiles - totalCritical - (completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.5).length || 0), 0))),
   };
 
-  const [totalRef, totalVal] = useAnimatedCounter(jobs.length);
-  const [filesRef, filesVal] = useAnimatedCounter(totalFiles);
-  const [flaggedRef, flaggedVal] = useAnimatedCounter(totalFlagged);
-  const [criticalRef, criticalVal] = useAnimatedCounter(totalCritical);
+  const [totalVal, totalNode] = useAnimatedCounter(jobs.length);
+  const [filesVal, filesNode] = useAnimatedCounter(totalFiles);
+  const [flaggedVal, flaggedNode] = useAnimatedCounter(totalFlagged);
+  const [criticalVal, criticalNode] = useAnimatedCounter(totalCritical);
 
   return (
     <DashboardLayout>
@@ -127,10 +127,10 @@ export default function Home() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard ref={totalRef} value={totalVal} label="Total Analyses" icon={FileCheck} color="blue" trend="+12%" trendUp />
-          <StatCard ref={filesRef} value={filesVal} label="Files Analyzed" icon={Users} color="emerald" trend="+8%" trendUp />
-          <StatCard ref={flaggedRef} value={flaggedVal} label="Flagged Cases" icon={AlertTriangle} color="amber" trend={totalFlagged > 0 ? `${totalFlagged} active` : 'None'} neutral />
-          <StatCard ref={criticalRef} value={criticalVal} label="Critical Risk" icon={Shield} color="red" trend={totalCritical > 0 ? 'Requires action' : 'Clear'} neutral />
+          <StatCard nodeRef={totalNode} value={totalVal} label="Total Analyses" icon={FileCheck} color="blue" trend="+12%" trendUp />
+          <StatCard nodeRef={filesNode} value={filesVal} label="Files Analyzed" icon={Users} color="emerald" trend="+8%" trendUp />
+          <StatCard nodeRef={flaggedNode} value={flaggedVal} label="Flagged Cases" icon={AlertTriangle} color="amber" trend={totalFlagged > 0 ? `${totalFlagged} active` : 'None'} neutral />
+          <StatCard nodeRef={criticalNode} value={criticalVal} label="Critical Risk" icon={Shield} color="red" trend={totalCritical > 0 ? 'Requires action' : 'Clear'} neutral />
         </div>
 
         {/* Main Grid */}
@@ -312,7 +312,7 @@ export default function Home() {
   );
 }
 
-const StatCard = ({ ref, value, label, icon: Icon, color, trend, trendUp, neutral }) => {
+const StatCard = ({ nodeRef, value, label, icon: Icon, color, trend, trendUp, neutral }) => {
   const colorMap = {
     blue: { bg: 'bg-blue-50', text: 'text-blue-600', icon: 'text-blue-600' },
     emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: 'text-emerald-600' },
@@ -321,7 +321,7 @@ const StatCard = ({ ref, value, label, icon: Icon, color, trend, trendUp, neutra
   };
   const c = colorMap[color] || colorMap.blue;
   return (
-    <div ref={ref} className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-all duration-200 group">
+    <div ref={nodeRef} className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-all duration-200 group">
       <div className="flex items-center justify-between mb-3">
         <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center group-hover:scale-110 transition-transform duration-200`}>
           <Icon size={18} className={c.icon} />
