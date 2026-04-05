@@ -721,125 +721,77 @@ export default function BenchmarkPage() {
 
         {/* Quick Test Cases */}
         {tab === 'quick' && (
-          <div className="space-y-4 mb-6">
+          <div className="space-y-6 mb-6">
             {/* Dataset Selector */}
-            <div className="flex items-center gap-2 mb-2">
-              <FlaskConical size={16} className="text-violet-500" />
-              <span className="text-sm font-semibold text-slate-700">Choose Dataset:</span>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <FlaskConical size={16} className="text-violet-500" />
+                <span className="text-sm font-semibold text-slate-700">Choose Dataset:</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {DATASETS.map((ds) => {
+                  const isActive = selectedDataset === ds.id;
+                  return (
+                    <button
+                      key={ds.id}
+                      onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
+                      className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                        isActive
+                          ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20'
+                          : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
+                      }`}
+                    >
+                      {isActive && (
+                        <div className="absolute top-2 right-2">
+                          <CheckCircle2 size={14} className="text-violet-600" />
+                        </div>
+                      )}
+                      <div className="text-xl mb-2">{ds.icon}</div>
+                      <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
+                      <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
+                      <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              {DATASETS.map((ds) => {
-                const isActive = selectedDataset === ds.id;
-                return (
+
+            {/* Test Cases for Selected Dataset */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Info size={16} className="text-slate-400" />
+                <p className="text-sm text-slate-500">
+                  Click any test case to run it across all selected tools instantly.
+                </p>
+              </div>
+              <div className="grid md:grid-cols-5 gap-3">
+                {activeCases.map((tc) => (
                   <button
-                    key={ds.id}
-                    onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
-                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                      isActive
-                        ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20'
-                        : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
+                    key={tc.id}
+                    onClick={() => runQuickTest(tc)}
+                    disabled={running || selectedTools.length === 0}
+                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      selectedTestCase === tc.id && running
+                        ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
+                        : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
                     }`}
                   >
-                    {isActive && (
+                    {selectedTestCase === tc.id && running && (
                       <div className="absolute top-2 right-2">
-                        <CheckCircle2 size={14} className="text-violet-600" />
+                        <Loader2 size={14} className="text-violet-600 animate-spin" />
                       </div>
                     )}
-                    <div className="text-xl mb-2">{ds.icon}</div>
-                    <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                    <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                    <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Test Cases for Selected Dataset */}
-            <div className="flex items-center gap-2 mb-2">
-              <Info size={16} className="text-slate-400" />
-              <p className="text-sm text-slate-500">
-                Click any test case to run it across all selected tools instantly. No file upload needed.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-5 gap-3">
-              {activeCases.map((tc) => (
-                <button
-                  key={tc.id}
-                  onClick={() => runQuickTest(tc)}
-                  disabled={running || selectedTools.length === 0}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-                    selectedTestCase === tc.id && running
-                      ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
-                      : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
-                  }`}
-                >
-                  {selectedTestCase === tc.id && running && (
-                    <div className="absolute top-2 right-2">
-                      <Loader2 size={14} className="text-violet-600 animate-spin" />
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                      }`} />
+                      <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
                     </div>
-                  )}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                    }`} />
-                    <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
-                  <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
-                  <div className="mt-3 flex items-center gap-1 text-xs font-medium text-violet-600 opacity-0 group-hover:opacity-100">
-                    Run test <ArrowRight size={12} />
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-                    <div className="text-xl mb-2">{ds.icon}</div>
-                    <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                    <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                    <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
+                    <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
+                    <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Test Cases for Selected Dataset */}
-            <div className="flex items-center gap-2 mb-2">
-              <Info size={16} className="text-slate-400" />
-              <p className="text-sm text-slate-500">
-                Click any test case to run it across all selected tools instantly. No file upload needed.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-5 gap-3">
-              {activeCases.map((tc) => (
-                <button
-                  key={tc.id}
-                  onClick={() => runQuickTest(tc)}
-                  disabled={running || selectedTools.length === 0}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-                    selectedTestCase === tc.id && running
-                      ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
-                      : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
-                  }`}
-                >
-                  {selectedTestCase === tc.id && running && (
-                    <div className="absolute top-2 right-2">
-                      <Loader2 size={14} className="text-violet-600 animate-spin" />
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                    }`} />
-                    <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
-                  <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
-                  <div className="mt-3 flex items-center gap-1 text-xs font-medium text-violet-600 opacity-0 group-hover:opacity-100">
-                    Run test <ArrowRight size={12} />
-                  </div>
-                </button>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}
