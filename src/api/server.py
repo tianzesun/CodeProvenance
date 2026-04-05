@@ -414,108 +414,192 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
     student_info = {fn: _extract_student_info(fn) for fn in students_involved}
 
     css = """
-    body { font-family: 'Georgia', serif; margin: 40px; color: #1a1a1a; line-height: 1.6; }
-    .header { text-align: center; border-bottom: 3px double #333; padding-bottom: 20px; margin-bottom: 30px; }
-    .header h1 { font-size: 24px; margin: 0; }
-    .header h2 { font-size: 14px; margin: 6px 0 0; color: #555; font-weight: normal; text-transform: uppercase; letter-spacing: 0.08em; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px; font-size: 13px; }
-    .meta-item { padding: 10px 12px; background: #f9f9f9; border-left: 3px solid #333; }
-    .meta-label { font-weight: bold; color: #555; display: block; font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
-    .rec-box { background: #fde8e8; border: 2px solid #dc3545; border-left: 5px solid #a41e35; padding: 20px; margin-bottom: 30px; }
-    .rec-box h3 { margin: 0 0 8px; color: #a41e35; text-transform: uppercase; }
-    .exec-summary { background: #fff8e1; border: 1px solid #e8a300; padding: 20px; margin-bottom: 30px; }
-    .section { margin-bottom: 30px; }
-    .section h3 { border-bottom: 2px solid #333; padding-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 13px; }
-    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background: #f5f5f5; font-size: 11px; text-transform: uppercase; color: #555; }
-    .risk-critical { background: #a41e35; color: white; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-    .risk-high { background: #dc3545; color: white; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-    .risk-medium { background: #e8a300; color: #333; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-    .risk-low { background: #28a745; color: white; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-    .stat-card { text-align: center; padding: 16px; background: #f5f5f5; border-radius: 4px; border-top: 3px solid #333; }
-    .stat-value { font-size: 28px; font-weight: bold; }
-    .stat-label { font-size: 10px; color: #666; margin-top: 4px; text-transform: uppercase; }
-    .finding { border: 1px solid #d9d9d9; margin-bottom: 20px; border-radius: 4px; overflow: hidden; }
-    .finding-header { display: flex; justify-content: space-between; padding: 12px 16px; background: #fafbfc; border-bottom: 1px solid #e8e8e8; }
-    .finding-body { padding: 16px; }
-    .finding-comment { background: #fff3cd; border-left: 3px solid #e8a300; padding: 10px 14px; margin: 12px 0; font-style: italic; color: #856404; }
-    .features { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-    .feature-tag { background: #e6f0fa; color: #0066cc; padding: 3px 8px; border-radius: 3px; font-size: 11px; }
-    .code-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 12px; border: 1px solid #d9d9d9; border-radius: 4px; overflow: hidden; }
-    .code-hdr { padding: 6px 12px; background: #f5f5f5; font-size: 11px; font-weight: 600; border-bottom: 1px solid #d9d9d9; }
-    .code-blk { padding: 12px; font-family: monospace; font-size: 10px; line-height: 1.5; overflow-x: auto; max-height: 200px; background: #1e1e1e; color: #d4d4d4; margin: 0; white-space: pre; }
-    .footer { margin-top: 50px; padding-top: 20px; border-top: 2px solid #333; font-size: 11px; color: #888; text-align: center; }
-    .sig { margin-top: 50px; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; }
-    .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; }
-    .conf-banner { background: #333; color: #fff; text-align: center; padding: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 30px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #f5f5f5; color: #333; line-height: 1.5; }
+    .report-container { max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .report-header { background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%); color: #fff; padding: 24px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .report-header-left { display: flex; align-items: center; gap: 16px; }
+    .report-logo { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+    .report-title { font-size: 18px; font-weight: 600; }
+    .report-subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+    .report-header-right { text-align: right; font-size: 11px; opacity: 0.8; }
+    .report-meta { padding: 20px 32px; border-bottom: 1px solid #e0e0e0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 13px; }
+    .meta-item { }
+    .meta-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; }
+    .meta-value { font-size: 14px; font-weight: 500; color: #333; }
+    .similarity-overview { padding: 32px; text-align: center; border-bottom: 1px solid #e0e0e0; }
+    .similarity-circle { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; color: #fff; position: relative; }
+    .similarity-circle::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: #fff; }
+    .similarity-circle span { position: relative; z-index: 1; }
+    .similarity-label { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 4px; }
+    .similarity-desc { font-size: 12px; color: #666; }
+    .color-legend { display: flex; justify-content: center; gap: 20px; margin-top: 16px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .sources-section { padding: 24px 32px; }
+    .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a73e8; }
+    .sources-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .sources-table th { background: #f8f9fa; padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 2px solid #e0e0e0; }
+    .sources-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+    .sources-table tr:hover td { background: #fafbfc; }
+    .similarity-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
+    .sim-high { background: #dc3545; }
+    .sim-medium { background: #fd7e14; }
+    .sim-low { background: #ffc107; color: #333; }
+    .sim-none { background: #28a745; }
+    .findings-section { padding: 24px 32px; }
+    .finding-card { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+    .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; }
+    .finding-title { font-size: 14px; font-weight: 600; color: #333; }
+    .finding-body { padding: 18px; }
+    .finding-summary { font-size: 13px; color: #555; margin-bottom: 12px; }
+    .engine-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+    .engine-item { text-align: center; padding: 8px; background: #f8f9fa; border-radius: 6px; }
+    .engine-name { font-size: 9px; font-weight: 600; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+    .engine-score { font-size: 16px; font-weight: 700; }
+    .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; margin-top: 12px; }
+    .code-panel { }
+    .code-panel-header { padding: 8px 12px; background: #f8f9fa; font-size: 11px; font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
+    .code-panel pre { padding: 12px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 10px; line-height: 1.5; overflow-x: auto; max-height: 180px; background: #1e1e1e; color: #d4d4d4; margin: 0; white-space: pre; }
+    .methodology { padding: 24px 32px; border-top: 1px solid #e0e0e0; }
+    .methodology p { font-size: 12px; color: #555; line-height: 1.6; }
+    .footer { padding: 20px 32px; border-top: 1px solid #e0e0e0; text-align: center; font-size: 11px; color: #888; }
+    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 20px; }
+    .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color: #333; }
+    .conf-banner { background: #333; color: #fff; text-align: center; padding: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+    @media print { body { background: #fff; } .report-container { box-shadow: none; } .no-print { display: none; } }
     """
 
     now = datetime.now()
-    critical_cases = []
-    for c in critical:
-        ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
-        ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
-        critical_cases.append(f"{ia['name']} (ID: {ia['id']}) and {ib['name']} (ID: {ib['id']})")
+    max_score = max((c.score for c in suspicious), default=0)
+    if max_score >= 0.9:
+        circle_color = "#dc3545"
+        circle_label = "High Similarity"
+    elif max_score >= 0.75:
+        circle_color = "#fd7e14"
+        circle_label = "Moderate Similarity"
+    elif max_score >= 0.5:
+        circle_color = "#ffc107"
+        circle_label = "Some Similarity"
+    else:
+        circle_color = "#28a745"
+        circle_label = "Low Similarity"
 
-    rec_text = "Immediate administrative action is requested." if critical else "Review at next scheduled meeting."
-
-    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Academic Integrity Report</title><style>{css}</style></head><body>
-<div class="conf-banner">Confidential -- For Academic Integrity Committee Use Only</div>
-<div style="text-align:right;margin-bottom:20px"><button onclick="window.print()" style="padding:8px 16px;cursor:pointer">Print / Save as PDF</button></div>
-<div class="header"><h1>ACADEMIC INTEGRITY COMMITTEE REPORT</h1><h2>Code Similarity Analysis</h2><h2>IntegrityDesk</h2></div>
-<div class="meta">
-<div class="meta-item"><span class="meta-label">Course</span>{course_name or "Not Specified"}</div>
-<div class="meta-item"><span class="meta-label">Assignment</span>{assignment_name or "Not Specified"}</div>
-<div class="meta-item"><span class="meta-label">Date</span>{now.strftime('%B %d, %Y at %H:%M')}</div>
-<div class="meta-item"><span class="meta-label">Case ID</span>{job_id}</div>
-<div class="meta-item"><span class="meta-label">Submissions</span>{len(submissions)}</div>
-<div class="meta-item"><span class="meta-label">Threshold</span>{threshold:.0%}</div>
+    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Originality Report - {course_name or 'Course'}</title><style>{css}</style></head><body>
+<div class="report-container">
+<div class="conf-banner">Confidential -- Academic Integrity Report</div>
+<div class="report-header">
+<div class="report-header-left">
+<div class="report-logo">ID</div>
+<div>
+<div class="report-title">IntegrityDesk Originality Report</div>
+<div class="report-subtitle">Code Similarity Detection &amp; Analysis</div>
 </div>
-<div class="rec-box"><h3>Recommendation</h3><p>{rec_text}</p></div>
-<div class="exec-summary"><h3>Executive Summary</h3>
-<p>Analysis of <strong>{len(submissions)} submissions</strong> for <strong>"{assignment_name or 'N/A'}"</strong> in <strong>"{course_name or 'N/A'}"</strong>.</p>
-<p><strong>{len(suspicious)} case(s)</strong> flagged, involving <strong>{len(students_involved)} student(s)</strong>. {len(critical)} critical, {len(high)} high risk."""
-    if critical_cases:
-        html += f" Critical cases: {', '.join(critical_cases)}."
-    html += f"""</p></div>
-<div class="section"><h3>Statistics</h3><div class="stat-grid">
-<div class="stat-card"><div class="stat-value">{len(submissions)}</div><div class="stat-label">Submissions</div></div>
-<div class="stat-card"><div class="stat-value">{report['summary']['total_pairs']}</div><div class="stat-label">Pairs Compared</div></div>
-<div class="stat-card"><div class="stat-value" style="color:#dc3545">{len(suspicious)}</div><div class="stat-label">Flagged</div></div>
-<div class="stat-card"><div class="stat-value" style="color:#a41e35">{len(critical)}</div><div class="stat-label">Critical</div></div>
-</div></div>
-<div class="section"><h3>Risk Distribution</h3>
-<table><tr><th>Risk</th><th>Count</th><th>Range</th><th>Action</th></tr>
-<tr><td><span class="risk-critical">CRITICAL</span></td><td>{len(critical)}</td><td>90-100%</td><td>Immediate review</td></tr>
-<tr><td><span class="risk-high">HIGH</span></td><td>{len(high)}</td><td>75-89%</td><td>Detailed review</td></tr>
-<tr><td><span class="risk-medium">MEDIUM</span></td><td>{len(medium)}</td><td>50-74%</td><td>Manual check</td></tr>
-<tr><td><span class="risk-low">LOW</span></td><td>{len(comparisons) - len(suspicious)}</td><td>Below {threshold:.0%}</td><td>No action</td></tr></table></div>
-<div class="section"><h3>Detailed Findings</h3>"""
+</div>
+<div class="report-header-right">
+<div>Generated: {now.strftime('%B %d, %Y')}</div>
+<div>Case ID: {job_id}</div>
+</div>
+</div>
+
+<div class="report-meta">
+<div class="meta-item"><div class="meta-label">Course</div><div class="meta-value">{course_name or "Not Specified"}</div></div>
+<div class="meta-item"><div class="meta-label">Assignment</div><div class="meta-value">{assignment_name or "Not Specified"}</div></div>
+<div class="meta-item"><div class="meta-label">Submissions</div><div class="meta-value">{len(submissions)} files analyzed</div></div>
+<div class="meta-item"><div class="meta-label">Pairs Compared</div><div class="meta-value">{report['summary']['total_pairs']}</div></div>
+<div class="meta-item"><div class="meta-label">Threshold</div><div class="meta-value">{threshold:.0%}</div></div>
+<div class="meta-item"><div class="meta-label">Flagged Cases</div><div class="meta-value">{len(suspicious)}</div></div>
+</div>
+
+<div class="similarity-overview">
+<div class="similarity-circle" style="background: conic-gradient({circle_color} {max_score*360:.1f}deg, #e0e0e0 {max_score*360:.1f}deg);">
+<span style="color: {circle_color}">{(max_score*100):.0f}%</span>
+</div>
+<div class="similarity-label">{circle_label}</div>
+<div class="similarity-desc">Highest similarity score detected across {len(submissions)} submissions</div>
+<div class="color-legend">
+<div class="legend-item"><div class="legend-dot" style="background:#dc3545"></div>High (90%+)</div>
+<div class="legend-item"><div class="legend-dot" style="background:#fd7e14"></div>Moderate (75-89%)</div>
+<div class="legend-item"><div class="legend-dot" style="background:#ffc107"></div>Some (50-74%)</div>
+<div class="legend-item"><div class="legend-dot" style="background:#28a745"></div>Low (&lt;50%)</div>
+</div>
+</div>
+
+<div class="sources-section">
+<div class="section-title">Flagged Pairs</div>
+<table class="sources-table">
+<thead><tr><th>Pair</th><th>Students</th><th>Similarity</th><th>Risk Level</th><th>Engines Flagged</th></tr></thead>
+<tbody>"""
 
     for i, c in enumerate(suspicious, 1):
         ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
         ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
-        feats = "".join(f'<span class="feature-tag">{k}: {v:.1%}</span>' for k, v in sorted(c.features.items(), key=lambda x: -x[1])[:5])
-        rc = "risk-critical" if c.score >= 0.9 else "risk-high" if c.score >= 0.75 else "risk-medium"
-        comment = ""
-        if c.score >= 0.99:
-            comment = '<div class="finding-comment">Near-perfect match across all engines -- suggests direct file copy.</div>'
-        elif c.score >= 0.9:
-            comment = '<div class="finding-comment">Extremely high similarity -- substantial code sharing detected.</div>'
-        elif c.score >= 0.75:
-            comment = '<div class="finding-comment">Significant similarities -- manual review recommended.</div>'
-        ca = (c.code_a or "N/A")[:800] + ("..." if len(c.code_a or "") > 800 else "")
-        cb = (c.code_b or "N/A")[:800] + ("..." if len(c.code_b or "") > 800 else "")
-        html += f"""<div class="finding"><div class="finding-header"><strong>Case #{i}: {ia['name']} vs {ib['name']}</strong><span class="{rc}">{c.risk} ({c.score:.1%})</span></div>
-<div class="finding-body"><p>Files: {c.file_a} vs {c.file_b}</p><p>Score: <strong>{c.score:.1%}</strong></p>{comment}<div class="features">{feats}</div>
-<div class="code-comp"><div><div class="code-hdr">{c.file_a}</div><pre class="code-blk">{ca}</pre></div><div><div class="code-hdr">{c.file_b}</div><pre class="code-blk">{cb}</pre></div></div></div></div>"""
+        badge_class = "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+        risk_label = "Critical" if c.score >= 0.9 else "High" if c.score >= 0.75 else "Medium"
+        flagged_engines = sum(1 for v in c.features.values() if v >= threshold)
+        html += f"""<tr>
+<td><strong>{c.file_a}</strong> vs <strong>{c.file_b}</strong></td>
+<td>{ia['name']} vs {ib['name']}</td>
+<td><span class="similarity-badge {badge_class}">{(c.score*100):.1f}%</span></td>
+<td>{risk_label}</td>
+<td>{flagged_engines}/5</td>
+</tr>"""
 
-    html += f"""</div><div class="section"><h3>Methodology</h3><p>IntegrityDesk uses six forensic engines: AST, Winnowing, N-gram, Embedding, Execution, and Token analysis. Results are fused via weighted Bayesian arbitration. The system detects similarity even with variable renaming, reordering, or comment changes.</p></div>
-<div class="section"><h3>Disclaimer</h3><p>Scores indicate structural/semantic similarity but do not constitute definitive proof of misconduct. Consider alongside timestamps, student statements, and other evidence.</p></div>
-<div class="sig"><div><div class="sig-line">Instructor Signature</div></div><div><div class="sig-line">Date</div></div></div>
-<div class="footer"><p>IntegrityDesk | Case {job_id} | {now.strftime('%Y-%m-%d')}</p><p>Confidential -- Academic Integrity Committee only.</p></div></body></html>"""
+    html += f"""</tbody></table></div>
+
+<div class="findings-section">
+<div class="section-title">Detailed Findings &amp; Evidence</div>"""
+
+    for i, c in enumerate(suspicious, 1):
+        ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
+        ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
+        badge_class = "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+
+        engine_items = ""
+        for name, value in sorted(c.features.items(), key=lambda x: -x[1])[:5]:
+            ecolor = "#dc3545" if value >= 0.75 else "#fd7e14" if value >= 0.5 else "#28a745"
+            engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(value*100):.0f}%</div></div>'
+
+        ca = (c.code_a or "N/A")[:600] + ("..." if len(c.code_a or "") > 600 else "")
+        cb = (c.code_b or "N/A")[:600] + ("..." if len(c.code_b or "") > 600 else "")
+
+        html += f"""<div class="finding-card">
+<div class="finding-header">
+<div class="finding-title">Finding #{i}: {ia['name']} vs {ib['name']}</div>
+<span class="similarity-badge {badge_class}">{(c.score*100):.1f}% Similarity</span>
+</div>
+<div class="finding-body">
+<div class="finding-summary">
+<strong>Files:</strong> {c.file_a} vs {c.file_b}<br>
+<strong>Overall Score:</strong> {(c.score*100):.1f}% | <strong>Risk:</strong> {c.risk}
+</div>
+<div class="engine-grid">{engine_items}</div>
+<div class="code-evidence">
+<div class="code-panel"><div class="code-panel-header">{c.file_a}</div><pre>{ca}</pre></div>
+<div class="code-panel"><div class="code-panel-header">{c.file_b}</div><pre>{cb}</pre></div>
+</div>
+</div>
+</div>"""
+
+    html += f"""</div>
+
+<div class="methodology">
+<div class="section-title">Methodology</div>
+<p>IntegrityDesk employs a multi-engine detection approach using six independent forensic engines: <strong>AST</strong> (Abstract Syntax Tree structural comparison), <strong>Winnowing</strong> (K-gram fingerprinting for copy-paste detection), <strong>N-gram</strong> (character/token sequence matching), <strong>Embedding</strong> (semantic similarity via code embeddings), <strong>Execution</strong> (runtime output comparison), and <strong>Token</strong> (token frequency and TF-IDF analysis).</p>
+<p style="margin-top:8px;">Results are fused using weighted Bayesian arbitration to produce final similarity scores. This ensemble approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
+</div>
+
+<div class="signature-row">
+<div><div class="sig-line">Instructor Signature</div></div>
+<div><div class="sig-line">Date</div></div>
+</div>
+
+<div class="footer">
+<p>Generated by IntegrityDesk | Case ID: {job_id} | {now.strftime('%Y-%m-%d %H:%M:%S')}</p>
+<p>This report is confidential and intended solely for academic integrity review.</p>
+</div>
+</div>
+</body></html>"""
     output_path.write_text(html, encoding='utf-8')
 
 

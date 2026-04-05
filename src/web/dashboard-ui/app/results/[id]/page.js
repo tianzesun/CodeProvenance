@@ -117,23 +117,124 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        {/* Alert banner */}
+        {/* Alert banner with evidence */}
         {summary.suspicious_pairs > 0 && (
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-8 flex items-center justify-between flex-wrap gap-4 animate-fade-in">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                <AlertTriangle size={20} className="text-amber-600" />
+          <div className="space-y-4 mb-8 animate-fade-in">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-amber-900">{summary.suspicious_pairs} flagged pair(s) detected above {(job.threshold * 100).toFixed(0)}% threshold</p>
+                  <p className="text-sm text-amber-700 mt-0.5">
+                    {critical.length} critical and {high.length} high-risk findings require review.
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold text-amber-900">{summary.suspicious_pairs} flagged pair(s) detected above {(job.threshold * 100).toFixed(0)}% threshold</p>
-                <p className="text-sm text-amber-700 mt-0.5">
-                  {critical.length} critical and {high.length} high-risk findings require review.
-                </p>
-              </div>
+              <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20 shrink-0">
+                <Shield size={14} /> Generate Committee Report
+              </a>
             </div>
-            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20 shrink-0">
-              <Shield size={14} /> Generate Committee Report
-            </a>
+
+            {/* Evidence Panel */}
+            {results.filter((r) => r.score >= job.threshold).map((result, idx) => {
+              const risk = result.score >= 0.9 ? 'critical' : result.score >= 0.75 ? 'high' : 'medium';
+              const features = result.features || {};
+              const featureEntries = Object.entries(features).sort((a, b) => b[1] - a[1]).slice(0, 5);
+              const codeA = job.submissions?.[result.file_a] || '';
+              const codeB = job.submissions?.[result.file_b] || '';
+
+              // Find matching lines (simple approach: show first 10 lines of each)
+              const linesA = codeA.split('\n').slice(0, 12);
+              const linesB = codeB.split('\n').slice(0, 12);
+
+              return (
+                <div key={idx} className="bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-amber-100 bg-amber-50/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-3 h-3 rounded-full ${risk === 'critical' ? 'bg-red-500' : risk === 'high' ? 'bg-amber-500' : 'bg-yellow-500'}`} />
+                        <h3 className="font-semibold text-slate-900">Evidence: {result.file_a} vs {result.file_b}</h3>
+                      </div>
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${
+                        risk === 'critical' ? 'bg-red-100 text-red-700' : risk === 'high' ? 'bg-amber-100 text-amber-700' : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {risk.toUpperCase()} {(result.score * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-5">
+                    {/* Engine Breakdown */}
+                    <div className="mb-5">
+                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Detection Engine Results</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                        {featureEntries.map(([name, value]) => {
+                          const barColor = value >= 0.75 ? 'bg-red-500' : value >= 0.5 ? 'bg-amber-500' : 'bg-emerald-500';
+                          return (
+                            <div key={name} className="bg-slate-50 rounded-lg p-3">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] font-semibold text-slate-500 uppercase">{name}</span>
+                                <span className="text-xs font-bold text-slate-700">{(value * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${value * 100}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Code Evidence */}
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Matching Code Evidence</h4>
+                      <div className="grid md:grid-cols-2 gap-3">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-xs font-semibold text-blue-700">{result.file_a}</span>
+                          </div>
+                          <pre className="p-3 text-xs font-mono bg-slate-900 text-slate-300 overflow-x-auto max-h-48 leading-relaxed">
+                            {linesA.join('\n')}
+                            {codeA.split('\n').length > 12 && '\n\n// ... [truncated]'}
+                          </pre>
+                        </div>
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-3 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span className="text-xs font-semibold text-emerald-700">{result.file_b}</span>
+                          </div>
+                          <pre className="p-3 text-xs font-mono bg-slate-900 text-slate-300 overflow-x-auto max-h-48 leading-relaxed">
+                            {linesB.join('\n')}
+                            {codeB.split('\n').length > 12 && '\n\n// ... [truncated]'}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Analysis Summary */}
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <Zap size={14} className="text-blue-600 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-sm font-semibold text-blue-900">Analysis Summary</p>
+                          <p className="text-xs text-blue-700 mt-1">
+                            {result.score >= 0.99
+                              ? `Near-perfect match across ${featureEntries.length} forensic engines. The submissions are functionally identical, strongly suggesting a direct file copy.`
+                              : result.score >= 0.9
+                              ? `High similarity detected across ${featureEntries.length} independent engines. The strongest matches are in ${featureEntries.slice(0, 2).map(e => e[0]).join(' and ')}, indicating substantial code sharing.`
+                              : `Significant structural similarities detected. ${featureEntries.length} engines flagged overlapping patterns in ${featureEntries.slice(0, 2).map(e => e[0]).join(' and ')}. Manual review recommended.`
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
