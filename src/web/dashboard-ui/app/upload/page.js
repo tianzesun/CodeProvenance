@@ -104,7 +104,7 @@ export default function UploadPage() {
               onClick={() => setMode('individual')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 mode === 'individual'
-                  ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/25'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                   : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
               }`}
             >
@@ -115,7 +115,7 @@ export default function UploadPage() {
               onClick={() => setMode('zip')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 mode === 'zip'
-                  ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/25'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                   : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
               }`}
             >
@@ -130,7 +130,7 @@ export default function UploadPage() {
               <div
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
-                className="border-2 border-dashed border-slate-200 rounded-xl p-12 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-all duration-200 cursor-pointer group"
+                className="border-2 border-dashed border-slate-200 rounded-xl p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group"
                 onClick={() => {
                   if (mode === 'individual') {
                     document.getElementById('fileInput').click();
@@ -139,8 +139,8 @@ export default function UploadPage() {
                   }
                 }}
               >
-                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-brand-50 transition-colors">
-                  <UploadIcon size={24} className="text-slate-400 group-hover:text-brand-500 transition-colors" />
+                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-50 transition-colors">
+                  <UploadIcon size={24} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
                 </div>
                 <p className="text-sm font-semibold text-slate-700 mb-1">
                   {mode === 'individual'
@@ -253,7 +253,7 @@ export default function UploadPage() {
                     value={courseName}
                     onChange={(e) => setCourseName(e.target.value)}
                     placeholder="e.g., CS101 - Intro to Programming"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 bg-white transition-all"
+                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all"
                   />
                 </div>
                 <div>
@@ -265,7 +265,7 @@ export default function UploadPage() {
                     value={assignmentName}
                     onChange={(e) => setAssignmentName(e.target.value)}
                     placeholder="e.g., Assignment 3 - Sorting"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 bg-white transition-all"
+                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all"
                   />
                 </div>
               </div>
@@ -275,7 +275,7 @@ export default function UploadPage() {
                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Similarity Threshold
                   </label>
-                  <span className="text-sm font-bold text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-lg">
+                  <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-lg">
                     {(threshold * 100).toFixed(0)}%
                   </span>
                 </div>
@@ -286,7 +286,7 @@ export default function UploadPage() {
                   step="0.05"
                   value={threshold}
                   onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                 />
                 <div className="flex justify-between text-xs text-slate-400 mt-1.5">
                   <span>Strict (10%)</span>
@@ -298,7 +298,7 @@ export default function UploadPage() {
               <button
                 onClick={handleSubmit}
                 disabled={uploading}
-                className="w-full py-3.5 bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 disabled:from-brand-300 disabled:to-brand-200 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-brand-500/25 hover:shadow-xl hover:shadow-brand-500/30 disabled:shadow-none"
+                className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 disabled:from-blue-300 disabled:to-blue-200 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 disabled:shadow-none"
               >
                 {uploading ? (
                   <>
