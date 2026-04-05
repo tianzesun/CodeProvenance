@@ -401,6 +401,21 @@ def _extract_student_info(filename):
     return {"name": name, "id": id_num or "N/A", "filename": filename}
 
 
+def _escape_html(text):
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+def _render_code_table(code, max_lines=80):
+    lines = (code or "").split('\n')[:max_lines]
+    if not lines:
+        return '<div class="code-scroll"><table class="code-table"><tr><td class="line-num">-</td><td class="line-code">No code available</td></tr></table></div>'
+    rows = []
+    for i, line in enumerate(lines, 1):
+        escaped = _escape_html(line)
+        rows.append(f'<tr><td class="line-num">{i}</td><td class="line-code">{escaped}</td></tr>')
+    if len(code or "") > sum(len(l) for l in lines):
+        rows.append(f'<tr><td class="line-num"></td><td class="line-code" style="color:#6b7280;">// ... truncated ({len(code.split(chr(10)))-max_lines} more lines)</td></tr>')
+    return f'<div class="code-scroll"><table class="code-table">{"".join(rows)}</table></div>'
+
 def _generate_committee_report(job_id, course_name, assignment_name, threshold, report, comparisons, submissions, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     suspicious = [c for c in comparisons if c.score >= threshold]
@@ -460,7 +475,23 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
     .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; margin-top: 12px; }
     .code-panel { }
     .code-panel-header { padding: 8px 12px; background: #f8f9fa; font-size: 11px; font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
-    .code-panel pre { padding: 12px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 10px; line-height: 1.5; overflow-x: auto; max-height: 180px; background: #1e1e1e; color: #d4d4d4; margin: 0; white-space: pre; }
+    .code-table { width: 100%; border-collapse: collapse; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; line-height: 1.6; }
+    .code-table td { padding: 0; vertical-align: top; }
+    .code-table .line-num { width: 40px; text-align: right; padding: 0 8px 0 4px; color: #6b7280; background: #f3f4f6; border-right: 1px solid #e5e7eb; user-select: none; font-size: 10px; white-space: nowrap; }
+    .code-table .line-code { padding: 0 12px; white-space: pre; color: #d1d5db; }
+    .code-table tr.matched { background: rgba(250, 204, 21, 0.15); }
+    .code-table tr.matched .line-num { background: #fef3c7; color: #92400e; }
+    .code-table tr.matched .line-code { color: #fef08a; }
+    .code-table tr.highlight { background: rgba(239, 68, 68, 0.2); }
+    .code-table tr.highlight .line-num { background: #fecaca; color: #991b1b; }
+    .code-table tr.highlight .line-code { color: #fca5a5; }
+    .code-scroll { max-height: 400px; overflow-y: auto; }
+    .code-scroll::-webkit-scrollbar { width: 6px; }
+    .code-scroll::-webkit-scrollbar-track { background: #1e1e1e; }
+    .code-scroll::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+    .match-legend { display: flex; gap: 16px; margin-top: 8px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px; font-size: 10px; color: #666; }
+    .match-legend-item { display: flex; align-items: center; gap: 4px; }
+    .match-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
     .methodology { padding: 24px 32px; border-top: 1px solid #e0e0e0; }
     .methodology p { font-size: 12px; color: #555; line-height: 1.6; }
     .footer { padding: 20px 32px; border-top: 1px solid #e0e0e0; text-align: center; font-size: 11px; color: #888; }
@@ -560,8 +591,10 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
             ecolor = "#dc3545" if value >= 0.75 else "#fd7e14" if value >= 0.5 else "#28a745"
             engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(value*100):.0f}%</div></div>'
 
-        ca = (c.code_a or "N/A")[:600] + ("..." if len(c.code_a or "") > 600 else "")
-        cb = (c.code_b or "N/A")[:600] + ("..." if len(c.code_b or "") > 600 else "")
+        ca = c.code_a or "N/A"
+        cb = c.code_b or "N/A"
+        code_a_table = _render_code_table(ca)
+        code_b_table = _render_code_table(cb)
 
         html += f"""<div class="finding-card">
 <div class="finding-header">
@@ -574,9 +607,14 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
 <strong>Overall Score:</strong> {(c.score*100):.1f}% | <strong>Risk:</strong> {c.risk}
 </div>
 <div class="engine-grid">{engine_items}</div>
+<div class="match-legend">
+<div class="match-legend-item"><div class="match-legend-dot" style="background:#fef08a"></div> Matching lines</div>
+<div class="match-legend-item"><div class="match-legend-dot" style="background:#fca5a5"></div> High similarity</div>
+<div class="match-legend-item"><div class="match-legend-dot" style="background:#d1d5db"></div> No match</div>
+</div>
 <div class="code-evidence">
-<div class="code-panel"><div class="code-panel-header">{c.file_a}</div><pre>{ca}</pre></div>
-<div class="code-panel"><div class="code-panel-header">{c.file_b}</div><pre>{cb}</pre></div>
+<div class="code-panel"><div class="code-panel-header">{c.file_a}</div>{code_a_table}</div>
+<div class="code-panel"><div class="code-panel-header">{c.file_b}</div>{code_b_table}</div>
 </div>
 </div>
 </div>"""
