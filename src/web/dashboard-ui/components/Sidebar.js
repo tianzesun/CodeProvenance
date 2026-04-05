@@ -13,14 +13,26 @@ import {
   ChevronDown,
   Menu,
   X,
+  LogOut,
+  Bell,
 } from 'lucide-react';
 
-const navItems = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/upload', label: 'New Analysis', icon: Upload },
-  { href: '/benchmark', label: 'Benchmark', icon: BarChart3 },
-  { href: '/reports', label: 'Reports', icon: FileText },
-  { href: '/settings', label: 'Settings', icon: Settings },
+const navSections = [
+  {
+    label: 'Analysis',
+    items: [
+      { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/upload', label: 'New Analysis', icon: Upload },
+      { href: '/benchmark', label: 'Multi-Tool Compare', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { href: '/reports', label: 'Reports', icon: FileText },
+      { href: '/settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ];
 
 export default function Sidebar() {
@@ -30,10 +42,10 @@ export default function Sidebar() {
   return (
     <>
       <button
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-slate-900 text-white"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-slate-900 text-white shadow-lg"
         onClick={() => setMobileOpen(!mobileOpen)}
       >
-        {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        {mobileOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
 
       <aside
@@ -41,56 +53,69 @@ export default function Sidebar() {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="p-5 border-b border-white/10">
+        {/* Brand */}
+        <div className="px-5 py-5 border-b border-white/[0.06]">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center">
-              <Shield size={18} />
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Shield size={16} className="text-white" />
             </div>
             <div>
-              <div className="font-semibold text-sm tracking-wide">IntegrityDesk</div>
-              <div className="text-[10px] text-white/40 uppercase tracking-widest">Academic Integrity</div>
+              <div className="font-bold text-sm tracking-tight">IntegrityDesk</div>
+              <div className="text-[10px] text-white/30 uppercase tracking-[0.15em] font-medium">Enterprise</div>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 py-4 px-3 space-y-1">
-          {navItems.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-white/10 text-white'
-                    : 'text-white/60 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <item.icon size={18} className={active ? 'text-brand-400' : ''} />
-                {item.label}
-              </Link>
-            );
-          })}
+        {/* Navigation */}
+        <nav className="flex-1 py-4 px-3 space-y-6 overflow-y-auto">
+          {navSections.map((section) => (
+            <div key={section.label}>
+              <div className="px-3 mb-2 text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">
+                {section.label}
+              </div>
+              <div className="space-y-0.5">
+                {section.items.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                        active
+                          ? 'bg-white/[0.08] text-white shadow-sm'
+                          : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
+                      }`}
+                    >
+                      <item.icon size={17} className={`shrink-0 transition-colors ${active ? 'text-blue-400' : 'text-white/40'}`} />
+                      {item.label}
+                      {active && <div className="ml-auto w-1 h-1 rounded-full bg-blue-400" />}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center text-xs font-bold">
+        {/* User */}
+        <div className="p-3 border-t border-white/[0.06]">
+          <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/[0.04] transition-colors cursor-pointer group">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-[11px] font-bold shadow-sm">
               P
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium truncate">Professor</div>
-              <div className="text-xs text-white/40">Faculty Account</div>
+              <div className="text-[11px] text-white/30">Faculty Account</div>
             </div>
-            <ChevronDown size={14} className="text-white/40" />
+            <LogOut size={14} className="text-white/20 group-hover:text-white/50 transition-colors" />
           </div>
         </div>
       </aside>
 
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
