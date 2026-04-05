@@ -544,7 +544,7 @@ export default function BenchmarkPage() {
   const activeDataset = DATASETS.find(d => d.id === selectedDataset) || DATASETS[0];
   const activeCases = activeDataset?.cases || [];
 
-  const runQuickTest = async (testCase) => {
+  const handleDrop = useCallback((e) => {
     e.preventDefault();
     setFiles(Array.from(e.dataTransfer.files));
   }, []);
