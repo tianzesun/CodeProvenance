@@ -14,11 +14,16 @@ import {
   ArrowRight,
   Loader2,
   Users,
-  TrendingUp,
   FileSearch,
   CheckCircle2,
-  AlertCircle,
   ChevronRight,
+  Download,
+  Layers,
+  Zap,
+  Target,
+  TrendingUp,
+  FileText,
+  Building2,
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
