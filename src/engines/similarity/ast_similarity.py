@@ -17,6 +17,44 @@ import hashlib
 import math
 
 
+class Finding:
+    """Simple finding result for AST comparison."""
+    def __init__(self, engine: str = "", score: float = 0.0, confidence: float = 0.0,
+                 evidence: list = None, evidence_blocks: list = None, methodology: str = "",
+                 details: str = ""):
+        self.engine = engine
+        self.score = score
+        self.confidence = confidence
+        self.evidence = evidence or []
+        self.evidence_blocks = evidence_blocks or []
+        self.methodology = methodology
+        self.details = details
+
+
+class EvidenceBlock:
+    """Evidence block for AST finding."""
+    def __init__(self, engine: str = "", score: float = 0.0, confidence: float = 0.0,
+                 a_snippet: str = "", b_snippet: str = "", transformation_notes: list = None):
+        self.engine = engine
+        self.score = score
+        self.confidence = confidence
+        self.a_snippet = a_snippet
+        self.b_snippet = b_snippet
+        self.transformation_notes = transformation_notes or []
+
+
+class EvidenceBlock:
+    """Evidence block for AST finding."""
+    def __init__(self, engine: str = "", score: float = 0.0, confidence: float = 0.0,
+                 a_snippet: str = "", b_snippet: str = "", transformation_notes: list = None):
+        self.engine = engine
+        self.score = score
+        self.confidence = confidence
+        self.a_snippet = a_snippet
+        self.b_snippet = b_snippet
+        self.transformation_notes = transformation_notes or []
+
+
 class ASTNode:
     """Represents a node in an Abstract Syntax Tree."""
     

@@ -316,7 +316,8 @@ def _run_jplag_approx(submissions, pairs):
         results = []
         for fa, fb in pairs:
             try:
-                score = engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+                finding = engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+                score = finding.score if hasattr(finding, 'score') else 0.0
             except Exception:
                 score = 0.0
             results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
