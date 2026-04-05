@@ -111,9 +111,6 @@ export default function ResultsPage() {
             <a href={`${API}/report/${id}/download-json`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-all">
               <Download size={16} /> JSON
             </a>
-            <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20">
-              <Building2 size={16} /> Committee Report
-            </a>
           </div>
         </div>
 
