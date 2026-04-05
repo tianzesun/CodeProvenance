@@ -18,6 +18,11 @@ import {
   CheckCircle2,
   AlertCircle,
   FileCode,
+  Clock,
+  Users,
+  Target,
+  Zap,
+  Layers,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -48,7 +53,7 @@ export default function ResultsPage() {
   if (loading) return (
     <DashboardLayout>
       <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="w-10 h-10 border-4 border-slate-200 border-t-brand-500 rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
         <p className="text-sm text-slate-500 mt-4">Loading results...</p>
       </div>
     </DashboardLayout>
@@ -74,33 +79,36 @@ export default function ResultsPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 lg:p-8">
+      <div className="p-6 lg:p-8 max-w-[1440px] mx-auto">
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-slate-500 mb-6">
-          <Link href="/" className="hover:text-brand-600 transition-colors">Dashboard</Link>
+        <div className="flex items-center gap-2 text-sm text-slate-500 mb-6 animate-fade-in">
+          <Link href="/" className="hover:text-blue-600 transition-colors">Dashboard</Link>
           <span className="text-slate-300">/</span>
           <span className="text-slate-900 font-medium">{job.course_name}</span>
         </div>
 
         {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-8">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-8 animate-fade-in">
           <div>
             <div className="flex items-center gap-3 mb-1">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <Shield size={18} className="text-white" />
+              </div>
               <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{job.course_name}</h1>
             </div>
-            <p className="text-slate-500">
+            <p className="text-slate-500 mt-1">
               {job.assignment_name}
               <span className="mx-2 text-slate-300">|</span>
-              Case ID: <span className="font-mono text-slate-700">{job.id}</span>
+              Case ID: <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-xs">{job.id}</span>
               <span className="mx-2 text-slate-300">|</span>
               {job.created_at?.slice(0, 16).replace('T', ' ')}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <a href={`${API}/report/${id}/download`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-all">
+            <a href={`${API}/report/${id}/download`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-all">
               <FileText size={16} /> HTML Report
             </a>
-            <a href={`${API}/report/${id}/download-json`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-all">
+            <a href={`${API}/report/${id}/download-json`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-all">
               <Download size={16} /> JSON
             </a>
             <a href={`${API}/report/${id}/committee`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl text-sm font-semibold hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/20">
@@ -111,7 +119,7 @@ export default function ResultsPage() {
 
         {/* Alert banner */}
         {summary.suspicious_pairs > 0 && (
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-8 flex items-center justify-between flex-wrap gap-4">
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-8 flex items-center justify-between flex-wrap gap-4 animate-fade-in">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
                 <AlertTriangle size={20} className="text-amber-600" />
@@ -130,15 +138,15 @@ export default function ResultsPage() {
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard label="Submissions" value={job.file_count} gradient="from-blue-500 to-blue-600" bgLight="bg-blue-50" />
-          <StatCard label="Pairs Compared" value={summary.total_pairs || 0} gradient="from-slate-500 to-slate-600" bgLight="bg-slate-50" />
-          <StatCard label="Flagged Pairs" value={summary.suspicious_pairs || 0} gradient="from-amber-500 to-amber-600" bgLight="bg-amber-50" />
-          <StatCard label="Critical Risk" value={critical.length} gradient="from-red-500 to-red-600" bgLight="bg-red-50" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 animate-fade-in">
+          <StatCard label="Submissions" value={job.file_count} icon={Users} color="blue" />
+          <StatCard label="Pairs Compared" value={summary.total_pairs || 0} icon={Target} color="slate" />
+          <StatCard label="Flagged Pairs" value={summary.suspicious_pairs || 0} icon={AlertTriangle} color="amber" />
+          <StatCard label="Critical Risk" value={critical.length} icon={Shield} color="red" />
         </div>
 
         {/* Risk distribution */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8 animate-fade-in">
           <RiskCard count={critical.length} label="Critical" range="90%+" color="red" />
           <RiskCard count={high.length} label="High" range="75-89%" color="amber" />
           <RiskCard count={medium.length} label="Medium" range="50-74%" color="yellow" />
@@ -146,7 +154,7 @@ export default function ResultsPage() {
         </div>
 
         {/* Results */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
             <div>
               <h2 className="font-semibold text-slate-900">Pairwise Similarity Results</h2>
@@ -154,10 +162,10 @@ export default function ResultsPage() {
             </div>
             <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
               {[
-                { key: 'all', label: `All` },
-                { key: 'flagged', label: `Flagged` },
-                { key: 'critical', label: `Critical` },
-                { key: 'high', label: `High` },
+                { key: 'all', label: 'All' },
+                { key: 'flagged', label: 'Flagged' },
+                { key: 'critical', label: 'Critical' },
+                { key: 'high', label: 'High' },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -189,10 +197,10 @@ export default function ResultsPage() {
                   : result.score >= 0.75 ? 'high'
                   : result.score >= 0.5 ? 'medium' : 'low';
                 const riskConfig = {
-                  critical: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', dot: 'bg-red-500' },
-                  high: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-500' },
-                  medium: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200', dot: 'bg-yellow-500' },
-                  low: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+                  critical: { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500' },
+                  high: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
+                  medium: { bg: 'bg-yellow-50', text: 'text-yellow-700', dot: 'bg-yellow-500' },
+                  low: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
                 };
                 const rc = riskConfig[risk];
                 const features = result.features || {};
@@ -200,7 +208,7 @@ export default function ResultsPage() {
                 const isExpanded = expanded[idx];
 
                 return (
-                  <div key={idx} className="p-6 hover:bg-slate-50/50 transition-colors">
+                  <div key={idx} className="p-6 hover:bg-slate-50/50 transition-colors animate-fade-in" style={{ animationDelay: `${idx * 50}ms` }}>
                     <div className="flex items-start justify-between gap-4 mb-4">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className={`w-2 h-8 rounded-full ${rc.dot}`} />
@@ -240,7 +248,7 @@ export default function ResultsPage() {
 
                     <button
                       onClick={() => toggleCode(idx)}
-                      className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1.5"
+                      className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1.5"
                     >
                       <Code2 size={14} />
                       {isExpanded ? 'Hide source comparison' : 'View source comparison'}
@@ -276,12 +284,19 @@ export default function ResultsPage() {
   );
 }
 
-function StatCard({ label, value, gradient, bgLight }) {
+function StatCard({ label, value, icon: Icon, color }) {
+  const colorMap = {
+    blue: { bg: 'bg-blue-50', text: 'text-blue-600', icon: 'text-blue-600' },
+    slate: { bg: 'bg-slate-50', text: 'text-slate-600', icon: 'text-slate-600' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-600', icon: 'text-amber-600' },
+    red: { bg: 'bg-red-50', text: 'text-red-600', icon: 'text-red-600' },
+  };
+  const c = colorMap[color] || colorMap.blue;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-shadow group">
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-all duration-200 group">
       <div className="flex items-center justify-between mb-3">
-        <div className={`w-9 h-9 rounded-xl ${bgLight} flex items-center justify-center`}>
-          <div className={`w-2.5 h-2.5 rounded-full bg-gradient-to-br ${gradient}`} />
+        <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center group-hover:scale-110 transition-transform duration-200`}>
+          <Icon size={18} className={c.icon} />
         </div>
       </div>
       <div className="text-2xl font-bold text-slate-900 tracking-tight">{value}</div>
@@ -299,7 +314,7 @@ function RiskCard({ count, label, range, color }) {
   };
   const c = config[color];
   return (
-    <div className={`bg-white rounded-xl border border-slate-200 border-t-4 ${c.border} p-4`}>
+    <div className={`bg-white rounded-xl border border-slate-200 border-t-4 ${c.border} p-4 hover:shadow-md transition-shadow`}>
       <div className={`text-xl font-bold ${c.text}`}>{count}</div>
       <div className="text-xs font-medium text-slate-500 mt-0.5">{label}</div>
       <div className="text-[10px] text-slate-400">{range}</div>
