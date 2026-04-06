@@ -222,10 +222,12 @@ class DataFlowGraph:
 
 class TreeEditDistance:
     """
-    Simplified tree edit distance calculation.
+    Identity-Aware tree edit distance calculation.
     
-    Computes the minimum number of edit operations (insert, delete, relabel)
-    needed to transform one tree into another.
+    Computes weighted edit distance with identity awareness:
+    - Higher cost for mismatches at greater function depths
+    - Higher cost for mismatches in high logic density regions
+    - FunctionDeclaration nodes have strict identity matching requirements
     """
     
     def __init__(self, deletion_cost: float = 1.0, insertion_cost: float = 1.0,
@@ -236,24 +238,69 @@ class TreeEditDistance:
     
     def calculate_distance(self, tree_a: Optional[ASTNode], 
                           tree_b: Optional[ASTNode]) -> float:
-        """Calculate tree edit distance between two ASTs."""
+        """Calculate identity-aware tree edit distance between two ASTs."""
         if tree_a is None or tree_b is None:
             return float('inf')
+        
+        # Precompute node weightings for both trees
+        weights_a = self._compute_node_weights(tree_a)
+        weights_b = self._compute_node_weights(tree_b)
         
         forest_a = self._postorder_linearize(tree_a)
         forest_b = self._postorder_linearize(tree_b)
         
-        return self._simplified_ted(forest_a, forest_b)
+        return self._identity_aware_ted(forest_a, forest_b, weights_a, weights_b)
     
-    def _simplified_ted(self, forest_a: List[ASTNode], 
-                        forest_b: List[ASTNode]) -> float:
-        """Simplified tree edit distance for practical use."""
+    def _compute_node_weights(self, root: ASTNode) -> Dict[ASTNode, float]:
+        """Compute identity weights for each node based on depth and context."""
+        weights = {}
+        function_stack = []
+        
+        def _traverse(node: ASTNode, depth: int = 0):
+            # Track function entry/exit for depth context
+            if node.node_type in ['FunctionDeclaration', 'def', 'function']:
+                function_stack.append(node)
+            
+            # Base weight increases with depth
+            depth_weight = 1.0 + (depth * 0.15)
+            
+            # Function declarations have strict identity requirements
+            if node.node_type in ['FunctionDeclaration', 'def', 'function']:
+                node_weight = 3.0 * depth_weight
+            # Control flow nodes have higher weight
+            elif node.node_type in ['IfStatement', 'ForStatement', 'WhileStatement', 
+                                   'TryStatement', 'ReturnStatement', 'if', 'for', 'while']:
+                node_weight = 2.0 * depth_weight
+            else:
+                node_weight = 1.0 * depth_weight
+            
+            weights[node] = node_weight
+            
+            for child in node.children:
+                _traverse(child, depth + 1)
+            
+            if node.node_type in ['FunctionDeclaration', 'def', 'function']:
+                function_stack.pop()
+        
+        _traverse(root)
+        return weights
+    
+    def _identity_aware_ted(self, forest_a: List[ASTNode], 
+                           forest_b: List[ASTNode],
+                           weights_a: Dict[ASTNode, float],
+                           weights_b: Dict[ASTNode, float]) -> float:
+        """Identity-aware tree edit distance with weighted nodes."""
         if not forest_a and not forest_b:
             return 0.0
         if not forest_a:
-            return len(forest_b) * self.insertion_cost
+            return sum(weights_b[n] * self.insertion_cost for n in forest_b)
         if not forest_b:
-            return len(forest_a) * self.deletion_cost
+            return sum(weights_a[n] * self.deletion_cost for n in forest_a)
+        
+        # First pass: exact identity matches
+        matched_nodes = 0
+        deletion_cost = 0.0
+        insertion_cost = 0.0
         
         tuples_a = [node.to_tuple() for node in forest_a]
         tuples_b = [node.to_tuple() for node in forest_b]
@@ -261,20 +308,36 @@ class TreeEditDistance:
         set_a = set(tuples_a)
         set_b = set(tuples_b)
         
-        common = len(set_a.intersection(set_b))
-        unique_a = len(set_a - set_b)
-        unique_b = len(set_b - set_a)
+        # Calculate costs for unmatched nodes with their weights
+        for i, node in enumerate(forest_a):
+            if tuples_a[i] not in set_b:
+                deletion_cost += weights_a[node] * self.deletion_cost
         
-        deletion_cost = unique_a * self.deletion_cost
-        insertion_cost = unique_b * self.insertion_cost
+        for i, node in enumerate(forest_b):
+            if tuples_b[i] not in set_a:
+                insertion_cost += weights_b[node] * self.insertion_cost
         
-        # Structure penalty
-        depth_a = sum(n.depth() for n in forest_a) / len(forest_a) if forest_a else 0
-        depth_b = sum(n.depth() for n in forest_b) / len(forest_b) if forest_b else 0
-        depth_diff = abs(depth_a - depth_b)
-        structure_penalty = depth_diff * 0.5
+        # Function depth identity penalty
+        functions_a = [n for n in forest_a if n.node_type in ['FunctionDeclaration', 'def', 'function']]
+        functions_b = [n for n in forest_b if n.node_type in ['FunctionDeclaration', 'def', 'function']]
         
-        return deletion_cost + insertion_cost + structure_penalty
+        function_depth_penalty = 0.0
+        for fa, fb in zip(functions_a, functions_b):
+            depth_diff = abs(fa.depth() - fb.depth())
+            if depth_diff > 0:
+                function_depth_penalty += depth_diff * 1.5
+        
+        # Logic density penalty
+        control_a = sum(1 for n in forest_a if n.node_type in 
+                       ['IfStatement', 'ForStatement', 'WhileStatement', 'if', 'for', 'while'])
+        control_b = sum(1 for n in forest_b if n.node_type in 
+                       ['IfStatement', 'ForStatement', 'WhileStatement', 'if', 'for', 'while'])
+        
+        density_a = control_a / max(len(forest_a), 1)
+        density_b = control_b / max(len(forest_b), 1)
+        density_penalty = abs(density_a - density_b) * 10.0
+        
+        return deletion_cost + insertion_cost + function_depth_penalty + density_penalty
     
     def _postorder_linearize(self, node: ASTNode) -> List[ASTNode]:
         """Linearize tree using post-order traversal."""
@@ -338,21 +401,21 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
     """
     
     def __init__(self, 
-                 ted_weight: float = 0.3,
-                 cfg_weight: float = 0.2,
-                 dfg_weight: float = 0.2,
-                 pattern_weight: float = 0.15,
-                 complexity_weight: float = 0.15,
+                 ted_weight: float = 0.35,
+                 cfg_weight: float = 0.18,
+                 dfg_weight: float = 0.18,
+                 pattern_weight: float = 0.12,
+                 complexity_weight: float = 0.17,
                  normalize_variables: bool = True):
         """
-        Initialize AST similarity algorithm.
+        Initialize Identity-Aware AST similarity algorithm.
         
         Args:
-            ted_weight: Weight for tree edit distance
+            ted_weight: Weight for identity-aware tree edit distance
             cfg_weight: Weight for control flow graph comparison
             dfg_weight: Weight for data flow graph comparison
             pattern_weight: Weight for subtree pattern matching
-            complexity_weight: Weight for complexity metrics
+            complexity_weight: Weight for complexity metrics (function depth, logic density)
             normalize_variables: Whether to normalize variable names before comparison
         """
         super().__init__("enhanced_ast")
@@ -663,15 +726,22 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         return sum(scores) / len(scores) if scores else 0.5
     
     def _compute_complexity(self, ast: ASTNode) -> Dict[str, float]:
-        """Compute complexity metrics from AST."""
+        """Compute complexity metrics from AST with logic density and function depth."""
         total_nodes = ast.subtree_size()
         
         # Count specific node types
         node_types: Dict[str, int] = defaultdict(int)
-        def _count(node: ASTNode):
+        function_depths = []
+        
+        def _count(node: ASTNode, depth: int = 0):
             node_types[node.node_type] += 1
+            
+            # Track function declaration depths
+            if node.node_type == 'FunctionDeclaration' or node.node_type == 'def':
+                function_depths.append(depth)
+                
             for child in node.children:
-                _count(child)
+                _count(child, depth + 1)
         _count(ast)
         
         # Cyclomatic complexity approximation
@@ -688,9 +758,24 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
                 _max_depth(child, current_depth + 1)
         _max_depth(ast, 0)
         
+        # Logic density: ratio of control flow nodes to total nodes
+        control_flow_nodes = sum(node_types.get(t, 0) for t in [
+            'if', 'for', 'while', 'elif', 'case', 'catch', 'return', 'break', 'continue'
+        ])
+        logic_density = control_flow_nodes / max(total_nodes, 1)
+        
+        # Average function depth
+        avg_function_depth = sum(function_depths) / len(function_depths) if function_depths else 0.0
+        
+        # Function count
+        function_count = len(function_depths)
+        
         return {
             'total_nodes': float(total_nodes),
             'cyclomatic': float(cyclomatic),
             'max_depth': float(max_depth),
-            'branching_factor': (total_nodes - 1) / max(max_depth, 1)
+            'branching_factor': (total_nodes - 1) / max(max_depth, 1),
+            'logic_density': float(logic_density),
+            'avg_function_depth': float(avg_function_depth),
+            'function_count': float(function_count)
         }
