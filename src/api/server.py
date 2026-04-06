@@ -50,6 +50,8 @@ UPLOADS_DIR = project_root / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 _jobs: Dict[str, Dict[str, Any]] = {}
+JOB_METADATA_FILENAME = "job.json"
+REVIEW_STATUSES = {"unreviewed", "needs_review", "confirmed", "dismissed", "escalated"}
 
 ALLOWED_EXTENSIONS = {
     '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.js', '.ts', '.jsx', '.tsx',
@@ -90,6 +92,189 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
             except Exception as e:
                 logger.warning(f"Skipping {f.name}: {e}")
     return submissions
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _job_report_dir(job_id: str) -> PathLib:
+    return REPORTS_DIR / job_id
+
+
+def _job_metadata_path(job_id: str) -> PathLib:
+    return _job_report_dir(job_id) / JOB_METADATA_FILENAME
+
+
+def _build_job_summary(results: List[Dict[str, Any]], threshold: float) -> Dict[str, Any]:
+    suspicious_pairs = sum(1 for result in results if _coerce_float(result.get("score")) >= threshold)
+    return {
+        "total_pairs": len(results),
+        "suspicious_pairs": suspicious_pairs,
+    }
+
+
+def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    features = {}
+    for name, value in (result.get("features") or {}).items():
+        features[name] = round(_coerce_float(value), 3)
+
+    return {
+        "file_a": result.get("file_a", ""),
+        "file_b": result.get("file_b", ""),
+        "score": round(_coerce_float(result.get("score")), 3),
+        "risk_level": result.get("risk_level") or result.get("risk") or "",
+        "features": features,
+    }
+
+
+def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, Any]:
+    normalized = dict(job)
+    job_id = normalized.get("id", "")
+    threshold = _coerce_float(normalized.get("threshold"), 0.5)
+    results = [_normalize_result(result) for result in normalized.get("results", [])]
+    submissions = normalized.get("submissions") if isinstance(normalized.get("submissions"), dict) else {}
+    file_count = normalized.get("file_count")
+    try:
+        file_count = int(file_count)
+    except (TypeError, ValueError):
+        file_count = 0
+
+    normalized["threshold"] = threshold
+    normalized["results"] = results
+    normalized["summary"] = normalized.get("summary") if isinstance(normalized.get("summary"), dict) else {}
+    if not normalized["summary"]:
+        normalized["summary"] = _build_job_summary(results, threshold)
+
+    normalized["course_name"] = normalized.get("course_name") or "Unnamed Course"
+    normalized["assignment_name"] = normalized.get("assignment_name") or normalized["course_name"] or "Unnamed Assignment"
+    normalized["created_at"] = normalized.get("created_at") or datetime.now().isoformat()
+    normalized["submissions"] = submissions
+    normalized["file_count"] = file_count or len(submissions) or len({name for result in results for name in (result["file_a"], result["file_b"])})
+    normalized["review_status"] = normalized.get("review_status") if normalized.get("review_status") in REVIEW_STATUSES else "unreviewed"
+    normalized["review_notes"] = str(normalized.get("review_notes") or "")
+    normalized["review_updated_at"] = normalized.get("review_updated_at")
+
+    report_dir = _job_report_dir(job_id)
+    normalized["report_path"] = normalized.get("report_path") or str(report_dir / "report.html")
+    normalized["report_json_path"] = normalized.get("report_json_path") or str(report_dir / "report.json")
+    normalized["committee_report_path"] = normalized.get("committee_report_path") or str(report_dir / "committee_report.html")
+
+    if from_disk and normalized.get("status") in {"processing", "analyzing"}:
+        normalized["status"] = "failed"
+        normalized["error"] = normalized.get("error") or "Analysis did not complete because the backend restarted before the check finished."
+
+    return normalized
+
+
+def _persist_job(job_id: str) -> None:
+    job = _jobs.get(job_id)
+    if not job:
+        return
+
+    normalized = _normalize_job(job)
+    _jobs[job_id] = normalized
+
+    metadata_path = _job_metadata_path(job_id)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
+
+
+def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
+    report_json_path = _job_report_dir(job_id) / "report.json"
+    if not report_json_path.exists():
+        return None
+
+    try:
+        report_data = json.loads(report_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception(f"Failed to recover job metadata for {job_id} from report.json")
+        return None
+
+    results = [
+        _normalize_result(
+            {
+                "file_a": comparison.get("file_a", ""),
+                "file_b": comparison.get("file_b", ""),
+                "score": comparison.get("score", 0),
+                "risk_level": comparison.get("risk") or comparison.get("risk_level") or "",
+                "features": comparison.get("features") or {},
+            }
+        )
+        for comparison in report_data.get("comparisons", [])
+    ]
+    threshold = _coerce_float(report_data.get("threshold"), 0.5)
+    title = str(report_data.get("title") or "").replace("IntegrityDesk Report -", "").strip()
+    assignment_name = title or f"Recovered Assignment {job_id}"
+    file_names = {name for result in results for name in (result["file_a"], result["file_b"]) if name}
+
+    recovered_job = _normalize_job(
+        {
+            "id": job_id,
+            "course_name": assignment_name,
+            "assignment_name": assignment_name,
+            "threshold": threshold,
+            "status": "completed",
+            "created_at": report_data.get("generated") or datetime.now().isoformat(),
+            "file_count": len(file_names),
+            "results": results,
+            "summary": _build_job_summary(results, threshold),
+            "report_path": str(_job_report_dir(job_id) / "report.html"),
+            "report_json_path": str(report_json_path),
+            "committee_report_path": str(_job_report_dir(job_id) / "committee_report.html"),
+            "submissions": {},
+            "review_status": "unreviewed",
+            "review_notes": "",
+            "review_updated_at": None,
+        }
+    )
+    _jobs[job_id] = recovered_job
+    _persist_job(job_id)
+    return recovered_job
+
+
+def _load_persisted_job(job_id: str) -> Optional[Dict[str, Any]]:
+    metadata_path = _job_metadata_path(job_id)
+    if metadata_path.exists():
+        try:
+            stored_job = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.exception(f"Failed to read persisted job metadata for {job_id}")
+        else:
+            stored_job["id"] = job_id
+            normalized = _normalize_job(stored_job, from_disk=True)
+            _jobs[job_id] = normalized
+            _persist_job(job_id)
+            return normalized
+
+    return _recover_job_from_report(job_id)
+
+
+def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    if job_id in _jobs:
+        _jobs[job_id] = _normalize_job(_jobs[job_id])
+        return _jobs[job_id]
+    return _load_persisted_job(job_id)
+
+
+def _list_all_jobs() -> List[Dict[str, Any]]:
+    jobs_by_id: Dict[str, Dict[str, Any]] = {}
+
+    if REPORTS_DIR.exists():
+        for report_dir in REPORTS_DIR.iterdir():
+            if not report_dir.is_dir():
+                continue
+            job = _get_job(report_dir.name)
+            if job:
+                jobs_by_id[report_dir.name] = job
+
+    for job_id, job in _jobs.items():
+        jobs_by_id[job_id] = _normalize_job(job)
+
+    return sorted(jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True)
 
 
 @app.post("/api/upload")
@@ -144,13 +329,16 @@ async def upload_zip(
 
 
 async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold):
+    _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id, "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
         "threshold": threshold, "status": "processing",
         "created_at": datetime.now().isoformat(), "file_count": 0,
         "results": [], "summary": {},
+        "review_status": "unreviewed", "review_notes": "", "review_updated_at": None,
     }
+    _persist_job(job_id)
 
     try:
         submissions = _read_files_from_dir(job_dir)
@@ -160,6 +348,7 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
 
         _jobs[job_id]["file_count"] = len(submissions)
         _jobs[job_id]["status"] = "analyzing"
+        _persist_job(job_id)
 
         service = BatchDetectionService(threshold=threshold)
         results = service.compare_all_pairs(submissions)
@@ -193,36 +382,72 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
             "committee_report_path": str(committee_report_path),
             "submissions": {k: v[:3000] for k, v in submissions.items()},
         })
+        _persist_job(job_id)
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
         if job_id in _jobs:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(e)
+            _persist_job(job_id)
         return JSONResponse(status_code=500, content={"error": f"Analysis failed: {str(e)}"})
 
 
 @app.get("/api/jobs")
 async def list_jobs():
-    return JSONResponse(content={"jobs": sorted(_jobs.values(), key=lambda x: x.get("created_at", ""), reverse=True)})
+    return JSONResponse(content={"jobs": _list_all_jobs()})
 
 
 @app.get("/api/job/{job_id}")
 async def get_job_status(job_id: str):
-    job = _jobs.get(job_id)
+    job = _get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return JSONResponse(content=job)
 
 
+@app.patch("/api/job/{job_id}/review")
+async def update_job_review(job_id: str, request: Request):
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid review payload")
+
+    if "review_status" not in payload and "review_notes" not in payload:
+        raise HTTPException(status_code=400, detail="No review updates provided")
+
+    if "review_status" in payload:
+        review_status = payload.get("review_status")
+        if review_status not in REVIEW_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid review status")
+        job["review_status"] = review_status
+
+    if "review_notes" in payload:
+        review_notes = payload.get("review_notes", "")
+        if not isinstance(review_notes, str):
+            raise HTTPException(status_code=400, detail="Review notes must be a string")
+        job["review_notes"] = review_notes.strip()
+
+    job["review_updated_at"] = datetime.now().isoformat()
+    _jobs[job_id] = job
+    _persist_job(job_id)
+    return JSONResponse(content=_jobs[job_id])
+
+
 @app.delete("/api/job/{job_id}")
 async def delete_job(job_id: str):
     job = _jobs.pop(job_id, None)
-    if not job:
+    if not job and not _job_metadata_path(job_id).exists() and not _job_report_dir(job_id).exists():
         raise HTTPException(status_code=404, detail="Job not found")
     job_dir = UPLOADS_DIR / job_id
     if job_dir.exists():
         shutil.rmtree(job_dir)
+    report_dir = _job_report_dir(job_id)
+    if report_dir.exists():
+        shutil.rmtree(report_dir)
     return JSONResponse(content={"status": "deleted"})
 
 
@@ -380,11 +605,11 @@ def _run_codequiry_approx(submissions, pairs):
 def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> PathLib:
     """Resolve a report path from live job state or on-disk report output.
 
-    Jobs are currently stored in-memory, so a backend restart clears `_jobs`
-    even though generated report files remain on disk under `reports/<job_id>/`.
-    This helper keeps existing downloads working across restarts.
+    Generated reports remain on disk under `reports/<job_id>/` and completed
+    jobs now persist there as well. This helper keeps report downloads working
+    even when the in-memory cache has not been warmed yet.
     """
-    job = _jobs.get(job_id)
+    job = _get_job(job_id)
     if job and job_key in job:
         return PathLib(job[job_key])
 
