@@ -43,7 +43,7 @@ import {
   Radar,
 } from 'recharts';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 const TOOLS = [
   { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion (AST + N-gram + Winnowing + Embedding + Token)', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', engines: ['AST', 'N-gram', 'Winnowing', 'Embedding', 'Token', 'Execution'] },

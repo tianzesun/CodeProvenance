@@ -4,9 +4,9 @@ import Sidebar from '@/components/Sidebar';
 
 export default function DashboardLayout({ children }) {
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="theme-shell">
       <Sidebar />
-      <main className="lg:ml-64 min-h-screen">
+      <main className="relative z-10 min-h-screen lg:ml-72">
         {children}
       </main>
     </div>

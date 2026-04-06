@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function ResultsPage() {
   const { id } = useParams();
@@ -62,6 +62,8 @@ export default function ResultsPage() {
 
   const results = job.results || [];
   const summary = job.summary || {};
+  const assignmentTitle = job.assignment_name || job.course_name || 'Assignment Check';
+  const referenceLabel = job.course_name && job.course_name !== assignmentTitle ? job.course_name : '';
   const critical = results.filter((r) => r.score >= 0.9);
   const high = results.filter((r) => r.score >= 0.75 && r.score < 0.9);
   const medium = results.filter((r) => r.score >= 0.5 && r.score < 0.75);
@@ -82,9 +84,9 @@ export default function ResultsPage() {
       <div className="p-4 lg:p-6 ">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500 mb-6 animate-fade-in">
-          <Link href="/" className="hover:text-blue-600 transition-colors">Dashboard</Link>
+          <Link href="/" className="hover:text-blue-600 transition-colors">Home</Link>
           <span className="text-slate-300">/</span>
-          <span className="text-slate-900 font-medium">{job.course_name}</span>
+          <span className="text-slate-900 font-medium">{assignmentTitle}</span>
         </div>
 
         {/* Header */}
@@ -94,11 +96,15 @@ export default function ResultsPage() {
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
                 <Shield size={18} className="text-white" />
               </div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{job.course_name}</h1>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{assignmentTitle}</h1>
             </div>
             <p className="text-slate-500 mt-1">
-              {job.assignment_name}
-              <span className="mx-2 text-slate-300">|</span>
+              {referenceLabel ? (
+                <>
+                  {referenceLabel}
+                  <span className="mx-2 text-slate-300">|</span>
+                </>
+              ) : null}
               Case ID: <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-xs">{job.id}</span>
               <span className="mx-2 text-slate-300">|</span>
               {job.created_at?.slice(0, 16).replace('T', ' ')}

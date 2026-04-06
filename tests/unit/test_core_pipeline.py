@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.domain.models import Finding
 from src.engines.features.feature_extractor import FeatureExtractor, FeatureVector
 from src.engines.scoring.fusion_engine import FusionEngine, FusedScore, DEFAULT_WEIGHTS
 from src.domain.decision.decision_engine import DecisionEngine, DecisionResult
@@ -71,6 +72,37 @@ class TestFeatureExtractor:
             val = getattr(fv, name)
             assert isinstance(val, float)
             assert 0.0 <= val <= 1.0
+
+    def test_extract_normalizes_finding_objects_to_scores(self) -> None:
+        """Finding-like engine outputs should be converted to floats before fusion."""
+
+        class FindingEngine:
+            def __init__(self, score: float) -> None:
+                self._score = score
+
+            def compare(self, *_args, **_kwargs):
+                return Finding(engine="test", score=self._score, confidence=1.0)
+
+        class FloatEngine:
+            def __init__(self, score: float) -> None:
+                self._score = score
+
+            def compare(self, *_args, **_kwargs) -> float:
+                return self._score
+
+        self.extractor._ast_engine = FindingEngine(0.25)
+        self.extractor._token_engine = FindingEngine(0.5)
+        self.extractor._unixcoder_engine = FindingEngine(0.75)
+        self.extractor._ngram_engine = FloatEngine(0.4)
+        self.extractor._winnowing_engine = FloatEngine(0.6)
+
+        fv = self.extractor.extract("def a(): pass", "def b(): pass")
+
+        assert fv.ast == 0.25
+        assert fv.fingerprint == 0.5
+        assert fv.embedding == 0.75
+        assert fv.ngram == 0.4
+        assert fv.winnowing == 0.6
 
 
 # ─── FusionEngine ────────────────────────────────────────────────────────

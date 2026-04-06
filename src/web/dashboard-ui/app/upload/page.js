@@ -1,7 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import {
@@ -15,7 +15,7 @@ import {
   Settings2,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function UploadPage() {
   const router = useRouter();
@@ -27,6 +27,13 @@ export default function UploadPage() {
   const [threshold, setThreshold] = useState(0.5);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const requestedMode = new URLSearchParams(window.location.search).get('mode');
+    if (requestedMode === 'individual' || requestedMode === 'zip') {
+      setMode(requestedMode);
+    }
+  }, []);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -40,7 +47,7 @@ export default function UploadPage() {
   const handleSubmit = async () => {
     setError('');
     if (mode === 'individual' && files.length < 2) {
-      setError('Select at least 2 files');
+      setError('Select at least 2 submissions');
       return;
     }
     if (mode === 'zip' && !zipFile) {
@@ -56,8 +63,8 @@ export default function UploadPage() {
     } else {
       formData.append('file', zipFile);
     }
-    formData.append('course_name', courseName);
-    formData.append('assignment_name', assignmentName);
+    formData.append('course_name', courseName || assignmentName || 'Assignment Check');
+    formData.append('assignment_name', assignmentName || courseName || 'Assignment Check');
     formData.append('threshold', threshold);
 
     try {
@@ -67,17 +74,37 @@ export default function UploadPage() {
       const res = await axios.post(url, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const jobId = res.data.job_id;
+      const jobId = res.data?.job_id;
+      const status = res.data?.status;
+
+      if (!jobId) {
+        setUploading(false);
+        setError('Upload completed, but no job ID was returned.');
+        return;
+      }
+
+      // The current backend completes analysis before responding, so we can
+      // navigate straight to the results page without a follow-up poll.
+      if (status === 'completed') {
+        router.push(`/results/${jobId}`);
+        return;
+      }
 
       const poll = setInterval(async () => {
-        const status = await axios.get(`${API}/api/job/${jobId}`);
-        if (status.data.status === 'completed') {
-          clearInterval(poll);
-          router.push(`/results/${jobId}`);
-        } else if (status.data.status === 'failed') {
+        try {
+          const jobStatus = await axios.get(`${API}/api/job/${jobId}`);
+          if (jobStatus.data.status === 'completed') {
+            clearInterval(poll);
+            router.push(`/results/${jobId}`);
+          } else if (jobStatus.data.status === 'failed') {
+            clearInterval(poll);
+            setUploading(false);
+            setError(jobStatus.data.error || 'Analysis failed');
+          }
+        } catch (pollError) {
           clearInterval(poll);
           setUploading(false);
-          setError(status.data.error || 'Analysis failed');
+          setError(pollError.response?.data?.detail || 'Could not load analysis status.');
         }
       }, 1000);
     } catch (err) {
@@ -92,9 +119,9 @@ export default function UploadPage() {
         <div className="">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">New Analysis</h1>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Check Assignment</h1>
             <p className="text-slate-500 mt-1.5">
-              Upload student submissions to detect code similarity and potential academic integrity issues.
+              Upload the submissions for one assignment, run the similarity check, and open the result when it is ready.
             </p>
           </div>
 
@@ -105,7 +132,7 @@ export default function UploadPage() {
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 mode === 'individual'
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  : 'theme-button-secondary'
               }`}
             >
               <FileUp size={16} />
@@ -116,7 +143,7 @@ export default function UploadPage() {
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 mode === 'zip'
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  : 'theme-button-secondary'
               }`}
             >
               <FolderArchive size={16} />
@@ -124,7 +151,7 @@ export default function UploadPage() {
             </button>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="theme-card rounded-2xl overflow-hidden">
             <div className="p-6">
               {/* Drop Zone */}
               <div
@@ -240,25 +267,25 @@ export default function UploadPage() {
             <div className="border-t border-slate-100 bg-slate-50/50 p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Settings2 size={16} className="text-slate-400" />
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Analysis Settings</span>
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Check Settings</span>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4 mb-5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                    Course
+                    Reference Label
                   </label>
                   <input
                     type="text"
                     value={courseName}
                     onChange={(e) => setCourseName(e.target.value)}
-                    placeholder="e.g., CS101 - Intro to Programming"
+                    placeholder="Optional, e.g. Section A or Spring 2026"
                     className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                    Assignment
+                    Assignment Name
                   </label>
                   <input
                     type="text"
@@ -303,12 +330,12 @@ export default function UploadPage() {
                 {uploading ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
-                    Analyzing submissions...
+                    Running assignment check...
                   </>
                 ) : (
                   <>
                     <Check size={18} />
-                    Run Similarity Analysis
+                    Run Assignment Check
                   </>
                 )}
               </button>

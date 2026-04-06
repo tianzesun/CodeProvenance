@@ -31,7 +31,14 @@ app = FastAPI(title="IntegrityDesk API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3003",
+        "http://127.0.0.1:3003",
+        "http://localhost:3004",
+        "http://127.0.0.1:3004",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -296,13 +303,26 @@ def _run_competitor_tool(tool, submissions, pairs):
     return None
 
 
+def _coerce_similarity_score(result):
+    if isinstance(result, (int, float)):
+        return float(result)
+
+    score = getattr(result, "score", None)
+    if isinstance(score, (int, float)):
+        return float(score)
+
+    return 0.0
+
+
 def _run_moss_approx(submissions, pairs):
     try:
         from src.engines.similarity.token_similarity import TokenSimilarity
         engine = TokenSimilarity()
         results = []
         for fa, fb in pairs:
-            score = engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+            score = _coerce_similarity_score(
+                engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+            )
             results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
         return {"pairs": results}
     except Exception:
@@ -316,8 +336,9 @@ def _run_jplag_approx(submissions, pairs):
         results = []
         for fa, fb in pairs:
             try:
-                finding = engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
-                score = finding.score if hasattr(finding, 'score') else 0.0
+                score = _coerce_similarity_score(
+                    engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+                )
             except Exception:
                 score = 0.0
             results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
@@ -332,7 +353,9 @@ def _run_dolos_approx(submissions, pairs):
         engine = EnhancedWinnowingSimilarity()
         results = []
         for fa, fb in pairs:
-            score = engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+            score = _coerce_similarity_score(
+                engine.compare({"raw": submissions[fa], "tokens": []}, {"raw": submissions[fb], "tokens": []})
+            )
             results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
         return {"pairs": results}
     except Exception:
@@ -345,19 +368,32 @@ def _run_codequiry_approx(submissions, pairs):
         engine = EmbeddingSimilarity()
         results = []
         for fa, fb in pairs:
-            score = engine.compare({"raw": submissions[fa]}, {"raw": submissions[fb]})
+            score = _coerce_similarity_score(
+                engine.compare({"raw": submissions[fa]}, {"raw": submissions[fb]})
+            )
             results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
         return {"pairs": results}
     except Exception:
         return None
 
 
+def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> PathLib:
+    """Resolve a report path from live job state or on-disk report output.
+
+    Jobs are currently stored in-memory, so a backend restart clears `_jobs`
+    even though generated report files remain on disk under `reports/<job_id>/`.
+    This helper keeps existing downloads working across restarts.
+    """
+    job = _jobs.get(job_id)
+    if job and job_key in job:
+        return PathLib(job[job_key])
+
+    return REPORTS_DIR / job_id / fallback_filename
+
+
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
 async def download_report_html(request: Request, job_id: str):
-    job = _jobs.get(job_id)
-    if not job or "report_path" not in job:
-        raise HTTPException(status_code=404, detail="Report not available")
-    rp = PathLib(job["report_path"])
+    rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(str(rp), media_type="text/html", filename=f"integritydesk_report_{job_id}.html")
@@ -365,10 +401,7 @@ async def download_report_html(request: Request, job_id: str):
 
 @app.get("/report/{job_id}/download-json")
 async def download_report_json(job_id: str):
-    job = _jobs.get(job_id)
-    if not job or "report_json_path" not in job:
-        raise HTTPException(status_code=404, detail="Report not available")
-    rp = PathLib(job["report_json_path"])
+    rp = _resolve_report_path(job_id, "report_json_path", "report.json")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(str(rp), media_type="application/json", filename=f"integritydesk_report_{job_id}.json")
@@ -376,10 +409,7 @@ async def download_report_json(job_id: str):
 
 @app.get("/report/{job_id}/committee", response_class=HTMLResponse)
 async def download_committee_report(request: Request, job_id: str):
-    job = _jobs.get(job_id)
-    if not job or "committee_report_path" not in job:
-        raise HTTPException(status_code=404, detail="Committee report not available")
-    rp = PathLib(job["committee_report_path"])
+    rp = _resolve_report_path(job_id, "committee_report_path", "committee_report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Committee report file not found")
     return FileResponse(str(rp), media_type="text/html", filename=f"integritydesk_committee_report_{job_id}.html")

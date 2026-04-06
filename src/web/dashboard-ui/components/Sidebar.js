@@ -4,33 +4,53 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard,
-  Upload,
   BarChart3,
-  FileText,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  MoonStar,
   Settings,
   Shield,
-  ChevronDown,
-  Menu,
+  SunMedium,
+  Upload,
   X,
-  LogOut,
-  Bell,
 } from 'lucide-react';
+
+import { useTheme } from '@/components/ThemeProvider';
 
 const navSections = [
   {
-    label: 'Analysis',
+    label: 'Start',
     items: [
-      { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/upload', label: 'New Analysis', icon: Upload },
-      { href: '/benchmark', label: 'Multi-Tool Compare', icon: BarChart3 },
+      {
+        href: '/',
+        label: 'Home',
+        description: 'Start a check or open results',
+        icon: LayoutDashboard,
+      },
+      {
+        href: '/upload',
+        label: 'Check Assignment',
+        description: 'Upload files or a ZIP archive',
+        icon: Upload,
+      },
     ],
   },
   {
-    label: 'Management',
+    label: 'Tools',
     items: [
-      { href: '/reports', label: 'Reports', icon: FileText },
-      { href: '/settings', label: 'Settings', icon: Settings },
+      {
+        href: '/benchmark',
+        label: 'Benchmark Lab',
+        description: 'Advanced multi-engine comparison',
+        icon: BarChart3,
+      },
+      {
+        href: '/settings',
+        label: 'Preferences',
+        description: 'Default threshold and workflow',
+        icon: Settings,
+      },
     ],
   },
 ];
@@ -38,58 +58,87 @@ const navSections = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <>
       <button
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-slate-900 text-white shadow-lg"
-        onClick={() => setMobileOpen(!mobileOpen)}
+        className="theme-card-strong fixed left-4 top-4 z-50 rounded-2xl p-2.5 text-[var(--text-primary)] lg:hidden"
+        onClick={() => setMobileOpen((open) => !open)}
       >
         {mobileOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-950 text-white flex flex-col transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl transition-transform duration-300 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Brand */}
-        <div className="px-5 py-5 border-b border-white/[0.06]">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Shield size={16} className="text-white" />
+        <div className="theme-section-line border-b border-[color:var(--border)] px-6 py-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-sm">
+                <Shield size={18} />
+              </div>
+              <div>
+                <div className="font-display text-base font-semibold text-[var(--text-primary)]">IntegrityDesk</div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Assignment Review</div>
+              </div>
             </div>
-            <div>
-              <div className="font-bold text-sm tracking-tight">IntegrityDesk</div>
-              <div className="text-[10px] text-white/30 uppercase tracking-[0.15em] font-medium">Enterprise</div>
+
+            <button
+              onClick={toggleTheme}
+              className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            >
+              {theme === 'dark' ? <SunMedium size={17} /> : <MoonStar size={17} />}
+            </button>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-4">
+            <div className="text-sm font-medium text-[var(--text-primary)]">Upload once, review the flagged pairs, export the result.</div>
+            <div className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+              The workspace is tuned for a single assignment check instead of course-wide analytics.
             </div>
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 py-4 px-3 space-y-6 overflow-y-auto">
+        <nav className="scrollbar-thin flex-1 space-y-8 overflow-y-auto px-4 py-6">
           {navSections.map((section) => (
             <div key={section.label}>
-              <div className="px-3 mb-2 text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">
+              <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
                 {section.label}
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-2">
                 {section.items.map((item) => {
                   const active = pathname === item.href;
+
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
                       onClick={() => setMobileOpen(false)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                      className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${
                         active
-                          ? 'bg-white/[0.08] text-white shadow-sm'
-                          : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
+                          ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
+                          : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
                       }`}
                     >
-                      <item.icon size={17} className={`shrink-0 transition-colors ${active ? 'text-blue-400' : 'text-white/40'}`} />
-                      {item.label}
-                      {active && <div className="ml-auto w-1 h-1 rounded-full bg-blue-400" />}
+                      <span
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${
+                          active
+                            ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
+                            : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <item.icon size={17} />
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{item.label}</span>
+                        <span className="block truncate text-[11px] text-[var(--text-muted)]">{item.description}</span>
+                      </span>
                     </Link>
                   );
                 })}
@@ -98,24 +147,25 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {/* User */}
-        <div className="p-3 border-t border-white/[0.06]">
-          <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/[0.04] transition-colors cursor-pointer group">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-[11px] font-bold shadow-sm">
-              P
+        <div className="border-t border-[color:var(--border)] p-4">
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-3 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-[11px] font-semibold text-white">
+                P
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-[var(--text-primary)]">Professor Workspace</div>
+                <div className="text-[11px] text-[var(--text-muted)]">Single-assignment review flow</div>
+              </div>
+              <LogOut size={14} className="text-[var(--text-muted)]" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate">Professor</div>
-              <div className="text-[11px] text-white/30">Faculty Account</div>
-            </div>
-            <LogOut size={14} className="text-white/20 group-hover:text-white/50 transition-colors" />
           </div>
         </div>
       </aside>
 
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-950/35 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}

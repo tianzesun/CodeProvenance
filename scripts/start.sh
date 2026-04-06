@@ -1,12 +1,13 @@
 #!/bin/bash
-# Start IntegrityDesk - Backend API + Next.js Dashboard
-# Usage: ./scripts/start.sh [frontend_port]
-# Default: Backend on 8500, Frontend on 3000
+# Start IntegrityDesk - Backend API + Next.js Dashboard + Official Website
+# Usage: ./scripts/start.sh [dashboard_port] [website_port]
+# Default: Backend on 8500, Dashboard on 3003, Website on 3004
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRONTEND_PORT="${1:-3000}"
+DASHBOARD_PORT="${1:-3003}"
+WEBSITE_PORT="${2:-3004}"
 BACKEND_PORT=8500
 
 echo "============================================"
@@ -14,13 +15,23 @@ echo "  IntegrityDesk - Academic Integrity Platform"
 echo "============================================"
 echo ""
 echo "Backend API:  http://localhost:${BACKEND_PORT}"
-echo "Frontend UI:  http://localhost:${FRONTEND_PORT}"
+echo "Dashboard:    http://localhost:${DASHBOARD_PORT}"
+echo "Website:      http://localhost:${WEBSITE_PORT}"
 echo ""
 
-UI_DIR="$PROJECT_DIR/src/web/dashboard-ui"
-if [ ! -d "$UI_DIR/node_modules" ]; then
-    echo "Installing frontend dependencies..."
-    cd "$UI_DIR" && npm install
+# Install dashboard dependencies
+DASHBOARD_DIR="$PROJECT_DIR/src/web/dashboard-ui"
+if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
+    echo "Installing dashboard dependencies..."
+    cd "$DASHBOARD_DIR" && npm install
+    echo ""
+fi
+
+# Install website dependencies
+WEBSITE_DIR="$PROJECT_DIR/src/web/official-site"
+if [ ! -d "$WEBSITE_DIR/node_modules" ]; then
+    echo "Installing official website dependencies..."
+    cd "$WEBSITE_DIR" && npm install
     echo ""
 fi
 
@@ -31,17 +42,31 @@ cd "$PROJECT_DIR"
 BACKEND_PID=$!
 sleep 2
 
-echo "Starting Next.js dashboard on port ${FRONTEND_PORT}..."
-cd "$UI_DIR"
-npx next dev -p "$FRONTEND_PORT" &
-FRONTEND_PID=$!
+echo "Starting Next.js dashboard on port ${DASHBOARD_PORT}..."
+cd "$DASHBOARD_DIR"
+npx next dev -p "$DASHBOARD_PORT" &
+DASHBOARD_PID=$!
+sleep 1
+
+echo "Starting official product website on port ${WEBSITE_PORT}..."
+cd "$WEBSITE_DIR"
+npx next dev -p "$WEBSITE_PORT" &
+WEBSITE_PID=$!
 
 cleanup() {
     echo ""; echo "Shutting down..."
-    kill $BACKEND_PID 2>/dev/null; kill $FRONTEND_PID 2>/dev/null; exit 0
+    kill $BACKEND_PID 2>/dev/null
+    kill $DASHBOARD_PID 2>/dev/null
+    kill $WEBSITE_PID 2>/dev/null
+    exit 0
 }
 trap cleanup INT TERM
 
-echo ""; echo "Dashboard ready at http://localhost:${FRONTEND_PORT}"
+echo ""
+echo "Services ready:"
+echo "  Backend API: http://localhost:${BACKEND_PORT}"
+echo "  Dashboard:   http://localhost:${DASHBOARD_PORT}"
+echo "  Website:     http://localhost:${WEBSITE_PORT}"
+echo ""
 echo "Press Ctrl+C to stop"; echo ""
 wait
