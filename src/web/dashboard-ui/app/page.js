@@ -7,8 +7,8 @@ import axios from 'axios';
 import {
   Shield, Upload, BarChart3, AlertTriangle, FileCheck, Clock, ArrowRight,
   Loader2, Users, FileSearch, CheckCircle2, ChevronRight,
-  ArrowUpRight, ArrowDownRight, Minus, Bell, Search, Plus,
-  Zap, Layers, Target, Activity, TrendingUp,
+  ArrowUpRight, Minus, Bell, Search, Plus,
+  Layers,
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500';
@@ -62,8 +62,15 @@ export default function Home() {
 
   const completedJobs = jobs.filter((j) => j.status === 'completed');
   const totalFiles = completedJobs.reduce((s, j) => s + (j.file_count || 0), 0);
+  const totalPairs = completedJobs.reduce((s, j) => s + (j.summary?.total_pairs || 0), 0);
   const totalFlagged = completedJobs.reduce((s, j) => s + (j.summary?.suspicious_pairs || 0), 0);
   const totalCritical = completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.9).length || 0), 0);
+
+  // Unique courses
+  const courses = [...new Set(completedJobs.map(j => j.course_name))];
+
+  // Unique courses
+  const courses = [...new Set(completedJobs.map(j => j.course_name))];
 
   const recentJobs = jobs.slice(0, 8);
   const recentActivity = jobs.slice(0, 5).map((j) => ({
@@ -71,12 +78,13 @@ export default function Home() {
     status: j.status, flagged: j.summary?.suspicious_pairs || 0, time: j.created_at,
   }));
 
-  // Risk distribution for mini chart
+  // Risk distribution based on actual pair results
   const riskDist = {
     critical: totalCritical,
     high: completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.75 && r.score < 0.9).length || 0), 0),
     medium: completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.5 && r.score < 0.75).length || 0), 0),
-    low: Math.max(0, totalFiles - totalCritical - (completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.5).length || 0), 0))),
+    low: Math.max(0, totalPairs - totalCritical -
+      completedJobs.reduce((s, j) => s + (j.results?.filter((r) => r.score >= 0.5).length || 0), 0)),
   };
 
   const [totalVal, totalNode] = useAnimatedCounter(jobs.length);
@@ -127,9 +135,9 @@ export default function Home() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard nodeRef={totalNode} value={totalVal} label="Total Analyses" icon={FileCheck} color="blue" trend="+12%" trendUp />
-          <StatCard nodeRef={filesNode} value={filesVal} label="Files Analyzed" icon={Users} color="emerald" trend="+8%" trendUp />
-          <StatCard nodeRef={flaggedNode} value={flaggedVal} label="Flagged Cases" icon={AlertTriangle} color="amber" trend={totalFlagged > 0 ? `${totalFlagged} active` : 'None'} neutral />
+          <StatCard nodeRef={totalNode} value={totalVal} label="Total Analyses" icon={FileCheck} color="blue" trend={jobs.length > 0 ? `${jobs.length} total` : 'None'} />
+          <StatCard nodeRef={filesNode} value={filesVal} label="Files Analyzed" icon={Users} color="emerald" trend={totalFiles > 0 ? `${courses.length} course${courses.length !== 1 ? 's' : ''}` : 'None'} />
+          <StatCard nodeRef={flaggedNode} value={flaggedVal} label="Flagged Cases" icon={AlertTriangle} color="amber" trend={totalFlagged > 0 ? `${totalFlagged} active` : 'Clear'} neutral />
           <StatCard nodeRef={criticalNode} value={criticalVal} label="Critical Risk" icon={Shield} color="red" trend={totalCritical > 0 ? 'Requires action' : 'Clear'} neutral />
         </div>
 
