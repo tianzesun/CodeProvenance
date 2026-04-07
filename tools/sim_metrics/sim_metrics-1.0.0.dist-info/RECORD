@@ -1,0 +1,14 @@
+sim_metrics-1.0.0.dist-info/AUTHORS.rst,sha256=qi6rztgOfqpfDHVM9Wy9GT6PevR5iw1q2z-OHqtkLkE,316
+sim_metrics-1.0.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+sim_metrics-1.0.0.dist-info/LICENSE,sha256=8mluVEVU5FGmJ1_8b2ClHrZB7S51lPClhHJu6rZlVeE,20838
+sim_metrics-1.0.0.dist-info/METADATA,sha256=Ls5obujcgZv6X2pomo2BGKSaP6haEPvYHnE7m6EDNhs,2457
+sim_metrics-1.0.0.dist-info/RECORD,,
+sim_metrics-1.0.0.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+sim_metrics-1.0.0.dist-info/WHEEL,sha256=ewwEueio1C2XeHTvT17n8dZUJgOvyCWCt0WVNLClP9o,92
+sim_metrics-1.0.0.dist-info/top_level.txt,sha256=66EVZXP_-wogq08OKKHL-PGomRNo69r9eQvGbBcxw0I,12
+sim_metrics/__init__.py,sha256=bbARKM1G4ewwB4k2-IleOcSb3TTWgSsOBS1bh_Ieyk0,191
+sim_metrics/__pycache__/__init__.cpython-312.pyc,,
+sim_metrics/__pycache__/elmwise.cpython-312.pyc,,
+sim_metrics/__pycache__/version.cpython-312.pyc,,
+sim_metrics/elmwise.py,sha256=1lmVaiTFvaryNM697xxKqff1o_rLMdEKXIpB8nBHjE8,1820
+sim_metrics/version.py,sha256=GNw7l5GxQiZGdWtVry57XNiuWnn5rg_Cybr5cQrwTO4,367

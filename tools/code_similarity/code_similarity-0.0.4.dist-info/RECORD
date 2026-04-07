@@ -1,0 +1,9 @@
+CodeSimilarity/GetSimilarity/data/hit_stopwords.txt,sha256=z163RxaA0tIw7j32VTXEe_pZPrRRc7hr5TVv1c_yDx8,6014
+CodeSimilarity/__init__.py,sha256=4idsLBhdCvy7Q4jnq4tYqRnVvnMatSdgcogDuyGjeYg,297
+CodeSimilarity/__pycache__/__init__.cpython-312.pyc,,
+code_similarity-0.0.4.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+code_similarity-0.0.4.dist-info/METADATA,sha256=VGcxc7cWhQXU3KC7fbndnSEkl11gcp37JA-YZdhIfT4,2165
+code_similarity-0.0.4.dist-info/RECORD,,
+code_similarity-0.0.4.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+code_similarity-0.0.4.dist-info/WHEEL,sha256=aeYiig01lYGDzBgS8HxWXOg3uV61G9ijOsup-k9o1sk,91
+code_similarity-0.0.4.dist-info/top_level.txt,sha256=verwtJNwji94wabpmV9F1L7aCAZeogH5krXorAxXlAs,15
