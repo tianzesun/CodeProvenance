@@ -688,13 +688,25 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
             comparison_details.append(detail)
 
         rg = ReportGenerator(
-            title=f"IntegrityDesk Report - {course_name or 'Course'}",
-            institution="", course=course_name or "Course",
-            assignment=assignment_name or "Assignment", threshold=threshold,
-            output_dir=REPORTS_DIR / job_id,
+            institution_name=course_name or "Course",
+            branding_color="#2563eb",
         )
-        html_report_path = rg.generate_html(comparison_details)
-        json_report_path = rg.generate_json(comparison_details)
+        html_report = rg.generate_html_report({
+            "report_id": job_id,
+            "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
+            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
+            "ai_detection": {},
+        })
+        html_report_path = REPORTS_DIR / job_id / "report.html"
+        html_report_path.write_text(html_report)
+        json_report = rg.generate_json_report({
+            "report_id": job_id,
+            "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
+            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
+            "ai_detection": {},
+        })
+        json_report_path = REPORTS_DIR / job_id / "report.json"
+        json_report_path.write_text(json_report)
         committee_report_path = REPORTS_DIR / job_id / "committee_report.html"
         _generate_committee_report(job_id, course_name, assignment_name, threshold, report, comparison_details, submissions, committee_report_path)
 

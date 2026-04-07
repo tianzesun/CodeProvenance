@@ -28,7 +28,7 @@ import {
   ArrowRight,
   FileSpreadsheet,
   FileJson,
-  File,
+  File as FileIcon,
 } from 'lucide-react';
 import {
   BarChart,
