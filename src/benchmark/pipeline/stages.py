@@ -318,7 +318,7 @@ class MetricsStage(PipelineStage):
         input_data: List[SimilarityResult],
         config: Dict[str, Any]
     ) -> MetricsResult:
-        from benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
+        from src.benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
         
         threshold = config.get("threshold", 0.5)
         
@@ -414,7 +414,7 @@ class ReportingStage(PipelineStage):
         # JSON report (authoritative)
         if config.get("output", {}).get("json", True):
             output_dir = config.get("output_dir", "reports/json")
-            from benchmark.reporting import JSONReportWriter
+            from src.benchmark.reporting import JSONReportWriter
             writer = JSONReportWriter(f"{output_dir}/benchmark_{timestamp}.json")
             
             report_data = {
@@ -449,7 +449,7 @@ class ReportingStage(PipelineStage):
         # HTML report (human readable)
         if config.get("output", {}).get("html", False):
             html_output_dir = config.get("html_output_dir", "reports/html")
-            from benchmark.reporting import HTMLReportWriter
+            from src.benchmark.reporting import HTMLReportWriter
             html_path = f"{html_output_dir}/report_{timestamp}.html"
             writer = HTMLReportWriter(html_path)
             
@@ -486,7 +486,7 @@ class ReportingStage(PipelineStage):
             Path(leaderboard_dir).mkdir(parents=True, exist_ok=True)
             leaderboard_path = f"{leaderboard_dir}/leaderboard.json"
             
-            from benchmark.reporting import Leaderboard, LeaderboardEntry
+            from src.benchmark.reporting import Leaderboard, LeaderboardEntry
             leaderboard = Leaderboard.load(leaderboard_path)
             leaderboard.add(LeaderboardEntry(
                 engine=extra_info.get("engine", "unknown"),

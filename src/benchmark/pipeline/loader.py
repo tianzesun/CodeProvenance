@@ -8,7 +8,7 @@ from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 # Re-export canonical definitions from schema.py
-from benchmark.datasets.schema import CodePair, CanonicalDataset
+from src.benchmark.datasets.schema import CodePair, CanonicalDataset
 
 
 @dataclass

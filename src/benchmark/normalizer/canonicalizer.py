@@ -12,7 +12,7 @@ Canonicalization handles:
 4. Whitespace/comment removal
 
 Usage:
-    from benchmark.normalization.canonicalizer import Canonicalizer
+    from src.benchmark.normalization.canonicalizer import Canonicalizer
     
     canonicalizer = Canonicalizer()
     code_a_canon = canonicalizer.canonicalize(code_a)
@@ -334,8 +334,8 @@ class CanonicalComparePipeline:
     This wraps any engine to provide canonicalized comparison.
     
     Usage:
-        from benchmark.similarity.engines import HybridEngine
-        from benchmark.normalization.canonicalizer import CanonicalComparePipeline
+        from src.benchmark.similarity.engines import HybridEngine
+        from src.benchmark.normalization.canonicalizer import CanonicalComparePipeline
         
         pipeline = CanonicalComparePipeline(HybridEngine())
         score = pipeline.compare(code_a, code_b)

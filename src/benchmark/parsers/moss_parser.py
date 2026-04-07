@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import re
 import html as html_mod
-from benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from src.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
 
 
 class MossParser(BaseToolParser):

@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Set, Tuple
 
-from benchmark.similarity.base_engine import BaseSimilarityEngine
+from src.benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
 class JPlagEngine(BaseSimilarityEngine):

@@ -10,7 +10,7 @@ import random
 import string
 from typing import Dict, List, Optional, Set, Tuple
 
-from benchmark.generators.utils.ast_utils import get_identifiers, parse_code, unparse_code
+from src.benchmark.generators.utils.ast_utils import get_identifiers, parse_code, unparse_code
 
 
 class IdentifierRenamer(ast.NodeTransformer):

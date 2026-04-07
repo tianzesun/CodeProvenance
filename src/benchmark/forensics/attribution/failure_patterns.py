@@ -12,7 +12,7 @@ Known failure patterns:
 - template_similarity: Both codes use same template/boilerplate
 
 Usage:
-    from benchmark.forensics.attribution.failure_patterns import FailurePatternDetector
+    from src.benchmark.forensics.attribution.failure_patterns import FailurePatternDetector
 
     detector = FailurePatternDetector()
     report = detector.detect(results, component_scores)

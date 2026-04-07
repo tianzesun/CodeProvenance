@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from collections import defaultdict
 import xml.etree.ElementTree as ET
-from benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from src.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
 
 
 class NiCadParser(BaseToolParser):

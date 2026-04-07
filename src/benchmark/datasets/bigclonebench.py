@@ -21,7 +21,7 @@ import json
 import random
 from dataclasses import dataclass, field
 
-from benchmark.datasets.schema import (
+from src.benchmark.datasets.schema import (
     DatasetContract,
     DatasetMetadata,
     CloneType,

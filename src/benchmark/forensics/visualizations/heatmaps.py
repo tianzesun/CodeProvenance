@@ -8,7 +8,7 @@ Heatmaps show:
 - Color-coded similarity scores
 
 Usage:
-    from benchmark.forensics.visualizations.heatmaps import TokenHeatmapGenerator
+    from src.benchmark.forensics.visualizations.heatmaps import TokenHeatmapGenerator
 
     generator = TokenHeatmapGenerator()
     generator.generate(code_a, code_b, similarity_matrix, "output.png")

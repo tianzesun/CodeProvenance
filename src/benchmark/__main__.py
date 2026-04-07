@@ -82,7 +82,7 @@ def main() -> int:
         return 1
     
     if args.command == "core":
-        from benchmark.runners.core_runner import CoreBenchmarkRunner
+        from src.benchmark.runners.core_runner import CoreBenchmarkRunner
         runner = CoreBenchmarkRunner(output_dir=args.output)
         runner.run(
             engine_name=args.engine,
@@ -91,7 +91,7 @@ def main() -> int:
         )
     
     elif args.command == "diagnostic":
-        from benchmark.runners.diagnostic_runner import DiagnosticBenchmarkRunner
+        from src.benchmark.runners.diagnostic_runner import DiagnosticBenchmarkRunner
         runner = DiagnosticBenchmarkRunner(output_dir=args.output)
         runner.run(
             type1=args.type1, type2=args.type2, type3=args.type3, type4=args.type4,
@@ -99,7 +99,7 @@ def main() -> int:
         )
     
     elif args.command == "comparative":
-        from benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
+        from src.benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
         runner = ComparativeBenchmarkRunner(output_dir=args.output)
         runner.run(
             type1=args.type1, type2=args.type2, type3=args.type3, type4=args.type4,
@@ -107,13 +107,13 @@ def main() -> int:
         )
     
     elif args.command == "layers":
-        from benchmark.runners.layer_runner import ThreeLayerBenchmarkRunner
+        from src.benchmark.runners.layer_runner import ThreeLayerBenchmarkRunner
         runner = ThreeLayerBenchmarkRunner(output_dir=args.output)
         runner.run()
     
     elif args.command == "competitor":
-        from benchmark.competitors.runner import CompetitorBenchmarkRunner
-        from benchmark.competitors.report import CompetitorComparisonReport
+        from src.benchmark.competitors.runner import CompetitorBenchmarkRunner
+        from src.benchmark.competitors.report import CompetitorComparisonReport
         runner = CompetitorBenchmarkRunner(
             output_dir=args.output, threshold=args.threshold,
         )
@@ -137,7 +137,7 @@ def main() -> int:
             print(f"  JSON data:       {args.output}/{result.run_id}.json")
 
     elif args.command == "full":
-        from benchmark.runners.full_runner import FullBenchmarkRunner
+        from src.benchmark.runners.full_runner import FullBenchmarkRunner
         runner = FullBenchmarkRunner(output_dir=args.output)
         runner.run(
             type1=args.type1, type2=args.type2, type3=args.type3, type4=args.type4,

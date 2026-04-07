@@ -16,7 +16,7 @@ AEL Responsibilities:
 Pipeline: code → canonicalize → semantic_abstract → algorithmic_class → similarity
 
 Usage:
-    from benchmark.abstraction.algorithmic_equivalence import AlgorithmicEquivalenceDetector
+    from src.benchmark.abstraction.algorithmic_equivalence import AlgorithmicEquivalenceDetector
     
     detector = AlgorithmicEquivalenceDetector()
     result_a = detector.detect(code_a)
@@ -633,8 +633,8 @@ class AlgorithmicComparePipeline:
     Combines algorithmic intent detection with token-based similarity.
     
     Usage:
-        from benchmark.similarity.engines import HybridEngine
-        from benchmark.abstraction.algorithmic_equivalence import AlgorithmicComparePipeline
+        from src.benchmark.similarity.engines import HybridEngine
+        from src.benchmark.abstraction.algorithmic_equivalence import AlgorithmicComparePipeline
         
         pipeline = AlgorithmicComparePipeline(HybridEngine())
         score = pipeline.compare(code_a, code_b)

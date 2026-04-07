@@ -8,8 +8,8 @@ from __future__ import annotations
 import random
 from typing import List, Optional, Tuple
 
-from benchmark.generators.base_loader import CodePool
-from benchmark.generators.utils.ast_utils import count_lines, count_tokens
+from src.benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.utils.ast_utils import count_lines, count_tokens
 
 
 class NegativeGenerator:

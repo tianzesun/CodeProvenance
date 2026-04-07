@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from benchmark.forensics.attribution.error_analysis import ErrorAnalyzer, ErrorReport
+from src.benchmark.forensics.attribution.error_analysis import ErrorAnalyzer, ErrorReport
 
 
 @dataclass

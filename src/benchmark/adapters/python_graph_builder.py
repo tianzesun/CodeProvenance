@@ -5,7 +5,7 @@ Implements:
 2. DFG (Data Flow Graph): Variable definitions → uses → redefinitions
 
 Usage:
-    from benchmark.adapters.python_graph_builder import build_python_graph
+    from src.benchmark.adapters.python_graph_builder import build_python_graph
     cfg, dfg = build_python_graph(source_code)
     print(f"CFG nodes: {len(cfg_nodes)}, edges: {len(cfg_edges)}")
     print(f"DFG definitions: {len(dfg_defs)}, uses: {len(dfg_uses)}")

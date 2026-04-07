@@ -9,7 +9,7 @@ import random
 import re
 from typing import Optional
 
-from benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.base_loader import CodePool
 
 
 class Type1Generator:

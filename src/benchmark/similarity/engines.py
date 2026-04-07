@@ -56,7 +56,7 @@ class ASTEngine(BaseSimilarityEngine):
         if not code_a or not code_b:
             return 0.0
         try:
-            from benchmark.similarity.ast_subtree import compare_ast_safe
+            from src.benchmark.similarity.ast_subtree import compare_ast_safe
             return compare_ast_safe(code_a, code_b, max_depth=self._max_depth)
         except ImportError:
             return 0.0
@@ -102,7 +102,7 @@ class HybridEngine(BaseSimilarityEngine):
         
         # AST-based similarity (best-effort without parser)
         try:
-            from benchmark.similarity.ast_subtree import compare_ast_safe
+            from src.benchmark.similarity.ast_subtree import compare_ast_safe
             ast_sim = compare_ast_safe(
                 code_a, code_b,
                 max_depth=self._ast_max_depth

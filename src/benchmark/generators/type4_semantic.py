@@ -8,10 +8,10 @@ from __future__ import annotations
 import random
 from typing import Dict, List, Optional, Tuple
 
-from benchmark.generators.base_loader import CodePool
-from benchmark.generators.utils.rename_utils import rename_identifiers
-from benchmark.generators.utils.transform_utils import structural_transform
-from benchmark.generators.utils.ast_utils import is_valid_python
+from src.benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.utils.rename_utils import rename_identifiers
+from src.benchmark.generators.utils.transform_utils import structural_transform
+from src.benchmark.generators.utils.ast_utils import is_valid_python
 
 
 class Type4Generator:
@@ -92,7 +92,7 @@ class Type4Generator:
         result = structural_transform(result, seed=self.seed + 200)
         
         # Step 3: Add dead code
-        from benchmark.generators.utils.transform_utils import add_dead_code
+        from src.benchmark.generators.utils.transform_utils import add_dead_code
         result = add_dead_code(result, seed=self.seed + 300)
         
         # Verify validity
@@ -124,12 +124,12 @@ class Type4Generator:
         result = structural_transform(result, seed=self.seed + 400)
         
         # Pass 3: Add complex dead code
-        from benchmark.generators.utils.transform_utils import add_dead_code
+        from src.benchmark.generators.utils.transform_utils import add_dead_code
         for _ in range(3):
             result = add_dead_code(result, seed=self.seed + 500 + _)
         
         # Pass 4: Convert loops
-        from benchmark.generators.utils.transform_utils import convert_loops
+        from src.benchmark.generators.utils.transform_utils import convert_loops
         result = convert_loops(result, seed=self.seed + 600)
         
         # Verify validity

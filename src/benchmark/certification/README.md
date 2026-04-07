@@ -55,7 +55,7 @@ class BenchmarkRecord:
 Tests whether two classifiers have significantly different error rates on the same test set.
 
 ```python
-from benchmark.certification import mcnemar_test
+from src.benchmark.certification import mcnemar_test
 
 result = mcnemar_test(y_true, decisions_a, decisions_b)
 print(f"p-value: {result.p_value:.6f}")
@@ -67,7 +67,7 @@ print(f"Significant: {result.significant}")
 Tests whether score distributions are significantly different.
 
 ```python
-from benchmark.certification import wilcoxon_signed_rank_test
+from src.benchmark.certification import wilcoxon_signed_rank_test
 
 result = wilcoxon_signed_rank_test(scores_a, scores_b)
 print(f"p-value: {result.p_value:.6f}")
@@ -78,7 +78,7 @@ print(f"p-value: {result.p_value:.6f}")
 Computes confidence intervals for metric differences.
 
 ```python
-from benchmark.certification import paired_statistical_tests
+from src.benchmark.certification import paired_statistical_tests
 
 results = paired_statistical_tests(
     y_true, scores_a, scores_b,
@@ -94,7 +94,7 @@ results = paired_statistical_tests(
 Standardized mean difference (parametric):
 
 ```python
-from benchmark.certification import cohens_d
+from src.benchmark.certification import cohens_d
 
 result = cohens_d(scores_a, scores_b)
 print(f"Cohen's d: {result.value:.4f} ({result.magnitude})")
@@ -111,7 +111,7 @@ Interpretation:
 Non-parametric effect size (robust to outliers):
 
 ```python
-from benchmark.certification import cliffs_delta
+from src.benchmark.certification import cliffs_delta
 
 result = cliffs_delta(scores_a, scores_b)
 print(f"Cliff's δ: {result.value:.4f} ({result.magnitude})")
@@ -130,7 +130,7 @@ Interpretation:
 Gold standard for uncertainty estimation:
 
 ```python
-from benchmark.certification import bootstrap_ci
+from src.benchmark.certification import bootstrap_ci
 
 result = bootstrap_ci(y_true, y_pred, f1_score, n_bootstrap=2000)
 print(f"95% CI: [{result.ci_lower:.4f}, {result.ci_upper:.4f}]")
@@ -141,7 +141,7 @@ print(f"95% CI: [{result.ci_lower:.4f}, {result.ci_upper:.4f}]")
 Recommended for binomial proportions:
 
 ```python
-from benchmark.certification import wilson_score_interval
+from src.benchmark.certification import wilson_score_interval
 
 ci = wilson_score_interval(successes, trials, confidence_level=0.95)
 print(f"Accuracy: {ci.point_estimate:.4f} [{ci.ci_lower:.4f}, {ci.ci_upper:.4f}]")
@@ -156,7 +156,7 @@ Break down results by:
 Shows robustness to different clone types:
 
 ```python
-from benchmark.certification import StratifiedAnalyzer
+from src.benchmark.certification import StratifiedAnalyzer
 
 analyzer = StratifiedAnalyzer(n_bootstrap=1000)
 results = analyzer.analyze(records, engine_name="my_engine")
@@ -188,7 +188,7 @@ for language, metrics in results.by_language.items():
 ### Building a Report
 
 ```python
-from benchmark.certification import CertificationReportBuilder, BenchmarkRecord
+from src.benchmark.certification import CertificationReportBuilder, BenchmarkRecord
 
 # Create records
 records = [

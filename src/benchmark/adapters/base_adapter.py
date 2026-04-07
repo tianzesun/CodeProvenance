@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-from benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
 
 
 class BaseAdapter(ABC):
@@ -84,7 +84,7 @@ class BaseAdapter(ABC):
         Returns:
             Similarity score in [0, 1].
         """
-        from benchmark.contracts.evaluation_result import EnrichedPair
+        from src.benchmark.contracts.evaluation_result import EnrichedPair
         
         # Create a synthetic pair for comparison
         pair = EnrichedPair(

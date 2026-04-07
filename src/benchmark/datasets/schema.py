@@ -13,7 +13,7 @@ This module enables:
 - Documentation becomes self-describing
 
 Usage:
-    from benchmark.datasets.schema import DatasetContract, DatasetMetadata, CloneType, Difficulty
+    from src.benchmark.datasets.schema import DatasetContract, DatasetMetadata, CloneType, Difficulty
 
     class MyDataset(DatasetContract):
         @property

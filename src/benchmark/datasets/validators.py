@@ -11,7 +11,7 @@ This module enables:
 - Cross-dataset comparison
 
 Usage:
-    from benchmark.datasets.validators import DatasetValidator
+    from src.benchmark.datasets.validators import DatasetValidator
 
     errors = DatasetValidator.validate_metadata(metadata)
     if errors:
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from benchmark.datasets.schema import DatasetMetadata
+from src.benchmark.datasets.schema import DatasetMetadata
 
 
 class DatasetValidator:

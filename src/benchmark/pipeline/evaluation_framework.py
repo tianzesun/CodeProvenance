@@ -13,14 +13,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from benchmark.pipeline.loader import CanonicalDataset, CodePair
-from benchmark.pipeline.stages import SimilarityResult
-from benchmark.evaluation.metrics.significance import (
+from src.benchmark.pipeline.loader import CanonicalDataset, CodePair
+from src.benchmark.pipeline.stages import SimilarityResult
+from src.benchmark.evaluation.metrics.significance import (
     bootstrap_confidence_interval,
     mcnemar_test,
     add_significance_to_results,
 )
-from benchmark.normalizer.identifier_normalizer import normalize_identifiers
+from src.benchmark.normalizer.identifier_normalizer import normalize_identifiers
 
 
 # =============================================================================
@@ -924,7 +924,7 @@ class ThreeLayerBenchmarkRunner:
         """
         # Try to load real multi-language data
         try:
-            from benchmark.datasets.multilang_benchmark import MultiLangLoader
+            from src.benchmark.datasets.multilang_benchmark import MultiLangLoader
             loader = MultiLangLoader()
             ds = loader.load()
             

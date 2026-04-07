@@ -27,10 +27,10 @@ except ImportError:
         return iterable
     _HAS_TQDM = False
 
-from benchmark.pipeline.config import BenchmarkConfig
-from benchmark.pipeline.loader import CanonicalDataset, CodePair, DatasetLoader
-from benchmark.pipeline.external_loader import ExternalDatasetLoader
-from benchmark.pipeline.stages import (
+from src.benchmark.pipeline.config import BenchmarkConfig
+from src.benchmark.pipeline.loader import CanonicalDataset, CodePair, DatasetLoader
+from src.benchmark.pipeline.external_loader import ExternalDatasetLoader
+from src.benchmark.pipeline.stages import (
     NormalizerStage,
     ParserStage,
     SimilarityStage,
@@ -41,8 +41,8 @@ from benchmark.pipeline.stages import (
     MetricsResult,
     ParsedCode,
 )
-from benchmark.registry import registry
-from benchmark.forensics.clone_type_breakdown import (
+from src.benchmark.registry import registry
+from src.benchmark.forensics.clone_type_breakdown import (
     CloneTypeBreakdown,
     analyze_clone_type_breakdown,
 )
@@ -404,7 +404,7 @@ class BenchmarkRunner:
                 else:
                     fn += 1
 
-            from benchmark.evaluation.metrics import precision, recall, f1_score
+            from src.benchmark.evaluation.metrics import precision, recall, f1_score
             prec = precision(tp, fp)
             rec = recall(tp, fn)
             f1 = f1_score(prec, rec)
@@ -672,7 +672,7 @@ class BenchmarkRunner:
         # Statistical significance
         if len(engine_names) >= 2:
             import numpy as np
-            from benchmark.evaluation.metrics.significance import compare_engines_significance
+            from src.benchmark.evaluation.metrics.significance import compare_engines_significance
 
             scores_by_engine = {}
             for name in engine_names:

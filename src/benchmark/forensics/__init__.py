@@ -13,41 +13,41 @@ This module elevates analysis to forensics by providing:
 - Explainability features for forensic analysis
 - Clear forensic purpose and structure
 """
-from benchmark.forensics.causal import (
+from src.benchmark.forensics.causal import (
     CausalRankingEngine,
     CausalRankingReport,
     ImprovementCandidate,
     RootCauseAttributor,
     RootCause,
 )
-from benchmark.forensics.attribution import (
+from src.benchmark.forensics.attribution import (
     ErrorAnalyzer,
     ErrorCategory,
     FailurePatternDetector,
     FailurePattern,
 )
-from benchmark.forensics.attribution.error_attribution import (
+from src.benchmark.forensics.attribution.error_attribution import (
     ErrorAttributionModel,
     ErrorAttributionReport,
 )
-from benchmark.forensics.clone_taxonomy import (
+from src.benchmark.forensics.clone_taxonomy import (
     CloneTypeClassifier,
     CloneType,
     CloneTypeReport,
 )
-from benchmark.forensics.visualizations import (
+from src.benchmark.forensics.visualizations import (
     TokenHeatmapGenerator,
     ASTAlignmentVisualizer,
     CausalGraphGenerator,
 )
-from benchmark.forensics.stability_analysis import (
+from src.benchmark.forensics.stability_analysis import (
     ThresholdStabilityAnalyzer,
     FailureClusterAnalyzer,
     StabilityReport,
     ClusterReport,
     FailureCluster,
 )
-from benchmark.forensics.clone_type_breakdown import (
+from src.benchmark.forensics.clone_type_breakdown import (
     CloneTypeBreakdown,
     analyze_clone_type_breakdown,
 )

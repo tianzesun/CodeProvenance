@@ -1,5 +1,31 @@
 # CodeProvenance Benchmark System - Comprehensive Guide
 
+## Authoritative Benchmark Suite (2026 Standard)
+
+This is the official publication-grade benchmark suite. All evaluations must use this comparator set.
+
+| Tier | Category | Systems |
+|------|----------|---------|
+| **1** | Canonical Baselines | MOSS, JPlag, NiCad |
+| **2** | Practical / Scalable | Dolos, PMD CPD, SourcererCC |
+| **3** | Advanced / Research | STRANGE, Deckard |
+| **4** | Industry Reality Check | Turnitin, Codequiry |
+| **5** | Modern LLM Baseline | Transformer Semantic, LLM Similarity |
+| **6** | Specialized | Vendetect |
+
+### Evaluation Scenarios
+
+All systems are evaluated across three critical scenarios:
+
+1.  **Classic Plagiarism** (Copy + rename)
+    - Must beat MOSS/JPlag
+2.  **Near-miss / Obfuscation** (Reordering, refactoring)
+    - Must beat NiCad / Deckard
+3.  **AI-assisted Rewriting** (Same logic, different code)
+    - Must beat embedding/LLM baseline
+
+---
+
 ## Executive Summary
 
 The CodeProvenance Benchmark System is a **self-improving, evaluation-driven engineering loop** for code similarity detection algorithms. It provides a rigorous, reproducible framework for measuring detector capabilities across multiple dimensions.

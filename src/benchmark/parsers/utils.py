@@ -3,7 +3,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 import json
 
-from benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from src.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
 
 
 def parse_tool_output(tool_name: str, input_path: Path, dataset: str = "",
@@ -22,13 +22,13 @@ def parse_tool_output(tool_name: str, input_path: Path, dataset: str = "",
     """
     tool_name = tool_name.lower().strip()
     if tool_name == "jplag":
-        from benchmark.parsers.jplag_parser import JPlagParser
+        from src.benchmark.parsers.jplag_parser import JPlagParser
         return JPlagParser(dataset=dataset, threshold=threshold).parse(input_path)
     elif tool_name == "moss":
-        from benchmark.parsers.moss_parser import MossParser
+        from src.benchmark.parsers.moss_parser import MossParser
         return MossParser(dataset=dataset, threshold=threshold).parse(input_path)
     elif tool_name == "nicad":
-        from benchmark.parsers.nicad_parser import NiCadParser
+        from src.benchmark.parsers.nicad_parser import NiCadParser
         return NiCadParser(dataset=dataset, threshold=threshold).parse(input_path)
     else:
         raise ParserError(f"Unknown tool: {tool_name}")

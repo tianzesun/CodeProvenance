@@ -1,7 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import {
   Upload as UploadIcon,
@@ -50,7 +50,15 @@ const TOOLS = [
   { id: 'moss', name: 'MOSS', desc: 'Token-based Jaccard similarity (Stanford)', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', engines: ['Token'] },
   { id: 'jplag', name: 'JPlag', desc: 'AST structural comparison (KIT)', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', engines: ['AST'] },
   { id: 'dolos', name: 'Dolos', desc: 'Winnowing fingerprint comparison', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', engines: ['Winnowing'] },
+  { id: 'nicad', name: 'NiCad', desc: 'Near-miss clone detector with normalization', color: '#e11d48', gradient: 'from-rose-500 to-rose-600', bgLight: 'bg-rose-50', ring: 'ring-rose-500', engines: ['Normalization'] },
+  { id: 'pmd', name: 'PMD CPD', desc: 'Copy/Paste duplicate token sequence detector', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', engines: ['Duplicate Blocks'] },
+  { id: 'sherlock', name: 'Sherlock', desc: 'Line-level textual overlap detector', color: '#4f46e5', gradient: 'from-indigo-500 to-indigo-600', bgLight: 'bg-indigo-50', ring: 'ring-indigo-500', engines: ['Line Overlap'] },
+  { id: 'sim', name: 'SIM', desc: 'Dick Grune text similarity tester', color: '#0891b2', gradient: 'from-cyan-500 to-cyan-600', bgLight: 'bg-cyan-50', ring: 'ring-cyan-500', engines: ['Text Similarity'] },
+  { id: 'strange', name: 'STRANGE', desc: 'Semantic PDG clone detector', color: '#8b5cf6', gradient: 'from-purple-500 to-purple-600', bgLight: 'bg-purple-50', ring: 'ring-purple-500', engines: ['PDG Analysis'] },
+  { id: 'evalforge', name: 'EvalForge', desc: 'Plagiarism detection evaluation framework', color: '#f59e0b', gradient: 'from-orange-500 to-orange-600', bgLight: 'bg-orange-50', ring: 'ring-orange-500', engines: ['Benchmark Runner'] },
+  { id: 'gptzero', name: 'GPTZero', desc: 'Open source AI code/text detection', color: '#10b981', gradient: 'from-green-500 to-green-600', bgLight: 'bg-green-50', ring: 'ring-green-500', engines: ['Embedding Analysis'] },
   { id: 'codequiry', name: 'Codequiry', desc: 'Semantic embedding similarity', color: '#dc2626', gradient: 'from-red-500 to-red-600', bgLight: 'bg-red-50', ring: 'ring-red-500', engines: ['Embedding'] },
+  { id: 'vendetect', name: 'Vendetect', desc: 'Cross-repository vendored code detection', color: '#ec4899', gradient: 'from-pink-500 to-pink-600', bgLight: 'bg-pink-50', ring: 'ring-pink-500', engines: ['Cross Repo Matching'] },
 ];
 
 const TEST_CASES = [
@@ -540,6 +548,15 @@ export default function BenchmarkPage() {
   const [expandedPairs, setExpandedPairs] = useState({});
   const [selectedDataset, setSelectedDataset] = useState('basic-clone');
   const [selectedTestCase, setSelectedTestCase] = useState(null);
+  const [benchmarkDatasets, setBenchmarkDatasets] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${API}/api/benchmark-datasets`).then((res) => {
+      if (res.data?.datasets) {
+        setBenchmarkDatasets(res.data.datasets);
+      }
+    }).catch(() => {});
+  }, []);
 
   const activeDataset = DATASETS.find(d => d.id === selectedDataset) || DATASETS[0];
   const activeCases = activeDataset?.cases || [];
@@ -755,6 +772,46 @@ export default function BenchmarkPage() {
                 })}
               </div>
             </div>
+
+            {/* Benchmark Datasets */}
+            {benchmarkDatasets.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Layers size={16} className="text-emerald-500" />
+                  <span className="text-sm font-semibold text-slate-700">Benchmark Datasets:</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {benchmarkDatasets.map((ds) => {
+                    const isActive = selectedDataset === ds.id;
+                    return (
+                      <button
+                        key={ds.id}
+                        onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
+                        className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                          isActive
+                            ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
+                        }`}
+                      >
+                        {isActive && (
+                          <div className="absolute top-2 right-2">
+                            <CheckCircle2 size={14} className="text-emerald-600" />
+                          </div>
+                        )}
+                        <div className="text-xl mb-2">{ds.icon}</div>
+                        <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
+                        <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
+                        <div className="text-xs font-medium text-emerald-600 mt-2 flex items-center gap-2">
+                          <span>{ds.language?.toUpperCase()}</span>
+                          <span className="text-slate-400">•</span>
+                          <span>{ds.size}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Test Cases for Selected Dataset */}
             <div>

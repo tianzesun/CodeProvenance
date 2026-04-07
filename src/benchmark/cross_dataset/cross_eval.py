@@ -14,10 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from benchmark.cross_dataset.unified_format import UnifiedBenchmarkDataset
-from benchmark.cross_dataset.dataset_registry import DatasetRegistry
-from benchmark.cross_dataset.tool_adapters import ToolAdapter
-from benchmark.cross_dataset.eval_runner import EvaluationRunner, EvaluationResult
+from src.benchmark.cross_dataset.unified_format import UnifiedBenchmarkDataset
+from src.benchmark.cross_dataset.dataset_registry import DatasetRegistry
+from src.benchmark.cross_dataset.tool_adapters import ToolAdapter
+from src.benchmark.cross_dataset.eval_runner import EvaluationRunner, EvaluationResult
 
 
 @dataclass
@@ -176,7 +176,7 @@ class CrossDatasetEvaluator:
             self._tool_names.append(name)
 
     def register_tool_from_engine(self, engine, name: Optional[str] = None, **kwargs) -> None:
-        from benchmark.cross_dataset.tool_adapters import EngineToolAdapter
+        from src.benchmark.cross_dataset.tool_adapters import EngineToolAdapter
         adapter = EngineToolAdapter(engine, name=name, **kwargs)
         self.register_tool(adapter.name, adapter)
 

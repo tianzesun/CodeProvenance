@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from benchmark.runners.core_runner import CoreBenchmarkRunner
-from benchmark.runners.diagnostic_runner import DiagnosticBenchmarkRunner
-from benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
-from benchmark.runners.layer_runner import ThreeLayerBenchmarkRunner
+from src.benchmark.runners.core_runner import CoreBenchmarkRunner
+from src.benchmark.runners.diagnostic_runner import DiagnosticBenchmarkRunner
+from src.benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
+from src.benchmark.runners.layer_runner import ThreeLayerBenchmarkRunner
 
 
 class FullBenchmarkRunner:

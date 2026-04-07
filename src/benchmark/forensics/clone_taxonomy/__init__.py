@@ -4,12 +4,12 @@ Provides clone type classification and technique detection:
 - CloneTypeClassifier: Classifies code pairs by clone type
 - TechniqueDetector: Detects code transformation techniques
 """
-from benchmark.forensics.clone_taxonomy.type_classifier import (
+from src.benchmark.forensics.clone_taxonomy.type_classifier import (
     CloneTypeClassifier,
     CloneType,
     CloneTypeReport,
 )
-from benchmark.forensics.clone_taxonomy.technique_detector import (
+from src.benchmark.forensics.clone_taxonomy.technique_detector import (
     TechniqueDetector,
     TechniqueType,
     TechniqueReport,

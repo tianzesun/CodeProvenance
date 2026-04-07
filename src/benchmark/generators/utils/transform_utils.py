@@ -9,7 +9,7 @@ import ast
 import random
 from typing import List, Optional
 
-from benchmark.generators.utils.ast_utils import parse_code, unparse_code
+from src.benchmark.generators.utils.ast_utils import parse_code, unparse_code
 
 
 class StatementReorderer(ast.NodeTransformer):

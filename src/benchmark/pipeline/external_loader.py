@@ -18,7 +18,7 @@ import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from benchmark.pipeline.loader import CanonicalDataset, CodePair
+from src.benchmark.pipeline.loader import CanonicalDataset, CodePair
 
 
 class ExternalDatasetLoader:

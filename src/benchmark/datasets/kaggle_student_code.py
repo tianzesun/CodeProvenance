@@ -9,7 +9,7 @@ Expected structure after download:
     └── code/                # Source code files
 
 Usage:
-    from benchmark.datasets.kaggle_student_code import KaggleStudentCodeDataset
+    from src.benchmark.datasets.kaggle_student_code import KaggleStudentCodeDataset
 
     ds = KaggleStudentCodeDataset()
     print(ds.get_stats())

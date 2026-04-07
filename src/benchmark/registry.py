@@ -113,7 +113,7 @@ class EngineRegistry:
             TypeError: If engine_class does not have a compare method.
         """
         # Check for either DetectionEngine or BaseSimilarityEngine interface
-        from benchmark.similarity.base_engine import BaseSimilarityEngine
+        from src.benchmark.similarity.base_engine import BaseSimilarityEngine
         has_abstract = (
             issubclass(engine_class, DetectionEngine)
             if isinstance(engine_class, type) and issubclass(engine_class, DetectionEngine)

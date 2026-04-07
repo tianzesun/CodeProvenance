@@ -4,12 +4,12 @@ Provides root cause attribution and improvement ranking:
 - RootCauseAttributor: Analyzes why detectors fail
 - CausalRankingEngine: Ranks improvements by expected impact
 """
-from benchmark.forensics.causal.ranking import (
+from src.benchmark.forensics.causal.ranking import (
     CausalRankingEngine,
     CausalRankingReport,
     ImprovementCandidate,
 )
-from benchmark.forensics.causal.attribution import (
+from src.benchmark.forensics.causal.attribution import (
     RootCauseAttributor,
     RootCause,
     RootCauseReport,

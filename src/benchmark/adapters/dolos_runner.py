@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 from typing import Dict, List, Set, Tuple
 
-from benchmark.similarity.base_engine import BaseSimilarityEngine
+from src.benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
 class DolosBenchmarkEngine(BaseSimilarityEngine):

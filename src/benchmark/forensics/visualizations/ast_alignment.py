@@ -8,7 +8,7 @@ AST alignment shows:
 - Matching subtrees highlighted
 
 Usage:
-    from benchmark.forensics.visualizations.ast_alignment import ASTAlignmentVisualizer
+    from src.benchmark.forensics.visualizations.ast_alignment import ASTAlignmentVisualizer
 
     visualizer = ASTAlignmentVisualizer()
     visualizer.generate(code_a, code_b, "output.png")

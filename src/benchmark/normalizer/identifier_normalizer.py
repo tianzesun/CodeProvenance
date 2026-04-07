@@ -12,7 +12,7 @@ Example:
 This allows token-based similarity engines to detect Type-2 (rename) clones.
 
 Usage:
-    from benchmark.normalization.identifier_normalizer import normalize_identifiers
+    from src.benchmark.normalization.identifier_normalizer import normalize_identifiers
     
     code_a = normalize_identifiers("def foo(x, y): return x + y")
     code_b = normalize_identifiers("def bar(a, b): return a + b")
@@ -131,8 +131,8 @@ class NormalizedEngine:
     """Wraps any similarity engine with identifier normalization.
     
     Usage:
-        from benchmark.similarity.engines import TokenWinnowingEngine
-        from benchmark.normalization.identifier_normalizer import NormalizedEngine
+        from src.benchmark.similarity.engines import TokenWinnowingEngine
+        from src.benchmark.normalization.identifier_normalizer import NormalizedEngine
         
         base_engine = TokenWinnowingEngine()
         normalized = NormalizedEngine(base_engine)

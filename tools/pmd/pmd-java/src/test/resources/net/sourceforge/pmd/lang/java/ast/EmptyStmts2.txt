@@ -1,6 +1,0 @@
-+- CompilationUnit[@Compact = false, @PackageName = "c"]
-   +- PackageDeclaration[@Name = "c"]
-   |  +- ModifierList[@EffectiveModifiers = (), @ExplicitModifiers = ()]
-   +- EmptyDeclaration[]
-   +- ImportDeclaration[@ImportOnDemand = false, @ImportedName = "a", @ImportedSimpleName = "a", @ModuleImport = false, @PackageName = "", @Static = false]
-   +- ImportDeclaration[@ImportOnDemand = false, @ImportedName = "b", @ImportedSimpleName = "b", @ModuleImport = false, @PackageName = "", @Static = false]

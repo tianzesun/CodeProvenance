@@ -13,8 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Dict
 
-from benchmark.adapters.base_adapter import BaseAdapter
-from benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.benchmark.adapters.base_adapter import BaseAdapter
+from src.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
 
 
 class MossAdapter(BaseAdapter):

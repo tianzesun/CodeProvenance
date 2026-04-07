@@ -133,6 +133,31 @@ python -m benchmark run --config config/benchmark.yaml \
 | 3 | Restructured code | Requires AST analysis |
 | 4 | Semantic equivalent | Requires deep semantic |
 
+## Authoritative Benchmark Baselines (2026 Standard)
+
+This is the official benchmark suite structure for all evaluations. All baselines
+are scientifically accepted and widely used in industry and academia.
+
+| Tier | Category | Systems |
+|------|----------|---------|
+| **1** | Canonical Baselines | MOSS, JPlag, NiCad |
+| **2** | Practical / Scalable | Dolos, PMD CPD, SourcererCC |
+| **3** | Advanced / Research | STRANGE, Deckard |
+| **4** | Industry Reality Check | Turnitin, Codequiry |
+| **5** | Modern LLM Baseline | Transformer Semantic, LLM Similarity |
+| **6** | Specialized | Vendetect |
+
+## Benchmark Evaluation Scenarios
+
+All systems are evaluated across three critical scenarios:
+
+1.  **Classic Plagiarism** (Copy + rename)
+    - Must beat MOSS/JPlag
+2.  **Near-miss / Obfuscation** (Reordering, refactoring)
+    - Must beat NiCad / Deckard
+3.  **AI-assisted Rewriting** (Same logic, different code)
+    - Must beat embedding/LLM baseline
+
 ## Engine Performance (Baseline)
 
 | Engine | Precision | Recall | F1 | MAP | MRR |
@@ -149,8 +174,8 @@ python -m benchmark run --config config/benchmark.yaml \
 
 ### Top Improvement Target
 
-1. **Normalizer**: Add identifier normalization for rename detection (20 failures)
-2. **AST engine**: Improve subtree matching (2 failures)
+1.  **Normalizer**: Add identifier normalization for rename detection (20 failures)
+2.  **AST engine**: Improve subtree matching (2 failures)
 
 ## Iteration Process
 

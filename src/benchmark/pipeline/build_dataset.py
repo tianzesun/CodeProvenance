@@ -18,13 +18,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from benchmark.generators.base_loader import CodePool
-from benchmark.generators.type1_exact import generate_type1_clone
-from benchmark.generators.type2_rename import generate_type2_clone
-from benchmark.generators.type3_structure import generate_type3_clone
-from benchmark.generators.type4_semantic import generate_type4_clone
-from benchmark.generators.negatives import generate_negative_pair
-from benchmark.generators.utils.ast_utils import count_lines, count_tokens
+from src.benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.type1_exact import generate_type1_clone
+from src.benchmark.generators.type2_rename import generate_type2_clone
+from src.benchmark.generators.type3_structure import generate_type3_clone
+from src.benchmark.generators.type4_semantic import generate_type4_clone
+from src.benchmark.generators.negatives import generate_negative_pair
+from src.benchmark.generators.utils.ast_utils import count_lines, count_tokens
 
 
 class DatasetBuilder:

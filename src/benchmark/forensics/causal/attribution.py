@@ -10,7 +10,7 @@ Provides strategic intelligence for detector improvement by identifying
 the primary causes of false positives and false negatives.
 
 Usage:
-    from benchmark.forensics.causal.attribution import RootCauseAttributor
+    from src.benchmark.forensics.causal.attribution import RootCauseAttributor
 
     attributor = RootCauseAttributor()
     report = attributor.analyze(pairs, engine)
@@ -245,7 +245,7 @@ class RootCauseAttributor:
         Returns:
             Dict of component name to similarity function.
         """
-        from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine
+        from src.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine
         
         token_engine = TokenWinnowingEngine()
         ast_engine = ASTEngine()

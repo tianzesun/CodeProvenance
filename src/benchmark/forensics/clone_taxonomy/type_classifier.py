@@ -7,7 +7,7 @@ Classifies code pairs by clone type according to standard taxonomy:
 - Type-4: Semantic clones (same meaning, different syntax)
 
 Usage:
-    from benchmark.forensics.clone_taxonomy.type_classifier import CloneTypeClassifier
+    from src.benchmark.forensics.clone_taxonomy.type_classifier import CloneTypeClassifier
 
     classifier = CloneTypeClassifier()
     report = classifier.classify(code_pairs)

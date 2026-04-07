@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import re
 import html as html_mod
-from benchmark.normalizer.base_normalizer import BaseNormalizer
+from src.benchmark.normalizer.base_normalizer import BaseNormalizer
 
 class MossNormalizer(BaseNormalizer):
     @property

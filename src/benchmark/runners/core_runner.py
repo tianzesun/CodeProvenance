@@ -8,9 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from benchmark.evaluation.metrics import compute_average_precision
+from src.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
+from src.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
+from src.benchmark.evaluation.metrics import compute_average_precision
 
 
 class CoreBenchmarkRunner:

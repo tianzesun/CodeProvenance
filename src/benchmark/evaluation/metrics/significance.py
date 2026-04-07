@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Callable
 import numpy as np
 
-from benchmark.evaluation.statistics.bootstrap import (
+from src.benchmark.evaluation.statistics.bootstrap import (
     bootstrap_confidence_interval,
     bootstrap_metric,
     paired_bootstrap_test,

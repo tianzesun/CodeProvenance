@@ -10,7 +10,7 @@ Error categories:
 - By score magnitude: High-confidence vs low-confidence errors
 
 Usage:
-    from benchmark.forensics.attribution.error_analysis import ErrorAnalyzer
+    from src.benchmark.forensics.attribution.error_analysis import ErrorAnalyzer
 
     analyzer = ErrorAnalyzer()
     report = analyzer.analyze(results, threshold=0.5)

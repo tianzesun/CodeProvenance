@@ -125,7 +125,7 @@ class LineOverlapToolAdapter(BaseToolAdapter):
 class EngineToolAdapter(BaseToolAdapter):
     """Adapt a DetectionEngine to the ToolAdapter interface.
 
-    Wraps engines from benchmark.registry that implement compare(code1, code2) -> float.
+    Wraps engines from src.benchmark.registry that implement compare(code1, code2) -> float.
     """
 
     def __init__(self, engine, name: str = ""):
@@ -742,7 +742,7 @@ def build_default_adapters() -> List[ToolAdapter]:
         pass
 
     try:
-        from benchmark.registry import registry
+        from src.benchmark.registry import registry
         for eng_name in registry.list_engines():
             try:
                 engine = registry.get_instance(eng_name)

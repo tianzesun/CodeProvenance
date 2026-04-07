@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from benchmark.forensics import ErrorAttributionModel, ThresholdStabilityAnalyzer, FailureClusterAnalyzer
+from src.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
+from src.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
+from src.benchmark.forensics import ErrorAttributionModel, ThresholdStabilityAnalyzer, FailureClusterAnalyzer
 
 
 class DiagnosticBenchmarkRunner:

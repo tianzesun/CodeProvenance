@@ -8,14 +8,14 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from benchmark.generators.base_loader import CodePool
-from benchmark.generators.utils.transform_utils import (
+from src.benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.utils.transform_utils import (
     reorder_statements,
     add_dead_code,
     convert_loops,
     structural_transform,
 )
-from benchmark.generators.utils.ast_utils import is_valid_python
+from src.benchmark.generators.utils.ast_utils import is_valid_python
 
 
 class Type3Generator:

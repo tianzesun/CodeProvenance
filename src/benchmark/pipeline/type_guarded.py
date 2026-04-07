@@ -20,7 +20,7 @@ from contracts import (
     validate_enriched_pair,
 )
 from contracts.registry import registry
-from benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
 
 T = TypeVar("T")
 U = TypeVar("U")

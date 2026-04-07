@@ -8,9 +8,9 @@ from __future__ import annotations
 import random
 from typing import Optional
 
-from benchmark.generators.base_loader import CodePool
-from benchmark.generators.utils.rename_utils import rename_identifiers
-from benchmark.generators.utils.ast_utils import is_valid_python
+from src.benchmark.generators.base_loader import CodePool
+from src.benchmark.generators.utils.rename_utils import rename_identifiers
+from src.benchmark.generators.utils.ast_utils import is_valid_python
 
 
 class Type2Generator:

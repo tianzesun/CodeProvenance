@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from benchmark.registry import registry
-from benchmark.pipeline.evaluation_framework import ThreeLayerBenchmarkRunner as ThreeLayerFramework
+from src.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
+from src.benchmark.registry import registry
+from src.benchmark.pipeline.evaluation_framework import ThreeLayerBenchmarkRunner as ThreeLayerFramework
 
 
 class ThreeLayerBenchmarkRunner:

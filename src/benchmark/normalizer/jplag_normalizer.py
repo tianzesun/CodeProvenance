@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import json
-from benchmark.normalizer.base_normalizer import BaseNormalizer
+from src.benchmark.normalizer.base_normalizer import BaseNormalizer
 
 class JPlagNormalizer(BaseNormalizer):
     @property

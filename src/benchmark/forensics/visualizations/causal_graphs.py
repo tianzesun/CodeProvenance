@@ -8,7 +8,7 @@ Causal graphs show:
 - Improvement priority rankings
 
 Usage:
-    from benchmark.forensics.visualizations.causal_graphs import CausalGraphGenerator
+    from src.benchmark.forensics.visualizations.causal_graphs import CausalGraphGenerator
 
     generator = CausalGraphGenerator()
     generator.generate(root_cause_report, "output.png")

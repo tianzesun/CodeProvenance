@@ -11,7 +11,7 @@ This module provides strategic intelligence for detector improvement by:
 - Estimating confidence and implementation complexity
 
 Usage:
-    from benchmark.forensics.causal.ranking import CausalRankingEngine
+    from src.benchmark.forensics.causal.ranking import CausalRankingEngine
 
     engine = CausalRankingEngine(root_cause_report)
     ranking = engine.rank_improvements()

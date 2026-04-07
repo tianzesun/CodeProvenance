@@ -10,7 +10,7 @@ Clone Types Generated:
 - Type-4: Semantic (same logic, different implementation)
 
 Usage:
-    from benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
+    from src.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
     
     generator = SyntheticDatasetGenerator(seed=42)
     dataset = generator.generate_pair_count(

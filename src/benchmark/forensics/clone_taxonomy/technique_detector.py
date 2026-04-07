@@ -8,7 +8,7 @@ Detects code transformation techniques used to create clones:
 - Statement reordering
 
 Usage:
-    from benchmark.forensics.clone_taxonomy.technique_detector import TechniqueDetector
+    from src.benchmark.forensics.clone_taxonomy.technique_detector import TechniqueDetector
 
     detector = TechniqueDetector()
     report = detector.detect(code_a, code_b)

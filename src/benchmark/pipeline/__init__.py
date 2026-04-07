@@ -3,9 +3,9 @@
 Single authoritative execution model for all datasets, engines, metrics, and reports.
 All evaluation must execute through this pipeline - no bypassing.
 """
-from benchmark.pipeline.config import BenchmarkConfig
-from benchmark.pipeline.loader import DatasetLoader
-from benchmark.pipeline.stages import (
+from src.benchmark.pipeline.config import BenchmarkConfig
+from src.benchmark.pipeline.loader import DatasetLoader
+from src.benchmark.pipeline.stages import (
     PipelineStage,
     NormalizerStage,
     ParserStage,
@@ -14,7 +14,7 @@ from benchmark.pipeline.stages import (
     MetricsStage,
     ReportingStage
 )
-from benchmark.pipeline.runner import BenchmarkRunner, BenchmarkRunResult
+from src.benchmark.pipeline.runner import BenchmarkRunner, BenchmarkRunResult
 
 __all__ = [
     'BenchmarkConfig',

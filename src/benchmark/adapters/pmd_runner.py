@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict
 
-from benchmark.similarity.base_engine import BaseSimilarityEngine
+from src.benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
 class PMDBenchmarkEngine(BaseSimilarityEngine):

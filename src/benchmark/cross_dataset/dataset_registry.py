@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Dict, List, Callable, Optional, Any
 from pathlib import Path
 
-from benchmark.cross_dataset.unified_format import UnifiedDataset
+from src.benchmark.cross_dataset.unified_format import UnifiedDataset
 
 
 class DatasetRegistry:
@@ -185,7 +185,7 @@ def build_default_registry(
     registry = DatasetRegistry()
 
     try:
-        from benchmark.pipeline.external_loader import ExternalDatasetLoader
+        from src.benchmark.pipeline.external_loader import ExternalDatasetLoader
         loader = ExternalDatasetLoader(data_root=data_root, seed=seed)
     except ImportError:
         try:

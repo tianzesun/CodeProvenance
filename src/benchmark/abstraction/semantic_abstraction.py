@@ -17,7 +17,7 @@ This handles cases canonicalization cannot:
 Pipeline: code → canonicalize → semantic_abstract → similarity
 
 Usage:
-    from benchmark.abstraction.semantic_abstraction import SemanticAbstractor
+    from src.benchmark.abstraction.semantic_abstraction import SemanticAbstractor
     
     abstractor = SemanticAbstractor()
     abs_result = abstractor.abstract(code)
@@ -442,8 +442,8 @@ class SemanticComparePipeline:
     Wraps any engine to provide semantic-aware comparison.
     
     Usage:
-        from benchmark.similarity.engines import HybridEngine
-        from benchmark.abstraction.semantic_abstraction import (
+        from src.benchmark.similarity.engines import HybridEngine
+        from src.benchmark.abstraction.semantic_abstraction import (
             SemanticComparePipeline, SemanticAbstractor
         )
         

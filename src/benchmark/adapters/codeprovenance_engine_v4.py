@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from benchmark.similarity.base_engine import BaseSimilarityEngine
+from src.benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
 @dataclass
@@ -388,7 +388,7 @@ class CodeProvenanceEngineV4(BaseSimilarityEngine):
 
     def _get_token_engine(self):
         if self._token_engine is None:
-            from benchmark.similarity import TokenWinnowingEngine
+            from src.benchmark.similarity import TokenWinnowingEngine
             self._token_engine = TokenWinnowingEngine()
         return self._token_engine
 
@@ -414,7 +414,7 @@ class CodeProvenanceEngineV4(BaseSimilarityEngine):
 
     def _compute_ast_similarity(self, code_a: str, code_b: str) -> float:
         try:
-            from benchmark.similarity import compare_ast_safe
+            from src.benchmark.similarity import compare_ast_safe
             return compare_ast_safe(code_a, code_b, max_depth=3)
         except Exception:
             return 0.0

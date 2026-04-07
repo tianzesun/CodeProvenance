@@ -58,7 +58,7 @@ class HybridSimilarity:
         weights = {}
         
         # Token-based similarity
-        from benchmark.similarity.token_winnowing import token_similarity
+        from src.benchmark.similarity.token_winnowing import token_similarity
         scores['token'] = token_similarity(
             code1, code2,
             k=self.config.token_k,
@@ -68,7 +68,7 @@ class HybridSimilarity:
         
         # AST-based similarity (if ASTs provided)
         if ast1 is not None and ast2 is not None:
-            from benchmark.similarity.ast_subtree import compare_ast
+            from src.benchmark.similarity.ast_subtree import compare_ast
             scores['ast'] = compare_ast(ast1, ast2, self.config.ast_max_depth)
             weights['ast'] = self.config.ast_weight
         else:
@@ -115,7 +115,7 @@ class HybridSimilarity:
         Returns:
             Dict of component name -> score.
         """
-        from benchmark.similarity.token_winnowing import token_similarity
+        from src.benchmark.similarity.token_winnowing import token_similarity
         
         result = {
             'token': token_similarity(
@@ -126,7 +126,7 @@ class HybridSimilarity:
         }
         
         if ast1 is not None and ast2 is not None:
-            from benchmark.similarity.ast_subtree import compare_ast
+            from src.benchmark.similarity.ast_subtree import compare_ast
             result['ast'] = compare_ast(ast1, ast2, self.config.ast_max_depth)
         else:
             result['ast'] = None
