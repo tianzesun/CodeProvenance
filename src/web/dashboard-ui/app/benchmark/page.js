@@ -26,6 +26,9 @@ import {
   Info,
   FileText,
   ArrowRight,
+  FileSpreadsheet,
+  FileJson,
+  File,
 } from 'lucide-react';
 import {
   BarChart,
@@ -278,7 +281,7 @@ def sort_list(lst):
         expected: 0.70,
         codeA: `def factorial(n):
     if n <= 1:
-        return 1
+            return 1
     return n * factorial(n-1)
 
 def fibonacci(n):
@@ -540,7 +543,7 @@ export default function BenchmarkPage() {
   const [tab, setTab] = useState('quick');
   const [mode, setMode] = useState('individual');
   const [files, setFiles] = useState([]);
-  const [selectedTools, setSelectedTools] = useState(TOOLS.map(t => t.id));
+  const [selectedTools, setSelectedTools] = useState([]); // Start with no tools selected
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [results, setResults] = useState(null);
@@ -576,6 +579,11 @@ export default function BenchmarkPage() {
   const deselectAll = () => setSelectedTools([]);
 
   const runQuickTest = async (testCase) => {
+    if (selectedTools.length === 0) {
+      setError('Please select at least one detection tool (Step 1)');
+      return;
+    }
+
     setSelectedTestCase(testCase.id);
     setError('');
     setRunning(true);
@@ -606,15 +614,15 @@ export default function BenchmarkPage() {
 
   const runUploadBenchmark = async () => {
     if (selectedTools.length === 0) {
-      setError('Select at least one tool');
+      setError('Please select at least one detection tool (Step 1)');
       return;
     }
     if (mode === 'individual' && files.length < 2) {
-      setError('Upload at least 2 files');
+      setError('Upload at least 2 files (Step 3)');
       return;
     }
     if (mode === 'zip' && !files.length) {
-      setError('Select a ZIP file');
+      setError('Select a ZIP file (Step 3)');
       return;
     }
 
@@ -643,6 +651,44 @@ export default function BenchmarkPage() {
     setProgress('');
   };
 
+  // Export functions
+  const exportToJSON = () => {
+    if (!results) return;
+    const dataStr = JSON.stringify(results, null, 2);
+    const dataUri = URL.createObjectURL(new Blob([dataStr], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = dataUri;
+    link.download = 'benchmark-results.json';
+    link.click();
+  };
+
+  const exportToCSV = () => {
+    if (!results) return;
+    const { pair_results, tool_scores } = results;
+    const activeTools = Object.keys(tool_scores);
+    
+    let csv = 'Pair,File A,File B,' + activeTools.map(t => TOOLS.find(tool => tool.id === t)?.name || t).join(',') + '\n';
+    
+    pair_results.forEach(pair => {
+      const scores = activeTools.map(t => {
+        const tr = pair.tool_results?.find(r => r.tool === t);
+        return tr ? (tr.score * 100).toFixed(1) + '%' : 'N/A';
+      });
+      csv += `"${pair.label}","${pair.file_a}","${pair.file_b}",${scores.join(',')}\n`;
+    });
+
+    const dataUri = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const link = document.createElement('a');
+    link.href = dataUri;
+    link.download = 'benchmark-results.csv';
+    link.click();
+  };
+
+  const exportToPDF = () => {
+    // Open print dialog for PDF export
+    window.print();
+  };
+
   return (
     <DashboardLayout>
       <div className="p-4 lg:p-6">
@@ -657,6 +703,41 @@ export default function BenchmarkPage() {
               <p className="text-slate-500 mt-0.5">
                 Test and compare plagiarism detection tools with known test cases or your own files.
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Step Indicator */}
+        <div className="mb-6 bg-white rounded-2xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${selectedTools.length > 0 ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                1
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900">Choose Tools</p>
+                <p className="text-xs text-slate-500">{selectedTools.length} selected</p>
+              </div>
+            </div>
+            <div className="flex-1 mx-4 h-0.5 bg-slate-100" />
+            <div className="flex items-center gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${selectedDataset ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                2
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900">Choose Dataset</p>
+                <p className="text-xs text-slate-500">{activeDataset?.name}</p>
+              </div>
+            </div>
+            <div className="flex-1 mx-4 h-0.5 bg-slate-100" />
+            <div className="flex items-center gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${running ? 'bg-violet-600 text-white animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
+                3
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900">Run & Export</p>
+                <p className="text-xs text-slate-500">{results ? 'Results ready' : 'Start analysis'}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -687,13 +768,13 @@ export default function BenchmarkPage() {
           </button>
         </div>
 
-        {/* Tool Selection - Shared */}
+        {/* Step 1: Tool Selection - Shared */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-slate-900">Detection Tools</h2>
+              <h2 className="font-semibold text-slate-900">Step 1: Select Detection Tools</h2>
               <p className="text-sm text-slate-500 mt-0.5">
-                {selectedTools.length} of {TOOLS.length} tools selected
+                {selectedTools.length === 0 ? 'No tools selected — choose at least one to proceed' : `${selectedTools.length} of ${TOOLS.length} tools selected`}
               </p>
             </div>
             <div className="flex gap-2">
@@ -736,52 +817,20 @@ export default function BenchmarkPage() {
           </div>
         </div>
 
-        {/* Quick Test Cases */}
+        {/* Step 2 & 3: Dataset Selection and Run */}
         {tab === 'quick' && (
           <div className="space-y-6 mb-6">
-            {/* Dataset Selector */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <FlaskConical size={16} className="text-violet-500" />
-                <span className="text-sm font-semibold text-slate-700">Choose Dataset:</span>
+            {/* Dataset Selector (Step 2) */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100">
+                <h2 className="font-semibold text-slate-900">Step 2: Choose Dataset</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Select a test dataset to run against your chosen tools.
+                </p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {DATASETS.map((ds) => {
-                  const isActive = selectedDataset === ds.id;
-                  return (
-                    <button
-                      key={ds.id}
-                      onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
-                      className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                        isActive
-                          ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20'
-                          : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
-                      }`}
-                    >
-                      {isActive && (
-                        <div className="absolute top-2 right-2">
-                          <CheckCircle2 size={14} className="text-violet-600" />
-                        </div>
-                      )}
-                      <div className="text-xl mb-2">{ds.icon}</div>
-                      <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                      <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                      <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Benchmark Datasets */}
-            {benchmarkDatasets.length > 0 && (
-              <div className="mt-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <Layers size={16} className="text-emerald-500" />
-                  <span className="text-sm font-semibold text-slate-700">Benchmark Datasets:</span>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {benchmarkDatasets.map((ds) => {
+              <div className="p-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {DATASETS.map((ds) => {
                     const isActive = selectedDataset === ds.id;
                     return (
                       <button
@@ -789,77 +838,82 @@ export default function BenchmarkPage() {
                         onClick={() => { setSelectedDataset(ds.id); setSelectedTestCase(null); setResults(null); }}
                         className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
                           isActive
-                            ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-500/20'
+                            ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20'
                             : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
                         }`}
                       >
                         {isActive && (
                           <div className="absolute top-2 right-2">
-                            <CheckCircle2 size={14} className="text-emerald-600" />
+                            <CheckCircle2 size={14} className="text-violet-600" />
                           </div>
                         )}
                         <div className="text-xl mb-2">{ds.icon}</div>
                         <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
                         <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                        <div className="text-xs font-medium text-emerald-600 mt-2 flex items-center gap-2">
-                          <span>{ds.language?.toUpperCase()}</span>
-                          <span className="text-slate-400">•</span>
-                          <span>{ds.size}</span>
-                        </div>
+                        <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
                       </button>
                     );
                   })}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Test Cases for Selected Dataset */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Info size={16} className="text-slate-400" />
-                <p className="text-sm text-slate-500">
-                  Click any test case to run it across all selected tools instantly.
+            {/* Test Cases (Step 3 - Run) */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100">
+                <h2 className="font-semibold text-slate-900">Step 3: Run Test</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Click any test case to run it across all selected tools.
                 </p>
               </div>
-              <div className="grid md:grid-cols-5 gap-3">
-                {activeCases.map((tc) => (
-                  <button
-                    key={tc.id}
-                    onClick={() => runQuickTest(tc)}
-                    disabled={running || selectedTools.length === 0}
-                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      selectedTestCase === tc.id && running
-                        ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
-                        : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
-                    }`}
-                  >
-                    {selectedTestCase === tc.id && running && (
-                      <div className="absolute top-2 right-2">
-                        <Loader2 size={14} className="text-violet-600 animate-spin" />
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-2 h-2 rounded-full ${
-                        tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                      }`} />
-                      <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
-                    <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
-                  </button>
-                ))}
+              <div className="p-6">
+                {selectedTools.length === 0 ? (
+                  <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-100 rounded-xl">
+                    <AlertCircle size={18} className="text-amber-500 shrink-0" />
+                    <p className="text-sm text-amber-700">Please select at least one detection tool above before running tests.</p>
+                  </div>
+                ) : (
+                  <div className="grid md:grid-cols-5 gap-3">
+                    {activeCases.map((tc) => (
+                      <button
+                        key={tc.id}
+                        onClick={() => runQuickTest(tc)}
+                        disabled={running}
+                        className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          selectedTestCase === tc.id && running
+                            ? 'border-violet-300 bg-violet-50 ring-2 ring-violet-500 ring-offset-2'
+                            : 'border-slate-200 hover:border-violet-300 hover:shadow-md bg-white'
+                        }`}
+                      >
+                        {selectedTestCase === tc.id && running && (
+                          <div className="absolute top-2 right-2">
+                            <Loader2 size={14} className="text-violet-600 animate-spin" />
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className={`w-2 h-2 rounded-full ${
+                            tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                          }`} />
+                          <span className="text-xs font-semibold text-slate-500">Expected ~{(tc.expected * 100).toFixed(0)}%</span>
+                        </div>
+                        <div className="font-semibold text-sm text-slate-900">{tc.label}</div>
+                        <div className="text-xs text-slate-400 mt-1">{tc.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Upload Section */}
+        {/* Upload Section (Step 2 & 3) */}
         {tab === 'upload' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
             <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="font-semibold text-slate-900">Upload Assignments</h2>
+              <h2 className="font-semibold text-slate-900">Step 2 & 3: Upload and Run</h2>
               <p className="text-sm text-slate-500 mt-0.5">
-                Upload student submissions to compare across all selected tools.
+                Upload your files and run the analysis across all selected tools.
               </p>
             </div>
             <div className="p-6">
@@ -976,8 +1030,38 @@ export default function BenchmarkPage() {
           </div>
         )}
 
-        {/* Results */}
-        {results && <BenchmarkResults results={results} expandedPairs={expandedPairs} setExpandedPairs={setExpandedPairs} />}
+        {/* Results with Export Options */}
+        {results && (
+          <div className="space-y-6">
+            {/* Export Buttons */}
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={exportToJSON}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors"
+              >
+                <FileJson size={16} />
+                Export JSON
+              </button>
+              <button
+                onClick={exportToCSV}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors"
+              >
+                <FileSpreadsheet size={16} />
+                Export CSV
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors"
+              >
+                <File size={16} />
+                Export PDF
+              </button>
+            </div>
+
+            {/* Results Component */}
+            <BenchmarkResults results={results} expandedPairs={expandedPairs} setExpandedPairs={setExpandedPairs} />
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
