@@ -18,7 +18,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
 import numpy as np
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 
@@ -343,7 +343,9 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
     return submissions
 
 
-BENCHMARK_DATA_DIR = PathLib("/home/tsun/CodeProvenance/benchmark/data")
+# Dataset location: All datasets are stored in data/datasets/
+# Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
+BENCHMARK_DATA_DIR = project_root / "data" / "datasets"
 
 
 def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, str]:

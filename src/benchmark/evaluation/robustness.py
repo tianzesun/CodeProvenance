@@ -128,7 +128,7 @@ class RobustnessTester:
             try:
                 transformed_b = TRANSFORMATIONS[t_name](code_b)
                 transformed_scores[t_name] = self.detector(code_a, transformed_b)
-            except:
+            except Exception:
                 transformed_scores[t_name] = original_score
         
         scores = list(transformed_scores.values())
