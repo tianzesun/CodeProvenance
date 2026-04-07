@@ -1053,7 +1053,7 @@ export default function BenchmarkPage() {
                 onClick={exportToPDF}
                 className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors"
               >
-                <File size={16} />
+                <FileIcon size={16} />
                 Export PDF
               </button>
             </div>
