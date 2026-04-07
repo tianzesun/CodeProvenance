@@ -1,319 +1,237 @@
-"""
-Unit tests for AI Detection Module
-
-Tests the AI-generated code detection functionality including:
-- Pattern-based detection
-- Statistical analysis
-- Ensemble detection
-- Confidence scoring
-"""
-
+"""Unit tests for AI Detection Engine."""
 import pytest
-from src.utils.ai_detection import (
-    AIDetector,
-    StatisticalAIDetector,
-    EnsembleAIDetector,
-    AIDetectionResult,
-    detect_ai_code
-)
+from src.engines.similarity.ai_detection import AIDetectionEngine
 
 
-class TestAIDetector:
-    """Test the pattern-based AI detector."""
+@pytest.fixture
+def detector() -> AIDetectionEngine:
+    """Create a detector instance for testing."""
+    return AIDetectionEngine()
+
+
+class TestAIDetectionEngine:
+    """Test suite for AIDetectionEngine."""
     
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.detector = AIDetector(threshold=0.6)
+    def test_short_code_returns_error(self, detector: AIDetectionEngine) -> None:
+        """Test that very short code returns an error."""
+        result = detector.analyze("x = 1")
+        assert result["ai_probability"] == 0.0
+        assert result["error"] == "Code too short for analysis"
     
-    def test_ai_patterns_detection(self):
-        """Test detection of AI generation patterns."""
-        ai_code = """
-// This function calculates the factorial
-def factorial(n):
-    # Here we handle the base case
-    if n <= 1:
-        return 1
-    # Next, we recursively calculate
-    return n * factorial(n - 1)
-"""
-        result = self.detector.analyze(ai_code, 'python')
-        # The detector may not flag this as AI based on patterns alone
-        assert result.ai_score >= 0.0
-        assert 'ai_patterns' in result.indicators
+    def test_empty_code_returns_error(self, detector: AIDetectionEngine) -> None:
+        """Test that empty code returns an error."""
+        result = detector.analyze("")
+        assert result["ai_probability"] == 0.0
+        assert result["error"] == "Code too short for analysis"
     
-    def test_comment_density_analysis(self):
-        """Test comment density analysis."""
-        human_code = """
-def add(a, b):
-    return a + b
+    def test_returns_valid_structure(self, detector: AIDetectionEngine) -> None:
+        """Test that analysis returns expected structure."""
+        code = """
+def hello():
+    print("Hello, world!")
+    
+hello()
 """
-        ai_code = """
-# This function adds two numbers
-# Parameters: a and b
-# Returns: sum of a and b
-def add(a, b):
-    # Calculate the sum
-    return a + b
+        result = detector.analyze(code)
+        assert "ai_probability" in result
+        assert "confidence" in result
+        assert "signals" in result
+        assert "indicators" in result
+        assert isinstance(result["ai_probability"], float)
+        assert 0.0 <= result["ai_probability"] <= 1.0
+    
+    def test_perplexity_calculation(self, detector: AIDetectionEngine) -> None:
+        """Test perplexity score calculation."""
+        # Code with low entropy (repetitive) should score higher
+        repetitive_code = """
+x = 1
+x = 1
+x = 1
+x = 1
+x = 1
 """
+        result = detector.analyze(repetitive_code)
+        assert result["signals"]["perplexity"] > 0.5  # High AI score for repetitive
         
-        human_result = self.detector.analyze(human_code, 'python')
-        ai_result = self.detector.analyze(ai_code, 'python')
-        
-        # AI code should have higher comment density score
-        assert ai_result.indicators['comment_density'] > human_result.indicators['comment_density']
-    
-    def test_formatting_consistency(self):
-        """Test formatting consistency detection."""
-        consistent_code = """
-def process():
-    x = 1
-    y = 2
-    z = 3
-    return x + y + z
-"""
-        inconsistent_code = """
-def process():
-    x = 1
-    y=2
-    z = 3
-    return x+y+z
-"""
-        
-        consistent_result = self.detector.analyze(consistent_code, 'python')
-        inconsistent_result = self.detector.analyze(inconsistent_code, 'python')
-        
-        # Both should have formatting_consistency indicator
-        assert 'formatting_consistency' in consistent_result.indicators
-        assert 'formatting_consistency' in inconsistent_result.indicators
-    
-    def test_variable_naming_analysis(self):
-        """Test variable naming pattern analysis."""
-        ai_style = """
-def calculate_sum():
-    temp_result = 0
-    helper_value = 5
-    data_item = 10
-    return temp_result + helper_value + data_item
-"""
-        human_style = """
-def calculate_sum():
+        # Code with high entropy (varied) should score lower
+        varied_code = """
+def calculate_sum(numbers):
     total = 0
-    offset = 5
-    value = 10
-    return total + offset + value
+    for num in numbers:
+        total += num
+    return total
+
+result = calculate_sum([1, 2, 3, 4, 5])
+print(f"Sum: {result}")
 """
-        
-        ai_result = self.detector.analyze(ai_style, 'python')
-        human_result = self.detector.analyze(human_style, 'python')
-        
-        # AI-style naming should have higher suspicious score
-        assert ai_result.indicators['variable_naming'] > human_result.indicators['variable_naming']
+        result = detector.analyze(varied_code)
+        assert result["signals"]["perplexity"] < 0.5  # Lower AI score
     
-    def test_boilerplate_detection(self):
-        """Test boilerplate pattern detection."""
-        boilerplate_code = """
+    def test_burstiness_calculation(self, detector: AIDetectionEngine) -> None:
+        """Test burstiness score calculation."""
+        # Uniform code should have high AI score
+        uniform_code = """
+line1 = "hello"
+line2 = "world"
+line3 = "test"
+line4 = "code"
+line5 = "done"
+"""
+        result = detector.analyze(uniform_code)
+        assert result["signals"]["burstiness"] > 0.3  # More uniform = higher AI score
+    
+    def test_stylometry_formal_comments(self, detector: AIDetectionEngine) -> None:
+        """Test stylometry detection of formal comment patterns."""
+        # Code with formal, title-case comments (AI-like)
+        formal_comments_code = """
+# Initialize The Main Function
 def main():
-    if __name__ == "__main__":
-        try:
-            result = process()
-            print(result)
-        except Exception as e:
-            print(f"Error: {e}")
+    # Here Is The Processing Logic
+    result = process_data()
+    # Return The Final Output
+    return result
 """
-        result = self.detector.analyze(boilerplate_code, 'python')
-        assert result.indicators['boilerplate'] > 0
+        result = detector.analyze(formal_comments_code)
+        assert result["signals"]["stylometry"] > 0.3  # Higher AI score for formal comments
     
-    def test_empty_code(self):
-        """Test handling of empty code."""
-        result = self.detector.analyze("", 'python')
-        # Empty code should have low AI score
-        assert result.ai_score < 0.2
-        assert result.confidence >= 0.0
-    
-    def test_short_code(self):
-        """Test handling of very short code."""
-        result = self.detector.analyze("x = 1", 'python')
-        # Short code should have valid confidence
-        assert result.confidence >= 0.0
-        assert result.confidence <= 1.0
-    
-    def test_threshold_application(self):
-        """Test that threshold is correctly applied."""
-        detector = AIDetector(threshold=0.3)
-        
-        # Code with moderate AI indicators
-        code = """
-# Calculate sum
-def add(a, b):
-    return a + b
-"""
-        result = detector.analyze(code, 'python')
-        
-        # With low threshold, should be flagged
-        if result.ai_score >= 0.3:
-            assert result.is_likely_ai is True
-    
-    def test_explanation_generation(self):
-        """Test that explanations are generated."""
-        ai_code = """
-# This function processes data
-# Step 1: Get input
-# Step 2: Process
-# Step 3: Return result
+    def test_pattern_repetition_detection(self, detector: AIDetectionEngine) -> None:
+        """Test pattern repetition detection."""
+        # Code with LLM-like patterns
+        llm_pattern_code = """
+# Let us implement the solution
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
 def process_data(data):
-    temp_result = data
-    return temp_result
+    # Here is the processing logic
+    result = data.process()
+    return result
 """
-        result = self.detector.analyze(ai_code, 'python')
-        assert result.explanation != ""
-        assert "RISK" in result.explanation
-
-
-class TestStatisticalAIDetector:
-    """Test the statistical AI detector."""
+        result = detector.analyze(llm_pattern_code)
+        assert result["signals"]["pattern_repetition"] > 0.2
     
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.detector = StatisticalAIDetector()
+    def test_combine_signals(self, detector: AIDetectionEngine) -> None:
+        """Test signal combination produces valid probability."""
+        signals = {
+            "perplexity": 0.7,
+            "burstiness": 0.6,
+            "stylometry": 0.5,
+            "pattern_repetition": 0.4,
+        }
+        combined = detector._combine_signals(signals)
+        assert 0.0 <= combined <= 1.0
     
-    def test_statistical_properties(self):
-        """Test statistical property analysis."""
+    def test_confidence_calculation(self, detector: AIDetectionEngine) -> None:
+        """Test confidence calculation based on signal agreement."""
+        # High agreement (all signals similar) should give high confidence
+        agreeing_signals = {
+            "perplexity": 0.7,
+            "burstiness": 0.7,
+            "stylometry": 0.7,
+            "pattern_repetition": 0.7,
+        }
+        confidence = detector._calculate_confidence(agreeing_signals)
+        assert confidence > 0.7  # High confidence for agreement
+        
+        # Low agreement (signals vary) should give lower confidence
+        disagreeing_signals = {
+            "perplexity": 0.9,
+            "burstiness": 0.1,
+            "stylometry": 0.5,
+            "pattern_repetition": 0.3,
+        }
+        confidence = detector._calculate_confidence(disagreeing_signals)
+        assert confidence < 0.7  # Lower confidence for disagreement
+    
+    def test_identify_indicators(self, detector: AIDetectionEngine) -> None:
+        """Test indicator identification."""
         code = """
-def factorial(n):
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
+result = process_data()
+result = calculate_sum()
+result = handle_input()
+result = compute_output()
 """
-        stats = self.detector.analyze_statistical_properties(code)
-        
-        assert 'token_count' in stats
-        assert 'unique_token_ratio' in stats
-        assert 'avg_token_length' in stats
-        assert 'line_count' in stats
-        assert stats['token_count'] > 0
+        indicators = detector._identify_indicators(code)
+        assert any("generic" in ind.lower() for ind in indicators)
     
-    def test_known_patterns_comparison(self):
-        """Test comparison to known AI patterns."""
-        code_with_marker = "# Generated by AI assistant\ndef test(): pass"
-        code_without = "def test(): pass"
-        
-        with_marker_score = self.detector.compare_to_known_patterns(code_with_marker)
-        without_score = self.detector.compare_to_known_patterns(code_without)
-        
-        assert with_marker_score > without_score
+    def test_tokenize_code(self, detector: AIDetectionEngine) -> None:
+        """Test code tokenization."""
+        code = "def hello_world(): return 42"
+        tokens = detector._tokenize_code(code)
+        assert "def" in tokens
+        assert "hello_world" in tokens
+        assert "return" in tokens
+        assert "42" in tokens
     
-    def test_ngram_diversity(self):
-        """Test n-gram diversity calculation."""
-        repetitive_code = "a = 1\na = 1\na = 1\na = 1"
-        diverse_code = "a = 1\nb = 2\nc = 3\nd = 4"
-        
-        repetitive_stats = self.detector.analyze_statistical_properties(repetitive_code)
-        diverse_stats = self.detector.analyze_statistical_properties(diverse_code)
-        
-        # More diverse code should have higher bigram diversity
-        assert diverse_stats['bigram_diversity'] > repetitive_stats['bigram_diversity']
-
-
-class TestEnsembleAIDetector:
-    """Test the ensemble AI detector."""
+    def test_language_parameter(self, detector: AIDetectionEngine) -> None:
+        """Test that language parameter is accepted and returned."""
+        code = "func main() { fmt.Println(\"Hello\") }"
+        result = detector.analyze(code, language="go")
+        assert result["language"] == "go"
     
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.detector = EnsembleAIDetector(threshold=0.6)
-    
-    def test_ensemble_analysis(self):
-        """Test ensemble detection combining multiple methods."""
-        ai_code = """
-# This function calculates fibonacci
-# Here we handle the base case
+    def test_realistic_human_code(self, detector: AIDetectionEngine) -> None:
+        """Test detection on realistic human-written code."""
+        human_code = """
 def fibonacci(n):
     if n <= 1:
         return n
-    # Recursively calculate
-    return fibonacci(n-1) + fibonacci(n-2)
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+# Test the function
+for i in range(10):
+    print(fibonacci(i), end=' ')
 """
-        result = self.detector.analyze(ai_code, 'python')
-        
-        assert isinstance(result, AIDetectionResult)
-        assert result.ai_score >= 0.0
-        assert result.ai_score <= 1.0
-        assert result.confidence >= 0.0
-        assert result.confidence <= 1.0
-        assert 'known_ai_match' in result.indicators
+        result = detector.analyze(human_code)
+        # Human code should have lower AI probability
+        assert result["ai_probability"] < 0.5
+        assert result["confidence"] > 0.3
     
-    def test_ensemble_confidence(self):
-        """Test that ensemble provides confidence scores."""
-        code = "def test(): pass"
-        result = self.detector.analyze(code, 'python')
-        
-        assert result.confidence >= 0.0
-        assert result.confidence <= 1.0
+    def test_realistic_ai_like_code(self, detector: AIDetectionEngine) -> None:
+        """Test detection on code that looks AI-generated."""
+        ai_like_code = """
+# Let us implement a comprehensive solution for data processing
 
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Optional
 
-class TestConvenienceFunction:
-    """Test the convenience detection function."""
+def process_data(data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    \"\"\"Process the input data and return the results.
     
-    def test_detect_ai_code_default(self):
-        """Test default detection behavior."""
-        code = "# Generated by AI\ndef test(): pass"
-        result = detect_ai_code(code, 'python')
+    This function takes a list of dictionaries and processes them
+    to produce a comprehensive output.
+    \"\"\"
+    # Initialize the result dictionary
+    result = {}
+    
+    # Process each item in the data
+    for item in data:
+        # Calculate the processed value
+        processed_value = item.get('value', 0) * 2
         
-        assert isinstance(result, AIDetectionResult)
-        assert result.is_likely_ai is True or result.is_likely_ai is False
+        # Add to result
+        result[item.get('key', 'unknown')] = processed_value
     
-    def test_detect_ai_code_with_threshold(self):
-        """Test detection with custom threshold."""
-        code = "# Some code\ndef test(): pass"
-        
-        result_low = detect_ai_code(code, 'python', threshold=0.3)
-        result_high = detect_ai_code(code, 'python', threshold=0.9)
-        
-        # Lower threshold should be more likely to flag
-        if result_low.ai_score >= 0.3:
-            assert result_low.is_likely_ai is True
-        if result_high.ai_score < 0.9:
-            assert result_high.is_likely_ai is False
-    
-    def test_detect_ai_code_without_ensemble(self):
-        """Test detection without ensemble method."""
-        code = "def test(): pass"
-        result = detect_ai_code(code, 'python', use_ensemble=False)
-        
-        assert isinstance(result, AIDetectionResult)
-        # Without ensemble, should not have ensemble-specific indicators
-        assert 'known_ai_match' not in result.indicators
+    # Return the final result
+    return result
 
-
-class TestEdgeCases:
-    """Test edge cases and error handling."""
+# Here is the main execution
+if __name__ == "__main__":
+    # Create sample data
+    sample_data = [
+        {'key': 'a', 'value': 1},
+        {'key': 'b', 'value': 2},
+    ]
     
-    def test_whitespace_only(self):
-        """Test handling of whitespace-only code."""
-        detector = AIDetector()
-        result = detector.analyze("   \n\n   ", 'python')
-        # Whitespace-only code should have low AI score
-        assert result.ai_score < 0.2
-    
-    def test_comments_only(self):
-        """Test handling of comments-only code."""
-        detector = AIDetector()
-        result = detector.analyze("# Just a comment\n# Another comment", 'python')
-        assert result.indicators['comment_density'] > 0
-    
-    def test_very_long_code(self):
-        """Test handling of very long code."""
-        detector = AIDetector()
-        long_code = "\n".join([f"line_{i} = {i}" for i in range(1000)])
-        result = detector.analyze(long_code, 'python')
-        assert result is not None
-    
-    def test_special_characters(self):
-        """Test handling of special characters."""
-        detector = AIDetector()
-        code = "x = 'hello\\nworld'\ny = \"test\""
-        result = detector.analyze(code, 'python')
-        assert result is not None
-
-
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+    # Process and display results
+    output = process_data(sample_data)
+    print(f"Results: {output}")
+"""
+        result = detector.analyze(ai_like_code)
+        # AI-like code should have higher AI probability
+        assert result["ai_probability"] > 0.3
+        assert len(result["indicators"]) > 0

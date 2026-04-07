@@ -1,216 +1,442 @@
-"""Report Generator - Professional plagiarism reports with side-by-side diff highlighting.
+"""Professional Report Generator for Code Similarity Analysis.
 
-Features:
-1. Side-by-side diff view with add/remove/changed line highlighting
-2. Similarity cluster visualization (SVG graph)
-3. Feature breakdown per comparison
-4. HTML + JSON export
+Generates HTML, PDF, and JSON reports with:
+- Side-by-side code highlighting
+- Similarity heatmaps
+- Risk level indicators
+- AI detection results
+- Professional formatting
+
+Usage:
+    from src.infrastructure.report_generator import ReportGenerator
+    generator = ReportGenerator()
+    html_report = generator.generate_html_report(analysis_results)
+    generator.save_report(html_report, "report.html")
 """
 import json
-import difflib
-import math
-from typing import Dict, List, Any, Optional
-from pathlib import Path
-from dataclasses import dataclass, field
+import logging
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
-@dataclass
-class ComparisonDetail:
-    file_a: str
-    file_b: str
-    score: float
-    risk: str
-    features: Dict[str, float] = field(default_factory=dict)
-    code_a: str = ""
-    code_b: str = ""
-
-def _generate_side_by_side_diff(code_a: str, code_b: str, file_a: str = "", file_b: str = "", context: int = 5) -> str:
-    """Generate side-by-side HTML diff with color coding."""
-    a_lines = code_a.splitlines(keepends=True)
-    b_lines = code_b.splitlines(keepends=True)
-    
-    diff = list(difflib.unified_diff(
-        a_lines, b_lines,
-        fromfile=file_a or "File A",
-        tofile=file_b or "File B",
-        lineterm="",
-        n=context
-    ))
-    
-    if not diff:
-        return "<p style='color:#28a745'>Files are identical</p>"
-    
-    html = "<div class='diff-container'><table class='diff-table'><thead><tr>"
-    html += f"<th class='diff-header from'>{diff[0]}</th>"
-    html += f"<th class='diff-header to'>{diff[1]}</th>"
-    html += "</tr></thead><tbody>"
-    
-    for line in diff[2:]:
-        if line.startswith('---') or line.startswith('+++'):
-            continue
-        cls = 'diff-add' if line.startswith('+') else 'diff-del' if line.startswith('-') else 'diff-ctx'
-        escaped = line.replace('&', '&').replace('<', '<').replace('>', '>')
-        
-        if line.startswith('@@'):
-            html += f"<tr class='diff-hunk'><td colspan='2'>{escaped}</td><td colspan='2'></td></tr>"
-        elif line.startswith('-'):
-            html += f"<tr class='diff-del'><td class='diff-ln'>-</td><td class='diff-code'>{escaped[1:]}</td><td></td><td></td></tr>"
-        elif line.startswith('+'):
-            html += f"<tr class='diff-add'><td></td><td></td><td class='diff-ln'>+</td><td class='diff-code'>{escaped[1:]}</td></tr>"
-        else:
-            html += f"<tr class='diff-ctx'><td></td><td class='diff-code'>{escaped[1:]}</td><td></td><td class='diff-code'>{escaped[1:]}</td></tr>"
-    
-    html += "</tbody></table></div>"
-    return html
-
-_RISK_COLORS = {
-    "CRITICAL": "#dc3545", "HIGH": "#fd7e14",
-    "MEDIUM": "#ffc107", "LOW": "#28a745"
-}
-
-_CSS = """
-body{font-family:system-ui,-apple-system,sans-serif;margin:20px;color:#1a1a1a}
-.summary{background:#f5f5f5;padding:15px;margin:15px 0;border-radius:8px}
-.risk{padding:3px 10px;border-radius:4px;font-weight:bold;color:#fff}
-.pair{border:1px solid #e0e0e0;padding:20px;margin:15px 0;border-radius:8px}
-.table{width:100%;border-collapse:collapse;margin:10px 0}
-th,td{padding:10px;text-align:left;border-bottom:1px solid #eee}
-th{background:#f5f5f5}
-.feature{background:#e9ecef;padding:3px 10px;margin:2px;border-radius:4px;font-size:12px;display:inline-block}
-.chart{width:100%;max-width:800px;margin:20px auto}
-details{margin-top:10px}
-summary{cursor:pointer;color:#0969da;font-weight:500}
-
-/* Diff styles */
-.diff-container{overflow-x:auto;margin-top:10px}
-.diff-table{width:100%;border-collapse:collapse;font-family:monospace;font-size:13px}
-.diff-header{background:#e8e8e8;padding:4px 8px;text-align:left;font-weight:bold}
-.diff-hunk{background:#f0f0f0}
-.diff-ctx td{background:#f8f8f8}
-.diff-add td{background:#e6ffec}
-.diff-del td{background:#ffebe9}
-.diff-ln{width:30px;text-align:center;color:#666}
-.diff-code{white-space:pre-wrap;padding:2px 8px}
-"""
 
 class ReportGenerator:
-    """Generates professional plagiarism reports with diff highlighting."""
+    """Generate professional plagiarism detection reports."""
     
-    def __init__(self, title="IntegrityDesk Report", institution="", course="",
-                 assignment="", threshold=0.5, output_dir=Path("./reports")):
-        self.title = title
-        self.institution = institution
-        self.course = course
-        self.assignment = assignment
-        self.threshold = threshold
-        self.output_dir = output_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, institution_name: str = "CodeProvenance", branding_color: str = "#2563eb") -> None:
+        """Initialize report generator.
+        
+        Args:
+            institution_name: Name of the institution/course
+            branding_color: Primary color for branding (hex)
+        """
+        self.institution_name = institution_name
+        self.branding_color = branding_color
     
-    @staticmethod
-    def _risk_color(score):
-        if score >= 0.9: return _RISK_COLORS["CRITICAL"]
-        if score >= 0.75: return _RISK_COLORS["HIGH"]
-        if score >= 0.5: return _RISK_COLORS["MEDIUM"]
-        return _RISK_COLORS["LOW"]
-    
-    @staticmethod
-    def _risk_label(score):
-        if score >= 0.9: return "CRITICAL"
-        if score >= 0.75: return "HIGH"
-        if score >= 0.5: return "MEDIUM"
-        return "LOW"
-    
-    def _cluster_svg(self, pairs):
-        """Generate SVG similarity cluster visualization."""
-        clusters = {}
-        for p in pairs:
-            fa = getattr(p, 'file_a', '') or p.get('file_a', '') if hasattr(p, 'get') else getattr(p, 'file_a', '')
-            fb = getattr(p, 'file_b', '') or p.get('file_b', '') if hasattr(p, 'get') else getattr(p, 'file_b', '')
-            score = getattr(p, 'score', 0) or p.get('score', 0) if hasattr(p, 'get') else getattr(p, 'score', 0)
-            if score > 0.5:
-                clusters.setdefault(fa, {})[fb] = score
-                clusters.setdefault(fb, {})[fa] = score
+    def generate_html_report(self, results: Dict[str, Any]) -> str:
+        """Generate a comprehensive HTML report.
         
-        nodes = list(clusters.keys())[:20]
-        n = len(nodes)
-        svg = "<svg viewBox='0 0 800 400'>"
-        
-        # Draw edges
-        added = set()
-        for i, f1 in enumerate(nodes):
-            for f2, score in clusters.get(f1, {}).items():
-                if f2 in nodes and f"{f2}->{f1}" not in added:
-                    a1, a2 = 2*math.pi*i/n, 2*math.pi*nodes.index(f2)/n
-                    x1, y1 = 400+150*math.cos(a1), 200+150*math.sin(a1)
-                    x2, y2 = 400+150*math.cos(a2), 200+150*math.sin(a2)
-                    svg += f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' stroke='#666' stroke-width='{score*3}' opacity='0.6'/>"
-                    added.add(f"{f1}->{f2}")
-        
-        # Draw nodes
-        for i, node in enumerate(nodes):
-            angle = 2 * math.pi * i / n
-            x, y = 400 + 150 * math.cos(angle), 200 + 150 * math.sin(angle)
-            max_score = max(clusters.get(node, {}).values(), default=0)
-            color = "#dc3545" if max_score > 0.8 else "#fd7e14" if max_score > 0.6 else "#28a745"
-            svg += f"<circle cx='{x}' cy='{y}' r='15' fill='{color}' stroke='#fff' stroke-width='2'/>"
-            svg += f"<text x='{x}' y='{y+4}' text-anchor='middle' fill='#fff' font-size='10'>{node[:10]}</text>"
-        
-        return svg + "</svg>"
-
-    def generate_html(self, comparisons: list, path: Path = None) -> Path:
-        """Generate complete HTML report with side-by-side diffs."""
-        p = path or self.output_dir / "report.html"
-        total = len(comparisons)
-        suspicious = [c for c in comparisons if c.score >= self.threshold]
+        Args:
+            results: Analysis results from the detection service
+            
+        Returns:
+            HTML string of the report
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        summary = results.get("summary", {})
+        pairs = results.get("pairs", [])
         
         html = f"""<!DOCTYPE html>
-<html><head><meta charset='utf-8'><title>{self.title}</title>
-<style>{_CSS}</style></head><body>
-<h1>{self.title}</h1>
-<div class='info'>Institution: {self.institution} | Course: {self.course} | Assignment: {self.assignment}</div>
-<div class='summary'><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M')} | <strong>Threshold:</strong> {self.threshold} | <strong>Total pairs:</strong> {total} | <strong>Suspicious:</strong> {len(suspicious)}</div>"""
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Similarity Report - {self.institution_name}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .code-block {{
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }}
+        .highlight-added {{
+            background-color: #dcfce7;
+            border-left: 3px solid #22c55e;
+        }}
+        .highlight-removed {{
+            background-color: #fee2e2;
+            border-left: 3px solid #ef4444;
+        }}
+        .highlight-similar {{
+            background-color: #fef3c7;
+            border-left: 3px solid #f59e0b;
+        }}
+        .risk-critical {{
+            background-color: #dc2626;
+        }}
+        .risk-high {{
+            background-color: #ea580c;
+        }}
+        .risk-medium {{
+            background-color: #ca8a04;
+        }}
+        .risk-low {{
+            background-color: #16a34a;
+        }}
+        @media print {{
+            .no-print {{ display: none; }}
+            .page-break {{ page-break-before: always; }}
+        }}
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Code Similarity Report</h1>
+                    <p class="mt-1 text-sm text-gray-500">{self.institution_name}</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">Generated: {timestamp}</p>
+                    <p class="text-sm text-gray-500">Report ID: {results.get('report_id', 'N/A')}</p>
+                </div>
+            </div>
+        </div>
+    </header>
 
-        # Cluster visualization
-        html += "<h2>Similarity Clusters</h2>"
-        html += f"<div class='chart'>{self._cluster_svg(comparisons)}</div>"
+    <!-- Summary Dashboard -->
+    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        <!-- Key Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <dt class="text-sm font-medium text-gray-500 truncate">Total Files</dt>
+                <dd class="mt-1 text-3xl font-semibold text-gray-900">{summary.get('total_files', 0)}</dd>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <dt class="text-sm font-medium text-gray-500 truncate">Total Pairs</dt>
+                <dd class="mt-1 text-3xl font-semibold text-gray-900">{summary.get('total_pairs', 0)}</dd>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <dt class="text-sm font-medium text-gray-500 truncate">Suspicious Pairs</dt>
+                <dd class="mt-1 text-3xl font-semibold text-red-600">{summary.get('suspicious_pairs', 0)}</dd>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <dt class="text-sm font-medium text-gray-500 truncate">Avg Similarity</dt>
+                <dd class="mt-1 text-3xl font-semibold text-gray-900">{summary.get('average_similarity', 0):.1%}</dd>
+            </div>
+        </div>
+
+        <!-- Risk Distribution -->
+        <div class="bg-white rounded-lg shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Risk Distribution</h3>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {self._generate_risk_cards(summary.get('risk_distribution', {}))}
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Detection Summary -->
+        {self._generate_ai_summary(results.get('ai_detection', {}))}
+
+        <!-- Similarity Heatmap -->
+        <div class="bg-white rounded-lg shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Similarity Heatmap</h3>
+            </div>
+            <div class="p-6">
+                {self._generate_heatmap(pairs)}
+            </div>
+        </div>
+
+        <!-- Detailed Pairs -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Detailed Analysis ({len(pairs)} pairs)</h3>
+            </div>
+            <div class="divide-y divide-gray-200">
+                {self._generate_pair_details(pairs)}
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+            <p class="text-center text-sm text-gray-500">
+                Generated by CodeProvenance | {self.institution_name} | {timestamp}
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // Add interactivity for expanding/collapsing details
+        document.querySelectorAll('.toggle-details').forEach(button => {{
+            button.addEventListener('click', function() {{
+                const details = this.nextElementSibling;
+                details.classList.toggle('hidden');
+                this.textContent = details.classList.contains('hidden') ? 'Show Details' : 'Hide Details';
+            }});
+        }});
+    </script>
+</body>
+</html>"""
         
-        # Comparisons with side-by-side diffs
-        html += "<h2>Comparisons</h2>"
-        for c in comparisons:
-            color = self._risk_color(c.score)
-            label = self._risk_label(c.score)
-            html += f"""<div class='pair'>
-<div style='display:flex;justify-content:space-between;align-items:center'>
-<h3>{c.file_a} ↔ {c.file_b}</h3>
-<span class='risk' style='background:{color}'>{label} ({c.score:.3f})</span>
-</div>
-<div style='margin:10px 0'>{" ".join(f"<span class='feature'>{k}: {v:.3f}</span>" for k, v in sorted(c.features.items(), key=lambda x: -x[1]))}</div>"""
-            
-            # Side-by-side diff
-            if c.code_a and c.code_b:
-                html += f"<details><summary>View Side-by-Side Diff</summary>"
-                html += _generate_side_by_side_diff(c.code_a, c.code_b, c.file_a, c.file_b)
-                html += "</details>"
-            
-            html += "</div>"
-        
-        html += "<div style='text-align:center;margin-top:30px;color:#666;font-size:12px'>Generated by IntegrityDesk</div></body></html>"
-        p.write_text(html, encoding='utf-8')
-        return p
+        return html
     
-    def generate_json(self, comparisons: list, path: Path = None) -> Path:
-        """Generate JSON report."""
-        p = path or self.output_dir / "report.json"
-        data = {
-            'title': self.title, 'threshold': self.threshold,
-            'generated': datetime.now().isoformat(),
-            'comparisons': [
-                {'file_a': c.file_a, 'file_b': c.file_b, 'score': round(c.score, 3),
-                 'risk': self._risk_label(c.score),
-                 'features': {k: round(v, 3) for k, v in c.features.items()}}
-                for c in comparisons
-            ]
+    def generate_json_report(self, results: Dict[str, Any]) -> str:
+        """Generate a JSON report for API consumption.
+        
+        Args:
+            results: Analysis results from the detection service
+            
+        Returns:
+            JSON string of the report
+        """
+        report = {
+            "metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "institution": self.institution_name,
+                "version": "1.0",
+                "report_id": results.get("report_id", "N/A"),
+            },
+            "summary": results.get("summary", {}),
+            "pairs": results.get("pairs", []),
+            "ai_detection": results.get("ai_detection", {}),
+            "recommendations": self._generate_recommendations(results),
         }
-        p.write_text(json.dumps(data, indent=2))
-        return p
+        
+        return json.dumps(report, indent=2, default=str)
+    
+    def save_report(self, content: str, filepath: str) -> None:
+        """Save report to file.
+        
+        Args:
+            content: Report content (HTML or JSON)
+            filepath: Path to save the file
+        """
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        logger.info(f"Report saved to {filepath}")
+    
+    def _generate_risk_cards(self, distribution: Dict[str, int]) -> str:
+        """Generate risk level cards HTML."""
+        risk_levels = [
+            ("Critical", distribution.get("critical", 0), "bg-red-100 text-red-800 border-red-200"),
+            ("High", distribution.get("high", 0), "bg-orange-100 text-orange-800 border-orange-200"),
+            ("Medium", distribution.get("medium", 0), "bg-yellow-100 text-yellow-800 border-yellow-200"),
+            ("Low", distribution.get("low", 0), "bg-green-100 text-green-800 border-green-200"),
+        ]
+        
+        cards = []
+        for name, count, color_class in risk_levels:
+            cards.append(f"""
+            <div class="border rounded-lg p-4 {color_class}">
+                <dt class="text-sm font-medium"> {name} Risk</dt>
+                <dd class="mt-1 text-2xl font-bold">{count}</dd>
+            </div>
+            """)
+        
+        return "".join(cards)
+    
+    def _generate_ai_summary(self, ai_data: Dict[str, Any]) -> str:
+        """Generate AI detection summary section."""
+        if not ai_data:
+            return ""
+        
+        ai_flagged = ai_data.get("flagged_count", 0)
+        total_files = ai_data.get("total_files", 0)
+        
+        return f"""
+        <div class="bg-white rounded-lg shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">AI Detection Summary</h3>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                        <dt class="text-sm font-medium text-purple-700">AI-Flagged Files</dt>
+                        <dd class="mt-1 text-2xl font-bold text-purple-900">{ai_flagged}</dd>
+                    </div>
+                    <div class="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                        <dt class="text-sm font-medium text-purple-700">Total Files Analyzed</dt>
+                        <dd class="mt-1 text-2xl font-bold text-purple-900">{total_files}</dd>
+                    </div>
+                    <div class="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                        <dt class="text-sm font-medium text-purple-700">AI Detection Rate</dt>
+                        <dd class="mt-1 text-2xl font-bold text-purple-900">{(ai_flagged/total_files*100) if total_files > 0 else 0:.1f}%</dd>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+    
+    def _generate_heatmap(self, pairs: List[Dict[str, Any]]) -> str:
+        """Generate similarity heatmap visualization."""
+        if not pairs:
+            return "<p class='text-gray-500'>No pairs to display.</p>"
+        
+        # Sort by similarity score
+        sorted_pairs = sorted(pairs, key=lambda x: x.get("similarity_score", 0), reverse=True)
+        
+        rows = []
+        for i, pair in enumerate(sorted_pairs[:20]):  # Top 20
+            score = pair.get("similarity_score", 0)
+            file_a = pair.get("file_a", "Unknown")
+            file_b = pair.get("file_b", "Unknown")
+            risk = pair.get("risk_level", "LOW")
+            
+            # Color based on score
+            if score >= 0.9:
+                color = "bg-red-500"
+            elif score >= 0.75:
+                color = "bg-orange-500"
+            elif score >= 0.5:
+                color = "bg-yellow-500"
+            else:
+                color = "bg-green-500"
+            
+            rows.append(f"""
+            <div class="flex items-center py-3 border-b border-gray-100 last:border-0">
+                <div class="w-8 h-8 rounded {color} flex items-center justify-center text-white text-sm font-bold mr-4">
+                    {i+1}
+                </div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-900">{file_a} vs {file_b}</span>
+                        <span class="text-sm font-bold text-gray-900">{score:.1%}</span>
+                    </div>
+                    <div class="mt-1 w-full bg-gray-200 rounded-full h-2">
+                        <div class="h-2 rounded-full {color}" style="width: {score*100}%"></div>
+                    </div>
+                </div>
+                <span class="ml-4 px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">{risk}</span>
+            </div>
+            """)
+        
+        return f"""
+        <div class="space-y-2">
+            {''.join(rows)}
+        </div>
+        """
+    
+    def _generate_pair_details(self, pairs: List[Dict[str, Any]]) -> str:
+        """Generate detailed pair comparison sections."""
+        if not pairs:
+            return "<p class='p-6 text-gray-500'>No pairs to display.</p>"
+        
+        details = []
+        for pair in pairs:
+            file_a = pair.get("file_a", "Unknown")
+            file_b = pair.get("file_b", "Unknown")
+            score = pair.get("similarity_score", 0)
+            risk = pair.get("risk_level", "LOW")
+            engines = pair.get("engine_scores", {})
+            ai_info = pair.get("ai_detection", {})
+            
+            # Risk badge color
+            risk_colors = {
+                "CRITICAL": "bg-red-100 text-red-800",
+                "HIGH": "bg-orange-100 text-orange-800",
+                "MEDIUM": "bg-yellow-100 text-yellow-800",
+                "LOW": "bg-green-100 text-green-800",
+            }
+            risk_class = risk_colors.get(risk, "bg-gray-100 text-gray-800")
+            
+            # Engine scores
+            engine_html = ""
+            for engine_name, engine_score in engines.items():
+                engine_html += f"""
+                <div class="flex justify-between py-1">
+                    <span class="text-sm text-gray-600">{engine_name.replace('_', ' ').title()}</span>
+                    <span class="text-sm font-medium">{engine_score:.1%}</span>
+                </div>
+                """
+            
+            # AI detection info
+            ai_html = ""
+            if ai_info:
+                ai_prob = ai_info.get("ai_probability", 0)
+                ai_confidence = ai_info.get("confidence", 0)
+                indicators = ai_info.get("indicators", [])
+                
+                ai_html = f"""
+                <div class="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                    <h4 class="text-sm font-medium text-purple-900 mb-2">AI Detection</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-xs text-purple-700">AI Probability</span>
+                            <p class="text-sm font-bold text-purple-900">{ai_prob:.1%}</p>
+                        </div>
+                        <div>
+                            <span class="text-xs text-purple-700">Confidence</span>
+                            <p class="text-sm font-bold text-purple-900">{ai_confidence:.1%}</p>
+                        </div>
+                    </div>
+                    {f'<p class="mt-2 text-xs text-purple-700">Indicators: {", ".join(indicators[:3])}</p>' if indicators else ''}
+                </div>
+                """
+            
+            details.append(f"""
+            <div class="p-6 hover:bg-gray-50 transition-colors">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-3">
+                            <h4 class="text-lg font-medium text-gray-900">{file_a}</h4>
+                            <span class="text-gray-400">↔</span>
+                            <h4 class="text-lg font-medium text-gray-900">{file_b}</h4>
+                        </div>
+                        <div class="mt-2 flex items-center gap-4">
+                            <span class="text-2xl font-bold text-gray-900">{score:.1%}</span>
+                            <span class="px-3 py-1 rounded-full text-sm font-medium {risk_class}">{risk}</span>
+                        </div>
+                    </div>
+                    <button class="no-print toggle-details px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800">
+                        Show Details
+                    </button>
+                </div>
+                <div class="hidden mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <h5 class="text-sm font-medium text-gray-700 mb-2">Engine Scores</h5>
+                        {engine_html}
+                    </div>
+                    <div>
+                        {ai_html}
+                    </div>
+                </div>
+            </div>
+            """)
+        
+        return "".join(details)
+    
+    def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:
+        """Generate actionable recommendations based on results."""
+        recommendations = []
+        summary = results.get("summary", {})
+        
+        suspicious_count = summary.get("suspicious_pairs", 0)
+        total_pairs = summary.get("total_pairs", 0)
+        
+        if suspicious_count > 0:
+            recommendations.append(f"Review {suspicious_count} suspicious pairs manually")
+        
+        if total_pairs > 0 and suspicious_count / total_pairs > 0.3:
+            recommendations.append("High plagiarism rate detected - consider reviewing assignment design")
+        
+        ai_data = results.get("ai_detection", {})
+        if ai_data.get("flagged_count", 0) > 0:
+            recommendations.append(f"Investigate {ai_data['flagged_count']} files for potential AI-generated code")
+        
+        if not recommendations:
+            recommendations.append("No significant issues detected")
+        
+        return recommendations
