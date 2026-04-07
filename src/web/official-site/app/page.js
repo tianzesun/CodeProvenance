@@ -1,6 +1,6 @@
 'use client'
 
-import { Shield, Code, Zap, CheckCircle, ArrowRight, Menu, X, Sun, Moon } from 'lucide-react'
+import { Shield, Code, Zap, CheckCircle, ArrowRight, Menu, X, Sun, Moon, ChevronDown } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 export default function Home() {
@@ -19,7 +19,6 @@ export default function Home() {
   useEffect(() => {
     if (mounted) {
       localStorage.setItem('theme', darkMode ? 'dark' : 'light')
-      document.documentElement.classList.toggle('dark', darkMode)
     }
   }, [darkMode, mounted])
 
@@ -67,7 +66,7 @@ export default function Home() {
   return (
     <div className={`min-h-screen ${bgClass} transition-colors duration-300`}>
       {/* Navigation */}
-      <nav className={`fixed top-0 w-full z-50 ${navBg} backdrop-blur-md border-b ${navBorder}`}>
+      <nav className={`fixed top-0 w-full z-[100] ${navBg} backdrop-blur-md border-b ${navBorder}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2">
@@ -81,11 +80,12 @@ export default function Home() {
               <a href="#pricing" className={`${navText} ${navTextHover} transition-colors`}>Pricing</a>
               <a href="#contact" className={`${navText} ${navTextHover} transition-colors`}>Contact</a>
               
-              {/* Theme Toggle */}
+              {/* Theme Toggle - Higher z-index */}
               <button
                 onClick={toggleTheme}
-                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-800 text-yellow-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} transition-colors`}
+                className={`relative z-[110] p-2 rounded-lg ${darkMode ? 'bg-slate-800 text-yellow-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} transition-colors cursor-pointer`}
                 aria-label="Toggle theme"
+                type="button"
               >
                 {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
@@ -99,15 +99,17 @@ export default function Home() {
               {/* Mobile Theme Toggle */}
               <button
                 onClick={toggleTheme}
-                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-600'}`}
+                className={`relative z-[110] p-2 rounded-lg ${darkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-600'} cursor-pointer`}
                 aria-label="Toggle theme"
+                type="button"
               >
                 {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
               
               <button 
-                className={`${navText} md:hidden`}
+                className={`${navText} md:hidden cursor-pointer`}
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                type="button"
               >
                 {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
               </button>
@@ -131,7 +133,11 @@ export default function Home() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-4">
         <div className="max-w-7xl mx-auto text-center">
-          <div className={`inline-block mb-6 px-4 py-1 rounded-full ${darkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-blue-100 border-blue-200 text-blue-600'} border text-sm font-medium`}>
+          <div className={`inline-flex items-center gap-2 mb-6 px-4 py-2 rounded-full ${darkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-blue-100 border-blue-200 text-blue-600'} border text-sm font-medium`}>
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+            </span>
             Code Similarity Detection Platform
           </div>
           
@@ -144,12 +150,17 @@ export default function Home() {
           </p>
           
           <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <a href="http://localhost:3003" className="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 transition-all hover:scale-105 text-white">
+            <a href="http://localhost:3003" className="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 transition-all hover:scale-105 text-white shadow-lg shadow-blue-500/25">
               Get Started <ArrowRight className="w-5 h-5" />
             </a>
             <button className={`${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'} px-8 py-4 rounded-xl font-semibold text-lg transition-colors`}>
               View Documentation
             </button>
+          </div>
+
+          {/* Scroll indicator */}
+          <div className="mt-16 animate-bounce">
+            <ChevronDown className={`mx-auto w-6 h-6 ${textMuted}`} />
           </div>
         </div>
       </section>
@@ -166,9 +177,9 @@ export default function Home() {
             {features.map((feature, index) => (
               <div 
                 key={index} 
-                className={`${cardBg} backdrop-blur-sm border ${cardBorder} rounded-2xl p-6 hover:border-blue-500/50 transition-all hover:-translate-y-1`}
+                className={`${cardBg} backdrop-blur-sm border ${cardBorder} rounded-2xl p-6 hover:border-blue-500/50 transition-all hover:-translate-y-1 cursor-pointer group`}
               >
-                <div className="mb-4">
+                <div className="mb-4 group-hover:scale-110 transition-transform duration-300">
                   {feature.icon}
                 </div>
                 <h3 className={`text-xl font-semibold mb-2 ${textPrimary}`}>{feature.title}</h3>
@@ -179,14 +190,40 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Stats Section */}
+      <section className="py-20 px-4">
+        <div className="max-w-7xl mx-auto">
+          <div className={`${cardBg} backdrop-blur-sm border ${cardBorder} rounded-3xl p-8 md:p-12`}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              <div className="text-center">
+                <div className={`text-4xl md:text-5xl font-bold ${darkMode ? 'text-blue-400' : 'text-blue-600'} mb-2`}>50+</div>
+                <div className={`text-sm ${textSecondary}`}>Languages Supported</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-4xl md:text-5xl font-bold ${darkMode ? 'text-green-400' : 'text-green-600'} mb-2`}>99.8%</div>
+                <div className={`text-sm ${textSecondary}`}>Detection Accuracy</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-4xl md:text-5xl font-bold ${darkMode ? 'text-purple-400' : 'text-purple-600'} mb-2`}>5</div>
+                <div className={`text-sm ${textSecondary}`}>Detection Engines</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-4xl md:text-5xl font-bold ${darkMode ? 'text-amber-400' : 'text-amber-600'} mb-2`}>0.2%</div>
+                <div className={`text-sm ${textSecondary}`}>False Positive Rate</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Section */}
       <section className="py-20 px-4">
-        <div className="max-w-4xl mx-auto bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl p-12 text-center">
+        <div className="max-w-4xl mx-auto bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl p-12 text-center shadow-2xl shadow-blue-500/20">
           <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white">Ready to get started?</h2>
           <p className="text-blue-100 text-lg mb-8 max-w-2xl mx-auto">
             Start scanning your codebase today. No credit card required.
           </p>
-          <a href="http://localhost:3003" className="inline-block bg-white text-slate-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-slate-100 transition-colors">
+          <a href="http://localhost:3003" className="inline-block bg-white text-slate-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-slate-100 transition-colors shadow-lg">
             Launch Dashboard
           </a>
         </div>
@@ -194,7 +231,11 @@ export default function Home() {
 
       {/* Footer */}
       <footer className={`py-12 px-4 border-t ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-        <div className="max-w-7xl mx-auto text-center">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center space-x-2">
+            <Shield className={`w-6 h-6 ${darkMode ? 'text-blue-500' : 'text-blue-600'}`} />
+            <span className={`font-bold ${textPrimary}`}>IntegrityDesk</span>
+          </div>
           <p className={textMuted}>© 2026 IntegrityDesk. All rights reserved.</p>
         </div>
       </footer>
