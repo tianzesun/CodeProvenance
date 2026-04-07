@@ -51,21 +51,81 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         # Token cache keyed by raw code SHA-256 (avoids re-tokenizing same file)
         from src.engines.cache import TokenCache
+
         self._token_cache = TokenCache(maxsize=8192)
 
         # Programming language keywords
         self.keywords: Set[str] = {
-            "if", "else", "elif", "for", "while", "do", "switch", "case",
-            "break", "continue", "return", "try", "except", "catch", "finally",
-            "throw", "throws", "raise", "yield", "await", "async",
-            "class", "def", "func", "function", "import", "from", "package",
-            "struct", "interface", "enum", "type", "trait", "impl",
-            "true", "false", "null", "nil", "None", "undefined", "NaN",
-            "and", "or", "not", "in", "is", "instanceof", "typeof",
-            "var", "let", "const", "auto", "static", "final",
-            "public", "private", "protected", "internal", "abstract",
-            "virtual", "override", "new", "delete", "this", "self",
-            "super", "base", "extends", "implements", "with",
+            "if",
+            "else",
+            "elif",
+            "for",
+            "while",
+            "do",
+            "switch",
+            "case",
+            "break",
+            "continue",
+            "return",
+            "try",
+            "except",
+            "catch",
+            "finally",
+            "throw",
+            "throws",
+            "raise",
+            "yield",
+            "await",
+            "async",
+            "class",
+            "def",
+            "func",
+            "function",
+            "import",
+            "from",
+            "package",
+            "struct",
+            "interface",
+            "enum",
+            "type",
+            "trait",
+            "impl",
+            "true",
+            "false",
+            "null",
+            "nil",
+            "None",
+            "undefined",
+            "NaN",
+            "and",
+            "or",
+            "not",
+            "in",
+            "is",
+            "instanceof",
+            "typeof",
+            "var",
+            "let",
+            "const",
+            "auto",
+            "static",
+            "final",
+            "public",
+            "private",
+            "protected",
+            "internal",
+            "abstract",
+            "virtual",
+            "override",
+            "new",
+            "delete",
+            "this",
+            "self",
+            "super",
+            "base",
+            "extends",
+            "implements",
+            "with",
         }
 
     def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
@@ -76,14 +136,14 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         """
         raw_a = parsed_a.get("raw", "")
         raw_b = parsed_b.get("raw", "")
-        
+
         # 1. Size Filtering (Practical Tip)
         if len(raw_a.splitlines()) < 10 or len(raw_b.splitlines()) < 10:
             return Finding(
                 engine=self.name,
                 score=0.0,
                 confidence=1.0,
-                metadata={"reason": "file_too_short"}
+                metadata={"reason": "file_too_short"},
             )
 
         tokens_a = self._extract_tokens(parsed_a)
@@ -109,32 +169,44 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             + distribution_score * self.distribution_weight
             + keyword_score * self.keyword_weight
         )
-        
+
         # 3. Create Evidence Blocks (Canonical Schema)
         evidence = []
         if final_score > 0.5:
             # Simple heuristic for evidence: find longest common token sequence
             # (In a real system, you'd use a more sophisticated diff/match algorithm)
-            evidence.append(EvidenceBlock(
-                engine=self.name,
-                score=final_score,
-                confidence=0.8,
-                a_snippet="Matching token sequences detected",
-                b_snippet="Matching token sequences detected",
-                transformation_notes=["Token-level similarity"]
-            ))
+            evidence.append(
+                EvidenceBlock(
+                    engine=self.name,
+                    score=final_score,
+                    confidence=0.8,
+                    a_snippet="Matching token sequences detected",
+                    b_snippet="Matching token sequences detected",
+                    transformation_notes=["Token-level similarity"],
+                )
+            )
 
         return Finding(
             engine=self.name,
             score=min(1.0, max(0.0, final_score)),
             confidence=0.85,
             evidence_blocks=evidence,
-            methodology="N-gram overlap and token distribution analysis with boilerplate filtering."
+            methodology="N-gram overlap and token distribution analysis with boilerplate filtering.",
         )
 
     def _filter_boilerplate(self, tokens: List[str]) -> List[str]:
         """Filter out common boilerplate tokens."""
-        boilerplate = {"import", "from", "sys", "os", "def", "main", "if", "__name__", "__main__"}
+        boilerplate = {
+            "import",
+            "from",
+            "sys",
+            "os",
+            "def",
+            "main",
+            "if",
+            "__name__",
+            "__main__",
+        }
         return [t for t in tokens if t.lower() not in boilerplate]
 
     # ── Token extraction (cached) ──────────────────────────────────────
@@ -154,15 +226,13 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
     def _tokenize_cached(self, text: str) -> List[str]:
         """Tokenize source code text (called by cache on misses)."""
         # Remove strings and comments
-        text = re.sub(r'["\'].*?["\']', 'STR', text, flags=re.DOTALL)
-        text = re.sub(r'//.*?$', '', text, flags=re.MULTILINE)
-        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-        text = re.sub(r'#.*?$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'["\'].*?["\']', "STR", text, flags=re.DOTALL)
+        text = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+        text = re.sub(r"#.*?$", "", text, flags=re.MULTILINE)
 
         # Tokenize
-        tokens = re.findall(
-            r'[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]', text
-        )
+        tokens = re.findall(r"[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]", text)
         return [t for t in tokens if t]
 
     # ── Metrics ─────────────────────────────────────────────────────────
@@ -204,7 +274,9 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             ngrams.add(ngram)
         return ngrams
 
-    def _distribution_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _distribution_similarity(
+        self, tokens_a: List[str], tokens_b: List[str]
+    ) -> float:
         """Calculate similarity based on token type distributions."""
         dist_a = self._get_token_distribution(tokens_a)
         dist_b = self._get_token_distribution(tokens_b)
@@ -215,8 +287,8 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             return 1.0
 
         dot_product = sum(dist_a.get(k, 0) * dist_b.get(k, 0) for k in common_keys)
-        norm_a = math.sqrt(sum(v ** 2 for v in dist_a.values()))
-        norm_b = math.sqrt(sum(v ** 2 for v in dist_b.values()))
+        norm_a = math.sqrt(sum(v**2 for v in dist_a.values()))
+        norm_b = math.sqrt(sum(v**2 for v in dist_b.values()))
 
         if norm_a == 0 or norm_b == 0:
             return 0.0
@@ -266,3 +338,34 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         union = len(keywords_a.union(keywords_b))
 
         return intersection / union if union > 0 else 0.0
+
+    def _lcs_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+        """
+        Calculate Longest Common Subsequence similarity for token sequences.
+        Optimized O(nm) time with O(min(n,m)) space implementation.
+        """
+        if not tokens_a and not tokens_b:
+            return 1.0
+        if not tokens_a or not tokens_b:
+            return 0.0
+
+        # Ensure tokens_a is the shorter sequence for minimal space usage
+        if len(tokens_a) > len(tokens_b):
+            tokens_a, tokens_b = tokens_b, tokens_a
+
+        n, m = len(tokens_a), len(tokens_b)
+        previous = [0] * (n + 1)
+
+        for b_token in tokens_b:
+            current = [0] * (n + 1)
+            for i in range(1, n + 1):
+                if tokens_a[i - 1] == b_token:
+                    current[i] = previous[i - 1] + 1
+                else:
+                    current[i] = max(previous[i], current[i - 1])
+            previous = current
+
+        lcs_length = previous[n]
+        max_possible = max(n, m)
+
+        return lcs_length / max_possible if max_possible > 0 else 0.0

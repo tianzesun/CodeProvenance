@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 
 from src.application.services.batch_detection_service import BatchDetectionService
-from src.infrastructure.report_generator import ReportGenerator, ComparisonDetail
+from src.infrastructure.report_generator import ReportGenerator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
