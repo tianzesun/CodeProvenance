@@ -24,6 +24,34 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'llm' | 'engines' | 'advanced'>('general');
 
+  const enginePresets = [
+    {
+      name: "Balanced (Recommended)",
+      description: "Good all-around performance for most use cases",
+      weights: { token: 0.25, ast: 0.30, unixcoder: 0.30, structural: 0.15 }
+    },
+    {
+      name: "Copy-Paste Detection",
+      description: "Best for detecting direct copying, reformatting, minor changes",
+      weights: { token: 0.40, ast: 0.25, unixcoder: 0.20, structural: 0.15 }
+    },
+    {
+      name: "Semantic Similarity",
+      description: "Detect logic similarity even with heavy obfuscation",
+      weights: { token: 0.10, ast: 0.20, unixcoder: 0.55, structural: 0.15 }
+    },
+    {
+      name: "Structure Focused",
+      description: "Prioritize control flow and program structure patterns",
+      weights: { token: 0.15, ast: 0.45, unixcoder: 0.20, structural: 0.20 }
+    },
+    {
+      name: "Strict Comparison",
+      description: "High sensitivity - highest false positive rate",
+      weights: { token: 0.50, ast: 0.30, unixcoder: 0.15, structural: 0.05 }
+    }
+  ];
+
   useEffect(() => {
     axios.get('/api/settings')
       .then(res => setSettings(res.data))
@@ -215,7 +243,27 @@ export default function SettingsPage() {
             <>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
-                  Engine Weights
+                  Engine Presets
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                  {enginePresets.map((preset, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setSettings({ ...settings!, engine_weights: preset.weights })}
+                      className={`p-4 border rounded-xl text-left transition-all hover:border-blue-400 hover:bg-blue-50 ${
+                        Object.entries(settings.engine_weights).every(([k, v]) => Math.abs(preset.weights[k] - v) < 0.01)
+                          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <div className="font-semibold text-slate-900">{preset.name}</div>
+                      <div className="text-xs text-slate-500 mt-1">{preset.description}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                  Custom Engine Weights
                 </label>
                 <p className="text-xs text-slate-400 mb-4">
                   Adjust contribution weights for each similarity engine. Total should equal 1.0
