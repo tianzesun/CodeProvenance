@@ -22,6 +22,7 @@ from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPExce
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 
+from src.config.settings import settings
 from src.application.services.batch_detection_service import BatchDetectionService
 from src.infrastructure.report_generator import ReportGenerator
 
@@ -680,11 +681,11 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
 
         comparison_details = []
         for r in results:
-            detail = ComparisonDetail(
-                file_a=r.file_a, file_b=r.file_b, score=r.score,
-                risk=r.risk_level, features=r.features,
-                code_a=submissions.get(r.file_a, ""), code_b=submissions.get(r.file_b, ""),
-            )
+            detail = type('ComparisonDetail', (object,), {
+                'file_a': r.file_a, 'file_b': r.file_b, 'score': r.score,
+                'risk': r.risk_level, 'features': r.features,
+                'code_a': submissions.get(r.file_a, ""), 'code_b': submissions.get(r.file_b, ""),
+            })()
             comparison_details.append(detail)
 
         rg = ReportGenerator(
@@ -694,7 +695,7 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         html_report = rg.generate_html_report({
             "report_id": job_id,
             "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
-            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
+            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk_level, "engine_scores": r.features} for r in results],
             "ai_detection": {},
         })
         html_report_path = REPORTS_DIR / job_id / "report.html"
@@ -702,7 +703,7 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         json_report = rg.generate_json_report({
             "report_id": job_id,
             "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
-            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
+            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk_level, "engine_scores": r.features} for r in results],
             "ai_detection": {},
         })
         json_report_path = REPORTS_DIR / job_id / "report.json"
@@ -1762,6 +1763,31 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
 </div>
 </body></html>"""
     output_path.write_text(html, encoding='utf-8')
+
+
+@app.get("/api/settings")
+async def get_settings():
+    return JSONResponse(content={
+        "default_threshold": settings.DEFAULT_THRESHOLD,
+        "openai_api_key": settings.OPENAI_API_KEY is not None,
+        "openai_base_url": settings.OPENAI_BASE_URL,
+        "openai_model": settings.OPENAI_MODEL,
+        "anthropic_api_key": settings.ANTHROPIC_API_KEY is not None,
+        "anthropic_model": settings.ANTHROPIC_MODEL,
+        "embedding_model": settings.EMBEDDING_MODEL,
+        "embedding_server_url": settings.EMBEDDING_SERVER_URL,
+        "engine_weights": settings.ENGINE_WEIGHTS,
+        "batch_size": settings.BATCH_SIZE,
+        "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
+        "max_files_per_job": settings.MAX_FILES_PER_JOB,
+    })
+
+
+@app.patch("/api/settings")
+async def update_settings(request: Request):
+    data = await request.json()
+    # In a production system this would persist to database
+    return JSONResponse(content={"status": "ok", "settings": data})
 
 
 def main():

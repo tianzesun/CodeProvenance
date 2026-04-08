@@ -1,0 +1,51 @@
+"""Application Settings - Centralized configuration management."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional, Dict, Any
+
+
+class AppSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file='.env.local',
+        env_file_encoding='utf-8',
+        extra='ignore'
+    )
+
+    # Core
+    DATABASE_URL: str = "sqlite:///./codeprovenance.db"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # Similarity
+    DEFAULT_THRESHOLD: float = 0.5
+    
+    # LLM / AI
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-3.5-turbo"
+    
+    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
+    
+    # Embeddings
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_SERVER_URL: Optional[str] = None
+    
+    # AI Detection
+    GPTZERO_API_KEY: Optional[str] = None
+    GRAMMARLY_API_KEY: Optional[str] = None
+    
+    # Engine Weights
+    ENGINE_WEIGHTS: Dict[str, float] = {
+        "token": 0.25,
+        "ast": 0.30,
+        "unixcoder": 0.30,
+        "structural": 0.15
+    }
+    
+    # Advanced
+    BATCH_SIZE: int = 32
+    MAX_FILE_SIZE_MB: int = 10
+    MAX_FILES_PER_JOB: int = 500
+
+
+settings = AppSettings()
