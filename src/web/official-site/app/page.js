@@ -3,6 +3,9 @@
 import { Shield, Code, Zap, CheckCircle, ArrowRight, Menu, X, Sun, Moon, ChevronDown } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
+const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL || 'http://127.0.0.1:3000'
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL || 'http://127.0.0.1:8000/docs'
+
 export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [darkMode, setDarkMode] = useState(true)
@@ -90,7 +93,7 @@ export default function Home() {
                 {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
               
-              <a href="http://localhost:3003" className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition-colors text-white">
+              <a href={DASHBOARD_URL} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition-colors text-white">
                 Dashboard
               </a>
             </div>
@@ -123,7 +126,7 @@ export default function Home() {
             <a href="#how-it-works" className={`block ${navText}`}>How It Works</a>
             <a href="#pricing" className={`block ${navText}`}>Pricing</a>
             <a href="#contact" className={`block ${navText}`}>Contact</a>
-            <a href="http://localhost:3003" className="block bg-blue-600 text-white text-center py-2 rounded-lg font-medium">
+            <a href={DASHBOARD_URL} className="block bg-blue-600 text-white text-center py-2 rounded-lg font-medium">
               Dashboard
             </a>
           </div>
@@ -150,12 +153,12 @@ export default function Home() {
           </p>
           
           <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <a href="http://localhost:3003" className="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 transition-all hover:scale-105 text-white shadow-lg shadow-blue-500/25">
+            <a href={DASHBOARD_URL} className="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 transition-all hover:scale-105 text-white shadow-lg shadow-blue-500/25">
               Get Started <ArrowRight className="w-5 h-5" />
             </a>
-            <button className={`${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'} px-8 py-4 rounded-xl font-semibold text-lg transition-colors`}>
+            <a href={DOCS_URL} className={`${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'} px-8 py-4 rounded-xl font-semibold text-lg transition-colors`}>
               View Documentation
-            </button>
+            </a>
           </div>
 
           {/* Scroll indicator */}
@@ -223,7 +226,7 @@ export default function Home() {
           <p className="text-blue-100 text-lg mb-8 max-w-2xl mx-auto">
             Start scanning your codebase today. No credit card required.
           </p>
-          <a href="http://localhost:3003" className="inline-block bg-white text-slate-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-slate-100 transition-colors shadow-lg">
+          <a href={DASHBOARD_URL} className="inline-block bg-white text-slate-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-slate-100 transition-colors shadow-lg">
             Launch Dashboard
           </a>
         </div>

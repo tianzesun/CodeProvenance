@@ -88,6 +88,32 @@ class ZeroShotAIDetector:
             
         return score + 0.4 # Baseline for modern LLMs
 
+
+class CodeBERTDetector:
+    """Compatibility wrapper for the missing fine-tuned detector.
+
+    The original implementation was never checked in, so we delegate to the
+    stable heuristic detector that ships with the app and keep the same
+    ``predict()`` interface expected by older services.
+    """
+
+    def __init__(self):
+        self._engine = None
+
+    def predict(self, code: str) -> Dict[str, Any]:
+        if self._engine is None:
+            from src.engines.similarity.ai_detection import AIDetectionEngine
+
+            self._engine = AIDetectionEngine()
+
+        result = self._engine.analyze(code)
+        return {
+            "ai_prob": float(result.get("ai_probability", 0.0)),
+            "confidence": float(result.get("confidence", 0.0)),
+            "signals": result.get("signals", {}),
+            "indicators": result.get("indicators", []),
+        }
+
 class AIDetectionLayer:
     """
     The 'Kill-Feature': High-Accuracy ChatGPT Detection Layer.
@@ -107,12 +133,22 @@ class AIDetectionLayer:
         
         # Weighted Fusion (Priority to Fine-tuned CodeBERT)
         final_ai_prob = (pred_ft["ai_prob"] * 0.7) + (prob_zs * 0.3)
+        confidence = max(float(pred_ft.get("confidence", 0.0)), 0.6 if prob_zs > 0.5 else 0.4)
+        if final_ai_prob >= 0.7:
+            decision = "likely_ai"
+        elif final_ai_prob >= 0.4:
+            decision = "review"
+        else:
+            decision = "likely_human"
         
         return {
             "ai_probability": round(final_ai_prob, 4),
             "is_ai_generated": final_ai_prob > 0.85,
-            "confidence": 0.92,
+            "confidence": round(min(confidence, 1.0), 4),
+            "decision": decision,
             "methodology": "CodeBERT-Base + Zero-Shot Stylometric Contrast",
+            "indicators": pred_ft.get("indicators", []),
+            "signals": pred_ft.get("signals", {}),
             "forensic_markers": {
                 "structural_consistency": "High (AI Pattern)",
                 "naming_convention": "Standardized (AI Pattern)",

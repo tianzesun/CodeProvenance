@@ -211,6 +211,7 @@ class ReportGenerator:
             "summary": results.get("summary", {}),
             "pairs": results.get("pairs", []),
             "ai_detection": results.get("ai_detection", {}),
+            "web_analysis": results.get("web_analysis", {}),
             "recommendations": self._generate_recommendations(results),
         }
         

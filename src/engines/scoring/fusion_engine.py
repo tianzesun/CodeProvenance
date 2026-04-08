@@ -2,6 +2,8 @@
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 
+from src.evaluation.arbitration import BayesianArbitrator
+
 
 @dataclass
 class FusedScore:
@@ -48,7 +50,6 @@ class FusionEngine:
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
-        from src.evaluation.arbitration import BayesianArbitrator
         self.weights: Dict[str, float] = dict(weights or DEFAULT_WEIGHTS)
         total = sum(self.weights.values())
         if total > 0:

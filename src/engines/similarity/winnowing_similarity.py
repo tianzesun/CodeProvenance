@@ -15,6 +15,7 @@ This implementation surpasses MOSS, JPlag, Dolos, Codequiry, and HackerRank.
 
 from typing import List, Dict, Any, Set, Tuple, Optional
 from .base_similarity import BaseSimilarityAlgorithm
+import hashlib
 import xxhash
 import re
 from collections import defaultdict
@@ -129,6 +130,12 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
         normalized_a = self._normalize_tokens(tokens_a)
         normalized_b = self._normalize_tokens(tokens_b)
 
+        if (
+            [token["value"] for token in normalized_a] == [token["value"] for token in normalized_b]
+            and parsed_a.get("raw", "").strip() == parsed_b.get("raw", "").strip()
+        ):
+            return 1.0
+
         # Multi-pass fingerprinting
         if self.multi_pass:
             similarity = self._multi_pass_compare(normalized_a, normalized_b)
@@ -147,8 +154,8 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
 
         # Weighted combination
         final_similarity = (
-            similarity * 0.7  # Winnowing similarity
-            + cf_bonus * 0.2  # Control flow similarity
+            similarity * 0.65  # Winnowing similarity
+            + cf_bonus * 0.25  # Control flow similarity
             + ai_bonus * 0.1  # AI detection bonus
         )
 
@@ -231,8 +238,10 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
             return "VAR"
 
         # Keep common patterns
-        if var_name in ["i", "j", "k", "n", "m", "x", "y", "z"]:
+        if var_name in ["i", "j", "k"]:
             return "LOOP_VAR"
+        elif len(var_name) == 1 and var_name.isalpha():
+            return "VAR"
         elif var_name in ["self", "this"]:
             return "SELF"
         elif var_name.startswith("__") and var_name.endswith("__"):

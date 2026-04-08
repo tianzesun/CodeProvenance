@@ -30,6 +30,56 @@ class Finding:
         self.methodology = methodology
         self.details = details
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engine": self.engine,
+            "score": self.score,
+            "confidence": self.confidence,
+            "evidence_blocks": [block.to_dict() for block in self.evidence_blocks],
+            "methodology": self.methodology,
+            "details": self.details,
+        }
+
+    def _other_score(self, other: Any) -> float | None:
+        if isinstance(other, Finding):
+            return other.score
+        if isinstance(other, (int, float)):
+            return float(other)
+        return None
+
+    def __float__(self) -> float:
+        return self.score
+
+    def __eq__(self, other: object) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score == other_score
+
+    def __lt__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score < other_score
+
+    def __le__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score <= other_score
+
+    def __gt__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score > other_score
+
+    def __ge__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score >= other_score
+
 
 class EvidenceBlock:
     """Evidence block for AST finding."""
@@ -41,6 +91,26 @@ class EvidenceBlock:
         self.a_snippet = a_snippet
         self.b_snippet = b_snippet
         self.transformation_notes = transformation_notes or []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engine": self.engine,
+            "score": self.score,
+            "confidence": self.confidence,
+            "a_snippet": self.a_snippet,
+            "b_snippet": self.b_snippet,
+            "transformation_notes": self.transformation_notes,
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engine": self.engine,
+            "score": self.score,
+            "confidence": self.confidence,
+            "a_snippet": self.a_snippet,
+            "b_snippet": self.b_snippet,
+            "transformation_notes": self.transformation_notes,
+        }
 
 
 class EvidenceBlock:
@@ -118,7 +188,7 @@ class ASTNode:
             if node.node_type in identifier_nodes and node.value:
                 if node.value not in skip_keywords:
                     if node.value not in var_map:
-                        var_map[node.value] = f'v{var_counter[0]}'
+                        var_map[node.value] = f'var_{var_counter[0]}'
                         var_counter[0] += 1
                     node.value = var_map[node.value]
             for child in node.children:
@@ -437,6 +507,9 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             A Finding object containing scores and evidence.
         """
         from src.engines.features.stylometry import StylometryExtractor, compare_stylometry
+
+        if not parsed_a.get("tokens") and not parsed_a.get("raw") and not parsed_b.get("tokens") and not parsed_b.get("raw"):
+            return Finding(engine=self.name, score=0.0, confidence=1.0)
 
         ast_a = self._extract_ast(parsed_a)
         ast_b = self._extract_ast(parsed_b)

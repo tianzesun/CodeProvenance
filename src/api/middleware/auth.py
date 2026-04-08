@@ -216,12 +216,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.excluded_paths = excluded_paths or [
+            "/",
             "/docs",
             "/redoc",
             "/openapi.json",
             "/health",
             "/api/v1/health",
         ]
+        self.exclude_paths = self.excluded_paths
     
     async def dispatch(
         self, request: Request, call_next: Callable
@@ -230,7 +232,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         
         # Skip authentication for excluded paths
-        if any(path.startswith(excluded) for excluded in self.excluded_paths):
+        if any(
+            path == excluded or (excluded != "/" and path.startswith(excluded))
+            for excluded in self.excluded_paths
+        ):
             return await call_next(request)
         
         # Get API key from header

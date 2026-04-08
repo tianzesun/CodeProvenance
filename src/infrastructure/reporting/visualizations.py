@@ -14,7 +14,6 @@ import base64
 import difflib
 import io
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -23,6 +22,70 @@ logger = logging.getLogger(__name__)
 def _save_fig_to_base64(fig) -> str:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    return f"data:image/png;base64,{img_b64}"
+
+
+def _build_placeholder_image(
+    title: str,
+    lines: Optional[List[str]] = None,
+    width: int = 900,
+    height: int = 480,
+) -> str:
+    """Render a lightweight PNG placeholder when optional chart deps are missing."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        transparent_pixel = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/w8AAn8B9p3h0QAAAABJRU5ErkJggg=="
+        )
+        return f"data:image/png;base64,{transparent_pixel}"
+
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    # Header band
+    draw.rounded_rectangle((24, 24, width - 24, 100), radius=18, fill="#f5f7fb", outline="#d7dee8", width=2)
+    draw.text((48, 48), title, fill="#1f2937")
+
+    # Light chart grid
+    chart_top = 140
+    chart_bottom = height - 48
+    chart_left = 48
+    chart_right = width - 48
+    draw.rounded_rectangle(
+        (chart_left, chart_top, chart_right, chart_bottom),
+        radius=18,
+        outline="#d7dee8",
+        width=2,
+    )
+    for idx in range(1, 5):
+        y = chart_top + idx * (chart_bottom - chart_top) // 5
+        draw.line((chart_left + 16, y, chart_right - 16, y), fill="#ebeff5", width=1)
+    for idx in range(1, 6):
+        x = chart_left + idx * (chart_right - chart_left) // 6
+        draw.line((x, chart_top + 16, x, chart_bottom - 16), fill="#f1f5f9", width=1)
+
+    # Simple bar-like accents to make the placeholder visibly chart-like.
+    bars = [0.35, 0.58, 0.82, 0.47]
+    bar_width = 70
+    start_x = chart_left + 90
+    for idx, height_ratio in enumerate(bars):
+        x0 = start_x + idx * 150
+        y0 = chart_bottom - int((chart_bottom - chart_top - 48) * height_ratio)
+        draw.rounded_rectangle((x0, y0, x0 + bar_width, chart_bottom - 24), radius=12, fill="#f59e0b")
+
+    if lines:
+        y = 120
+        for line in lines[:8]:
+            draw.text((width - 330, y), line[:42], fill="#4b5563")
+            y += 34
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
     buf.seek(0)
     img_b64 = base64.b64encode(buf.read()).decode("utf-8")
     buf.close()
@@ -47,10 +110,15 @@ def generate_similarity_heatmap(
     Returns:
         Base64 data URI string for embedding in HTML.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ModuleNotFoundError:
+        label_list = labels or [f"File {i+1}" for i in range(len(similarity_matrix))]
+        lines = [f"{label}: {row[idx]:.2f}" for idx, (label, row) in enumerate(zip(label_list, similarity_matrix))]
+        return _build_placeholder_image(title, lines)
 
     matrix = np.array(similarity_matrix)
     n = matrix.shape[0]
@@ -102,10 +170,23 @@ def generate_code_diff_image(
     Returns:
         Base64 data URI string.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+    except ModuleNotFoundError:
+        diff_preview = list(
+            difflib.unified_diff(
+                code_a.splitlines(),
+                code_b.splitlines(),
+                fromfile=file_a,
+                tofile=file_b,
+                lineterm="",
+            )
+        )
+        lines = diff_preview[:8] or ["Files are identical"]
+        return _build_placeholder_image(f"Code Diff: {file_a} vs {file_b}", lines, width=1100, height=520)
 
     a_lines = code_a.splitlines(keepends=True)
     b_lines = code_b.splitlines(keepends=True)
@@ -196,10 +277,14 @@ def generate_ai_probability_chart(
     Returns:
         Base64 data URI string.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ModuleNotFoundError:
+        lines = [f"{model}: {prob:.1%}" for model, prob in ai_results.items()]
+        return _build_placeholder_image(title, lines)
 
     models = list(ai_results.keys())
     probs = list(ai_results.values())
@@ -244,10 +329,18 @@ def generate_engine_radar_chart(
     Returns:
         Base64 data URI string.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ModuleNotFoundError:
+        lines = [
+            f"{engine}: "
+            + ", ".join(f"{metric}={value:.2f}" for metric, value in scores.items())
+            for engine, scores in engine_scores.items()
+        ]
+        return _build_placeholder_image(title, lines)
 
     metrics = list(next(iter(engine_scores.values())).keys())
     n_metrics = len(metrics)
@@ -286,10 +379,19 @@ def generate_confusion_matrix_image(
     Returns:
         Base64 data URI string.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ModuleNotFoundError:
+        lines = [
+            f"TP: {tp}",
+            f"FP: {fp}",
+            f"TN: {tn}",
+            f"FN: {fn}",
+        ]
+        return _build_placeholder_image(title, lines)
 
     matrix = np.array([[tp, fn], [fp, tn]])
     labels = [["TP", "FN"], ["FP", "TN"]]
@@ -324,9 +426,16 @@ def generate_qr_code(
     border: int = 2,
 ) -> str:
     """Generate a QR code as base64 PNG."""
-    import qrcode
-    import qrcode.image.pil
-    import base64
+    try:
+        import qrcode
+        import qrcode.image.pil
+    except ModuleNotFoundError:
+        return _build_placeholder_image(
+            "Verification QR Code",
+            [url, f"Size: {size}px", "QR dependencies unavailable"],
+            width=max(500, size + 120),
+            height=max(320, size + 40),
+        )
 
     qr = qrcode.QRCode(
         version=None,

@@ -137,6 +137,7 @@ class CharacterMap:
     Precomputed index for fast offset → line/column conversion.
     Built once per source file, reused for all spans.
     """
+    code: str = ""
     line_offsets: List[int] = field(default_factory=list)
     
     def build(self, code: str) -> "CharacterMap":
@@ -148,11 +149,22 @@ class CharacterMap:
         Returns:
             Self for chaining
         """
+        self.code = code
         self.line_offsets = [0]
         for i, ch in enumerate(code):
             if ch == '\n':
                 self.line_offsets.append(i + 1)
         return self
+
+    @property
+    def total_lines(self) -> int:
+        """Total number of lines in the source code."""
+        return len(self.line_offsets)
+
+    @property
+    def total_chars(self) -> int:
+        """Total number of characters in the source code."""
+        return len(self.code)
     
     def offset_to_line_column(self, offset: int) -> tuple:
         """Convert absolute character offset to (line, column).
@@ -165,6 +177,8 @@ class CharacterMap:
         """
         if not self.line_offsets:
             return (1, 0)
+
+        offset = max(0, min(offset, len(self.code)))
         
         # Binary search for the line
         lo, hi = 0, len(self.line_offsets) - 1
@@ -177,6 +191,31 @@ class CharacterMap:
         line = lo + 1  # 1-indexed
         column = offset - self.line_offsets[lo]
         return (line, column)
+
+    def line_column_to_offset(self, line: int, column: int) -> int:
+        """Convert (line, column) to an absolute character offset."""
+        if not self.line_offsets:
+            return 0
+
+        line_idx = max(0, min(line - 1, len(self.line_offsets) - 1))
+        offset = self.line_offsets[line_idx] + column
+        return max(0, min(offset, len(self.code)))
+
+    def get_line_text(self, line: int) -> str:
+        """Get the text for a 1-indexed line, excluding the trailing newline."""
+        if not self.line_offsets or line < 1:
+            return ""
+
+        line_idx = line - 1
+        if line_idx >= len(self.line_offsets):
+            return ""
+
+        start = self.line_offsets[line_idx]
+        if line_idx + 1 < len(self.line_offsets):
+            end = self.line_offsets[line_idx + 1] - 1
+        else:
+            end = len(self.code)
+        return self.code[start:end]
     
     def span_to_line_range(self, span: TokenSpan) -> tuple:
         """Convert a TokenSpan to line range (start_line, end_line).

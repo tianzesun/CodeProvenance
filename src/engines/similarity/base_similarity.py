@@ -97,7 +97,15 @@ class SimilarityEngine:
         
         for algorithm in self.algorithms:
             try:
-                finding = algorithm.compare(parsed_a, parsed_b)
+                result = algorithm.compare(parsed_a, parsed_b)
+                if isinstance(result, (int, float)):
+                    finding = Finding(
+                        engine=algorithm.get_name(),
+                        score=float(result),
+                        confidence=1.0,
+                    )
+                else:
+                    finding = result
                 findings.append(finding)
                 
                 score = max(0.0, min(1.0, finding.score))

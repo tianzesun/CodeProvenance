@@ -34,7 +34,7 @@ class WebSearchService:
         params = {"q": query_str}
         
         try:
-            response = requests.get(url, headers=self.github_headers, params=params)
+            response = requests.get(url, headers=self.github_headers, params=params, timeout=8)
             response.raise_for_status()
             results = response.json().get("items", [])
             
@@ -43,6 +43,7 @@ class WebSearchService:
                 "id": f"gh_{r['sha']}",
                 "name": r["repository"]["full_name"],
                 "url": r["html_url"],
+                "source": "github",
                 "similarity": 0.8 # Placeholder similarity
             } for r in results]
         except Exception as e:
@@ -60,7 +61,7 @@ class WebSearchService:
         }
         
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=8)
             response.raise_for_status()
             results = response.json().get("items", [])
             
@@ -68,6 +69,7 @@ class WebSearchService:
                 "id": f"so_{r['question_id']}",
                 "name": r["title"],
                 "url": f"https://stackoverflow.com/questions/{r['question_id']}",
+                "source": "stackoverflow",
                 "similarity": 0.7 # Placeholder similarity
             } for r in results]
         except Exception as e:

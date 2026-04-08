@@ -119,6 +119,46 @@ class Finding:
             "metadata": self.metadata
         }
 
+    def _other_score(self, other: Any) -> float | None:
+        if isinstance(other, Finding):
+            return other.score
+        if isinstance(other, (int, float)):
+            return float(other)
+        return None
+
+    def __float__(self) -> float:
+        return self.score
+
+    def __eq__(self, other: object) -> bool:
+        other_score = self._other_score(other)
+        if other_score is not None:
+            return self.score == other_score
+        return NotImplemented
+
+    def __lt__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score < other_score
+
+    def __le__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score <= other_score
+
+    def __gt__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score > other_score
+
+    def __ge__(self, other: Any) -> bool:
+        other_score = self._other_score(other)
+        if other_score is None:
+            return NotImplemented
+        return self.score >= other_score
+
 
 # ─────────────────────────────────────────────
 # Academic Integrity Case (the core domain object)

@@ -373,6 +373,7 @@ class ASTTokenExtractor:
                     "end": end_offset,
                     "body": code[start_offset:end_offset],
                 })
+                i += 1
                 continue
             
             match = class_pattern.match(line)

@@ -18,9 +18,7 @@ import logging
 import math
 import re
 import pickle
-import os
 from typing import Any, Dict, List, Optional, Tuple
-from pathlib import Path
 
 try:
     from sklearn.ensemble import RandomForestClassifier
@@ -64,6 +62,10 @@ class AIDetectionEngine:
         """
         self.perplexity_threshold = perplexity_threshold
         self.burstiness_threshold = burstiness_threshold
+        self.stylometry_extractor = StylometryExtractor()
+        self.classifier = None
+        self.feature_importance: Optional[Dict[str, float]] = None
+        self.use_ml_classifier = False
 
         # Common LLM patterns (heuristics)
         self.llm_patterns = [
@@ -136,8 +138,8 @@ class AIDetectionEngine:
             indicators = self._identify_indicators(code)
 
             return {
-                "ai_probability": ai_probability,
-                "confidence": confidence,
+                "ai_probability": max(0.0, min(1.0, ai_probability)),
+                "confidence": max(0.0, min(1.0, confidence)),
                 "signals": signals,
                 "indicators": indicators,
                 "language": language,
@@ -181,8 +183,10 @@ class AIDetectionEngine:
                 if p > 0:
                     entropy -= p * math.log2(p)
 
-            # Normalize entropy (typical range: 3-8 for code)
-            normalized_entropy = max(0, min(1, (entropy - 3) / 5))
+            # Short snippets have a much tighter entropy range than full files.
+            # Using a smaller window keeps repetitive toy examples AI-like
+            # without pushing ordinary functions to >0.5 by default.
+            normalized_entropy = max(0.0, min(1.0, (entropy - 1.5) / 2.5))
 
             # Lower entropy = higher AI probability
             return 1.0 - normalized_entropy
@@ -201,15 +205,16 @@ class AIDetectionEngine:
             Score between 0 (human-like variation) and 1 (AI-like uniformity)
         """
         try:
-            lines = [line.strip() for line in code.split("\n") if line.strip()]
+            lines = [line.rstrip() for line in code.split("\n") if line.strip()]
             if len(lines) < 3:
                 return 0.0
 
             # Calculate line complexity (length + nesting depth)
             complexities = []
             for line in lines:
-                length_score = len(line) / 100.0  # Normalize by 100 chars
-                indent_level = len(line) - len(line.lstrip())
+                stripped = line.lstrip()
+                length_score = len(stripped) / 100.0  # Normalize by 100 chars
+                indent_level = len(line) - len(stripped)
                 nesting_score = indent_level / 4.0  # Assume 4-space indentation
                 complexity = length_score + nesting_score
                 complexities.append(complexity)
@@ -254,14 +259,13 @@ class AIDetectionEngine:
             if comment_lines:
                 # LLMs tend to write more formal, complete sentence comments
                 formal_patterns = [
-                    r"^#\s+[A-Z][a-z]+(?:\s+[a-z]+)*\s*$",  # Title case
+                    r"^#\s+(?:[A-Z][a-z]*)(?:\s+[A-Z][a-z]*)+\s*$",  # Title case
                     r"^#\s+(This|The|Let|We|Here|Note)\s+",  # Formal starters
                 ]
                 formal_count = sum(
                     1
                     for comment in comment_lines
-                    for pattern in formal_patterns
-                    if re.match(pattern, comment)
+                    if any(re.match(pattern, comment) for pattern in formal_patterns)
                 )
                 if len(comment_lines) > 0:
                     formal_ratio = formal_count / len(comment_lines)
@@ -297,7 +301,8 @@ class AIDetectionEngine:
                         ai_score += 1.0 - min(1.0, cv)
                         total_checks += 1
 
-            return ai_score / total_checks if total_checks > 0 else 0.0
+            score = ai_score / total_checks if total_checks > 0 else 0.0
+            return max(0.0, min(1.0, score))
 
         except Exception as exc:
             logger.debug(f"Stylometry calculation failed: {exc}")
@@ -337,9 +342,9 @@ class AIDetectionEngine:
 
             # Combine pattern matches and duplication
             pattern_score = min(1.0, pattern_matches / 5.0)  # Normalize
-            combined_score = (pattern_score + duplication_ratio) / 2.0
+            combined_score = 0.7 * pattern_score + 0.3 * duplication_ratio
 
-            return combined_score
+            return max(0.0, min(1.0, combined_score))
 
         except Exception as exc:
             logger.debug(f"Pattern repetition calculation failed: {exc}")
@@ -356,10 +361,10 @@ class AIDetectionEngine:
         """
         # Learned weights (could be optimized with ML)
         weights = {
-            "perplexity": 0.3,
+            "perplexity": 0.15,
             "burstiness": 0.25,
-            "stylometry": 0.25,
-            "pattern_repetition": 0.2,
+            "stylometry": 0.35,
+            "pattern_repetition": 0.25,
         }
 
         total_score = 0.0
@@ -572,7 +577,10 @@ class AIDetectionEngine:
                 data = pickle.load(f)
                 self.classifier = data["classifier"]
                 self.feature_importance = data.get("feature_importance")
+                self.use_ml_classifier = self.classifier is not None
             logger.debug(f"Loaded AI detection model from {path}")
         except Exception as exc:
             logger.warning(f"Failed to load model from {path}: {exc}")
             self.classifier = None
+            self.feature_importance = None
+            self.use_ml_classifier = False

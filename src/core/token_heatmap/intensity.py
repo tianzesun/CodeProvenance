@@ -76,7 +76,7 @@ class HeatIntensityCalculator:
             New TokenSpan with adjusted confidence
         """
         bonus = self.type_bonuses.get(span.match_type, 0.0)
-        adjusted_confidence = min(span.confidence + bonus, 1.0)
+        adjusted_confidence = round(min(span.confidence + bonus, 1.0), 4)
         
         return TokenSpan(
             start=span.start,

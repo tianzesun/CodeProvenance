@@ -13,29 +13,25 @@ logger = logging.getLogger(__name__)
 class FeatureVector:
     """Similarity scores from each detection engine.
 
-    A score of None means the engine failed to run (missing dependency,
-    parsing error, etc.) and should be excluded from fusion.
+    The extraction layer normalizes missing or failed engines to ``0.0`` so
+    the downstream pipeline always receives a stable numeric feature set.
     """
 
-    ast: Optional[float] = None
-    fingerprint: Optional[float] = None
-    embedding: Optional[float] = None
-    ngram: Optional[float] = None
-    winnowing: Optional[float] = None
+    ast: float = 0.0
+    fingerprint: float = 0.0
+    embedding: float = 0.0
+    ngram: float = 0.0
+    winnowing: float = 0.0
 
     def as_dict(self) -> Dict[str, float]:
-        """Convert FeatureVector to a dictionary, excluding failed engines."""
-        result = {}
-        for name, score in [
-            ("ast", self.ast),
-            ("fingerprint", self.fingerprint),
-            ("embedding", self.embedding),
-            ("ngram", self.ngram),
-            ("winnowing", self.winnowing),
-        ]:
-            if score is not None:
-                result[name] = score
-        return result
+        """Convert FeatureVector to a dictionary."""
+        return {
+            "ast": self.ast,
+            "fingerprint": self.fingerprint,
+            "embedding": self.embedding,
+            "ngram": self.ngram,
+            "winnowing": self.winnowing,
+        }
 
 
 class FeatureExtractor:
@@ -69,12 +65,18 @@ class FeatureExtractor:
         Returns:
             A FeatureVector with a score from each engine.
         """
+        ast = self._run_ast(code_a, code_b)
+        fingerprint = self._run_fingerprint(code_a, code_b)
+        embedding = self._run_embedding(code_a, code_b)
+        ngram = self._run_ngram(code_a, code_b)
+        winnowing = self._run_winnowing(code_a, code_b)
+
         return FeatureVector(
-            ast=self._run_ast(code_a, code_b),
-            fingerprint=self._run_fingerprint(code_a, code_b),
-            embedding=self._run_embedding(code_a, code_b),
-            ngram=self._run_ngram(code_a, code_b),
-            winnowing=self._run_winnowing(code_a, code_b),
+            ast=ast if ast is not None else 0.0,
+            fingerprint=fingerprint if fingerprint is not None else 0.0,
+            embedding=embedding if embedding is not None else 0.0,
+            ngram=ngram if ngram is not None else 0.0,
+            winnowing=winnowing if winnowing is not None else 0.0,
         )
 
     def to_features(self, fv: FeatureVector) -> List[float]:

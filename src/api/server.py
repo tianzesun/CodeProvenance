@@ -11,6 +11,7 @@ import zipfile
 import shutil
 import uuid
 import json
+import os
 import re
 import logging
 from datetime import datetime
@@ -237,6 +238,9 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
 _jobs: Dict[str, Dict[str, Any]] = {}
 JOB_METADATA_FILENAME = "job.json"
 REVIEW_STATUSES = {"unreviewed", "needs_review", "confirmed", "dismissed", "escalated"}
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
+AI_MEDIUM_RISK_THRESHOLD = 0.4
+AI_HIGH_RISK_THRESHOLD = 0.7
 
 ALLOWED_EXTENSIONS = {
     '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.js', '.ts', '.jsx', '.tsx',
@@ -248,6 +252,52 @@ ALLOWED_EXTENSIONS = {
 
 def _is_code_file(filename: str) -> bool:
     return PathLib(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+
+def _infer_language_from_filename(filename: str) -> str:
+    suffix = PathLib(filename).suffix.lower()
+    language_map = {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".java": "java",
+        ".c": "c",
+        ".cpp": "cpp",
+        ".cc": "cpp",
+        ".hpp": "cpp",
+        ".h": "c",
+        ".go": "go",
+        ".rs": "rust",
+        ".rb": "ruby",
+        ".php": "php",
+        ".cs": "csharp",
+        ".kt": "kotlin",
+        ".swift": "swift",
+        ".scala": "scala",
+    }
+    return language_map.get(suffix, "python")
+
+
+def _ai_bucket(score: float) -> str:
+    if score >= AI_HIGH_RISK_THRESHOLD:
+        return "high"
+    if score >= AI_MEDIUM_RISK_THRESHOLD:
+        return "medium"
+    return "low"
+
+
+def _ai_status_label(score: float) -> str:
+    if score >= AI_HIGH_RISK_THRESHOLD:
+        return "High Risk"
+    if score >= AI_MEDIUM_RISK_THRESHOLD:
+        return "Needs Review"
+    return "Low Risk"
+
+
+def _pair_key(file_a: str, file_b: str) -> str:
+    return "::".join(sorted([file_a, file_b]))
 
 
 def _canonical_tool_id(directory_name: str) -> str:
@@ -455,6 +505,110 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
+    signals = {
+        name: round(_coerce_float(value), 3)
+        for name, value in (entry.get("signals") or {}).items()
+    }
+    indicators = [str(indicator) for indicator in (entry.get("indicators") or []) if indicator]
+
+    return {
+        "name": str(entry.get("name") or ""),
+        "language": str(entry.get("language") or "python"),
+        "ai_probability": round(_coerce_float(entry.get("ai_probability")), 3),
+        "confidence": round(_coerce_float(entry.get("confidence")), 3),
+        "status": str(entry.get("status") or "Low Risk"),
+        "signals": signals,
+        "indicators": indicators[:5],
+        "error": str(entry.get("error") or ""),
+    }
+
+
+def _normalize_ai_detection(ai_detection: Any) -> Dict[str, Any]:
+    if not isinstance(ai_detection, dict):
+        return {}
+
+    submissions = [
+        _normalize_submission_ai_result(entry)
+        for entry in ai_detection.get("submissions", [])
+        if isinstance(entry, dict)
+    ]
+    signal_summary = {}
+    for name, data in (ai_detection.get("signal_summary") or {}).items():
+        if not isinstance(data, dict):
+            continue
+        signal_summary[str(name)] = {
+            "average": round(_coerce_float(data.get("average")), 3),
+            "peak": round(_coerce_float(data.get("peak")), 3),
+        }
+
+    distribution = ai_detection.get("distribution") if isinstance(ai_detection.get("distribution"), dict) else {}
+
+    return {
+        "enabled": bool(ai_detection.get("enabled")),
+        "threshold": round(_coerce_float(ai_detection.get("threshold"), AI_MEDIUM_RISK_THRESHOLD), 3),
+        "status_message": str(ai_detection.get("status_message") or ""),
+        "flagged_count": int(ai_detection.get("flagged_count") or 0),
+        "total_files": int(ai_detection.get("total_files") or len(submissions)),
+        "average_score": round(_coerce_float(ai_detection.get("average_score")), 3),
+        "highest_score": round(_coerce_float(ai_detection.get("highest_score")), 3),
+        "distribution": {
+            "low": int(distribution.get("low") or 0),
+            "medium": int(distribution.get("medium") or 0),
+            "high": int(distribution.get("high") or 0),
+        },
+        "signal_summary": signal_summary,
+        "submissions": submissions,
+    }
+
+
+def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
+    if not isinstance(web_analysis, dict):
+        return {}
+
+    submissions = []
+    for entry in web_analysis.get("submissions", []):
+        if not isinstance(entry, dict):
+            continue
+        sources = []
+        for source in entry.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            sources.append(
+                {
+                    "name": str(source.get("name") or ""),
+                    "url": str(source.get("url") or ""),
+                    "source": str(source.get("source") or ""),
+                    "similarity": round(_coerce_float(source.get("similarity")), 3),
+                }
+            )
+        source_counts = entry.get("source_counts") if isinstance(entry.get("source_counts"), dict) else {}
+        submissions.append(
+            {
+                "name": str(entry.get("name") or ""),
+                "max_similarity": round(_coerce_float(entry.get("max_similarity")), 3),
+                "match_count": int(entry.get("match_count") or 0),
+                "top_source": sources[0] if sources else None,
+                "sources": sources,
+                "source_counts": {str(k): int(v or 0) for k, v in source_counts.items()},
+            }
+        )
+
+    return {
+        "enabled": bool(web_analysis.get("enabled")),
+        "configured": bool(web_analysis.get("configured")),
+        "status_message": str(web_analysis.get("status_message") or ""),
+        "matched_submissions": int(web_analysis.get("matched_submissions") or 0),
+        "highest_similarity": round(_coerce_float(web_analysis.get("highest_similarity")), 3),
+        "average_similarity": round(_coerce_float(web_analysis.get("average_similarity")), 3),
+        "source_totals": {
+            str(k): int(v or 0)
+            for k, v in (web_analysis.get("source_totals") or {}).items()
+        },
+        "submissions": submissions,
+    }
+
+
 def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, Any]:
     normalized = dict(job)
     job_id = normalized.get("id", "")
@@ -481,6 +635,8 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
     normalized["review_status"] = normalized.get("review_status") if normalized.get("review_status") in REVIEW_STATUSES else "unreviewed"
     normalized["review_notes"] = str(normalized.get("review_notes") or "")
     normalized["review_updated_at"] = normalized.get("review_updated_at")
+    normalized["ai_detection"] = _normalize_ai_detection(normalized.get("ai_detection"))
+    normalized["web_analysis"] = _normalize_web_analysis(normalized.get("web_analysis"))
 
     report_dir = _job_report_dir(job_id)
     normalized["report_path"] = normalized.get("report_path") or str(report_dir / "report.html")
@@ -518,6 +674,7 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
         logger.exception(f"Failed to recover job metadata for {job_id} from report.json")
         return None
 
+    report_pairs = report_data.get("comparisons") or report_data.get("pairs") or []
     results = [
         _normalize_result(
             {
@@ -528,7 +685,7 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
                 "features": comparison.get("features") or {},
             }
         )
-        for comparison in report_data.get("comparisons", [])
+        for comparison in report_pairs
     ]
     threshold = _coerce_float(report_data.get("threshold"), 0.5)
     title = str(report_data.get("title") or "").replace("IntegrityDesk Report -", "").strip()
@@ -550,6 +707,8 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
             "report_json_path": str(report_json_path),
             "committee_report_path": str(_job_report_dir(job_id) / "committee_report.html"),
             "submissions": {},
+            "ai_detection": report_data.get("ai_detection", {}),
+            "web_analysis": report_data.get("web_analysis", {}),
             "review_status": "unreviewed",
             "review_notes": "",
             "review_updated_at": None,
@@ -582,6 +741,196 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
         _jobs[job_id] = _normalize_job(_jobs[job_id])
         return _jobs[job_id]
     return _load_persisted_job(job_id)
+
+
+def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+    if not submissions:
+        return {}
+
+    from src.engines.similarity.ai_detection import AIDetectionEngine
+
+    detector = AIDetectionEngine()
+    entries: List[Dict[str, Any]] = []
+    signal_totals: Dict[str, float] = {}
+    signal_peaks: Dict[str, float] = {}
+    signal_counts: Dict[str, int] = {}
+
+    for name, code in submissions.items():
+        result = detector.analyze(code, language=_infer_language_from_filename(name))
+        ai_probability = round(_coerce_float(result.get("ai_probability")), 3)
+        confidence = round(_coerce_float(result.get("confidence")), 3)
+        signals = {
+            signal_name: round(_coerce_float(signal_value), 3)
+            for signal_name, signal_value in (result.get("signals") or {}).items()
+        }
+
+        for signal_name, signal_value in signals.items():
+            signal_totals[signal_name] = signal_totals.get(signal_name, 0.0) + signal_value
+            signal_peaks[signal_name] = max(signal_peaks.get(signal_name, 0.0), signal_value)
+            signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
+
+        entries.append(
+            {
+                "name": name,
+                "language": result.get("language") or _infer_language_from_filename(name),
+                "ai_probability": ai_probability,
+                "confidence": confidence,
+                "status": _ai_status_label(ai_probability),
+                "signals": signals,
+                "indicators": [str(indicator) for indicator in (result.get("indicators") or [])][:5],
+                "error": str(result.get("error") or ""),
+            }
+        )
+
+    entries.sort(key=lambda entry: (-entry["ai_probability"], entry["name"]))
+
+    distribution = {"low": 0, "medium": 0, "high": 0}
+    for entry in entries:
+        distribution[_ai_bucket(entry["ai_probability"])] += 1
+
+    average_score = sum(entry["ai_probability"] for entry in entries) / len(entries)
+    highest_score = max((entry["ai_probability"] for entry in entries), default=0.0)
+    signal_summary = {
+        name: {
+            "average": round(signal_totals[name] / max(signal_counts.get(name, 1), 1), 3),
+            "peak": round(signal_peaks.get(name, 0.0), 3),
+        }
+        for name in sorted(signal_totals)
+    }
+
+    return {
+        "enabled": True,
+        "threshold": AI_MEDIUM_RISK_THRESHOLD,
+        "status_message": "Per-submission AI scoring is available for this assignment.",
+        "flagged_count": sum(1 for entry in entries if entry["ai_probability"] >= AI_MEDIUM_RISK_THRESHOLD),
+        "total_files": len(entries),
+        "average_score": round(average_score, 3),
+        "highest_score": round(highest_score, 3),
+        "distribution": distribution,
+        "signal_summary": signal_summary,
+        "submissions": entries,
+    }
+
+
+def _build_pair_ai_details(
+    results: List[Any],
+    ai_detection: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    ai_by_submission = {
+        entry.get("name"): entry
+        for entry in ai_detection.get("submissions", [])
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    pair_ai_details: Dict[str, Dict[str, Any]] = {}
+
+    for result in results:
+        file_a = getattr(result, "file_a", "")
+        file_b = getattr(result, "file_b", "")
+        if not file_a or not file_b:
+            continue
+
+        ai_a = ai_by_submission.get(file_a, {})
+        ai_b = ai_by_submission.get(file_b, {})
+        indicators = []
+        for indicator in [*(ai_a.get("indicators") or []), *(ai_b.get("indicators") or [])]:
+            if indicator and indicator not in indicators:
+                indicators.append(indicator)
+
+        pair_ai_details[_pair_key(file_a, file_b)] = {
+            "ai_probability": round(
+                max(
+                    _coerce_float(ai_a.get("ai_probability")),
+                    _coerce_float(ai_b.get("ai_probability")),
+                ),
+                3,
+            ),
+            "confidence": round(
+                (
+                    _coerce_float(ai_a.get("confidence"))
+                    + _coerce_float(ai_b.get("confidence"))
+                )
+                / 2,
+                3,
+            ),
+            "indicators": indicators[:5],
+        }
+
+    return pair_ai_details
+
+
+def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+    if not submissions:
+        return {}
+
+    web_enabled = os.getenv("INTEGRITYDESK_ENABLE_WEB_ANALYSIS", "").strip().lower() in TRUTHY_VALUES
+    github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
+    stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
+
+    if not web_enabled:
+        return {
+            "enabled": False,
+            "configured": bool(github_token or stackoverflow_api_key),
+            "status_message": "Web analysis is available but disabled by default. Set INTEGRITYDESK_ENABLE_WEB_ANALYSIS=1 to query external sources during assignment checks.",
+            "matched_submissions": 0,
+            "highest_similarity": 0.0,
+            "average_similarity": 0.0,
+            "source_totals": {},
+            "submissions": [],
+        }
+
+    from src.infrastructure.indexing.web_search import WebSearchService
+
+    service = WebSearchService(
+        github_token=github_token,
+        stackoverflow_api_key=stackoverflow_api_key,
+    )
+    entries: List[Dict[str, Any]] = []
+    source_totals: Dict[str, int] = {}
+
+    for name, code in submissions.items():
+        result = service.perform_full_web_scan(code, _infer_language_from_filename(name))
+        sources = []
+        for source in result.get("web_results", [])[:5]:
+            sources.append(
+                {
+                    "name": str(source.get("name") or ""),
+                    "url": str(source.get("url") or ""),
+                    "source": str(source.get("source") or ""),
+                    "similarity": round(_coerce_float(source.get("similarity")), 3),
+                }
+            )
+
+        source_counts = result.get("source_counts") if isinstance(result.get("source_counts"), dict) else {}
+        for source_name, count in source_counts.items():
+            source_totals[source_name] = source_totals.get(source_name, 0) + int(count or 0)
+
+        entries.append(
+            {
+                "name": name,
+                "max_similarity": round(_coerce_float(result.get("max_web_similarity")), 3),
+                "match_count": len(result.get("web_results") or []),
+                "sources": sources,
+                "source_counts": {str(key): int(value or 0) for key, value in source_counts.items()},
+            }
+        )
+
+    entries.sort(key=lambda entry: (-entry["max_similarity"], entry["name"]))
+    average_similarity = (
+        sum(entry["max_similarity"] for entry in entries) / len(entries)
+        if entries
+        else 0.0
+    )
+
+    return {
+        "enabled": True,
+        "configured": True,
+        "status_message": "External source checks are enabled for this assignment.",
+        "matched_submissions": sum(1 for entry in entries if entry["match_count"] > 0),
+        "highest_similarity": round(max((entry["max_similarity"] for entry in entries), default=0.0), 3),
+        "average_similarity": round(average_similarity, 3),
+        "source_totals": source_totals,
+        "submissions": entries,
+    }
 
 
 def _list_all_jobs() -> List[Dict[str, Any]]:
@@ -677,6 +1026,9 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         service = BatchDetectionService(threshold=threshold)
         results = service.compare_all_pairs(submissions)
         report = service.generate_report(results)
+        ai_detection = _build_ai_detection_summary(submissions)
+        web_analysis = _build_web_analysis_summary(submissions)
+        pair_ai_details = _build_pair_ai_details(results, ai_detection)
 
         comparison_details = []
         for r in results:
@@ -691,20 +1043,44 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
             institution_name=course_name or "Course",
             branding_color="#2563eb",
         )
-        html_report = rg.generate_html_report({
+        report_summary = {
+            "total_files": len(submissions),
+            "total_pairs": len(results),
+            "suspicious_pairs": report["summary"].get("suspicious_pairs", 0),
+            "average_similarity": (
+                sum(r.score for r in results) / len(results)
+                if results
+                else 0.0
+            ),
+            "risk_distribution": {
+                "critical": sum(1 for r in results if r.risk_level == "CRITICAL"),
+                "high": sum(1 for r in results if r.risk_level == "HIGH"),
+                "medium": sum(1 for r in results if r.risk_level == "MEDIUM"),
+                "low": sum(1 for r in results if r.risk_level == "LOW"),
+            },
+        }
+        report_pairs = [
+            {
+                "file_a": r.file_a,
+                "file_b": r.file_b,
+                "similarity_score": r.score,
+                "risk_level": r.risk_level,
+                "engine_scores": r.features,
+                "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
+            }
+            for r in results
+        ]
+        report_payload = {
             "report_id": job_id,
-            "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
-            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
-            "ai_detection": {},
-        })
+            "summary": report_summary,
+            "pairs": report_pairs,
+            "ai_detection": ai_detection,
+            "web_analysis": web_analysis,
+        }
+        html_report = rg.generate_html_report(report_payload)
         html_report_path = REPORTS_DIR / job_id / "report.html"
         html_report_path.write_text(html_report)
-        json_report = rg.generate_json_report({
-            "report_id": job_id,
-            "summary": {"total_files": len(submissions), "total_pairs": len(results), "suspicious_pairs": 0, "average_similarity": 0.0, "risk_distribution": {}},
-            "pairs": [{"file_a": r.file_a, "file_b": r.file_b, "similarity_score": r.score, "risk_level": r.risk, "engine_scores": r.features} for r in results],
-            "ai_detection": {},
-        })
+        json_report = rg.generate_json_report(report_payload)
         json_report_path = REPORTS_DIR / job_id / "report.json"
         json_report_path.write_text(json_report)
         committee_report_path = REPORTS_DIR / job_id / "committee_report.html"
@@ -714,6 +1090,8 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
             "status": "completed",
             "results": [{"file_a": r.file_a, "file_b": r.file_b, "score": round(r.score, 3), "risk_level": r.risk_level, "features": {k: round(v, 3) for k, v in r.features.items()}} for r in results],
             "summary": report["summary"],
+            "ai_detection": ai_detection,
+            "web_analysis": web_analysis,
             "report_path": str(html_report_path), "report_json_path": str(json_report_path),
             "committee_report_path": str(committee_report_path),
             "submissions": {k: v[:3000] for k, v in submissions.items()},

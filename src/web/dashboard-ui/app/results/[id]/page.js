@@ -285,6 +285,28 @@ function getSubmissionRiskDistribution(submissionStats) {
   };
 }
 
+function getAiRiskTone(score) {
+  if (score >= 0.7) {
+    return {
+      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
+      label: 'High Risk',
+    };
+  }
+  if (score >= 0.4) {
+    return {
+      badge: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-600',
+      panel: 'border-yellow-500/15 bg-yellow-500/[0.06]',
+      label: 'Needs Review',
+    };
+  }
+  return {
+    badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+    panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
+    label: 'Low Risk',
+  };
+}
+
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -322,6 +344,37 @@ export default function ResultsPage() {
   const results = [...(job?.results || [])].sort((a, b) => b.score - a.score);
   const submissions = job?.submissions || {};
   const summary = job?.summary || {};
+  const aiDetection = job?.ai_detection || {};
+  const aiSubmissions = [...(aiDetection.submissions || [])].sort((a, b) => {
+    if ((b.ai_probability || 0) !== (a.ai_probability || 0)) {
+      return (b.ai_probability || 0) - (a.ai_probability || 0);
+    }
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const aiEnabled = Boolean(aiDetection.enabled);
+  const aiFlaggedCount = Number(aiDetection.flagged_count || 0);
+  const aiAverageScore = Number(aiDetection.average_score || 0);
+  const aiHighestScore = Number(aiDetection.highest_score || 0);
+  const aiDistribution = aiDetection.distribution || { low: 0, medium: 0, high: 0 };
+  const aiSignalSummary = Object.entries(aiDetection.signal_summary || {})
+    .map(([name, values]) => ({
+      name,
+      average: Number(values?.average || 0),
+      peak: Number(values?.peak || 0),
+    }))
+    .sort((a, b) => b.peak - a.peak);
+  const webAnalysis = job?.web_analysis || {};
+  const webSubmissions = [...(webAnalysis.submissions || [])].sort((a, b) => {
+    if ((b.max_similarity || 0) !== (a.max_similarity || 0)) {
+      return (b.max_similarity || 0) - (a.max_similarity || 0);
+    }
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const webEnabled = Boolean(webAnalysis.enabled);
+  const webMatchedSubmissions = Number(webAnalysis.matched_submissions || 0);
+  const webHighestSimilarity = Number(webAnalysis.highest_similarity || 0);
+  const webAverageSimilarity = Number(webAnalysis.average_similarity || 0);
+  const webSourceTotals = webAnalysis.source_totals || {};
   const threshold = getThreshold(job);
   const assignmentTitle = getAssignmentTitle(job);
   const referenceLabel = getReferenceLabel(job);
@@ -494,10 +547,10 @@ export default function ResultsPage() {
   const tabs = [
     { key: 'overview', label: 'Overview', icon: Shield, count: flaggedResults.length },
     { key: 'files', label: 'Files', icon: FileCode, count: submissionStats.length },
-    { key: 'ai_detection', label: 'AI Detection', icon: Brain, count: 0 },
+    { key: 'ai_detection', label: 'AI Detection', icon: Brain, count: aiFlaggedCount },
     { key: 'insights', label: 'Insights', icon: BarChart3, count: flaggedResults.length },
     { key: 'peer_similarity', label: 'Peer Similarity', icon: Users, count: summary.total_pairs || results.length },
-    { key: 'web_analysis', label: 'Web Analysis', icon: Globe2, count: 0 },
+    { key: 'web_analysis', label: 'Web Analysis', icon: Globe2, count: webMatchedSubmissions },
     { key: 'matches', label: 'Matches', icon: Search, count: results.length },
     { key: 'result_driller', label: 'Result Driller', icon: Code2, count: visibleDrillerMatches.length },
   ];
@@ -685,15 +738,19 @@ export default function ResultsPage() {
                         />
                         <OverviewBreakdownCard
                           label="AI Detection"
-                          value="Not Run"
-                          note="Backend engine not enabled"
-                          tone="pending"
+                          value={aiEnabled ? formatPercentPrecise(aiAverageScore) : 'Not Run'}
+                          note={aiEnabled
+                            ? `${aiFlaggedCount} submission${aiFlaggedCount === 1 ? '' : 's'} above the AI review threshold`
+                            : 'AI scoring is not available for this assignment'}
+                          tone={aiEnabled ? 'ready' : 'pending'}
                         />
                         <OverviewBreakdownCard
                           label="Web Analysis"
-                          value="Not Run"
-                          note="Backend engine not enabled"
-                          tone="pending"
+                          value={webEnabled ? formatPercentPrecise(webHighestSimilarity) : 'Not Run'}
+                          note={webEnabled
+                            ? `${webMatchedSubmissions} submission${webMatchedSubmissions === 1 ? '' : 's'} matched an external source`
+                            : (webAnalysis.status_message || 'Web source checks are not enabled for this assignment')}
+                          tone={webEnabled ? 'ready' : 'pending'}
                         />
                       </div>
 
@@ -1556,31 +1613,38 @@ export default function ResultsPage() {
                 <div className="space-y-6">
                   <FeatureStatusBanner
                     icon={Brain}
-                    title="AI detection workspace is ready, but the backend AI engine is not enabled"
-                    description="This tab now follows the assignment analytics pattern used in dedicated AI result dashboards. Once the backend provides AI scores, this page can show assignment averages, score distribution, and per-submission details without another redesign."
-                    tone="pending"
+                    title={aiEnabled ? 'AI detection is active for this assignment' : 'AI detection workspace is ready, but this assignment has no AI scores'}
+                    description={aiEnabled
+                      ? (aiDetection.status_message || 'Each submission now includes an AI probability, confidence, and the strongest heuristic signals.')
+                      : 'This workspace can display assignment-level AI analytics as soon as the backend returns per-submission scores.'}
+                    tone={aiEnabled ? 'ready' : 'pending'}
                   />
 
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <InsightHeroMetric
                       label="Average AI Score"
-                      value="Not Run"
-                      note={`${submissionStats.length} submission${submissionStats.length === 1 ? '' : 's'} available for future analysis`}
+                      value={aiEnabled ? formatPercentPrecise(aiAverageScore) : 'Not Run'}
+                      note={aiEnabled
+                        ? `${aiSubmissions.length} submission${aiSubmissions.length === 1 ? '' : 's'} analyzed`
+                        : `${submissionStats.length} submission${submissionStats.length === 1 ? '' : 's'} available for future analysis`}
+                      tone={aiEnabled ? (aiFlaggedCount > 0 ? 'warning' : 'safe') : 'default'}
                     />
                     <InsightHeroMetric
                       label="Submissions"
-                      value={submissionStats.length}
-                      note="Ready for AI review when enabled"
+                      value={aiEnabled ? aiSubmissions.length : submissionStats.length}
+                      note={aiEnabled ? 'AI scores stored with this assignment' : 'Ready for AI review when enabled'}
                     />
                     <InsightHeroMetric
                       label="Highest Score"
-                      value="—"
-                      note="No AI scoring data yet"
+                      value={aiEnabled ? formatPercentPrecise(aiHighestScore) : '—'}
+                      note={aiEnabled ? 'Strongest AI signal in the assignment' : 'No AI scoring data yet'}
+                      tone={aiEnabled && aiHighestScore >= 0.7 ? 'warning' : 'default'}
                     />
                     <InsightHeroMetric
                       label="Flagged"
-                      value="0"
-                      note="No AI flags recorded"
+                      value={aiEnabled ? aiFlaggedCount : 0}
+                      note={aiEnabled ? 'Submissions at or above the AI review threshold' : 'No AI flags recorded'}
+                      tone={aiEnabled && aiFlaggedCount > 0 ? 'warning' : 'safe'}
                     />
                   </div>
 
@@ -1593,25 +1657,69 @@ export default function ResultsPage() {
                         AI risk distribution
                       </h2>
                       <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
-                        The layout is ready for low, medium, and high AI scores once the detection engine is connected.
+                        {aiEnabled
+                          ? 'Low, medium, and high AI risk buckets are calculated from the stored per-submission probabilities.'
+                          : 'The layout is ready for low, medium, and high AI scores once the detection engine is connected.'}
                       </p>
 
                       <div className="mt-5 grid gap-3 md:grid-cols-3">
-                        <RiskDistributionTile label="Low Risk" range="< 40%" count={0} total={submissionStats.length || 1} tone="safe" />
-                        <RiskDistributionTile label="Medium Risk" range="40-70%" count={0} total={submissionStats.length || 1} tone="medium" />
-                        <RiskDistributionTile label="High Risk" range="> 70%" count={0} total={submissionStats.length || 1} tone="warning" />
+                        <RiskDistributionTile
+                          label="Low Risk"
+                          range="< 40%"
+                          count={aiEnabled ? aiDistribution.low : 0}
+                          total={(aiEnabled ? aiSubmissions.length : submissionStats.length) || 1}
+                          tone="safe"
+                        />
+                        <RiskDistributionTile
+                          label="Medium Risk"
+                          range="40-70%"
+                          count={aiEnabled ? aiDistribution.medium : 0}
+                          total={(aiEnabled ? aiSubmissions.length : submissionStats.length) || 1}
+                          tone="medium"
+                        />
+                        <RiskDistributionTile
+                          label="High Risk"
+                          range="> 70%"
+                          count={aiEnabled ? aiDistribution.high : 0}
+                          total={(aiEnabled ? aiSubmissions.length : submissionStats.length) || 1}
+                          tone="warning"
+                        />
                       </div>
 
                       <div className="mt-5 border-t border-[color:var(--border)] pt-5">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                          Planned outputs
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <CoverageChip label="Submission AI score" tone="pending" />
-                          <CoverageChip label="Score range" tone="pending" />
-                          <CoverageChip label="Model attribution" tone="pending" />
-                          <CoverageChip label="Sentence evidence" tone="pending" />
-                        </div>
+                        {aiEnabled ? (
+                          <>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                              Detection signals
+                            </div>
+                            <div className="mt-4 space-y-4">
+                              {aiSignalSummary.length === 0 ? (
+                                <EmptyInline text="No AI signal breakdown was returned for this assignment." />
+                              ) : (
+                                aiSignalSummary.slice(0, 4).map((signal) => (
+                                  <SignalRow
+                                    key={signal.name}
+                                    label={signal.name.replace(/_/g, ' ')}
+                                    average={signal.average}
+                                    peak={signal.peak}
+                                  />
+                                ))
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                              Planned outputs
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <CoverageChip label="Submission AI score" tone="pending" />
+                              <CoverageChip label="Score range" tone="pending" />
+                              <CoverageChip label="Model attribution" tone="pending" />
+                              <CoverageChip label="Sentence evidence" tone="pending" />
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -1631,10 +1739,10 @@ export default function ResultsPage() {
                       </div>
 
                       <div className="mt-5 space-y-3">
-                        {submissionStats.length === 0 ? (
+                        {aiSubmissions.length === 0 ? (
                           <EmptyInline text="No submissions are available for AI analysis." />
                         ) : (
-                          submissionStats.map((entry) => (
+                          aiSubmissions.map((entry) => (
                             <AiSubmissionRow key={entry.name} entry={entry} />
                           ))
                         )}
@@ -1645,11 +1753,91 @@ export default function ResultsPage() {
               )}
 
               {activeTab === 'web_analysis' && (
-                <EmptyState
-                  icon={Globe2}
-                  title="Web analysis is not enabled for this assignment"
-                  description="This assignment currently stores peer-to-peer code similarity only. When web source checking is available, this tab can list matched sources, source confidence, and export-ready web evidence."
-                />
+                <div className="space-y-6">
+                  <FeatureStatusBanner
+                    icon={Globe2}
+                    title={webEnabled ? 'Web source analysis is active for this assignment' : 'Web source analysis is available but not enabled'}
+                    description={webAnalysis.status_message || 'This workspace lists matched public sources and submission-level external similarity once web analysis is enabled.'}
+                    tone={webEnabled ? 'ready' : 'pending'}
+                  />
+
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <InsightHeroMetric
+                      label="Matched submissions"
+                      value={webMatchedSubmissions}
+                      note={webEnabled ? 'Submissions with at least one external source match' : 'Enable web analysis to populate this tab'}
+                      tone={webEnabled && webMatchedSubmissions > 0 ? 'warning' : 'default'}
+                    />
+                    <InsightHeroMetric
+                      label="Highest match"
+                      value={webEnabled ? formatPercentPrecise(webHighestSimilarity) : '—'}
+                      note={webEnabled ? 'Strongest external similarity score' : 'No web scoring data yet'}
+                      tone={webEnabled && webHighestSimilarity >= 0.7 ? 'warning' : 'default'}
+                    />
+                    <InsightHeroMetric
+                      label="Average similarity"
+                      value={webEnabled ? formatPercentPrecise(webAverageSimilarity) : '—'}
+                      note={webEnabled ? 'Across all stored web checks' : 'Awaiting external source checks'}
+                    />
+                    <InsightHeroMetric
+                      label="Source hits"
+                      value={Object.values(webSourceTotals).reduce((sum, count) => sum + Number(count || 0), 0)}
+                      note={webEnabled ? 'GitHub and Stack Overflow matches recorded' : 'No external source calls were made'}
+                    />
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+                    <div className="theme-card-muted rounded-[24px] p-5">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                        Coverage
+                      </div>
+                      <h2 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
+                        External source coverage
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+                        {webEnabled
+                          ? 'When public-source checking is enabled, these totals show how many hits were captured from each upstream source.'
+                          : 'External source checking is off by default so local assignment reviews do not depend on outbound network access.'}
+                      </p>
+
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {Object.keys(webSourceTotals).length === 0 ? (
+                          <CoverageChip label="No source totals yet" tone="pending" />
+                        ) : (
+                          Object.entries(webSourceTotals).map(([name, count]) => (
+                            <CoverageChip
+                              key={name}
+                              label={`${name}: ${count}`}
+                              tone={count > 0 ? 'ready' : 'pending'}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="theme-card-muted rounded-[24px] p-5">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                        Submissions
+                      </div>
+                      <h2 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
+                        Web analysis queue
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+                        Each submission records its strongest external-source match and the top source snippets returned by the web search layer.
+                      </p>
+
+                      <div className="mt-5 space-y-3">
+                        {webSubmissions.length === 0 ? (
+                          <EmptyInline text="No web analysis records are available for this assignment." />
+                        ) : (
+                          webSubmissions.map((entry) => (
+                            <WebSubmissionRow key={entry.name} entry={entry} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </section>
@@ -1844,23 +2032,82 @@ function CoverageChip({ label, tone }) {
 }
 
 function AiSubmissionRow({ entry }) {
+  const tone = getAiRiskTone(entry.ai_probability || 0);
+  const signalEntries = Object.entries(entry.signals || {}).sort((a, b) => b[1] - a[1]);
+  const topSignal = signalEntries[0];
+
   return (
-    <div className="theme-card rounded-[22px] px-4 py-4">
+    <div className={`rounded-[22px] border px-4 py-4 ${tone.panel}`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="font-semibold text-[var(--text-primary)] break-all">{entry.name}</div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-            <span>{entry.lines || '—'} lines</span>
-            <span>{entry.totalMatches} peer match{entry.totalMatches === 1 ? '' : 'es'} already available</span>
+            <span>{entry.language || 'python'}</span>
+            <span>confidence {formatPercentPrecise(entry.confidence || 0)}</span>
+            {topSignal && <span>top signal {topSignal[0].replace(/_/g, ' ')}</span>}
           </div>
+          {entry.indicators?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {entry.indicators.slice(0, 3).map((indicator) => (
+                <CoverageChip key={indicator} label={indicator} tone="ready" />
+              ))}
+            </div>
+          )}
+          {entry.error && (
+            <div className="mt-3 text-xs text-red-600">{entry.error}</div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex rounded-full border border-[color:var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--text-secondary)]">
-            Score —
+          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+            Score {formatPercentPrecise(entry.ai_probability || 0)}
           </span>
-          <span className="inline-flex rounded-full border border-[color:var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--text-secondary)]">
-            Pending
+          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+            {entry.status || tone.label}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WebSubmissionRow({ entry }) {
+  const tone = getAiRiskTone(entry.max_similarity || 0);
+  const topSource = entry.top_source || entry.sources?.[0] || null;
+
+  return (
+    <div className={`rounded-[22px] border px-4 py-4 ${tone.panel}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="font-semibold text-[var(--text-primary)] break-all">{entry.name}</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
+            <span>{entry.match_count || 0} external match{entry.match_count === 1 ? '' : 'es'}</span>
+            {topSource?.source && <span>{topSource.source}</span>}
+            {topSource?.name && <span className="truncate max-w-[20rem]">{topSource.name}</span>}
+          </div>
+          {entry.sources?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {entry.sources.slice(0, 3).map((source) => (
+                <a
+                  key={`${source.source}-${source.url}-${source.name}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="theme-link inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[var(--surface)] px-3 py-1 text-xs font-medium"
+                >
+                  {source.source || 'source'} · {formatPercentPrecise(source.similarity || 0)}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+            Best match {formatPercentPrecise(entry.max_similarity || 0)}
+          </span>
+          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+            {entry.match_count > 0 ? 'Matched' : 'No hits'}
           </span>
         </div>
       </div>

@@ -57,6 +57,35 @@ class IRMetadata:
             line_count=data.get("line_count", 0),
             char_count=data.get("char_count", 0),
         )
+
+    @classmethod
+    def create_metadata(
+        cls,
+        source_code: str,
+        language: str,
+        representation_type: str,
+        file_path: Optional[str] = None,
+    ) -> "IRMetadata":
+        """Create metadata directly from source code.
+
+        Older callers construct metadata through ``IRMetadata.create_metadata``
+        rather than ``BaseIR.create_metadata``. Keeping the helper here
+        preserves that public API.
+        """
+        source_hash = hashlib.sha256(source_code.encode("utf-8")).hexdigest()
+        line_count = len(source_code.split("\n"))
+        char_count = len(source_code)
+        timestamp = datetime.now().isoformat()
+
+        return cls(
+            language=language,
+            source_hash=source_hash,
+            timestamp=timestamp,
+            representation_type=representation_type,
+            file_path=file_path,
+            line_count=line_count,
+            char_count=char_count,
+        )
     
     def validate(self) -> bool:
         """Validate metadata completeness."""
@@ -136,25 +165,11 @@ class BaseIR(ABC):
         Returns:
             IRMetadata instance
         """
-        # Calculate source hash
-        source_hash = hashlib.sha256(source_code.encode('utf-8')).hexdigest()
-        
-        # Count lines and characters
-        lines = source_code.split('\n')
-        line_count = len(lines)
-        char_count = len(source_code)
-        
-        # Create timestamp
-        timestamp = datetime.now().isoformat()
-        
-        return IRMetadata(
+        return IRMetadata.create_metadata(
+            source_code=source_code,
             language=language,
-            source_hash=source_hash,
-            timestamp=timestamp,
             representation_type=representation_type,
             file_path=file_path,
-            line_count=line_count,
-            char_count=char_count,
         )
     
     def save(self, filepath: str) -> None:
