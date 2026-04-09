@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   CheckCircle2,
   GripVertical,
   LayoutGrid,
@@ -20,10 +21,12 @@ import {
   FileText,
   FolderArchive,
   Loader2,
+  Plus,
   RotateCcw,
   Settings2,
   Shield,
   Upload,
+  Users,
 } from 'lucide-react';
 
 const API = '';
@@ -35,6 +38,7 @@ const HOME_CARD_DEFAULT_ORDER = [
   'upload-zip',
   'settings',
 ];
+const HOME_CARD_OPTIONAL_ORDER = ['benchmark-suite', 'admin-console'];
 const REVIEW_STATUS_LABELS = {
   unreviewed: 'Unreviewed',
   needs_review: 'Needs Review',
@@ -135,21 +139,22 @@ function getHomeCardStorageKey(userId) {
   return `${HOME_CARD_STORAGE_KEY}:${userId || 'guest'}`;
 }
 
-function normalizeCardOrder(value) {
-  const validIds = new Set(HOME_CARD_DEFAULT_ORDER);
+function normalizeCardOrder(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]) {
+  const validIdSet = new Set(validIds);
+  const preferredOrder = validIds;
   const seen = new Set();
   const normalized = [];
 
   if (Array.isArray(value)) {
     value.forEach((id) => {
-      if (validIds.has(id) && !seen.has(id)) {
+      if (validIdSet.has(id) && !seen.has(id)) {
         normalized.push(id);
         seen.add(id);
       }
     });
   }
 
-  HOME_CARD_DEFAULT_ORDER.forEach((id) => {
+  preferredOrder.forEach((id) => {
     if (!seen.has(id)) {
       normalized.push(id);
     }
@@ -158,8 +163,8 @@ function normalizeCardOrder(value) {
   return normalized;
 }
 
-function normalizeHiddenCards(value) {
-  const validIds = new Set(HOME_CARD_DEFAULT_ORDER);
+function normalizeHiddenCards(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]) {
+  const validIdSet = new Set(validIds);
   const seen = new Set();
   const normalized = [];
 
@@ -168,7 +173,7 @@ function normalizeHiddenCards(value) {
   }
 
   value.forEach((id) => {
-    if (validIds.has(id) && !seen.has(id)) {
+    if (validIdSet.has(id) && !seen.has(id)) {
       normalized.push(id);
       seen.add(id);
     }
@@ -185,9 +190,14 @@ export default function Home() {
   const [hiddenCards, setHiddenCards] = useState([]);
   const [editMode, setEditMode] = useState(false);
   const [activeCardId, setActiveCardId] = useState(null);
+  const [draggedCardId, setDraggedCardId] = useState(null);
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const longPressTimerRef = useRef(null);
   const longPressTriggeredRef = useRef(false);
+  const availableCardIds = user?.role === 'admin'
+    ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
+    : [...HOME_CARD_DEFAULT_ORDER, 'benchmark-suite'];
+  const optionalCardIds = availableCardIds.filter((id) => !HOME_CARD_DEFAULT_ORDER.includes(id));
 
   useEffect(() => {
     if (authLoading) {
@@ -216,20 +226,20 @@ export default function Home() {
       const rawLayout = window.localStorage.getItem(getHomeCardStorageKey(user?.id));
 
       if (!rawLayout) {
-        setCardOrder(HOME_CARD_DEFAULT_ORDER);
-        setHiddenCards([]);
+        setCardOrder(availableCardIds);
+        setHiddenCards(optionalCardIds);
       } else {
         const parsedLayout = JSON.parse(rawLayout);
-        setCardOrder(normalizeCardOrder(parsedLayout?.order));
-        setHiddenCards(normalizeHiddenCards(parsedLayout?.hidden));
+        setCardOrder(normalizeCardOrder(parsedLayout?.order, availableCardIds));
+        setHiddenCards(normalizeHiddenCards(parsedLayout?.hidden, availableCardIds));
       }
     } catch {
-      setCardOrder(HOME_CARD_DEFAULT_ORDER);
-      setHiddenCards([]);
+      setCardOrder(availableCardIds);
+      setHiddenCards(optionalCardIds);
     }
 
     setLayoutLoaded(true);
-  }, [authLoading, user?.id]);
+  }, [authLoading, availableCardIds.join('|'), optionalCardIds.join('|'), user?.id]);
 
   useEffect(() => {
     if (!layoutLoaded || typeof window === 'undefined') {
@@ -239,11 +249,11 @@ export default function Home() {
     window.localStorage.setItem(
       getHomeCardStorageKey(user?.id),
       JSON.stringify({
-        order: normalizeCardOrder(cardOrder),
-        hidden: normalizeHiddenCards(hiddenCards),
+        order: normalizeCardOrder(cardOrder, availableCardIds),
+        hidden: normalizeHiddenCards(hiddenCards, availableCardIds),
       })
     );
-  }, [cardOrder, hiddenCards, layoutLoaded, user?.id]);
+  }, [availableCardIds.join('|'), cardOrder, hiddenCards, layoutLoaded, user?.id]);
 
   useEffect(() => () => {
     if (longPressTimerRef.current) {
@@ -271,7 +281,7 @@ export default function Home() {
   const latestSummary = latestCompleted?.summary || {};
   const latestHighestMatch = latestFlaggedResults[0];
   const latestReviewStatus = getReviewStatus(latestCompleted);
-  const visibleCardIds = normalizeCardOrder(cardOrder).filter((id) => !hiddenCards.includes(id));
+  const visibleCardIds = normalizeCardOrder(cardOrder, availableCardIds).filter((id) => !hiddenCards.includes(id));
 
   const startCardPress = (cardId) => {
     if (editMode) {
@@ -325,6 +335,23 @@ export default function Home() {
     setActiveCardId(cardId);
   };
 
+  const moveCardBefore = (draggedId, targetId) => {
+    if (!draggedId || !targetId || draggedId === targetId) {
+      return;
+    }
+
+    const nextOrder = cardOrder.filter((id) => id !== draggedId);
+    const targetIndex = nextOrder.indexOf(targetId);
+
+    if (targetIndex === -1) {
+      return;
+    }
+
+    nextOrder.splice(targetIndex, 0, draggedId);
+    setCardOrder(nextOrder);
+    setActiveCardId(draggedId);
+  };
+
   const hideCard = (cardId) => {
     if (hiddenCards.includes(cardId)) {
       return;
@@ -336,15 +363,17 @@ export default function Home() {
 
   const restoreCard = (cardId) => {
     setHiddenCards((current) => current.filter((id) => id !== cardId));
+    setCardOrder((current) => normalizeCardOrder(current, availableCardIds));
     setEditMode(true);
     setActiveCardId(cardId);
   };
 
   const resetLayout = () => {
-    setCardOrder(HOME_CARD_DEFAULT_ORDER);
-    setHiddenCards([]);
+    setCardOrder(availableCardIds);
+    setHiddenCards(optionalCardIds);
     setEditMode(false);
     setActiveCardId(null);
+    setDraggedCardId(null);
   };
 
   const dashboardCards = {
@@ -545,8 +574,37 @@ export default function Home() {
         />
       ),
     },
+    'benchmark-suite': {
+      id: 'benchmark-suite',
+      label: 'Benchmark suite',
+      className: 'xl:col-span-4',
+      content: (
+        <ActionCard
+          href="/benchmark"
+          icon={BarChart3}
+          title="Open benchmark suite"
+          description="Compare detection engines, review score patterns, and export benchmark reports."
+        />
+      ),
+    },
+    ...(user?.role === 'admin'
+      ? {
+          'admin-console': {
+            id: 'admin-console',
+            label: 'Admin console',
+            className: 'xl:col-span-4',
+            content: (
+              <ActionCard
+                href="/admin"
+                icon={Users}
+                title="Open admin console"
+                description="Manage accounts, roles, and workspace access from the dashboard."
+              />
+            ),
+          },
+        }
+      : {}),
   };
-
   return (
     <DashboardLayout>
       <div className="px-4 py-4 lg:px-6 lg:py-6">
@@ -763,7 +821,7 @@ export default function Home() {
                 </div>
                 <p className="text-sm text-[var(--text-secondary)]">
                   {editMode
-                    ? 'Layout mode is on. Move cards earlier or later, hide ones you do not need, or restore hidden cards.'
+                    ? 'Layout mode is on. Drag cards to reorder them, hide the ones you do not need, or add more from the card library.'
                     : 'Press and hold any card for a moment to customize the home dashboard.'}
                 </p>
               </div>
@@ -805,9 +863,13 @@ export default function Home() {
 
             {editMode && hiddenCards.length > 0 && (
               <div className="theme-card rounded-[28px] px-5 py-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                  Hidden cards
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                  <Plus size={14} />
+                  Add cards
                 </div>
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                  Bring hidden or optional cards back onto the home dashboard.
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {hiddenCards.map((cardId) => (
                     <button
@@ -816,7 +878,8 @@ export default function Home() {
                       onClick={() => restoreCard(cardId)}
                       className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold"
                     >
-                      Restore {dashboardCards[cardId]?.label || cardId}
+                      <Plus size={14} />
+                      Add {dashboardCards[cardId]?.label || cardId}
                     </button>
                   ))}
                 </div>
@@ -855,6 +918,22 @@ export default function Home() {
                       onMoveEarlier={() => moveCard(cardId, -1)}
                       onMoveLater={() => moveCard(cardId, 1)}
                       onHide={() => hideCard(cardId)}
+                      onDragStart={() => {
+                        setDraggedCardId(cardId);
+                        setActiveCardId(cardId);
+                        setEditMode(true);
+                      }}
+                      onDragOver={() => {
+                        if (editMode) {
+                          setActiveCardId(cardId);
+                        }
+                      }}
+                      onDrop={() => {
+                        moveCardBefore(draggedCardId, cardId);
+                        setDraggedCardId(null);
+                      }}
+                      onDragEnd={() => setDraggedCardId(null)}
+                      isDragging={draggedCardId === cardId}
                       onPressStart={() => startCardPress(cardId)}
                       onPressEnd={stopCardPress}
                       onClickCapture={handleCardClickCapture}
@@ -878,18 +957,51 @@ const EditableDashboardCard = ({
   label,
   editMode,
   isActive,
+  isDragging,
   canMoveEarlier,
   canMoveLater,
   onActivate,
   onMoveEarlier,
   onMoveLater,
   onHide,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onPressStart,
   onPressEnd,
   onClickCapture,
 }) => (
   <div
     className={`relative ${className || ''}`}
+    draggable={editMode}
+    onDragStart={(event) => {
+      if (!editMode) {
+        return;
+      }
+
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', label);
+      onDragStart?.();
+    }}
+    onDragOver={(event) => {
+      if (!editMode) {
+        return;
+      }
+
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      onDragOver?.();
+    }}
+    onDrop={(event) => {
+      if (!editMode) {
+        return;
+      }
+
+      event.preventDefault();
+      onDrop?.();
+    }}
+    onDragEnd={onDragEnd}
     onMouseDown={onPressStart}
     onMouseUp={onPressEnd}
     onMouseLeave={onPressEnd}
@@ -901,16 +1013,22 @@ const EditableDashboardCard = ({
     <div
       className={`transition ${editMode ? 'pointer-events-none select-none' : ''} ${
         isActive ? 'scale-[0.995] opacity-95' : ''
+      } ${
+        isDragging ? 'opacity-60' : ''
       }`}
     >
       {children}
     </div>
 
     {editMode && (
-      <div className="pointer-events-none absolute inset-0 rounded-[30px] border-2 border-dashed border-blue-600/30 bg-blue-600/[0.04]">
+      <div
+        className={`pointer-events-none absolute inset-0 rounded-[30px] border-2 border-dashed bg-blue-600/[0.04] ${
+          isActive ? 'border-blue-600/45 shadow-[0_0_0_1px_rgba(37,99,235,0.12)]' : 'border-blue-600/30'
+        }`}
+      >
         <div className="pointer-events-auto absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border border-blue-600/15 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm">
           <GripVertical size={14} className="text-blue-600" />
-          {label}
+          Drag {label}
         </div>
 
         <div className="pointer-events-auto absolute right-3 top-3 flex flex-wrap justify-end gap-2">
