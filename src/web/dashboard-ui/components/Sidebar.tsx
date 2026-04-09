@@ -115,12 +115,6 @@ export default function Sidebar() {
             </button>
           </div>
 
-          <div className="mt-5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-4">
-            <div className="text-sm font-medium text-[var(--text-primary)]">Upload once, review the flagged pairs, export the result.</div>
-            <div className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
-              The workspace is tuned for a single assignment check instead of course-wide analytics.
-            </div>
-          </div>
         </div>
 
         <nav className="scrollbar-thin flex-1 space-y-8 overflow-y-auto px-4 py-6">
