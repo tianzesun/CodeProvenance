@@ -25,7 +25,7 @@ aiohttp==3.9.1
 
 # Security
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+passlib==1.7.4
 cryptography==41.0.7
 
 # Code Parsing & Similarity

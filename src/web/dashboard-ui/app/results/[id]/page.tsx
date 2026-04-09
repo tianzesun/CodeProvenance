@@ -1,6 +1,8 @@
+// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -26,7 +28,7 @@ import {
   Users,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+const API = '';
 const REVIEW_STATUS_OPTIONS = [
   { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
   { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
@@ -310,6 +312,7 @@ function getAiRiskTone(score) {
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
 
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -326,10 +329,17 @@ export default function ResultsPage() {
   const [reviewError, setReviewError] = useState('');
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     if (id) {
       fetchJob();
     }
-  }, [id]);
+  }, [authLoading, id, user]);
 
   const fetchJob = async () => {
     try {

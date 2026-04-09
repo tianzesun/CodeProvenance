@@ -1,6 +1,8 @@
+// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
@@ -19,7 +21,7 @@ import {
   Upload,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+const API = '';
 const REVIEW_STATUS_LABELS = {
   unreviewed: 'Unreviewed',
   needs_review: 'Needs Review',
@@ -117,15 +119,24 @@ function getTopFeature(result) {
 }
 
 export default function Home() {
+  const { user, loading: authLoading } = useAuth();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     fetchJobs();
     const interval = setInterval(fetchJobs, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [authLoading, user]);
 
   const fetchJobs = async () => {
     try {

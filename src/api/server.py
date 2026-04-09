@@ -14,7 +14,9 @@ import json
 import os
 import re
 import logging
-from datetime import datetime
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
 import numpy as np
@@ -22,10 +24,17 @@ import numpy as np
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from sqlalchemy import func, select
 
 from src.config.settings import settings
 from src.application.services.batch_detection_service import BatchDetectionService
+os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
+from src.config.database import SessionLocal
 from src.infrastructure.report_generator import ReportGenerator
+from src.infrastructure.reporting.evidence_pdf_exporter import _minimal_pdf_bytes
+from src.models.database import Tenant, User
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,8 +48,6 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:3003",
         "http://127.0.0.1:3003",
-        "http://localhost:3004",
-        "http://127.0.0.1:3004",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -52,6 +59,20 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR = project_root / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 TOOLS_DIR = project_root / "tools"
+ENV_SETTINGS_PATH = project_root / ".env.local"
+AUTH_COOKIE_NAME = "integritydesk_session"
+AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
+AUTH_EXEMPT_PATHS = {
+    "/",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/auth/status",
+    "/api/auth/login",
+    "/api/auth/bootstrap-admin",
+}
+AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 RUNNABLE_BENCHMARK_TOOLS = {
     "integritydesk",
@@ -110,30 +131,30 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     },
     "moss": {
         "name": "MOSS",
-        "desc": "Stanford token-based plagiarism detector with strong lexical overlap matching.",
+        "desc": "Tokenized code comparison with document fingerprinting via the winnowing algorithm.",
         "color": "#7c3aed",
         "gradient": "from-violet-500 to-violet-600",
         "bgLight": "bg-violet-50",
         "ring": "ring-violet-500",
-        "engines": ["Token"],
+        "engines": ["Token", "Winnowing"],
     },
     "jplag": {
         "name": "JPlag",
-        "desc": "Structural plagiarism detector focused on token and syntax-pattern similarity.",
+        "desc": "Syntax-aware token comparison over normalized language-specific token streams.",
         "color": "#059669",
         "gradient": "from-emerald-500 to-emerald-600",
         "bgLight": "bg-emerald-50",
         "ring": "ring-emerald-500",
-        "engines": ["AST"],
+        "engines": ["Token", "Syntax-Aware"],
     },
     "dolos": {
         "name": "Dolos",
-        "desc": "Fingerprint-based code similarity detector with robust winnowing-style matching.",
+        "desc": "Language-aware token streams plus fingerprinting and MOSS-style winnowing.",
         "color": "#d97706",
         "gradient": "from-amber-500 to-amber-600",
         "bgLight": "bg-amber-50",
         "ring": "ring-amber-500",
-        "engines": ["Winnowing"],
+        "engines": ["Token", "Winnowing", "Syntax-Aware"],
     },
     "nicad": {
         "name": "NiCad",
@@ -151,25 +172,25 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
         "gradient": "from-teal-500 to-teal-600",
         "bgLight": "bg-teal-50",
         "ring": "ring-teal-500",
-        "engines": ["Duplicate Blocks"],
+        "engines": ["Token"],
     },
     "sherlock": {
         "name": "Sherlock",
-        "desc": "Classic plagiarism detector emphasizing line-level and textual overlap patterns.",
+        "desc": "Text-signature style detector based on textual signatures and attribute-style comparisons.",
         "color": "#4f46e5",
         "gradient": "from-indigo-500 to-indigo-600",
         "bgLight": "bg-indigo-50",
         "ring": "ring-indigo-500",
-        "engines": ["Line Overlap"],
+        "engines": ["Text-Signature Style", "Text Similarity"],
     },
     "sim": {
         "name": "SIM",
-        "desc": "Dick Grune's software similarity tester for text-oriented overlap comparison.",
+        "desc": "Dick Grune's software similarity tester for common token and text segments.",
         "color": "#0891b2",
         "gradient": "from-cyan-500 to-cyan-600",
         "bgLight": "bg-cyan-50",
         "ring": "ring-cyan-500",
-        "engines": ["Text Similarity"],
+        "engines": ["Token", "Text Similarity"],
     },
     "bplag": {
         "name": "BPlag",
@@ -636,6 +657,9 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
     normalized["review_status"] = normalized.get("review_status") if normalized.get("review_status") in REVIEW_STATUSES else "unreviewed"
     normalized["review_notes"] = str(normalized.get("review_notes") or "")
     normalized["review_updated_at"] = normalized.get("review_updated_at")
+    normalized["tenant_id"] = normalized.get("tenant_id")
+    normalized["owner_user_id"] = normalized.get("owner_user_id")
+    normalized["owner_user_email"] = normalized.get("owner_user_email")
     normalized["ai_detection"] = _normalize_ai_detection(normalized.get("ai_detection"))
     normalized["web_analysis"] = _normalize_web_analysis(normalized.get("web_analysis"))
 
@@ -934,7 +958,7 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     }
 
 
-def _list_all_jobs() -> List[Dict[str, Any]]:
+def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
     jobs_by_id: Dict[str, Dict[str, Any]] = {}
 
     if REPORTS_DIR.exists():
@@ -942,22 +966,159 @@ def _list_all_jobs() -> List[Dict[str, Any]]:
             if not report_dir.is_dir():
                 continue
             job = _get_job(report_dir.name)
-            if job:
+            if job and _job_is_accessible(job, current_user):
                 jobs_by_id[report_dir.name] = job
 
     for job_id, job in _jobs.items():
-        jobs_by_id[job_id] = _normalize_job(job)
+        normalized = _normalize_job(job)
+        if _job_is_accessible(normalized, current_user):
+            jobs_by_id[job_id] = normalized
 
     return sorted(jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True)
 
 
+@app.get("/api/auth/status")
+async def auth_status():
+    with SessionLocal() as db:
+        user_count = int(db.scalar(select(func.count()).select_from(User)) or 0)
+    _ensure_auth_secret()
+    return JSONResponse(content={"bootstrapped": user_count > 0, "user_count": user_count})
+
+
+@app.post("/api/auth/bootstrap-admin")
+async def bootstrap_admin(request: Request):
+    payload = await request.json()
+    email = _normalize_email(str(payload.get("email") or ""))
+    full_name = str(payload.get("full_name") or payload.get("name") or "").strip()
+    password = str(payload.get("password") or "")
+    tenant_name = str(payload.get("tenant_name") or "").strip()
+
+    if not email or not full_name:
+        raise HTTPException(status_code=400, detail="Email and full name are required")
+    _validate_password_input(password)
+
+    with SessionLocal() as db:
+        existing_users = int(db.scalar(select(func.count()).select_from(User)) or 0)
+        if existing_users > 0:
+            raise HTTPException(status_code=400, detail="Bootstrap has already been completed")
+
+        tenant = _create_tenant(db, tenant_name or _generate_tenant_name(full_name, email))
+        user = User(
+            tenant_id=tenant.id,
+            email=email,
+            full_name=full_name,
+            password_hash=_hash_password(password),
+            role="admin",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        response = JSONResponse(content={"user": _serialize_user(user)})
+        _issue_auth_cookie(response, user)
+        return response
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    payload = await request.json()
+    email = _normalize_email(str(payload.get("email") or ""))
+    password = str(payload.get("password") or "")
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+    _validate_password_input(password)
+
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == email))
+        if not user or not _verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Your account is disabled")
+
+        user.last_login_at = datetime.utcnow()
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        response = JSONResponse(content={"user": _serialize_user(user)})
+        _issue_auth_cookie(response, user)
+        return response
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    response = JSONResponse(content={"status": "ok"})
+    _clear_auth_cookie(response)
+    return response
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    return JSONResponse(content={"user": _require_current_user(request)})
+
+
+@app.get("/api/admin/users")
+async def list_users(request: Request):
+    _require_current_user(request, admin_only=True)
+    with SessionLocal() as db:
+        users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+        return JSONResponse(content={"users": [_serialize_user(user) for user in users]})
+
+
+@app.post("/api/admin/users")
+async def create_user(request: Request):
+    current_user = _require_current_user(request, admin_only=True)
+    payload = await request.json()
+
+    email = _normalize_email(str(payload.get("email") or ""))
+    full_name = str(payload.get("full_name") or payload.get("name") or "").strip()
+    password = str(payload.get("password") or "")
+    role = str(payload.get("role") or "professor").strip().lower()
+    tenant_name = str(payload.get("tenant_name") or "").strip()
+
+    if role not in {"admin", "professor"}:
+        raise HTTPException(status_code=400, detail="Role must be admin or professor")
+    if not email or not full_name:
+        raise HTTPException(status_code=400, detail="Email and full name are required")
+    _validate_password_input(password)
+
+    with SessionLocal() as db:
+        if db.scalar(select(User).where(User.email == email)):
+            raise HTTPException(status_code=409, detail="A user with that email already exists")
+
+        tenant = _create_tenant(db, tenant_name or _generate_tenant_name(full_name, email))
+        user = User(
+            tenant_id=tenant.id,
+            email=email,
+            full_name=full_name,
+            password_hash=_hash_password(password),
+            role=role,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        return JSONResponse(
+            status_code=201,
+            content={
+                "user": _serialize_user(user),
+                "created_by": current_user["email"],
+            },
+        )
+
+
 @app.post("/api/upload")
 async def upload_files(
+    request: Request,
     files: List[UploadFile] = File(...),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
 ):
+    current_user = _require_current_user(request)
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -973,16 +1134,18 @@ async def upload_files(
     if len(saved_files) < 2:
         return JSONResponse(status_code=400, content={"error": "At least 2 code files are required"})
 
-    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold)
+    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user)
 
 
 @app.post("/api/upload-zip")
 async def upload_zip(
+    request: Request,
     file: UploadFile = File(...),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
 ):
+    current_user = _require_current_user(request)
     if not file.filename or not file.filename.lower().endswith('.zip'):
         return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
 
@@ -999,10 +1162,10 @@ async def upload_zip(
         shutil.rmtree(job_dir)
         return JSONResponse(status_code=400, content={"error": "Zip must contain at least 2 code files"})
 
-    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold)
+    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user)
 
 
-async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold):
+async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user: Dict[str, Any]):
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id, "course_name": course_name or "Unnamed Course",
@@ -1011,6 +1174,9 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         "created_at": datetime.now().isoformat(), "file_count": 0,
         "results": [], "summary": {},
         "review_status": "unreviewed", "review_notes": "", "review_updated_at": None,
+        "tenant_id": current_user.get("tenant_id"),
+        "owner_user_id": current_user.get("id"),
+        "owner_user_email": current_user.get("email"),
     }
     _persist_job(job_id)
 
@@ -1109,23 +1275,20 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
 
 
 @app.get("/api/jobs")
-async def list_jobs():
-    return JSONResponse(content={"jobs": _list_all_jobs()})
+async def list_jobs(request: Request):
+    current_user = _require_current_user(request)
+    return JSONResponse(content={"jobs": _list_all_jobs(current_user)})
 
 
 @app.get("/api/job/{job_id}")
-async def get_job_status(job_id: str):
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+async def get_job_status(job_id: str, request: Request):
+    job = _require_job_access(job_id, request)
     return JSONResponse(content=job)
 
 
 @app.patch("/api/job/{job_id}/review")
 async def update_job_review(job_id: str, request: Request):
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = _require_job_access(job_id, request)
 
     payload = await request.json()
     if not isinstance(payload, dict):
@@ -1153,7 +1316,8 @@ async def update_job_review(job_id: str, request: Request):
 
 
 @app.delete("/api/job/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(job_id: str, request: Request):
+    _require_job_access(job_id, request)
     job = _jobs.pop(job_id, None)
     if not job and not _job_metadata_path(job_id).exists() and not _job_report_dir(job_id).exists():
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1672,8 +1836,309 @@ def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> P
     return REPORTS_DIR / job_id / fallback_filename
 
 
+def _format_env_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _quote_env_value(value: str) -> str:
+    if value == "":
+        return '""'
+    if any(ch in value for ch in [' ', '#', '"', "'"]):
+        return json.dumps(value)
+    return value
+
+
+def _persist_env_settings(updates: Dict[str, Any]) -> None:
+    lines = ENV_SETTINGS_PATH.read_text(encoding="utf-8").splitlines() if ENV_SETTINGS_PATH.exists() else []
+    rendered_updates = {key: _format_env_value(value) for key, value in updates.items()}
+
+    new_lines: List[str] = []
+    seen = set()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            new_lines.append(line)
+            continue
+
+        key = line.split("=", 1)[0].strip()
+        if key not in rendered_updates:
+            new_lines.append(line)
+            continue
+
+        seen.add(key)
+        value = rendered_updates[key]
+        if value is None:
+            continue
+        new_lines.append(f"{key}={_quote_env_value(value)}")
+
+    for key, value in rendered_updates.items():
+        if key in seen or value is None:
+            continue
+        new_lines.append(f"{key}={_quote_env_value(value)}")
+
+    content = "\n".join(new_lines).rstrip()
+    ENV_SETTINGS_PATH.write_text(f"{content}\n" if content else "", encoding="utf-8")
+
+
+def _should_require_auth(path: str) -> bool:
+    if path in AUTH_EXEMPT_PATHS:
+        return False
+    return path.startswith(AUTH_PROTECTED_PREFIXES)
+
+
+def _ensure_auth_secret() -> str:
+    if settings.AUTH_JWT_SECRET:
+        return settings.AUTH_JWT_SECRET
+
+    generated_secret = secrets.token_urlsafe(48)
+    settings.AUTH_JWT_SECRET = generated_secret
+    _persist_env_settings({"AUTH_JWT_SECRET": generated_secret})
+    return generated_secret
+
+
+def _normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _validate_password_input(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+
+
+def _hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    return pwd_context.verify(password, password_hash)
+
+
+def _create_access_token(user: User) -> str:
+    secret = _ensure_auth_secret()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user.id),
+        "role": user.role,
+        "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
+        "exp": now + timedelta(minutes=settings.AUTH_TOKEN_EXPIRE_MINUTES),
+        "iat": now,
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _serialize_user(user: User) -> Dict[str, Any]:
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
+        "tenant_name": user.tenant.name if getattr(user, "tenant", None) else None,
+        "is_active": bool(user.is_active),
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
+    "default_threshold": settings.DEFAULT_THRESHOLD,
+    "openai_api_key": settings.OPENAI_API_KEY or "",
+    "openai_base_url": settings.OPENAI_BASE_URL,
+    "openai_model": settings.OPENAI_MODEL,
+    "anthropic_api_key": settings.ANTHROPIC_API_KEY or "",
+    "anthropic_model": settings.ANTHROPIC_MODEL,
+    "embedding_runtime": settings.EMBEDDING_RUNTIME,
+    "embedding_model": settings.EMBEDDING_MODEL,
+    "embedding_server_url": settings.EMBEDDING_SERVER_URL,
+    "embedding_server_host": settings.EMBEDDING_SERVER_HOST,
+    "embedding_server_port": settings.EMBEDDING_SERVER_PORT,
+    "embedding_device": settings.EMBEDDING_DEVICE,
+    "embedding_batch_size": settings.EMBEDDING_BATCH_SIZE,
+    "engine_weights": settings.ENGINE_WEIGHTS,
+    "batch_size": settings.BATCH_SIZE,
+    "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
+    "max_files_per_job": settings.MAX_FILES_PER_JOB,
+}
+
+SETTINGS_ATTR_MAP = {
+    "default_threshold": "DEFAULT_THRESHOLD",
+    "openai_api_key": "OPENAI_API_KEY",
+    "openai_base_url": "OPENAI_BASE_URL",
+    "openai_model": "OPENAI_MODEL",
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "anthropic_model": "ANTHROPIC_MODEL",
+    "embedding_runtime": "EMBEDDING_RUNTIME",
+    "embedding_model": "EMBEDDING_MODEL",
+    "embedding_server_url": "EMBEDDING_SERVER_URL",
+    "embedding_server_host": "EMBEDDING_SERVER_HOST",
+    "embedding_server_port": "EMBEDDING_SERVER_PORT",
+    "embedding_device": "EMBEDDING_DEVICE",
+    "embedding_batch_size": "EMBEDDING_BATCH_SIZE",
+    "engine_weights": "ENGINE_WEIGHTS",
+    "batch_size": "BATCH_SIZE",
+    "max_file_size_mb": "MAX_FILE_SIZE_MB",
+    "max_files_per_job": "MAX_FILES_PER_JOB",
+}
+
+SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key"}
+
+
+def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
+    if not tenant_id:
+        return {}
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, tenant_id)
+        if not tenant or not isinstance(tenant.settings, dict):
+            return {}
+        return dict(tenant.settings)
+
+
+def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
+    stored = _load_tenant_settings_record(tenant_id)
+    payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
+
+    openai_key = str(payload.get("openai_api_key") or "")
+    anthropic_key = str(payload.get("anthropic_api_key") or "")
+
+    payload["openai_api_key"] = ""
+    payload["openai_api_key_configured"] = bool(openai_key)
+    payload["anthropic_api_key"] = ""
+    payload["anthropic_api_key_configured"] = bool(anthropic_key)
+    return payload
+
+
+def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
+    merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
+    for key, attr in SETTINGS_ATTR_MAP.items():
+        if key in merged:
+            setattr(settings, attr, merged[key])
+
+
+def _issue_auth_cookie(response: Response, user: User) -> None:
+    token = _create_access_token(user)
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+
+
+def _generate_tenant_name(full_name: str, email: str) -> str:
+    base = full_name.strip() or email.split("@", 1)[0]
+    return f"{base} Workspace"
+
+
+def _create_tenant(db, name: str) -> Tenant:
+    tenant = Tenant(
+        name=name,
+        api_key_hash=hashlib.sha256(f"{uuid.uuid4()}:{name}".encode("utf-8")).hexdigest(),
+    )
+    db.add(tenant)
+    db.flush()
+    return tenant
+
+
+def _authenticate_request(request: Request) -> Dict[str, Any]:
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    auth_header = request.headers.get("Authorization", "")
+    if not token and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        payload = jwt.decode(token, _ensure_auth_secret(), algorithms=["HS256"])
+    except JWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired session") from exc
+
+    user_id = str(payload.get("sub") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="User account is unavailable")
+        serialized = _serialize_user(user)
+
+    return serialized
+
+
+def _require_current_user(request: Request, admin_only: bool = False) -> Dict[str, Any]:
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if admin_only and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return user
+
+
+def _job_is_accessible(job: Dict[str, Any], user: Dict[str, Any]) -> bool:
+    if user.get("role") == "admin":
+        return True
+
+    owner_user_id = str(job.get("owner_user_id") or "")
+    if owner_user_id and owner_user_id == user.get("id"):
+        return True
+
+    tenant_id = str(job.get("tenant_id") or "")
+    if tenant_id and tenant_id == user.get("tenant_id"):
+        return True
+
+    return False
+
+
+def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    user = _require_current_user(request)
+    if not _job_is_accessible(job, user):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return job
+
+
+@app.middleware("http")
+async def dashboard_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if not _should_require_auth(path):
+        return await call_next(request)
+
+    try:
+        user = _authenticate_request(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    request.state.user = user
+    request.state.user_id = user["id"]
+    request.state.user_role = user["role"]
+    request.state.tenant_id = user.get("tenant_id")
+    _apply_runtime_settings_from_record(_load_tenant_settings_record(user.get("tenant_id")))
+    return await call_next(request)
+
+
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
 async def download_report_html(request: Request, job_id: str):
+    _require_job_access(job_id, request)
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
@@ -1681,7 +2146,8 @@ async def download_report_html(request: Request, job_id: str):
 
 
 @app.get("/report/{job_id}/download-json")
-async def download_report_json(job_id: str):
+async def download_report_json(job_id: str, request: Request):
+    _require_job_access(job_id, request)
     rp = _resolve_report_path(job_id, "report_json_path", "report.json")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
@@ -1690,6 +2156,7 @@ async def download_report_json(job_id: str):
 
 @app.get("/report/{job_id}/committee", response_class=HTMLResponse)
 async def download_committee_report(request: Request, job_id: str):
+    _require_job_access(job_id, request)
     rp = _resolve_report_path(job_id, "committee_report_path", "committee_report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Committee report file not found")
@@ -1697,7 +2164,8 @@ async def download_committee_report(request: Request, job_id: str):
 
 
 @app.get("/report/{job_id}/download-pdf")
-async def download_report_pdf(job_id: str):
+async def download_report_pdf(job_id: str, request: Request):
+    _require_job_access(job_id, request)
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
@@ -1728,6 +2196,11 @@ async def download_report_pdf(job_id: str):
             media_type="text/html",
             headers={"Content-Disposition": f"attachment; filename=integritydesk_report_{job_id}.html"}
         )
+    except Exception as exc:
+        logger.warning("Report PDF export fell back to minimal PDF for %s: %s", job_id, exc)
+        response = Response(content=_minimal_pdf_bytes(f"IntegrityDesk Report {job_id}"), media_type="application/pdf")
+        response.headers["Content-Disposition"] = f"attachment; filename=integritydesk_report_{job_id}.pdf"
+        return response
 
 
 @app.get("/benchmark/{job_id}/download-csv")
@@ -1833,6 +2306,115 @@ async def download_benchmark_pdf(job_id: str):
             media_type="text/html",
             headers={"Content-Disposition": f"attachment; filename=benchmark_{job_id}.html"}
         )
+    except Exception as exc:
+        logger.warning("Benchmark PDF export fell back to minimal PDF for %s: %s", job_id, exc)
+        response = Response(content=_minimal_pdf_bytes(f"Benchmark {job_id}"), media_type="application/pdf")
+        response.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
+        return response
+
+
+@app.post("/api/benchmark/export-pdf")
+async def export_benchmark_pdf(request: Request):
+    payload = await request.json()
+
+    pair_results = payload.get("pair_results") or []
+    summary = payload.get("summary") or {}
+    dataset_name = payload.get("datasetName") or "Benchmark"
+    generated_at = payload.get("runAt") or datetime.now().isoformat()
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{dataset_name} Benchmark Report</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }}
+            h1 {{ font-size: 24px; margin-bottom: 8px; }}
+            h2 {{ font-size: 16px; margin: 28px 0 10px; }}
+            p {{ margin: 0; }}
+            .meta {{ color: #64748b; font-size: 12px; margin-bottom: 24px; }}
+            .summary {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }}
+            .card {{ border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; min-width: 160px; }}
+            .label {{ color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }}
+            .value {{ font-size: 24px; font-weight: 700; margin-top: 6px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+            th, td {{ border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }}
+            th {{ background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }}
+            td {{ font-size: 12px; }}
+            .tool-chip {{ display: inline-block; border-radius: 999px; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; font-size: 11px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }}
+        </style>
+    </head>
+    <body>
+        <h1>{dataset_name} Benchmark Report</h1>
+        <div class="meta">Generated: {generated_at}</div>
+        <div class="summary">
+            <div class="card">
+                <div class="label">Tools Run</div>
+                <div class="value">{summary.get("tools_compared", 0)}</div>
+            </div>
+            <div class="card">
+                <div class="label">Pairs Tested</div>
+                <div class="value">{summary.get("pairs_tested", len(pair_results))}</div>
+            </div>
+            <div class="card">
+                <div class="label">IntegrityDesk Avg</div>
+                <div class="value">{round(float(((summary.get("accuracy") or {}).get("integritydesk") or 0)) * 100, 1)}%</div>
+            </div>
+            <div class="card">
+                <div class="label">Best Competitor Avg</div>
+                <div class="value">{round(float(((summary.get("accuracy") or {}).get("best_competitor") or 0)) * 100, 1)}%</div>
+            </div>
+        </div>
+
+        <h2>Pair Results</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pair</th>
+                    <th>Files</th>
+                    <th>Tool Scores</th>
+                </tr>
+            </thead>
+            <tbody>
+    """
+
+    for pair in pair_results:
+        tool_scores = "".join(
+            f'<span class="tool-chip">{tr.get("tool", "tool")}: {round(float(tr.get("score", 0)) * 100, 1)}%</span>'
+            for tr in (pair.get("tool_results") or [])
+        )
+        html_content += f"""
+            <tr>
+                <td>{pair.get('label', 'Pair')}</td>
+                <td>{pair.get('file_a', '')}<br>{pair.get('file_b', '')}</td>
+                <td>{tool_scores or 'No scores available'}</td>
+            </tr>
+        """
+
+    html_content += """
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
+
+    try:
+        import weasyprint
+        pdf = weasyprint.HTML(string=html_content).write_pdf()
+        response = Response(content=pdf, media_type="application/pdf")
+        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
+        return response
+    except ImportError:
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": "attachment; filename=benchmark_report.html"}
+        )
+    except Exception as exc:
+        logger.warning("Benchmark PDF export fell back to minimal PDF: %s", exc)
+        response = Response(content=_minimal_pdf_bytes(f"{dataset_name} Benchmark Report"), media_type="application/pdf")
+        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
+        return response
 
 
 @app.get("/benchmark/{job_id}/radar")
@@ -2144,28 +2726,41 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
 
 
 @app.get("/api/settings")
-async def get_settings():
-    return JSONResponse(content={
-        "default_threshold": settings.DEFAULT_THRESHOLD,
-        "openai_api_key": settings.OPENAI_API_KEY is not None,
-        "openai_base_url": settings.OPENAI_BASE_URL,
-        "openai_model": settings.OPENAI_MODEL,
-        "anthropic_api_key": settings.ANTHROPIC_API_KEY is not None,
-        "anthropic_model": settings.ANTHROPIC_MODEL,
-        "embedding_model": settings.EMBEDDING_MODEL,
-        "embedding_server_url": settings.EMBEDDING_SERVER_URL,
-        "engine_weights": settings.ENGINE_WEIGHTS,
-        "batch_size": settings.BATCH_SIZE,
-        "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
-        "max_files_per_job": settings.MAX_FILES_PER_JOB,
-    })
+async def get_settings(request: Request):
+    current_user = _require_current_user(request, admin_only=True)
+    return JSONResponse(content=_build_settings_payload(current_user.get("tenant_id")))
 
 
 @app.patch("/api/settings")
 async def update_settings(request: Request):
+    current_user = _require_current_user(request, admin_only=True)
     data = await request.json()
-    # In a production system this would persist to database
-    return JSONResponse(content={"status": "ok", "settings": data})
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Admin account is not attached to a workspace tenant")
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Workspace tenant not found")
+
+        stored_settings = dict(tenant.settings or {})
+        applied = {}
+
+        for key, value in data.items():
+            if key not in SETTINGS_ATTR_MAP:
+                continue
+            if key in SECRET_SETTING_KEYS and value == "":
+                continue
+            stored_settings[key] = value
+            applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
+
+        tenant.settings = stored_settings
+        db.add(tenant)
+        db.commit()
+
+    _apply_runtime_settings_from_record(stored_settings)
+    return JSONResponse(content={"status": "ok", "settings": applied, "source": "database"})
 
 
 def main():

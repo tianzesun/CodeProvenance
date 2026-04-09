@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from dataclasses import dataclass
+from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,16 @@ class FeatureExtractor:
         self._fallback_embedding = None
         self._ngram_engine = None
         self._winnowing_engine = None
+
+    def _resolve_embedding_base_url(self) -> Optional[str]:
+        if settings.EMBEDDING_SERVER_URL:
+            return settings.EMBEDDING_SERVER_URL
+
+        host = settings.EMBEDDING_SERVER_HOST
+        if host:
+            return f"http://{host}:{settings.EMBEDDING_SERVER_PORT}/v1"
+
+        return settings.OPENAI_BASE_URL or None
 
     # ── Public API ──────────────────────────────────────────────
 
@@ -139,27 +150,36 @@ class FeatureExtractor:
             return None
 
     def _run_embedding(self, a: str, b: str) -> Optional[float]:
-        # Primary: UniXcoder (local, GPU-friendly)
-        try:
-            if self._unixcoder_engine is None:
-                from src.engines.similarity.unixcoder_similarity import UniXcoderSimilarity
-                self._unixcoder_engine = UniXcoderSimilarity()
-            result = self._unixcoder_engine.compare({"raw": a}, {"raw": b})
-            coerced = self._coerce_score(result, "embedding")
-            if coerced is not None:
-                return coerced
-        except Exception as exc:
-            logger.debug("UniXcoder engine unavailable, falling back to OpenAI: %s", exc)
+        runtime = (settings.EMBEDDING_RUNTIME or "local_unixcoder").lower()
 
-        # Fallback: OpenAI embeddings
+        if runtime in {"local", "local_unixcoder", "unixcoder"}:
+            try:
+                if self._unixcoder_engine is None:
+                    from src.engines.similarity.unixcoder_similarity import UniXcoderSimilarity
+                    self._unixcoder_engine = UniXcoderSimilarity(
+                        model_name=settings.EMBEDDING_MODEL,
+                        device=settings.EMBEDDING_DEVICE,
+                        batch_size=settings.EMBEDDING_BATCH_SIZE,
+                    )
+                result = self._unixcoder_engine.compare({"raw": a}, {"raw": b})
+                coerced = self._coerce_score(result, "embedding")
+                if coerced is not None:
+                    return coerced
+            except Exception as exc:
+                logger.debug("UniXcoder engine unavailable, falling back to API embeddings: %s", exc)
+
         try:
             if self._fallback_embedding is None:
                 from src.engines.similarity.embedding_similarity import EmbeddingSimilarity
-                self._fallback_embedding = EmbeddingSimilarity()
+                self._fallback_embedding = EmbeddingSimilarity(
+                    model_name=settings.EMBEDDING_MODEL,
+                    base_url=self._resolve_embedding_base_url(),
+                    api_key=settings.OPENAI_API_KEY,
+                )
             result = self._fallback_embedding.compare({"raw": a}, {"raw": b})
             return self._coerce_score(result, "embedding")
         except Exception as exc:
-            logger.debug("OpenAI embedding fallback also failed: %s", exc)
+            logger.debug("Embedding API fallback also failed: %s", exc)
             return None
 
     def _run_ngram(self, a: str, b: str) -> Optional[float]:

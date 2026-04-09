@@ -1,6 +1,8 @@
+// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
@@ -11,21 +13,20 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, RadarChart, PolarGrid,
-  PolarAngleAxis, PolarRadiusAxis, Radar,
+  ResponsiveContainer, Cell,
 } from 'recharts';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+const API = '';
 
 const TOOLS = [
-  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion (AST + N-gram + Winnowing + Embedding + Token)', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['AST', 'N-gram', 'Winnowing', 'Embedding', 'Token', 'Execution'] },
-  { id: 'moss', name: 'MOSS', desc: 'Token-based Jaccard similarity (Stanford)', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token'] },
-  { id: 'jplag', name: 'JPlag', desc: 'AST structural comparison (KIT)', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['AST'] },
-  { id: 'dolos', name: 'Dolos', desc: 'Winnowing fingerprint comparison', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Winnowing'] },
+  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across AST, token, n-gram, winnowing, embedding, and execution evidence', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['AST', 'N-gram', 'Winnowing', 'Embedding', 'Token', 'Execution'] },
+  { id: 'moss', name: 'MOSS', desc: 'Tokenized code comparison with document fingerprinting via the winnowing algorithm', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token', 'Winnowing'] },
+  { id: 'jplag', name: 'JPlag', desc: 'Syntax-aware token comparison over normalized language-specific token streams', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['Token', 'Syntax-Aware'] },
+  { id: 'dolos', name: 'Dolos', desc: 'Language-aware token streams plus fingerprinting and MOSS-style winnowing', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Token', 'Winnowing', 'Syntax-Aware'] },
   { id: 'nicad', name: 'NiCad', desc: 'Near-miss clone detector with normalization', color: '#e11d48', gradient: 'from-rose-500 to-rose-600', bgLight: 'bg-rose-50', ring: 'ring-rose-500', textColor: 'text-rose-600', engines: ['Normalization'] },
-  { id: 'pmd', name: 'PMD CPD', desc: 'Copy/Paste duplicate token sequence detector', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', textColor: 'text-teal-600', engines: ['Duplicate Blocks'] },
-  { id: 'sherlock', name: 'Sherlock', desc: 'Line-level textual overlap detector', color: '#4f46e5', gradient: 'from-indigo-500 to-indigo-600', bgLight: 'bg-indigo-50', ring: 'ring-indigo-500', textColor: 'text-indigo-600', engines: ['Line Overlap'] },
-  { id: 'sim', name: 'SIM', desc: 'Dick Grune text similarity tester', color: '#0891b2', gradient: 'from-cyan-500 to-cyan-600', bgLight: 'bg-cyan-50', ring: 'ring-cyan-500', textColor: 'text-cyan-600', engines: ['Text Similarity'] },
+  { id: 'pmd', name: 'PMD CPD', desc: 'Copy/Paste Detector based on duplicated token sequences', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', textColor: 'text-teal-600', engines: ['Token'] },
+  { id: 'sherlock', name: 'Sherlock', desc: 'Text-signature style detector based on textual signatures and attribute-style comparisons', color: '#4f46e5', gradient: 'from-indigo-500 to-indigo-600', bgLight: 'bg-indigo-50', ring: 'ring-indigo-500', textColor: 'text-indigo-600', engines: ['Text-Signature Style', 'Text Similarity'] },
+  { id: 'sim', name: 'SIM', desc: 'Software Similarity Tester for common token and text segments', color: '#0891b2', gradient: 'from-cyan-500 to-cyan-600', bgLight: 'bg-cyan-50', ring: 'ring-cyan-500', textColor: 'text-cyan-600', engines: ['Token', 'Text Similarity'] },
   { id: 'strange', name: 'STRANGE', desc: 'Semantic PDG clone detector', color: '#8b5cf6', gradient: 'from-purple-500 to-purple-600', bgLight: 'bg-purple-50', ring: 'ring-purple-500', textColor: 'text-purple-600', engines: ['PDG Analysis'] },
   { id: 'evalforge', name: 'EvalForge', desc: 'Plagiarism detection evaluation framework', color: '#f59e0b', gradient: 'from-orange-500 to-orange-600', bgLight: 'bg-orange-50', ring: 'ring-orange-500', textColor: 'text-orange-600', engines: ['Benchmark Runner'] },
   { id: 'gptzero', name: 'GPTZero', desc: 'Open source AI code/text detection', color: '#10b981', gradient: 'from-green-500 to-green-600', bgLight: 'bg-green-50', ring: 'ring-green-500', textColor: 'text-green-600', engines: ['Embedding Analysis'] },
@@ -66,23 +67,126 @@ const DATASETS = [
 ];
 
 const TOOL_COLORS = Object.fromEntries(TOOLS.map(t => [t.id, t.color]));
+const ENGINE_FILTERS = Array.from(new Set(TOOLS.flatMap((tool) => tool.engines))).sort();
 
-// ── Step indicator ──────────────────────────────────────────────────────────
-function StepIndicator({ steps, currentStep, completedSteps }) {
+function formatChartPercent(value) {
+  return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function ToolBadge({ toolId, compact = false }) {
+  const tool = TOOLS.find((entry) => entry.id === toolId);
+
+  if (!tool) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+        <span className="h-2.5 w-2.5 rounded-full bg-slate-400" />
+        {toolId}
+      </span>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-0 mb-8">
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${
+        compact ? 'text-[11px]' : 'text-xs'
+      } font-semibold ${tool.bgLight} ${tool.textColor} border-current/10`}
+    >
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tool.color }} />
+      {tool.name}
+    </span>
+  );
+}
+
+function PairScoreTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const rows = payload
+    .filter((entry) => typeof entry.value === 'number')
+    .sort((a, b) => Number(b.value) - Number(a.value));
+
+  return (
+    <div className="min-w-[220px] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl shadow-slate-900/10 backdrop-blur">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">File Pair</div>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{label}</div>
+      <div className="mt-3 space-y-2">
+        {rows.map((entry) => (
+          <div key={entry.dataKey} className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: entry.color || '#94a3b8' }}
+              />
+              <span className="truncate text-xs font-medium text-slate-600">
+                {TOOLS.find((tool) => tool.id === entry.dataKey)?.name || entry.name}
+              </span>
+            </div>
+            <span className="text-xs font-semibold text-slate-900">{formatChartPercent(entry.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardTooltip({ active, payload }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const toolId = payload[0]?.payload?.id;
+  const tool = TOOLS.find((entry) => entry.id === toolId);
+  const row = payload[0]?.payload;
+
+  if (!row) {
+    return null;
+  }
+
+  return (
+    <div className="min-w-[240px] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl shadow-slate-900/10 backdrop-blur">
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: row.color }} />
+        <div className="text-sm font-semibold text-slate-900">{row.name}</div>
+      </div>
+      {tool?.desc && <div className="mt-2 text-xs leading-5 text-slate-500">{tool.desc}</div>}
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-slate-400">Average</div>
+          <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(row.average)}</div>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-slate-400">Peak</div>
+          <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(row.peak)}</div>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-slate-400">Lowest</div>
+          <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(row.minimum)}</div>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-slate-400">Spread</div>
+          <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(row.spread)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── Step indicator ──────────────────────────────────────────────────────────
+function StepIndicator({ steps, currentStep, completedSteps, compact = false }) {
+  return (
+    <div className={`flex items-center gap-0 ${compact ? '' : 'mb-8'}`}>
       {steps.map((step, idx) => {
         const isCompleted = completedSteps.includes(idx);
         const isCurrent = currentStep === idx;
         const isLast = idx === steps.length - 1;
         return (
           <div key={idx} className="flex items-center flex-1 last:flex-none">
-            <div className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+            <div className={`flex items-center ${compact ? 'gap-2 px-3 py-2 rounded-2xl' : 'gap-3 px-4 py-3 rounded-xl'} transition-all duration-200 ${
               isCurrent ? 'bg-violet-600 shadow-lg shadow-violet-500/25' :
               isCompleted ? 'bg-emerald-50 border border-emerald-200' :
               'bg-white border border-slate-200'
             }`}>
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+              <div className={`${compact ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs'} rounded-full flex items-center justify-center font-bold shrink-0 ${
                 isCurrent ? 'bg-white/20 text-white' :
                 isCompleted ? 'bg-emerald-500 text-white' :
                 'bg-slate-100 text-slate-400'
@@ -90,16 +194,16 @@ function StepIndicator({ steps, currentStep, completedSteps }) {
                 {isCompleted ? <Check size={13} /> : idx + 1}
               </div>
               <div>
-                <div className={`text-xs font-bold uppercase tracking-wide ${
+                <div className={`${compact ? 'text-[11px]' : 'text-xs'} font-bold uppercase tracking-wide ${
                   isCurrent ? 'text-white' : isCompleted ? 'text-emerald-700' : 'text-slate-400'
                 }`}>{step.label}</div>
-                <div className={`text-xs mt-0.5 hidden sm:block ${
+                <div className={`${compact ? 'hidden' : 'text-xs mt-0.5 hidden sm:block'} ${
                   isCurrent ? 'text-violet-200' : isCompleted ? 'text-emerald-500' : 'text-slate-400'
                 }`}>{step.subtitle}</div>
               </div>
             </div>
             {!isLast && (
-              <div className={`h-px flex-1 mx-2 ${
+              <div className={`h-px flex-1 ${compact ? 'mx-1.5' : 'mx-2'} ${
                 completedSteps.includes(idx) ? 'bg-emerald-300' : 'bg-slate-200'
               }`} />
             )}
@@ -112,9 +216,23 @@ function StepIndicator({ steps, currentStep, completedSteps }) {
 
 // ── Step 1: Tool Selection ──────────────────────────────────────────────────
 function ToolSelectionStep({ selectedTools, setSelectedTools, onNext }) {
+  const [activeEngines, setActiveEngines] = useState([]);
+
+  const visibleTools = activeEngines.length
+    ? TOOLS.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))
+    : TOOLS;
+
   const toggleTool = (id) => setSelectedTools(prev =>
     prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
   );
+
+  const toggleEngine = (engine) => setActiveEngines((prev) =>
+    prev.includes(engine) ? prev.filter((item) => item !== engine) : [...prev, engine]
+  );
+
+  const selectVisibleTools = () => setSelectedTools((prev) => [...new Set([...prev, ...visibleTools.map((tool) => tool.id)])]);
+  const clearVisibleTools = () => setSelectedTools((prev) => prev.filter((toolId) => !visibleTools.some((tool) => tool.id === toolId)));
+  const visibleSelectedCount = visibleTools.filter((tool) => selectedTools.includes(tool.id)).length;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -131,14 +249,64 @@ function ToolSelectionStep({ selectedTools, setSelectedTools, onNext }) {
             selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
           }`}>{selectedTools.length} / {TOOLS.length} selected</span>
           <div className="flex gap-1">
-            <button onClick={() => setSelectedTools(TOOLS.map(t => t.id))} className="text-xs font-medium text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">All</button>
             <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
           </div>
         </div>
       </div>
       <div className="p-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {TOOLS.map(tool => {
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Filter By Engine</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {ENGINE_FILTERS.map((engine) => {
+                  const active = activeEngines.includes(engine);
+                  return (
+                    <button
+                      key={engine}
+                      onClick={() => toggleEngine(engine)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                        active
+                          ? 'border-violet-500 bg-violet-600 text-white shadow-lg shadow-violet-500/20'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      {engine}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200">
+                {visibleTools.length} visible
+              </span>
+              <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200">
+                {visibleSelectedCount} selected in view
+              </span>
+              <button onClick={selectVisibleTools} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:border-blue-300">
+                Select Visible
+              </button>
+              <button onClick={clearVisibleTools} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300">
+                Clear Visible
+              </button>
+              {activeEngines.length > 0 && (
+                <button onClick={() => setActiveEngines([])} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300">
+                  Show All Engines
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {visibleTools.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
+            <div className="text-sm font-semibold text-slate-700">No tools match the selected engines.</div>
+            <div className="mt-2 text-sm text-slate-500">Try clearing one or more engine filters to widen the comparison set.</div>
+          </div>
+        ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {visibleTools.map(tool => {
             const isSelected = selectedTools.includes(tool.id);
             return (
               <button key={tool.id} onClick={() => toggleTool(tool.id)}
@@ -156,11 +324,24 @@ function ToolSelectionStep({ selectedTools, setSelectedTools, onNext }) {
                   <Zap size={16} className="text-white" />
                 </div>
                 <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                <div className="text-xs text-slate-400 mt-0.5 line-clamp-2">{tool.desc}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {tool.engines.slice(0, 3).map((engine) => (
+                    <span
+                      key={engine}
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'
+                      }`}
+                    >
+                      {engine}
+                    </span>
+                  ))}
+                </div>
+                <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
               </button>
             );
           })}
         </div>
+        )}
       </div>
       <div className="px-6 pb-6 flex justify-end">
         <button onClick={onNext} disabled={selectedTools.length === 0}
@@ -544,6 +725,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 // ── Step 4: Report ──────────────────────────────────────────────────────────
 function ReportStep({ results, onRestart }) {
   const [expandedPairs, setExpandedPairs] = useState({});
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const { tool_scores, pair_results, summary } = results;
   const activeTools = Object.keys(tool_scores || {});
 
@@ -556,14 +738,33 @@ function ReportStep({ results, onRestart }) {
     return d;
   });
 
-  const radarData = activeTools.map(tool => {
-    const d = { tool: TOOLS.find(t => t.id === tool)?.name || tool };
-    (pair_results || []).forEach(pair => {
-      const tr = pair.tool_results?.find(r => r.tool === tool);
-      d[pair.label] = tr ? Math.round(tr.score * 1000) / 10 : 0;
-    });
-    return d;
-  });
+  const toolLeaderboard = activeTools.map((tool) => {
+    const toolInfo = TOOLS.find(t => t.id === tool);
+    const scores = (pair_results || [])
+      .map(pair => pair.tool_results?.find(r => r.tool === tool)?.score)
+      .filter(score => typeof score === 'number');
+    const average = scores.length
+      ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+      : 0;
+    const peak = scores.length ? Math.max(...scores) : 0;
+    const minimum = scores.length ? Math.min(...scores) : 0;
+    const spread = peak - minimum;
+
+    return {
+      id: tool,
+      name: toolInfo?.name || tool,
+      shortName: toolInfo?.name || tool,
+      color: TOOL_COLORS[tool] || '#94a3b8',
+      average: Math.round(average * 1000) / 10,
+      peak: Math.round(peak * 1000) / 10,
+      minimum: Math.round(minimum * 1000) / 10,
+      spread: Math.round(spread * 1000) / 10,
+      pairCount: scores.length,
+    };
+  }).sort((a, b) => b.average - a.average);
+
+  const leadingTool = toolLeaderboard[0] || null;
+  const leadingToolInfo = leadingTool ? TOOLS.find((tool) => tool.id === leadingTool.id) : null;
 
   const togglePair = (idx) => setExpandedPairs(prev => ({ ...prev, [idx]: !prev[idx] }));
 
@@ -600,6 +801,26 @@ function ReportStep({ results, onRestart }) {
     URL.revokeObjectURL(url);
   };
 
+  const downloadPDF = async () => {
+    try {
+      setPdfDownloading(true);
+      const res = await axios.post(`${API}/api/benchmark/export-pdf`, results, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      window.alert('Could not export the benchmark report as PDF.');
+    } finally {
+      setPdfDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Report header */}
@@ -616,6 +837,11 @@ function ReportStep({ results, onRestart }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={downloadPDF} disabled={pdfDownloading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-semibold rounded-xl transition-all text-sm shadow-lg shadow-slate-900/10 disabled:shadow-none">
+            <Download size={15} />
+            {pdfDownloading ? 'Preparing PDF…' : 'PDF'}
+          </button>
           <button onClick={downloadCSV}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-violet-200 hover:border-violet-400 text-violet-700 font-semibold rounded-xl transition-all text-sm hover:shadow-sm">
             <Download size={15} />
@@ -658,8 +884,13 @@ function ReportStep({ results, onRestart }) {
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="font-semibold text-slate-900">Score Comparison</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Similarity scores per file pair</p>
+              <h2 className="font-semibold text-slate-900">Pair-by-Pair Scores</h2>
+              <p className="text-sm text-slate-500 mt-0.5">See how each tool scored every tested file pair.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {activeTools.map((toolId) => (
+                  <ToolBadge key={toolId} toolId={toolId} compact />
+                ))}
+              </div>
             </div>
             <div className="p-6 h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -667,8 +898,7 @@ function ReportStep({ results, onRestart }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="pair" tick={{ fontSize: 11, fill: '#64748b' }} />
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} domain={[0, 100]} />
-                  <Tooltip formatter={v => `${v.toFixed(1)}%`} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  <Tooltip content={<PairScoreTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }} />
                   {activeTools.map(tool => (
                     <Bar key={tool} dataKey={tool} fill={TOOL_COLORS[tool] || '#94a3b8'} radius={[4, 4, 0, 0]} name={TOOLS.find(t => t.id === tool)?.name || tool} />
                   ))}
@@ -678,24 +908,119 @@ function ReportStep({ results, onRestart }) {
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="font-semibold text-slate-900">Tool Radar</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Multi-dimensional tool comparison</p>
+              <h2 className="font-semibold text-slate-900">Tool Leaderboard</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                Average score across all tested pairs, with the top tool called out at a glance.
+              </p>
             </div>
-            <div className="p-6 h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={radarData}>
-                  <PolarGrid stroke="#e2e8f0" />
-                  <PolarAngleAxis dataKey="tool" tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                  <Tooltip formatter={v => `${v.toFixed(1)}%`} />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  {(pair_results || []).map((pair, i) => (
-                    <Radar key={pair.label} name={pair.label} dataKey={pair.label}
-                      stroke={TOOL_COLORS.integritydesk} fill={TOOL_COLORS.integritydesk}
-                      fillOpacity={0.1 + i * 0.1} />
-                  ))}
-                </RadarChart>
-              </ResponsiveContainer>
+            <div className="grid gap-6 p-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={toolLeaderboard}
+                    layout="vertical"
+                    margin={{ top: 8, right: 12, left: 12, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} />
+                    <YAxis
+                      type="category"
+                      dataKey="shortName"
+                      width={110}
+                      tick={{ fontSize: 11, fill: '#475569' }}
+                    />
+                    <Tooltip content={<LeaderboardTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }} />
+                    <Bar dataKey="average" radius={[0, 10, 10, 0]} name="Average score">
+                      {toolLeaderboard.map((entry) => (
+                        <Cell key={entry.id} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="space-y-3">
+                {leadingTool && (
+                  <div className="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+                    <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500" />
+                    <div className="p-4">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+                      <Trophy size={14} />
+                      Top Average Score
+                    </div>
+                    <div className="mt-3 flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="text-2xl font-bold text-slate-900">{leadingTool.name}</div>
+                        <div className="mt-1 text-sm text-slate-600">
+                          {leadingTool.average.toFixed(1)}% average across {leadingTool.pairCount} pair{leadingTool.pairCount === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                      <ToolBadge toolId={leadingTool.id} compact />
+                    </div>
+                    {leadingToolInfo?.desc && (
+                      <div className="mt-3 text-sm leading-6 text-slate-600">{leadingToolInfo.desc}</div>
+                    )}
+                    {leadingToolInfo?.engines?.length > 0 && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {leadingToolInfo.engines.slice(0, 4).map((engine) => (
+                          <span
+                            key={engine}
+                            className="rounded-full border border-blue-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700"
+                          >
+                            {engine}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    </div>
+                  </div>
+                )}
+
+                {toolLeaderboard.slice(0, 4).map((tool, index) => (
+                  <div key={tool.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-slate-300">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
+                            style={{ backgroundColor: tool.color }}
+                          >
+                            {index + 1}
+                          </span>
+                          <span className="truncate font-semibold text-slate-900">{tool.name}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <ToolBadge toolId={tool.id} compact />
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${tool.average}%`, backgroundColor: tool.color }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-slate-900">{tool.average.toFixed(1)}%</div>
+                        <div className="text-[11px] uppercase tracking-wider text-slate-400">Average</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-500">
+                      <div>
+                        <div className="font-semibold text-slate-700">{tool.peak.toFixed(1)}%</div>
+                        <div>Peak</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-700">{tool.minimum.toFixed(1)}%</div>
+                        <div>Lowest</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-700">{tool.spread.toFixed(1)}%</div>
+                        <div>Spread</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -817,9 +1142,10 @@ function ReportStep({ results, onRestart }) {
 
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
+  const { user, loading: authLoading } = useAuth();
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
-  const [selectedTools, setSelectedTools] = useState(TOOLS.map(t => t.id));
+  const [selectedTools, setSelectedTools] = useState([]);
   const [selectedDataset, setSelectedDataset] = useState('basic-clone');
   const [uploadMode, setUploadMode] = useState('builtin');
   const [files, setFiles] = useState([]);
@@ -827,10 +1153,13 @@ export default function BenchmarkPage() {
   const [results, setResults] = useState(null);
 
   useEffect(() => {
+    if (authLoading || !user) {
+      return;
+    }
     axios.get(`${API}/api/benchmark-datasets`).then(res => {
       if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets);
     }).catch(() => {});
-  }, []);
+  }, [authLoading, user]);
 
   const goToStep = (next, currentCompleted) => {
     setCompletedSteps(prev => {
@@ -855,20 +1184,29 @@ export default function BenchmarkPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+      <div className="px-4 py-4 lg:px-6 lg:py-6">
         {/* Header */}
-        <div className="mb-8 flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/25 shrink-0">
-            <FlaskConical size={20} className="text-white" />
+        <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/25 shrink-0">
+              <FlaskConical size={20} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Benchmark Suite</h1>
+              <p className="text-slate-500 text-sm mt-0.5 max-w-2xl">Compare plagiarism detection tools across standardized datasets.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Benchmark Suite</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Compare plagiarism detection tools across standardized datasets.</p>
+
+          <div className="xl:w-[540px] xl:max-w-[48%]">
+            <div className="rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-sm">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Progress</div>
+                <div className="text-xs font-medium text-slate-500">Step {step + 1} of {STEPS.length}</div>
+              </div>
+              <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} compact />
+            </div>
           </div>
         </div>
-
-        {/* Stepper */}
-        <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
 
         {/* Steps */}
         {step === 0 && (

@@ -2,20 +2,51 @@
 
 import { ReactNode, useEffect, useState } from 'react';
 import { motion, useScroll, useSpring, useTransform } from 'framer-motion';
+import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
+import { useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
 
 interface DashboardLayoutProps {
   children: ReactNode;
+  requiredRole?: 'admin' | 'professor';
 }
 
-export default function DashboardLayout({ children }: DashboardLayoutProps) {
+export default function DashboardLayout({ children, requiredRole }: DashboardLayoutProps) {
   const { scrollY } = useScroll();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { user, loading, bootstrapped } = useAuth();
   
   const headerOpacity = useTransform(scrollY, [0, 80], [0.7, 0.95]);
   const headerBlur = useTransform(scrollY, [0, 80], [8, 20]);
   const headerShadow = useTransform(scrollY, [0, 80], [0, 1]);
   const headerBorder = useTransform(scrollY, [0, 80], [0, 1]);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    if (!bootstrapped || !user) {
+      router.replace(`/login?next=${encodeURIComponent(pathname || '/')}`);
+      return;
+    }
+
+    if (requiredRole === 'admin' && user.role !== 'admin') {
+      router.replace('/');
+    }
+  }, [bootstrapped, loading, pathname, requiredRole, router, user]);
+
+  if (loading || !bootstrapped || !user || (requiredRole === 'admin' && user.role !== 'admin')) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="rounded-3xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-500 shadow-sm">
+          Loading workspace...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <SmoothScroll>

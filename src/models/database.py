@@ -21,11 +21,36 @@ class Tenant(Base):
     name = Column(String(255), nullable=False)
     api_key_hash = Column(String(255), unique=True, nullable=False)
     tier = Column(String(50), default="free")
+    settings = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     jobs = relationship("Job", back_populates="tenant", lazy="dynamic")
     api_keys = relationship("ApiKey", back_populates="tenant", lazy="dynamic")
+    users = relationship("User", back_populates="tenant", lazy="dynamic")
+
+
+class User(Base):
+    """Dashboard user account."""
+    __tablename__ = "users"
+    __table_args__ = (
+        Index("idx_users_email", "email"),
+        Index("idx_users_role", "role"),
+        Index("idx_users_tenant_role", "tenant_id", "role"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
+    email = Column(String(255), nullable=False, unique=True)
+    full_name = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(50), nullable=False, default="professor")
+    is_active = Column(Boolean, default=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tenant = relationship("Tenant", back_populates="users")
 
 
 class ApiKey(Base):

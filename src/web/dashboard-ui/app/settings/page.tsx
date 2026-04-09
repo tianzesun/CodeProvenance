@@ -1,6 +1,7 @@
 "use client";
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import {
   GlassCard,
   MagneticButton,
@@ -12,13 +13,20 @@ import axios from "axios";
 
 interface Settings {
   default_threshold: number;
-  openai_api_key: boolean;
+  openai_api_key: string;
+  openai_api_key_configured: boolean;
   openai_base_url: string;
   openai_model: string;
-  anthropic_api_key: boolean;
+  anthropic_api_key: string;
+  anthropic_api_key_configured: boolean;
   anthropic_model: string;
+  embedding_runtime: string;
   embedding_model: string;
   embedding_server_url: string | null;
+  embedding_server_host: string | null;
+  embedding_server_port: number;
+  embedding_device: string;
+  embedding_batch_size: number;
   engine_weights: { [key: string]: number };
   batch_size: number;
   max_file_size_mb: number;
@@ -26,6 +34,7 @@ interface Settings {
 }
 
 export default function SettingsPage() {
+  const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<
@@ -62,15 +71,30 @@ export default function SettingsPage() {
   ];
 
   useEffect(() => {
+    if (authLoading || !user || user.role !== "admin") {
+      return;
+    }
     axios
       .get("/api/settings")
       .then((res) => setSettings(res.data))
-      .catch((err) => console.error("Failed to load settings:", err));
-  }, []);
+      .catch(() => {});
+  }, [authLoading, user]);
 
   const handleSave = () => {
     if (!settings) return;
     axios.patch("/api/settings", settings).then(() => {
+      setSettings((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          openai_api_key: "",
+          anthropic_api_key: "",
+          openai_api_key_configured:
+            current.openai_api_key_configured || current.openai_api_key.trim().length > 0,
+          anthropic_api_key_configured:
+            current.anthropic_api_key_configured || current.anthropic_api_key.trim().length > 0,
+        };
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
@@ -91,7 +115,7 @@ export default function SettingsPage() {
 
   if (!settings) {
     return (
-      <DashboardLayout>
+      <DashboardLayout requiredRole="admin">
         <div className="p-6 flex items-center justify-center h-64">
           <p className="text-slate-500">Loading settings...</p>
         </div>
@@ -107,7 +131,7 @@ export default function SettingsPage() {
   ];
 
   return (
-    <DashboardLayout>
+    <DashboardLayout requiredRole="admin">
       <div className="p-4 lg:p-6">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
@@ -176,13 +200,20 @@ export default function SettingsPage() {
                     <label className="text-sm text-slate-600">API Key</label>
                     <input
                       type="password"
+                      value={settings.openai_api_key}
+                      onChange={(e) =>
+                        updateSetting("openai_api_key", e.target.value)
+                      }
                       placeholder={
-                        settings.openai_api_key
-                          ? "••••••••••"
+                        settings.openai_api_key_configured
+                          ? "Leave blank to keep current OpenAI key"
                           : "Enter OpenAI API key"
                       }
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Saved to <code>.env.local</code>. The current key is never returned to the browser.
+                    </p>
                   </div>
                   <div>
                     <label className="text-sm text-slate-600">Base URL</label>
@@ -218,13 +249,20 @@ export default function SettingsPage() {
                     <label className="text-sm text-slate-600">API Key</label>
                     <input
                       type="password"
+                      value={settings.anthropic_api_key}
+                      onChange={(e) =>
+                        updateSetting("anthropic_api_key", e.target.value)
+                      }
                       placeholder={
-                        settings.anthropic_api_key
-                          ? "••••••••••"
+                        settings.anthropic_api_key_configured
+                          ? "Leave blank to keep current Anthropic key"
                           : "Enter Anthropic API key"
                       }
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Saved to <code>.env.local</code>. The current key is never returned to the browser.
+                    </p>
                   </div>
                   <div>
                     <label className="text-sm text-slate-600">Model</label>
@@ -247,7 +285,25 @@ export default function SettingsPage() {
                 <div className="space-y-3 mt-3">
                   <div>
                     <label className="text-sm text-slate-600">
-                      Embedding Model
+                      Embedding Runtime
+                    </label>
+                    <select
+                      value={settings.embedding_runtime}
+                      onChange={(e) =>
+                        updateSetting("embedding_runtime", e.target.value)
+                      }
+                      className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                      <option value="local_unixcoder">Local UniXcoder (GPU/CPU)</option>
+                      <option value="remote_openai_compatible">Remote OpenAI-Compatible Server</option>
+                    </select>
+                    <p className="text-xs text-slate-400 mt-2">
+                      Use local UniXcoder for on-box GPU/CPU inference, or point to an OpenAI-compatible embedding server such as vLLM serving Qwen embedding models.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-600">
+                      Embedding Model Name
                     </label>
                     <input
                       type="text"
@@ -258,9 +314,46 @@ export default function SettingsPage() {
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm text-slate-600">
+                        Embedding Server IP / Host
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.embedding_server_host || ""}
+                        placeholder="192.168.1.50 or gpu-server.local"
+                        onChange={(e) =>
+                          updateSetting(
+                            "embedding_server_host",
+                            e.target.value || null,
+                          )
+                        }
+                        className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-slate-600">
+                        Embedding Server Port
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={settings.embedding_server_port}
+                        onChange={(e) =>
+                          updateSetting(
+                            "embedding_server_port",
+                            parseInt(e.target.value || "8000", 10),
+                          )
+                        }
+                        className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+                  </div>
                   <div>
                     <label className="text-sm text-slate-600">
-                      Custom Embedding Server URL (optional)
+                      Full Embedding Server URL Override
                     </label>
                     <input
                       type="text"
@@ -274,6 +367,42 @@ export default function SettingsPage() {
                       }
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Optional. If left blank, IntegrityDesk will build the endpoint from the server IP/host and port above. Use this override for custom paths like `/v1`.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm text-slate-600">
+                        Local Device
+                      </label>
+                      <select
+                        value={settings.embedding_device}
+                        onChange={(e) =>
+                          updateSetting("embedding_device", e.target.value)
+                        }
+                        className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                      >
+                        <option value="auto">Auto Detect</option>
+                        <option value="cuda">CUDA / GPU</option>
+                        <option value="cpu">CPU</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-sm text-slate-600">
+                        Embedding Batch Size
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="256"
+                        value={settings.embedding_batch_size}
+                        onChange={(e) =>
+                          updateSetting("embedding_batch_size", parseInt(e.target.value))
+                        }
+                        className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -298,7 +427,7 @@ export default function SettingsPage() {
                       }
                       className={`p-4 border rounded-xl text-left transition-all hover:border-blue-400 hover:bg-blue-50 ${
                         Object.entries(settings.engine_weights).every(
-                          ([k, v]) => Math.abs(preset.weights[k] - v) < 0.01,
+                          ([k, v]) => Math.abs((preset.weights as Record<string, number>)[k] - v) < 0.01,
                         )
                           ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
                           : "border-slate-200"

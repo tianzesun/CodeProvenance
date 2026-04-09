@@ -18,7 +18,7 @@ else
 fi
 
 # Check dashboard
-DASHBOARD_PID=$(pgrep -f "next dev" | grep -v "official-site" 2>/dev/null || echo "")
+DASHBOARD_PID=$(pgrep -f "next dev" 2>/dev/null || echo "")
 if [ -n "$DASHBOARD_PID" ]; then
     DASHBOARD_PORT=$(ss -tulpn | grep "$DASHBOARD_PID" | grep LISTEN | awk '{print $5}' | cut -d: -f2 | head -1)
     echo "✅ Dashboard:       RUNNING (PID: $DASHBOARD_PID)"
@@ -31,21 +31,7 @@ else
     echo "❌ Dashboard:       STOPPED"
 fi
 
-# Check official website
-WEBSITE_PID=$(pgrep -f "next dev" | grep "official-site" 2>/dev/null || echo "")
-if [ -n "$WEBSITE_PID" ]; then
-    WEBSITE_PORT=$(ss -tulpn | grep "$WEBSITE_PID" | grep LISTEN | awk '{print $5}' | cut -d: -f2 | head -1)
-    echo "✅ Official Site:   RUNNING (PID: $WEBSITE_PID)"
-    if [ -n "$WEBSITE_PORT" ]; then
-        echo "                   Listening on http://localhost:$WEBSITE_PORT"
-    else
-        echo "                   Listening on http://localhost:3004"
-    fi
-else
-    echo "❌ Official Site:   STOPPED"
-fi
-
 echo ""
 echo "Open ports:"
-ss -tulpn 2>/dev/null | grep -E "(8500|3000|3003|3004)" | awk '{print "  "$5}' | sort
+ss -tulpn 2>/dev/null | grep -E "(8500|3000|3003)" | awk '{print "  "$5}' | sort
 echo ""

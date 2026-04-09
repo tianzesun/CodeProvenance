@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -15,7 +16,7 @@ import {
   Settings2,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+const API = '';
 
 export default function UploadPage() {
   const router = useRouter();

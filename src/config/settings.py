@@ -25,10 +25,19 @@ class AppSettings(BaseSettings):
     
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
+
+    # Auth
+    AUTH_JWT_SECRET: Optional[str] = None
+    AUTH_TOKEN_EXPIRE_MINUTES: int = 480
     
     # Embeddings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_RUNTIME: str = "local_unixcoder"
+    EMBEDDING_MODEL: str = "microsoft/unixcoder-base"
     EMBEDDING_SERVER_URL: Optional[str] = None
+    EMBEDDING_SERVER_HOST: Optional[str] = None
+    EMBEDDING_SERVER_PORT: int = 8000
+    EMBEDDING_DEVICE: str = "auto"
+    EMBEDDING_BATCH_SIZE: int = 32
     
     # AI Detection
     GPTZERO_API_KEY: Optional[str] = None

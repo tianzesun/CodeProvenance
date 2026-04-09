@@ -11,6 +11,7 @@ import os
 import hashlib
 import pickle
 from pathlib import Path
+from src.domain.models import Finding, EvidenceBlock
 
 
 class EmbeddingSimilarity(BaseSimilarityAlgorithm):
@@ -21,7 +22,12 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
     including LLM-obfuscated code.
     """
     
-    def __init__(self, model_name: str = "text-embedding-3-small"):
+    def __init__(
+        self,
+        model_name: str = "text-embedding-3-small",
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         """
         Initialize the embedding similarity algorithm.
         
@@ -30,6 +36,8 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         """
         super().__init__("embedding")
         self.model_name = model_name
+        self.base_url = base_url
+        self.api_key = api_key
         self.cache_dir = Path("./.embedding_cache")
         self.cache_dir.mkdir(exist_ok=True)
         self._client = None
@@ -44,10 +52,18 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         if self._client is None:
             try:
                 from openai import OpenAI
-                api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    raise ValueError("OPENAI_API_KEY environment variable not set")
-                self._client = OpenAI(api_key=api_key)
+                api_key = self.api_key or os.getenv("OPENAI_API_KEY")
+                base_url = self.base_url or os.getenv("OPENAI_BASE_URL")
+
+                if not api_key and not base_url:
+                    raise ValueError("OPENAI_API_KEY or an embedding server URL must be configured")
+
+                # OpenAI-compatible local servers often accept a dummy token.
+                resolved_api_key = api_key or "EMPTY"
+                if base_url:
+                    self._client = OpenAI(api_key=resolved_api_key, base_url=base_url)
+                else:
+                    self._client = OpenAI(api_key=resolved_api_key)
             except ImportError:
                 raise ImportError("OpenAI package not installed. Install with: pip install openai")
         return self._client

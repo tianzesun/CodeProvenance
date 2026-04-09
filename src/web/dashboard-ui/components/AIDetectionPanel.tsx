@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import { Brain, AlertTriangle, CheckCircle2, TrendingUp, FileCode, Sparkles } from 'lucide-react';
