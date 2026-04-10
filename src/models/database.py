@@ -47,6 +47,8 @@ class User(Base):
     role = Column(String(50), nullable=False, default="professor")
     is_active = Column(Boolean, default=True)
     last_login_at = Column(DateTime, nullable=True)
+    reset_token = Column(String(255), nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -13,6 +13,7 @@ BACKEND_PID=$(pgrep -f "uvicorn src.api.server:app" 2>/dev/null || echo "")
 if [ -n "$BACKEND_PID" ]; then
     echo "✅ Backend API:     RUNNING (PID: $BACKEND_PID)"
     echo "                   Listening on http://localhost:8500"
+    echo "                   API docs: http://localhost:8500/docs"
 else
     echo "❌ Backend API:     STOPPED"
 fi

@@ -28,7 +28,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import func, select
 
-from src.config.settings import settings
+from src.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.application.services.batch_detection_service import BatchDetectionService
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 from src.config.database import SessionLocal
@@ -121,12 +121,12 @@ TOOL_DISPLAY_ORDER = [
 BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     "integritydesk": {
         "name": "IntegrityDesk",
-        "desc": "Multi-engine fusion across AST, token, winnowing, embedding, and execution signals.",
+        "desc": "Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web signals, with optional AI Detection and Execution/CFG layers.",
         "color": "#0066cc",
         "gradient": "from-blue-500 to-blue-600",
         "bgLight": "bg-blue-50",
         "ring": "ring-blue-500",
-        "engines": ["AST", "N-gram", "Winnowing", "Embedding", "Token", "Execution"],
+        "engines": ["Token", "AST", "Winnowing", "GST", "Semantic", "Web", "AI Detection", "Execution/CFG"],
         "source_type": "built-in",
     },
     "moss": {
@@ -256,6 +256,42 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
         "engines": ["Evaluation"],
     },
 }
+
+ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
+    "fingerprint": "token",
+    "embedding": "semantic",
+    "unixcoder": "semantic",
+    "ngram": "gst",
+    "structural": "gst",
+    "graph": "execution_cfg",
+    "execution": "execution_cfg",
+}
+
+
+def _normalize_engine_weights(raw: Any) -> Dict[str, float]:
+    normalized = {key: 0.0 for key in DEFAULT_ENGINE_WEIGHTS}
+    seen = set()
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_ENGINE_WEIGHTS)
+
+    for key, value in raw.items():
+        target = ENGINE_WEIGHT_LEGACY_MAP.get(str(key), str(key))
+        if target not in normalized:
+            continue
+        try:
+            normalized[target] += float(value)
+            seen.add(target)
+        except (TypeError, ValueError):
+            continue
+
+    if not seen:
+        return dict(DEFAULT_ENGINE_WEIGHTS)
+
+    for key, value in DEFAULT_ENGINE_WEIGHTS.items():
+        if key not in seen:
+            normalized[key] = value
+
+    return normalized
 
 _jobs: Dict[str, Dict[str, Any]] = {}
 JOB_METADATA_FILENAME = "job.json"
@@ -2004,6 +2040,7 @@ def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
 def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
     payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
+    payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
 
     openai_key = str(payload.get("openai_api_key") or "")
     anthropic_key = str(payload.get("anthropic_api_key") or "")
@@ -2017,6 +2054,7 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
 
 def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
+    merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
         if key in merged:
             setattr(settings, attr, merged[key])
@@ -2707,7 +2745,7 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
 
 <div class="methodology">
 <div class="section-title">Methodology</div>
-<p>IntegrityDesk employs a multi-engine detection approach using six independent forensic engines: <strong>AST</strong> (Abstract Syntax Tree structural comparison), <strong>Winnowing</strong> (K-gram fingerprinting for copy-paste detection), <strong>N-gram</strong> (character/token sequence matching), <strong>Embedding</strong> (semantic similarity via code embeddings), <strong>Execution</strong> (runtime output comparison), and <strong>Token</strong> (token frequency and TF-IDF analysis).</p>
+<p>IntegrityDesk employs a multi-engine detection approach using six core forensic engines: <strong>Token</strong>, <strong>AST</strong>, <strong>Winnowing</strong>, <strong>GST</strong>, <strong>Semantic</strong>, and <strong>Web</strong>, with optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers for deeper review.</p>
 <p style="margin-top:8px;">Results are fused using weighted Bayesian arbitration to produce final similarity scores. This ensemble approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
 </div>
 
@@ -2723,6 +2761,16 @@ def _generate_committee_report(job_id, course_name, assignment_name, threshold, 
 </div>
 </body></html>"""
     output_path.write_text(html, encoding='utf-8')
+
+
+@app.get("/")
+async def root():
+    """Root endpoint returning API information."""
+    return {
+        "message": "Welcome to IntegrityDesk API",
+        "version": "1.0.0",
+        "docs": "/docs",
+    }
 
 
 @app.get("/api/settings")
@@ -2752,6 +2800,8 @@ async def update_settings(request: Request):
                 continue
             if key in SECRET_SETTING_KEYS and value == "":
                 continue
+            if key == "engine_weights":
+                value = _normalize_engine_weights(value)
             stored_settings[key] = value
             applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
 

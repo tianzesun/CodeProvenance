@@ -380,7 +380,7 @@ export default function Home() {
     'recent-checks': {
       id: 'recent-checks',
       label: 'Recent checks',
-      className: 'xl:col-span-8',
+      className: 'xl:col-span-8 lg:col-span-12',
       content: (
         <div className="theme-card rounded-[30px] overflow-hidden">
           <div className="theme-section-line px-6 py-5">
@@ -401,12 +401,21 @@ export default function Home() {
             </div>
           </div>
 
-          {loading ? (
-            <div className="space-y-3 px-6 pb-6">
-              {[1, 2, 3, 4].map((item) => (
-                <div key={item} className="h-20 rounded-[22px] skeleton" />
-              ))}
-            </div>
+           {loading ? (
+             <div className="space-y-4 px-6 pb-6">
+               {[1, 2, 3, 4].map((item) => (
+                 <div key={item} className="rounded-[22px] border border-[color:var(--border)] bg-[var(--surface-muted)] p-4">
+                   <div className="flex items-center gap-4">
+                     <div className="h-12 w-12 rounded-2xl skeleton" />
+                     <div className="flex-1 space-y-2">
+                       <div className="h-4 rounded skeleton w-3/4" />
+                       <div className="h-3 rounded skeleton w-1/2" />
+                     </div>
+                     <div className="h-6 w-16 rounded-full skeleton" />
+                   </div>
+                 </div>
+               ))}
+             </div>
           ) : recentJobs.length === 0 ? (
             <div className="px-6 pb-6">
               <div className="theme-card-muted rounded-[24px] px-6 py-12 text-center">
@@ -477,7 +486,7 @@ export default function Home() {
     'report-center': {
       id: 'report-center',
       label: 'Report center',
-      className: 'xl:col-span-4',
+      className: 'xl:col-span-4 lg:col-span-6',
       content: (
         <div className="theme-card rounded-[28px] overflow-hidden">
           <div className="theme-section-line px-5 py-5">
@@ -538,7 +547,7 @@ export default function Home() {
     'upload-files': {
       id: 'upload-files',
       label: 'Upload individual files',
-      className: 'xl:col-span-4',
+      className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/upload?mode=individual"
@@ -551,7 +560,7 @@ export default function Home() {
     'upload-zip': {
       id: 'upload-zip',
       label: 'Upload one ZIP archive',
-      className: 'xl:col-span-4',
+      className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/upload?mode=zip"
@@ -564,7 +573,7 @@ export default function Home() {
     settings: {
       id: 'settings',
       label: 'Review default threshold',
-      className: 'xl:col-span-4',
+      className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/settings"
@@ -577,7 +586,7 @@ export default function Home() {
     'benchmark-suite': {
       id: 'benchmark-suite',
       label: 'Benchmark suite',
-      className: 'xl:col-span-4',
+      className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/benchmark"
@@ -592,7 +601,7 @@ export default function Home() {
           'admin-console': {
             id: 'admin-console',
             label: 'Admin console',
-            className: 'xl:col-span-4',
+            className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
             content: (
               <ActionCard
                 href="/admin"
@@ -607,32 +616,32 @@ export default function Home() {
   };
   return (
     <DashboardLayout>
-      <div className="px-4 py-4 lg:px-6 lg:py-6">
-        <div className="space-y-6">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="space-y-8 lg:space-y-10">
           <section className="theme-card-strong theme-section-line relative overflow-hidden rounded-[32px] px-6 py-6 lg:px-8 lg:py-8">
             <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-blue-600/[0.08] blur-3xl" />
 
-            <div className="relative grid gap-6 xl:grid-cols-[1.1fr_1fr]">
-              <div className="space-y-6">
-                <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">
+            <div className="relative grid gap-8 xl:grid-cols-[1.2fr_1fr]">
+              <div className="space-y-8">
+                <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">
                   <Shield size={13} />
                   Integrity workspace
                 </div>
 
-                <div className="space-y-4">
-                  <h1 className="font-display max-w-3xl text-4xl font-semibold leading-tight text-[var(--text-primary)] sm:text-5xl">
+                <div className="space-y-6">
+                  <h1 className="font-display max-w-4xl text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
                     Review suspicious similarity, benchmark tools, and move through cases without dashboard clutter.
                   </h1>
-                  <p className="max-w-2xl text-sm leading-7 text-[var(--text-secondary)] sm:text-base">
+                  <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)] sm:text-base lg:text-lg">
                     Use one workspace for assignment review, benchmark comparisons, and follow-up decisions without
                     bouncing between separate tools.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-3 lg:gap-4">
                   <Link
                     href="/upload?mode=individual"
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition"
+                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
                   >
                     <Upload size={16} />
                     Upload Files
@@ -640,7 +649,7 @@ export default function Home() {
 
                   <Link
                     href="/upload?mode=zip"
-                    className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition"
+                    className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
                   >
                     <FolderArchive size={16} />
                     Upload ZIP
@@ -649,7 +658,7 @@ export default function Home() {
                   {latestCompleted && (
                     <Link
                       href={`/results/${latestCompleted.id}`}
-                      className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition"
+                      className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
                     >
                       <FileSearch size={16} />
                       Open Latest Result
@@ -657,11 +666,11 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-3 py-1.5 text-[var(--text-secondary)]">
+                <div className="flex flex-wrap gap-3 lg:gap-4">
+                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
                     {runningCount > 0 ? `${runningCount} check${runningCount === 1 ? '' : 's'} in progress` : 'No checks running'}
                   </span>
-                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-3 py-1.5 text-[var(--text-secondary)]">
+                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
                     {latestCompleted ? `Latest result ready ${formatTimestamp(latestCompleted.created_at)}` : 'No completed result yet'}
                   </span>
                 </div>
@@ -897,7 +906,7 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-6 xl:grid-cols-12">
+              <div className="grid gap-6 lg:gap-8 xl:grid-cols-12">
                 {visibleCardIds.map((cardId) => {
                   const card = dashboardCards[cardId];
                   const cardIndex = visibleCardIds.indexOf(cardId);
@@ -1125,32 +1134,32 @@ const FindingPreviewRow = ({ result }) => {
 const ReportLink = ({ href, icon: Icon, title, description }) => (
   <a
     href={href}
-    className="theme-card-muted group flex items-start gap-3 rounded-[22px] px-4 py-4 transition hover:-translate-y-0.5"
+    className="theme-card-muted group flex items-start gap-4 rounded-[22px] px-5 py-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
   >
-    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--accent-blue)]">
-      <Icon size={17} />
+    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--accent-blue)] transition group-hover:bg-blue-50 group-hover:scale-110">
+      <Icon size={18} />
     </div>
     <div className="min-w-0 flex-1">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">{title}</div>
+      <div className="text-sm font-semibold text-[var(--text-primary)] group-hover:text-blue-600">{title}</div>
       <div className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{description}</div>
     </div>
-    <ArrowRight size={16} className="mt-1 text-[var(--text-muted)] transition group-hover:translate-x-0.5" />
+    <ArrowRight size={17} className="mt-1 text-[var(--text-muted)] transition-all group-hover:translate-x-1 group-hover:text-blue-600" />
   </a>
 );
 
 const ActionCard = ({ href, icon: Icon, title, description }) => (
   <Link
     href={href}
-    className="theme-card group block rounded-[28px] px-5 py-5 transition hover:-translate-y-0.5"
+    className="theme-card group block rounded-[28px] px-6 py-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
   >
     <div className="flex items-start justify-between gap-4">
-      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-600">
-        <Icon size={18} />
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-600 transition group-hover:bg-blue-600/20 group-hover:scale-110">
+        <Icon size={20} />
       </div>
-      <ArrowRight size={17} className="text-[var(--text-muted)] transition group-hover:translate-x-0.5" />
+      <ArrowRight size={18} className="text-[var(--text-muted)] transition-all group-hover:translate-x-1 group-hover:text-blue-600" />
     </div>
-    <div className="mt-5 text-lg font-semibold text-[var(--text-primary)]">{title}</div>
-    <div className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{description}</div>
+    <div className="mt-6 text-lg font-semibold text-[var(--text-primary)] group-hover:text-blue-600">{title}</div>
+    <div className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{description}</div>
   </Link>
 );
 

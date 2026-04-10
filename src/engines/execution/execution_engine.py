@@ -216,6 +216,10 @@ class BaseToolRunner(ABC):
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
 
+    def is_available(self) -> bool:
+        """Return whether the underlying tool is actually usable."""
+        return True
+
     def _run_subprocess(
         self,
         cmd: List[str],
@@ -270,6 +274,14 @@ class MossRunner(BaseToolRunner):
     @property
     def tool_name(self) -> str:
         return "moss"
+
+    def is_available(self) -> bool:
+        return bool(
+            self.moss_user_id
+            and shutil.which("perl")
+            and self.moss_script
+            and Path(self.moss_script).exists()
+        )
 
     def run(
         self,
@@ -388,6 +400,13 @@ class JPlagRunner(BaseToolRunner):
     @property
     def tool_name(self) -> str:
         return "jplag"
+
+    def is_available(self) -> bool:
+        if self.use_docker:
+            return bool(self.sandbox and self.sandbox._docker_available)
+        if self.jplag_jar and self.jplag_jar.exists():
+            return True
+        return shutil.which("jplag") is not None
 
     def run(
         self,
@@ -536,6 +555,9 @@ class DolosRunner(BaseToolRunner):
     def tool_name(self) -> str:
         return "dolos"
 
+    def is_available(self) -> bool:
+        return shutil.which("dolos") is not None
+
     def run(
         self,
         code_dir: Path,
@@ -612,6 +634,11 @@ class NiCadRunner(BaseToolRunner):
     @property
     def tool_name(self) -> str:
         return "nicad"
+
+    def is_available(self) -> bool:
+        if self.nicad_path and Path(self.nicad_path).exists():
+            return True
+        return shutil.which("nicad5") is not None or shutil.which("nicad") is not None
 
     def run(
         self,
@@ -747,7 +774,8 @@ class ExecutionEngine:
         for tool_name in self.TOOL_REGISTRY:
             try:
                 runner = self.get_runner(tool_name)
-                available.append(tool_name)
+                if runner.is_available():
+                    available.append(tool_name)
             except Exception:
                 pass
         return available

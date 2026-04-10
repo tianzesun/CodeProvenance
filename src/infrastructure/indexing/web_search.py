@@ -1,6 +1,7 @@
 import requests
 import json
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from src.infrastructure.indexing.global_search import GlobalSearchService
 
@@ -18,6 +19,31 @@ class WebSearchService:
         self.stackoverflow_api_key = stackoverflow_api_key
         # Header for GitHub API
         self.github_headers = {"Authorization": f"token {github_token}"} if github_token else {}
+
+    def _tokenize_text(self, text: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]+", (text or "").lower())
+            if len(token) > 2
+        }
+
+    def _score_match(self, query_code: str, candidate_text: str, base_score: float = 0.0) -> float:
+        """Compute a simple lexical similarity score instead of placeholder constants."""
+        query_tokens = self._tokenize_text(query_code)
+        candidate_tokens = self._tokenize_text(candidate_text)
+
+        if not query_tokens or not candidate_tokens:
+            return round(max(0.0, min(1.0, base_score)), 4)
+
+        overlap = len(query_tokens & candidate_tokens)
+        union = len(query_tokens | candidate_tokens)
+        jaccard = overlap / union if union else 0.0
+
+        # Give a small boost for exact phrase presence without letting score explode.
+        phrase = " ".join(query_code.split()[:5]).strip().lower()
+        phrase_boost = 0.1 if phrase and phrase in (candidate_text or "").lower() else 0.0
+
+        return round(min(1.0, max(base_score, (jaccard * 0.85) + phrase_boost)), 4)
 
     def search_github(self, query_code: str, language: str = "python") -> List[Dict[str, Any]]:
         """Search GitHub for code snippets using the Code Search API."""
@@ -39,13 +65,23 @@ class WebSearchService:
             results = response.json().get("items", [])
             
             # Map GitHub response to internal result format
-            return [{
-                "id": f"gh_{r['sha']}",
-                "name": r["repository"]["full_name"],
-                "url": r["html_url"],
-                "source": "github",
-                "similarity": 0.8 # Placeholder similarity
-            } for r in results]
+            mapped_results = []
+            for r in results:
+                candidate_text = " ".join(
+                    [
+                        r.get("name", ""),
+                        r.get("path", ""),
+                        r.get("repository", {}).get("full_name", ""),
+                    ]
+                )
+                mapped_results.append({
+                    "id": f"gh_{r['sha']}",
+                    "name": r["repository"]["full_name"],
+                    "url": r["html_url"],
+                    "source": "github",
+                    "similarity": self._score_match(query_code, candidate_text),
+                })
+            return mapped_results
         except Exception as e:
             logger.error(f"GitHub search failed: {e}")
             return []
@@ -65,13 +101,22 @@ class WebSearchService:
             response.raise_for_status()
             results = response.json().get("items", [])
             
-            return [{
-                "id": f"so_{r['question_id']}",
-                "name": r["title"],
-                "url": f"https://stackoverflow.com/questions/{r['question_id']}",
-                "source": "stackoverflow",
-                "similarity": 0.7 # Placeholder similarity
-            } for r in results]
+            mapped_results = []
+            for r in results:
+                candidate_text = " ".join(
+                    [
+                        r.get("title", ""),
+                        str(r.get("excerpt", "")),
+                    ]
+                )
+                mapped_results.append({
+                    "id": f"so_{r['question_id']}",
+                    "name": r["title"],
+                    "url": f"https://stackoverflow.com/questions/{r['question_id']}",
+                    "source": "stackoverflow",
+                    "similarity": self._score_match(query_code, candidate_text),
+                })
+            return mapped_results
         except Exception as e:
             logger.error(f"Stack Overflow search failed: {e}")
             return []

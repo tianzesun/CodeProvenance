@@ -93,8 +93,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await axios.post('/api/auth/logout');
+    try {
+      await axios.post('/api/auth/logout');
+    } catch (error) {
+      // Continue with logout even if API call fails
+      console.warn('Logout API call failed:', error);
+    }
+
+    // Clear user state
     setUser(null);
+
+    // Clear any stored authentication data
+    if (typeof window !== 'undefined') {
+      // Clear any auth-related localStorage items
+      localStorage.removeItem('integritydesk-auth-token');
+      // Clear any session storage
+      sessionStorage.clear();
+    }
   };
 
   const listUsers = async () => {

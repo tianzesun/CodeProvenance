@@ -24,6 +24,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
 
@@ -75,33 +76,45 @@ export default function Sidebar() {
   ];
 
   const handleLogout = async () => {
-    await logout();
-    router.replace('/login');
+    if (loggingOut) return; // Prevent multiple logout attempts
+
+    setLoggingOut(true);
+    try {
+      await logout();
+      router.replace('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Still redirect to login even if logout fails
+      router.replace('/login');
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
     <>
       <button
-        className="theme-card-strong fixed left-4 top-4 z-50 rounded-2xl p-2.5 text-[var(--text-primary)] lg:hidden"
+        className="theme-card-strong fixed left-4 top-6 z-50 rounded-2xl p-3 text-[var(--text-primary)] shadow-lg backdrop-blur-xl transition-all hover:scale-105 lg:hidden"
         onClick={() => setMobileOpen((open) => !open)}
+        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
       >
-        {mobileOpen ? <X size={18} /> : <Menu size={18} />}
+        {mobileOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl transition-transform duration-300 lg:translate-x-0 ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl shadow-2xl transition-all duration-300 ease-out lg:translate-x-0 ${
+            mobileOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
-        <div className="theme-section-line border-b border-[color:var(--border)] px-6 py-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-sm">
-                <Shield size={18} />
+        <div className="theme-section-line border-b border-[color:var(--border)] px-6 py-8">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg">
+                <Shield size={20} />
               </div>
               <div>
-                <div className="font-display text-base font-semibold text-[var(--text-primary)]">IntegrityDesk</div>
-                <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Assignment Review</div>
+                <div className="font-display text-lg font-semibold text-[var(--text-primary)]">IntegrityDesk</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Assignment Review</div>
               </div>
             </div>
 
@@ -117,7 +130,7 @@ export default function Sidebar() {
 
         </div>
 
-        <nav className="scrollbar-thin flex-1 space-y-8 overflow-y-auto px-4 py-6">
+        <nav className="scrollbar-thin flex-1 space-y-10 overflow-y-auto px-4 py-8">
           {navSections.map((section) => (
             <div key={section.label}>
               <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
@@ -160,25 +173,26 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="border-t border-[color:var(--border)] p-4">
-          <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-3 py-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-[11px] font-semibold text-white">
-                P
+        <div className="border-t border-[color:var(--border)] p-6">
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-4 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-semibold text-white shadow-md">
+                {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-[var(--text-primary)]">{user?.full_name || 'Workspace'}</div>
-                <div className="text-[11px] text-[var(--text-muted)]">
+                <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{user?.full_name || 'Workspace'}</div>
+                <div className="text-xs text-[var(--text-muted)]">
                   {user?.role === 'admin' ? 'Administrator' : 'Professor'}{user?.tenant_name ? ` · ${user.tenant_name}` : ''}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
-                title="Log out"
+                disabled={loggingOut}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--surface)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                title={loggingOut ? "Logging out..." : "Log out"}
               >
-                <LogOut size={14} />
+                <LogOut size={14} className={loggingOut ? "animate-spin" : ""} />
               </button>
             </div>
           </div>
@@ -187,7 +201,7 @@ export default function Sidebar() {
 
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-30 bg-slate-950/35 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-md lg:hidden animate-in fade-in duration-300"
           onClick={() => setMobileOpen(false)}
         />
       )}

@@ -15,6 +15,7 @@ from src.models.database import (
     Tenant, ApiKey, Job, Submission, SimilarityResult,
     WebhookEvent, UsageMetric, AuditLog
 )
+from src.config.settings import DEFAULT_DETECTION_MODES
 from src.config.database import get_db, set_tenant_context, clear_tenant_context, SessionLocal
 
 
@@ -120,7 +121,7 @@ class JobService:
             threshold=threshold,
             webhook_url=webhook_url,
             idempotency_key=idempotency_key,
-            detection_modes=detection_modes or ['token', 'ast', 'ngram'],
+            detection_modes=detection_modes or list(DEFAULT_DETECTION_MODES),
             language_filters=language_filters,
             exclude_patterns=exclude_patterns or ['__pycache__', '*.class', 'node_modules'],
             template_files=template_files or [],

@@ -15,7 +15,7 @@ from .base_similarity import BaseSimilarityAlgorithm
 from collections import defaultdict
 import hashlib
 import math
-import xxhash
+from src.utils.hash_utils import fast_hash64
 
 
 class Finding:
@@ -288,9 +288,8 @@ class JPlagSubtreeHasher:
         sorted_child_hashes = sorted(child_hashes)
         hash_input = f"{node.node_type}|{sorted_child_hashes}".encode()
         try:
-            node_hash = xxhash.xxh3_64_intdigest(hash_input)
-        except NameError:
-            # Fallback to built-in hash if xxhash not available
+            node_hash = fast_hash64(hash_input)
+        except Exception:
             node_hash = hash(hash_input) & ((1 << 64) - 1)
 
         self.hash_cache[node] = node_hash
@@ -353,7 +352,7 @@ def collect_hash_sequence(root: ASTNode, min_size: int = 3) -> List[int]:
         
         # Compute node hash with type and ordered child hashes (order sensitive)
         hash_input = f"{node.node_type}|{child_hashes}".encode()
-        node_hash = xxhash.xxh3_64_intdigest(hash_input)
+        node_hash = fast_hash64(hash_input)
         
         size_cache[node] = (node_hash, size)
         

@@ -19,7 +19,7 @@ import {
 const API = '';
 
 const TOOLS = [
-  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across AST, token, n-gram, winnowing, embedding, and execution evidence', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['AST', 'N-gram', 'Winnowing', 'Embedding', 'Token', 'Execution'] },
+  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web evidence, with optional AI Detection and Execution/CFG layers', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['Token', 'AST', 'Winnowing', 'GST', 'Semantic', 'Web', 'AI Detection', 'Execution/CFG'] },
   { id: 'moss', name: 'MOSS', desc: 'Tokenized code comparison with document fingerprinting via the winnowing algorithm', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token', 'Winnowing'] },
   { id: 'jplag', name: 'JPlag', desc: 'Syntax-aware token comparison over normalized language-specific token streams', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['Token', 'Syntax-Aware'] },
   { id: 'dolos', name: 'Dolos', desc: 'Language-aware token streams plus fingerprinting and MOSS-style winnowing', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Token', 'Winnowing', 'Syntax-Aware'] },

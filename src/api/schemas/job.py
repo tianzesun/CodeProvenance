@@ -7,13 +7,15 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
+from src.config.settings import DEFAULT_DETECTION_MODES
+
 
 class JobBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     threshold: float = Field(0.7, ge=0.0, le=1.0)
     webhook_url: Optional[str] = None
     idempotency_key: Optional[str] = Field(None, max_length=255)
-    detection_modes: List[str] = Field(["token", "ast", "ngram"])
+    detection_modes: List[str] = Field(default_factory=lambda: list(DEFAULT_DETECTION_MODES))
     language_filters: Optional[List[str]] = None
     exclude_patterns: List[str] = Field(["__pycache__", "*.class", "node_modules"])
     template_files: List[Dict[str, Any]] = Field(default_factory=list)

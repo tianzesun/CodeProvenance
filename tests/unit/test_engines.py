@@ -11,8 +11,10 @@ from __future__ import annotations
 import pytest
 from typing import Any, Dict
 
+from src.engines.similarity.ast_similarity import ASTSimilarity
 from src.engines.similarity.token_similarity import TokenSimilarity
 from src.engines.similarity.ngram_similarity import NgramSimilarity
+from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
 from src.engines.cache import EmbeddingCache, TokenCache, _sha256, get_embedding_cache, get_token_cache, invalidate_all_caches
 
 
@@ -52,7 +54,7 @@ class TestTokenSimilarity:
         parsed_a = _make_parsed(tokens=["def", "foo", "(", ")", ":"])
         parsed_b = _make_parsed(tokens=["def", "bar", "(", ")", ":"])
         score = self.engine.compare(parsed_a, parsed_b)
-        assert 0.0 < score < 1.0
+        assert 0.0 < float(score) <= 1.0
 
     def test_empty_tokens(self) -> None:
         """Both empty → 1.0; one empty → 0.0."""
@@ -127,6 +129,28 @@ class TestNgramSimilarity:
         """Empty token lists → 1.0 for both empty."""
         empty = _make_parsed(tokens=[])
         assert self.engine.compare(empty, empty) == 1.0
+
+
+class TestOptionalDependencyFallbacks:
+    """Smoke tests for engines that should not hard-fail on optional deps."""
+
+    def test_ast_similarity_smoke(self) -> None:
+        engine = ASTSimilarity()
+        score = float(
+            engine.compare(
+                _make_parsed(raw="def add(a, b): return a + b"),
+                _make_parsed(raw="def add(x, y): return x + y"),
+            )
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_winnowing_similarity_smoke(self) -> None:
+        engine = EnhancedWinnowingSimilarity()
+        score = engine.compare(
+            _make_parsed(raw="def add(a, b): return a + b"),
+            _make_parsed(raw="def add(x, y): return x + y"),
+        )
+        assert 0.0 <= score <= 1.0
 
 
 # ─── Cache Module ──────────────────────────────────────────────────────

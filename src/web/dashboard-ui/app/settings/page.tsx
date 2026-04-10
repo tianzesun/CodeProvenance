@@ -11,6 +11,125 @@ import {
 import { useState, useEffect } from "react";
 import axios from "axios";
 
+const ENGINE_CATALOG = [
+  {
+    key: "token",
+    label: "Token",
+    tier: "core",
+    description: "Token-level overlap and lexical similarity.",
+  },
+  {
+    key: "ast",
+    label: "AST",
+    tier: "core",
+    description: "Structural similarity across parsed syntax trees.",
+  },
+  {
+    key: "winnowing",
+    label: "Winnowing",
+    tier: "core",
+    description: "K-gram fingerprinting for copy-paste style matches.",
+  },
+  {
+    key: "gst",
+    label: "GST",
+    tier: "core",
+    description: "Greedy String Tiling for long contiguous match blocks.",
+  },
+  {
+    key: "semantic",
+    label: "Semantic",
+    tier: "core",
+    description: "Meaning-level similarity via embedding or model-backed analysis.",
+  },
+  {
+    key: "web",
+    label: "Web",
+    tier: "core",
+    description: "External-source similarity checks against web-accessible code.",
+  },
+  {
+    key: "ai_detection",
+    label: "AI Detection",
+    tier: "optional",
+    description: "Authorship-style and AI-generated code detection signals.",
+  },
+  {
+    key: "execution_cfg",
+    label: "Execution/CFG",
+    tier: "optional",
+    description: "Behavioral/runtime checks and control-flow graph evidence.",
+  },
+];
+
+const DEFAULT_ENGINE_WEIGHTS = {
+  token: 0.18,
+  ast: 0.22,
+  winnowing: 0.16,
+  gst: 0.16,
+  semantic: 0.18,
+  web: 0.10,
+  ai_detection: 0,
+  execution_cfg: 0,
+};
+
+const LEGACY_ENGINE_KEY_MAP = {
+  fingerprint: "token",
+  embedding: "semantic",
+  unixcoder: "semantic",
+  ngram: "gst",
+  structural: "gst",
+  graph: "execution_cfg",
+  execution: "execution_cfg",
+};
+
+function normalizeEngineWeights(weights?: Record<string, number>) {
+  const normalized = Object.fromEntries(
+    Object.keys(DEFAULT_ENGINE_WEIGHTS).map((key) => [key, 0]),
+  ) as Record<string, number>;
+  const seenKeys = new Set<string>();
+
+  if (!weights || typeof weights !== "object") {
+    return { ...DEFAULT_ENGINE_WEIGHTS };
+  }
+
+  Object.entries(weights).forEach(([rawKey, rawValue]) => {
+    const targetKey = LEGACY_ENGINE_KEY_MAP[rawKey as keyof typeof LEGACY_ENGINE_KEY_MAP] || rawKey;
+    if (!(targetKey in normalized)) {
+      return;
+    }
+
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    normalized[targetKey] += value;
+    seenKeys.add(targetKey);
+  });
+
+  if (!seenKeys.size) {
+    return { ...DEFAULT_ENGINE_WEIGHTS };
+  }
+
+  Object.entries(DEFAULT_ENGINE_WEIGHTS).forEach(([key, value]) => {
+    if (!seenKeys.has(key)) {
+      normalized[key] = value;
+    }
+  });
+
+  return normalized;
+}
+
+function areWeightsEqual(a?: Record<string, number>, b?: Record<string, number>) {
+  const left = normalizeEngineWeights(a);
+  const right = normalizeEngineWeights(b);
+
+  return ENGINE_CATALOG.every(
+    ({ key }) => Math.abs((left[key] || 0) - (right[key] || 0)) < 0.01,
+  );
+}
+
 interface Settings {
   default_threshold: number;
   openai_api_key: string;
@@ -45,28 +164,73 @@ export default function SettingsPage() {
     {
       name: "Balanced (Recommended)",
       description: "Good all-around performance for most use cases",
-      weights: { token: 0.25, ast: 0.3, unixcoder: 0.3, structural: 0.15 },
+      weights: {
+        token: 0.18,
+        ast: 0.22,
+        winnowing: 0.16,
+        gst: 0.16,
+        semantic: 0.18,
+        web: 0.10,
+        ai_detection: 0,
+        execution_cfg: 0,
+      },
     },
     {
       name: "Copy-Paste Detection",
       description:
         "Best for detecting direct copying, reformatting, minor changes",
-      weights: { token: 0.4, ast: 0.25, unixcoder: 0.2, structural: 0.15 },
+      weights: {
+        token: 0.28,
+        ast: 0.18,
+        winnowing: 0.22,
+        gst: 0.20,
+        semantic: 0.07,
+        web: 0.05,
+        ai_detection: 0,
+        execution_cfg: 0,
+      },
     },
     {
       name: "Semantic Similarity",
       description: "Detect logic similarity even with heavy obfuscation",
-      weights: { token: 0.1, ast: 0.2, unixcoder: 0.55, structural: 0.15 },
+      weights: {
+        token: 0.10,
+        ast: 0.17,
+        winnowing: 0.08,
+        gst: 0.10,
+        semantic: 0.35,
+        web: 0.10,
+        ai_detection: 0.05,
+        execution_cfg: 0.05,
+      },
     },
     {
       name: "Structure Focused",
       description: "Prioritize control flow and program structure patterns",
-      weights: { token: 0.15, ast: 0.45, unixcoder: 0.2, structural: 0.2 },
+      weights: {
+        token: 0.12,
+        ast: 0.30,
+        winnowing: 0.08,
+        gst: 0.15,
+        semantic: 0.10,
+        web: 0.05,
+        ai_detection: 0.05,
+        execution_cfg: 0.15,
+      },
     },
     {
       name: "Strict Comparison",
       description: "High sensitivity - highest false positive rate",
-      weights: { token: 0.5, ast: 0.3, unixcoder: 0.15, structural: 0.05 },
+      weights: {
+        token: 0.22,
+        ast: 0.22,
+        winnowing: 0.18,
+        gst: 0.18,
+        semantic: 0.10,
+        web: 0.05,
+        ai_detection: 0.02,
+        execution_cfg: 0.03,
+      },
     },
   ];
 
@@ -76,7 +240,12 @@ export default function SettingsPage() {
     }
     axios
       .get("/api/settings")
-      .then((res) => setSettings(res.data))
+      .then((res) =>
+        setSettings({
+          ...res.data,
+          engine_weights: normalizeEngineWeights(res.data?.engine_weights),
+        }),
+      )
       .catch(() => {});
   }, [authLoading, user]);
 
@@ -87,6 +256,7 @@ export default function SettingsPage() {
         if (!current) return current;
         return {
           ...current,
+          engine_weights: normalizeEngineWeights(current.engine_weights),
           openai_api_key: "",
           anthropic_api_key: "",
           openai_api_key_configured:
@@ -109,7 +279,10 @@ export default function SettingsPage() {
     if (!settings) return;
     setSettings({
       ...settings,
-      engine_weights: { ...settings.engine_weights, [engine]: value },
+      engine_weights: normalizeEngineWeights({
+        ...settings.engine_weights,
+        [engine]: value,
+      }),
     });
   };
 
@@ -129,6 +302,13 @@ export default function SettingsPage() {
     { id: "engines", label: "Engines" },
     { id: "advanced", label: "Advanced" },
   ];
+  const engineWeights = normalizeEngineWeights(settings.engine_weights);
+  const coreEngines = ENGINE_CATALOG.filter((engine) => engine.tier === "core");
+  const optionalEngines = ENGINE_CATALOG.filter((engine) => engine.tier === "optional");
+  const engineWeightTotal = Object.values(engineWeights).reduce(
+    (sum, weight) => sum + Number(weight || 0),
+    0,
+  );
 
   return (
     <DashboardLayout requiredRole="admin">
@@ -422,13 +602,11 @@ export default function SettingsPage() {
                       onClick={() =>
                         setSettings({
                           ...settings!,
-                          engine_weights: preset.weights,
+                          engine_weights: normalizeEngineWeights(preset.weights),
                         })
                       }
                       className={`p-4 border rounded-xl text-left transition-all hover:border-blue-400 hover:bg-blue-50 ${
-                        Object.entries(settings.engine_weights).every(
-                          ([k, v]) => Math.abs((preset.weights as Record<string, number>)[k] - v) < 0.01,
-                        )
+                        areWeightsEqual(engineWeights, preset.weights)
                           ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
                           : "border-slate-200"
                       }`}
@@ -447,36 +625,86 @@ export default function SettingsPage() {
                   Custom Engine Weights
                 </label>
                 <p className="text-xs text-slate-400 mb-4">
-                  Adjust contribution weights for each similarity engine. Total
-                  should equal 1.0
+                  Adjust contribution weights for each dashboard engine. Core
+                  engines should usually sum to 1.0 unless you intentionally
+                  allocate weight to the optional layers.
                 </p>
-                <div className="space-y-4">
-                  {Object.entries(settings.engine_weights).map(
-                    ([engine, weight]) => (
-                      <div key={engine} className="flex items-center gap-3">
-                        <label className="w-24 text-sm font-medium text-slate-700 capitalize">
-                          {engine}
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={weight}
-                          onChange={(e) =>
-                            updateEngineWeight(
-                              engine,
-                              parseFloat(e.target.value),
-                            )
-                          }
-                          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                        />
-                        <span className="text-sm font-medium text-blue-600 w-12 text-right">
-                          {(weight * 100).toFixed(0)}%
-                        </span>
+                <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">
+                      Engine coverage total
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Current combined weight across all engines
+                    </div>
+                  </div>
+                  <div className={`text-lg font-bold ${
+                    Math.abs(engineWeightTotal - 1) < 0.01
+                      ? "text-emerald-600"
+                      : "text-amber-600"
+                  }`}>
+                    {(engineWeightTotal * 100).toFixed(0)}%
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  {[
+                    { title: "Core Engines (6)", engines: coreEngines },
+                    { title: "Optional Engines (2)", engines: optionalEngines },
+                  ].map((section) => (
+                    <div key={section.title}>
+                      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-600">
+                        {section.title}
                       </div>
-                    ),
-                  )}
+                      <div className="space-y-4">
+                        {section.engines.map((engine) => {
+                          const weight = engineWeights[engine.key] || 0;
+
+                          return (
+                            <div key={engine.key} className="rounded-xl border border-slate-200 p-4">
+                              <div className="mb-3 flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    {engine.label}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {engine.description}
+                                  </div>
+                                </div>
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                                  engine.tier === "core"
+                                    ? "bg-blue-50 text-blue-700"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}>
+                                  {engine.tier}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="1"
+                                  step="0.05"
+                                  value={weight}
+                                  onChange={(e) =>
+                                    updateEngineWeight(
+                                      engine.key,
+                                      parseFloat(e.target.value),
+                                    )
+                                  }
+                                  className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                />
+                                <span className="w-14 text-right text-sm font-medium text-blue-600">
+                                  {(weight * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </>

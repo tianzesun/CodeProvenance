@@ -60,7 +60,7 @@ export default function DashboardLayout({ children, requiredRole }: DashboardLay
 
       <Sidebar />
       
-      <main className="relative z-10 min-h-screen lg:ml-72 pt-4 pb-12">
+      <main className="relative z-10 min-h-screen lg:ml-72 pt-6 pb-16 lg:pt-8 lg:pb-20">
         {children}
       </main>
 

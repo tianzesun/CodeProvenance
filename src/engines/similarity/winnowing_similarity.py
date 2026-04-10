@@ -16,10 +16,10 @@ This implementation surpasses MOSS, JPlag, Dolos, Codequiry, and HackerRank.
 from typing import List, Dict, Any, Set, Tuple, Optional
 from .base_similarity import BaseSimilarityAlgorithm
 import hashlib
-import xxhash
 import re
 from collections import defaultdict
 import math
+from src.utils.hash_utils import fast_hash64
 
 
 class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):

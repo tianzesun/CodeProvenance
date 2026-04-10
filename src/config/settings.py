@@ -4,6 +4,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Dict, Any
 
 
+DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
+    "token": 0.18,
+    "ast": 0.22,
+    "winnowing": 0.16,
+    "gst": 0.16,
+    "semantic": 0.18,
+    "web": 0.10,
+    "ai_detection": 0.0,
+    "execution_cfg": 0.0,
+}
+
+DEFAULT_DETECTION_MODES = [
+    "token",
+    "ast",
+    "winnowing",
+    "gst",
+    "semantic",
+    "web",
+]
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file='.env.local',
@@ -44,12 +65,7 @@ class AppSettings(BaseSettings):
     GRAMMARLY_API_KEY: Optional[str] = None
     
     # Engine Weights
-    ENGINE_WEIGHTS: Dict[str, float] = {
-        "token": 0.25,
-        "ast": 0.30,
-        "unixcoder": 0.30,
-        "structural": 0.15
-    }
+    ENGINE_WEIGHTS: Dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()
     
     # Advanced
     BATCH_SIZE: int = 32
