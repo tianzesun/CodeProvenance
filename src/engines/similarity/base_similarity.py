@@ -158,8 +158,8 @@ class SimilarityEngine:
                 
                 # Incorporate deep analysis into overall score
                 deep_score = deep_result.get('combined_score', 0.0)
-                # Weight deep analysis at 50% of final score for better rename detection
-                result['overall_score'] = overall_score * 0.5 + deep_score * 0.5
+                # Weight deep analysis at 65% of final score for better rename detection
+                result['overall_score'] = overall_score * 0.35 + deep_score * 0.65
                 result['deep_analysis_score'] = deep_score
             except ImportError:
                 # Deep analysis module not available
@@ -223,14 +223,15 @@ def register_builtin_algorithms(engine: SimilarityEngine) -> None:
     Args:
         engine: SimilarityEngine instance to register algorithms with
     """
+    # JPlag-style weighting matching fusion engine formula
     default_weights: Dict[str, float] = {
-        "winnowing": 1.5,
-        "token": 1.0,
-        "ngram": 1.0,
-        "ast": 2.0,
-        "execution": 1.5,
-        "embedding": 0.5,
-        "graph": 1.5,
+        "ast": 4.0,        # 40%
+        "graph": 2.0,      # 20%
+        "token": 2.5,      # 25%
+        "execution": 1.0,  # 10%
+        "winnowing": 0.5,  # 5%
+        "ngram": 0.0,      # Disabled - surface-only
+        "embedding": 0.0,  # Disabled
     }
 
     for algo_name, algo in _get_builtin_algorithms().items():

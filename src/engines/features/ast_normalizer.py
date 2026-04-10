@@ -697,23 +697,21 @@ class PDGComparator:
         if not pdgs1 or not pdgs2:
             return 0.0
 
-        # Compare dependency structures
+        # Compare dependency structures - IGNORE variable names, only use structure
         deps1 = set()
         for node in pdgs1:
-            deps1.add((node.variable, tuple(sorted(node.dep_from))))
+            deps1.add(tuple(sorted(node.dep_from)))
 
         deps2 = set()
         for node in pdgs2:
-            deps2.add((node.variable, tuple(sorted(node.dep_from))))
+            deps2.add(tuple(sorted(node.dep_from)))
 
         dep_sim = len(deps1 & deps2) / len(deps1 | deps2) if (deps1 | deps2) else 0
 
-        # Variable names (normalized) distribution similarity
-        vars1 = set(n.variable for n in pdgs1)
-        vars2 = set(n.variable for n in pdgs2)
-        var_sim = len(vars1 & vars2) / len(vars1 | vars2) if (vars1 | vars2) else 0
+        # Variable count similarity (not names, just how many variables)
+        count_sim = 1.0 - abs(len(pdgs1) - len(pdgs2)) / max(len(pdgs1), len(pdgs2), 1)
 
-        return 0.7 * dep_sim + 0.3 * var_sim
+        return 0.8 * dep_sim + 0.2 * count_sim
 
 
 # Module-level convenience function

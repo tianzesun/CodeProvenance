@@ -3,7 +3,7 @@ Main API router for IntegrityDesk.
 """
 
 from fastapi import APIRouter
-from src.api.routes import jobs, submissions, results, webhooks, usage, health
+from src.api.routes import jobs, submissions, results, webhooks, usage, health, visualize
 
 # Create main API router
 api_router = APIRouter()
@@ -15,6 +15,7 @@ api_router.include_router(results.router, prefix="/results", tags=["results"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
+api_router.include_router(visualize.router, prefix="/visualize", tags=["visualize"])
 
 # Root endpoint
 @api_router.get("/")

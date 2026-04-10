@@ -148,6 +148,10 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         if filtered_a and filtered_b:
             tokens_a = filtered_a
             tokens_b = filtered_b
+        
+        # Normalize identifiers to handle renaming
+        norm_tokens_a = self._normalize_identifiers(tokens_a)
+        norm_tokens_b = self._normalize_identifiers(tokens_b)
 
         if not tokens_a and not tokens_b:
             return Finding(engine=self.name, score=1.0, confidence=1.0)
@@ -157,8 +161,9 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         if tokens_a == tokens_b:
             return Finding(engine=self.name, score=1.0, confidence=1.0)
 
-        jaccard_score = self._jaccard_similarity(tokens_a, tokens_b)
-        ngram_score = self._ngram_similarity(tokens_a, tokens_b)
+        # Use normalized tokens for jaccard and ngram to be rename-resistant
+        jaccard_score = self._jaccard_similarity(norm_tokens_a, norm_tokens_b)
+        ngram_score = self._ngram_similarity(norm_tokens_a, norm_tokens_b)
         distribution_score = self._distribution_similarity(tokens_a, tokens_b)
         keyword_score = self._keyword_similarity(tokens_a, tokens_b)
 
@@ -238,6 +243,28 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         # Tokenize
         tokens = re.findall(r"[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]", text)
         return [t for t in tokens if t]
+    
+    def _normalize_identifiers(self, tokens: List[str]) -> List[str]:
+        """Normalize identifiers by replacing them with sequential placeholders (var1, var2, etc.)"""
+        identifier_map = {}
+        counter = 1
+        normalized = []
+        
+        for token in tokens:
+            if token in self.keywords:
+                normalized.append(token)
+            elif token[0].isdigit():
+                normalized.append("__NUM__")
+            elif token in set("+-*/%=<>&|^~!?:;,.()[]{}"):
+                normalized.append(token)
+            else:
+                # This is an identifier
+                if token not in identifier_map:
+                    identifier_map[token] = f"__VAR{counter}__"
+                    counter += 1
+                normalized.append(identifier_map[token])
+        
+        return normalized
 
     # ── Metrics ─────────────────────────────────────────────────────────
 

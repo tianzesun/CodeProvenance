@@ -29,13 +29,13 @@ LANGUAGE_BASELINE: Dict[str, float] = {
 }
 
 
-# Default weights across all 5 engines
+# JPlag-style weights: structural > semantic > surface
 DEFAULT_WEIGHTS: Dict[str, float] = {
-    "ast": 0.25,
-    "fingerprint": 0.25,
-    "embedding": 0.20,
-    "ngram": 0.15,
-    "winnowing": 0.15,
+    "ast": 0.40,        # Highest weight - normalized AST structure
+    "graph": 0.20,      # CFG/PDG structural similarity
+    "token": 0.25,      # Normalized token sequence
+    "execution": 0.10,  # Semantic/behavioral similarity
+    "winnowing": 0.05,  # Lowest weight - literal surface matching
 }
 
 
@@ -79,9 +79,18 @@ class FusionEngine:
             corrected_scores[name] = round(corrected, 4)
 
         arbitration = self._arbitrator.arbitrate(corrected_scores)
+        
+        # JPlag-style AST boost: if AST similarity is very high, guarantee minimum score
+        final_score = arbitration.fused_score
+        ast_score = corrected_scores.get("ast", 0.0)
+        if ast_score > 0.85:
+            final_score = max(final_score, 0.9)
+        
+        # Clamp to valid range
+        final_score = min(1.0, max(0.0, final_score))
 
         return FusedScore(
-            final_score=arbitration.fused_score,
+            final_score=final_score,
             confidence=arbitration.agreement_index,
             uncertainty=arbitration.uncertainty,
             agreement_index=arbitration.agreement_index,
