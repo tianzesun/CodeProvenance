@@ -16,6 +16,7 @@ import re
 import logging
 import hashlib
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
@@ -70,6 +71,8 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/status",
     "/api/auth/login",
     "/api/auth/bootstrap-admin",
+    "/api/benchmark-datasets",
+    "/api/benchmark-tools",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -460,6 +463,43 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
     """Load benchmark dataset and extract to target directory for comparison."""
     submissions = {}
 
+    # Handle demo datasets
+    if dataset_id.startswith("demo_"):
+        dataset_dir = BENCHMARK_DATA_DIR / dataset_id
+        if not dataset_dir.exists():
+            logger.warning(f"Demo dataset not found: {dataset_dir}")
+            return submissions
+
+        # For demo datasets, combine original and plagiarized files
+        submissions = {}
+
+        # Load original files
+        original_dir = dataset_dir / "original"
+        if original_dir.exists():
+            for file_path in original_dir.glob("*"):
+                if file_path.is_file() and _is_code_file(file_path.name):
+                    try:
+                        content = file_path.read_text(encoding='utf-8', errors='ignore')
+                        submissions[file_path.name] = content
+                    except Exception as e:
+                        logger.warning(f"Error reading file {file_path}: {e}")
+
+        # Load plagiarized files with modified names to distinguish them
+        plagiarized_dir = dataset_dir / "plagiarized"
+        if plagiarized_dir.exists():
+            for file_path in plagiarized_dir.glob("*"):
+                if file_path.is_file() and _is_code_file(file_path.name):
+                    try:
+                        content = file_path.read_text(encoding='utf-8', errors='ignore')
+                        # Add suffix to distinguish plagiarized versions
+                        modified_name = file_path.name.replace('.py', '_plagiarized.py').replace('.java', '_plagiarized.java').replace('.js', '_plagiarized.js').replace('.cpp', '_plagiarized.cpp')
+                        submissions[modified_name] = content
+                    except Exception as e:
+                        logger.warning(f"Error reading file {file_path}: {e}")
+
+        return submissions
+
+    # Handle regular datasets
     if dataset_id == "poj104":
         dataset_dir = BENCHMARK_DATA_DIR / "poj104" / "huggingface" / "train"
     elif dataset_id == "codesearchnet":
@@ -1146,6 +1186,979 @@ async def create_user(request: Request):
         )
 
 
+@app.post("/api/admin/create-demo-dataset")
+async def create_demo_dataset(request: Request):
+    """Create a synthetic demo dataset for testing."""
+    current_user = _require_current_user(request, admin_only=True)
+
+    try:
+        data = await request.json()
+        dataset_name = data.get("name", "").strip()
+        description = data.get("description", "").strip()
+        language = data.get("language", "python")
+        num_files = min(max(int(data.get("numFiles", 10)), 5), 100)
+        similarity_type = data.get("similarityType", "plagiarism")
+
+        if not dataset_name:
+            raise HTTPException(status_code=400, detail="Dataset name is required")
+
+        # Validate language
+        supported_languages = ["python", "java", "javascript", "cpp"]
+        if language not in supported_languages:
+            language = "python"
+
+        # Create dataset directory
+        dataset_dir = BENCHMARK_DATA_DIR / f"demo_{dataset_name}_{int(time.time())}"
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate synthetic files
+        files_created = 0
+        original_dir = dataset_dir / "original"
+        plagiarized_dir = dataset_dir / "plagiarized"
+        original_dir.mkdir()
+        plagiarized_dir.mkdir()
+
+        # Create original files
+        for i in range(num_files):
+            filename = f"{i:02d}"
+            filepath = original_dir / f"{filename}.{language}"
+
+            # Generate synthetic code based on language
+            code_content = generate_synthetic_code(i, language, similarity_type)
+            filepath.write_text(code_content)
+            files_created += 1
+
+        # Create modified versions (plagiarized)
+        for i in range(num_files):
+            original_file = original_dir / f"{i:02d}.{language}"
+            plagiarized_file = plagiarized_dir / f"{i:02d}.{language}"
+
+            if original_file.exists():
+                content = original_file.read_text()
+
+                # Apply modifications based on similarity type
+                if similarity_type == "type1_exact":
+                    # No transformations - exact copy
+                    modified_content = content
+                elif similarity_type == "type2_renamed":
+                    # Apply renaming transformations
+                    modified_content = apply_renaming_transforms(content, language)
+                elif similarity_type == "type3_modified":
+                    # Apply structural modifications
+                    modified_content = apply_structural_transforms(content, language)
+                elif similarity_type == "type4_semantic":
+                    # Different algorithm but same functionality - already handled in generation
+                    modified_content = content
+                elif similarity_type == "token_similarity":
+                    # Focus on token patterns - minimal changes
+                    modified_content = apply_token_transforms(content, language)
+                elif similarity_type == "structural_similarity":
+                    # Code organization changes
+                    modified_content = apply_organization_transforms(content, language)
+                else:  # semantic_similarity or default
+                    # Conceptual changes
+                    modified_content = apply_semantic_transforms(content, language)
+
+                plagiarized_file.write_text(modified_content)
+                files_created += 1
+
+        # Create metadata
+        metadata = {
+            "name": dataset_name,
+            "description": description,
+            "language": language,
+            "files_created": files_created,
+            "original_files": num_files,
+            "plagiarized_files": num_files,
+            "similarity_type": similarity_type,
+            "created_by": current_user["email"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_path": str(dataset_dir.relative_to(BENCHMARK_DATA_DIR.parent)),
+            "pairs": num_files
+        }
+
+        metadata_file = dataset_dir / "metadata.json"
+        metadata_file.write_text(json.dumps(metadata, indent=2))
+
+        return JSONResponse(
+            status_code=201,
+            content={
+                "message": f"Demo dataset '{dataset_name}' created successfully",
+                "dataset": metadata,
+                "files_created": files_created,
+                "dataset_path": str(dataset_dir)
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create demo dataset: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create demo dataset: {str(e)}")
+
+
+def generate_synthetic_code(index: int, language: str, similarity_type: str) -> str:
+    """Generate synthetic code for testing different similarity types."""
+
+    if language == "python":
+        if similarity_type == "type1_exact":
+            # Generate base code for exact copying
+            return f'''"""
+Basic mathematical utilities - Sample {index}
+"""
+
+def fibonacci_iterative(n):
+    """Calculate nth Fibonacci number iteratively."""
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+def check_prime(num):
+    """Check if number is prime."""
+    if num <= 1:
+        return False
+    if num <= 3:
+        return True
+    if num % 2 == 0 or num % 3 == 0:
+        return False
+    i = 5
+    while i * i <= num:
+        if num % i == 0 or num % (i + 2) == 0:
+            return False
+        i += 6
+    return True
+
+def sort_bubble(arr):
+    """Bubble sort implementation."""
+    n = len(arr)
+    for i in range(n):
+        for j in range(0, n - i - 1):
+            if arr[j] > arr[j + 1]:
+                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+    return arr
+
+# Test the functions
+result_fib = fibonacci_iterative({index})
+result_prime = check_prime({index})
+test_data = [{index}, {index+1}, {index+2}]
+result_sort = sort_bubble(test_data)
+
+print(f"Fibonacci({index}) = {{result_fib}}")
+print(f"Prime check for {index}: {{result_prime}}")
+print(f"Sorted data: {{result_sort}}")
+'''
+
+        elif similarity_type == "type2_renamed":
+            # Generate code with renamed identifiers for Type 2 testing
+            return f'''"""
+Mathematics computation module - Sample {index}
+"""
+
+def compute_fibonacci_number(target):
+    """Compute fibonacci sequence value."""
+    if target <= 1:
+        return target
+    previous, current = 0, 1
+    for _ in range(2, target + 1):
+        previous, current = current, previous + current
+    return current
+
+def validate_prime(candidate):
+    """Validate if candidate is prime number."""
+    if candidate <= 1:
+        return False
+    if candidate <= 3:
+        return True
+    if candidate % 2 == 0 or candidate % 3 == 0:
+        return False
+    divisor = 5
+    while divisor * divisor <= candidate:
+        if candidate % divisor == 0 or candidate % (divisor + 2) == 0:
+            return False
+        divisor += 6
+    return True
+
+def arrange_elements_bubble(input_list):
+    """Arrange list elements using bubble technique."""
+    list_length = len(input_list)
+    for pass_num in range(list_length):
+        for element_idx in range(0, list_length - pass_num - 1):
+            if input_list[element_idx] > input_list[element_idx + 1]:
+                input_list[element_idx], input_list[element_idx + 1] = input_list[element_idx + 1], input_list[element_idx]
+    return input_list
+
+# Execute test cases
+fibonacci_value = compute_fibonacci_number({index})
+prime_status = validate_prime({index})
+sample_values = [{index}, {index+1}, {index+2}]
+organized_values = arrange_elements_bubble(sample_values)
+
+print(f"Fibonacci number {index}: {{fibonacci_value}}")
+print(f"Is {index} prime: {{prime_status}}")
+print(f"Organized values: {{organized_values}}")
+'''
+
+        elif similarity_type == "type3_modified":
+            # Generate code with modified structure (added comments, different organization)
+            return f'''"""
+Advanced mathematical utilities with detailed documentation - Sample {index}
+Created for comprehensive testing of similarity detection algorithms
+"""
+
+# Import necessary modules for mathematical operations
+import math
+
+def calculate_fibonacci(n):
+    """
+    Calculate the nth Fibonacci number using an iterative approach.
+
+    This function implements the classic Fibonacci sequence calculation
+    using a bottom-up dynamic programming approach for efficiency.
+
+    Args:
+        n (int): The position in the Fibonacci sequence
+
+    Returns:
+        int: The nth Fibonacci number
+    """
+    # Handle base cases
+    if n <= 1:
+        return n
+
+    # Initialize variables for iterative calculation
+    a, b = 0, 1
+
+    # Iterate through the sequence
+    for iteration in range(2, n + 1):
+        # Update values for next iteration
+        a, b = b, a + b
+
+    return b
+
+def is_prime(number):
+    """
+    Determine whether a given number is prime.
+
+    Uses an optimized trial division algorithm with 6k±1 optimization.
+
+    Args:
+        number (int): The number to check for primality
+
+    Returns:
+        bool: True if prime, False otherwise
+    """
+    # Handle edge cases first
+    if number <= 1:
+        return False
+    if number <= 3:
+        return True
+
+    # Check divisibility by 2 and 3
+    if number % 2 == 0 or number % 3 == 0:
+        return False
+
+    # Check divisibility by numbers of form 6k±1
+    i = 5
+    while i * i <= number:
+        if number % i == 0 or number % (i + 2) == 0:
+            return False
+        i += 6
+
+    return True
+
+def bubble_sort(arr):
+    """
+    Sort an array using the bubble sort algorithm.
+
+    This is a simple comparison-based sorting algorithm that repeatedly
+    steps through the list, compares adjacent elements and swaps them
+    if they are in the wrong order.
+
+    Args:
+        arr (list): The array to sort
+
+    Returns:
+        list: The sorted array
+    """
+    n = len(arr)
+
+    # Outer loop for each pass
+    for i in range(n):
+        # Inner loop for comparisons in this pass
+        for j in range(0, n - i - 1):
+            # Swap if elements are in wrong order
+            if arr[j] > arr[j + 1]:
+                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+
+    return arr
+
+# Main execution block
+if __name__ == "__main__":
+    # Test fibonacci calculation
+    fib_result = calculate_fibonacci({index})
+
+    # Test prime checking
+    prime_result = is_prime({index})
+
+    # Test sorting functionality
+    sample_array = [{index}, {index+1}, {index+2}, {index+3}, {index+4}]
+    sorted_array = bubble_sort(sample_array)
+
+    # Display results
+    print(f"Fibonacci({index}) = {{fib_result}}")
+    print(f"Is {index} prime? {{prime_result}}")
+    print(f"Sorted array: {{sorted_array}}")
+'''
+
+        elif similarity_type == "type4_semantic":
+            # Generate semantically equivalent code with different algorithms
+            return f'''"""
+Alternative mathematical implementations - Sample {index}
+Demonstrating different approaches to achieve same results
+"""
+
+def fibonacci_recursive(n):
+    """Calculate Fibonacci using recursive approach."""
+    if n <= 1:
+        return n
+    return fibonacci_recursive(n-1) + fibonacci_recursive(n-2)
+
+def prime_trial_division(num):
+    """Check primality using trial division up to square root."""
+    if num < 2:
+        return False
+    for i in range(2, int(num ** 0.5) + 1):
+        if num % i == 0:
+            return False
+    return True
+
+def selection_sort(items):
+    """Sort using selection sort algorithm."""
+    for i in range(len(items)):
+        min_idx = i
+        for j in range(i+1, len(items)):
+            if items[j] < items[min_idx]:
+                min_idx = j
+        items[i], items[min_idx] = items[min_idx], items[i]
+    return items
+
+# Alternative implementations for same functionality
+def fibonacci_matrix(n):
+    """Calculate Fibonacci using matrix exponentiation concept."""
+    if n == 0:
+        return 0
+    # Simplified iterative matrix approach
+    a, b = 1, 1
+    for _ in range(2, n):
+        a, b = b, a + b
+    return b if n > 1 else 1
+
+# Test different algorithmic approaches
+recursive_fib = fibonacci_recursive(min({index}, 10))  # Limit recursion depth
+matrix_fib = fibonacci_matrix({index})
+trial_prime = prime_trial_division({index})
+
+test_list = [{index}, {index+2}, {index+1}]
+selection_sorted = selection_sort(test_list.copy())
+
+print(f"Recursive Fibonacci: {{recursive_fib}}")
+print(f"Matrix Fibonacci: {{matrix_fib}}")
+print(f"Trial division prime check: {{trial_prime}}")
+print(f"Selection sorted: {{selection_sorted}}")
+'''
+
+        elif similarity_type == "token_similarity":
+            # Focus on token patterns and programming style
+            return f'''
+"""
+Programming style demonstration - Sample {index}
+Showcasing common programming patterns and token usage
+"""
+
+def process_data(data_list):
+    """Process a list of data elements."""
+    result = []
+    for item in data_list:
+        if item % 2 == 0:
+            result.append(item * 2)
+        else:
+            result.append(item + 1)
+    return result
+
+def validate_input(value):
+    """Validate input value with multiple checks."""
+    if value is None:
+        return False
+    if not isinstance(value, int):
+        return False
+    if value < 0:
+        return False
+    if value > 1000:
+        return False
+    return True
+
+def calculate_average(numbers):
+    """Calculate average of number list."""
+    if not numbers:
+        return 0
+    total = sum(numbers)
+    count = len(numbers)
+    return total / count
+
+def find_maximum(items):
+    """Find maximum value in collection."""
+    if not items:
+        return None
+    max_val = items[0]
+    for item in items:
+        if item > max_val:
+            max_val = item
+    return max_val
+
+# Demonstrate common programming patterns
+sample_data = [{index}, {index+1}, {index+2}, {index+3}]
+processed = process_data(sample_data)
+is_valid = validate_input({index})
+average = calculate_average(sample_data)
+maximum = find_maximum(sample_data)
+
+print("Processed data:", processed)
+print("Input validation:", is_valid)
+print("Average value:", average)
+print("Maximum value:", maximum)
+'''
+
+        elif similarity_type == "structural_similarity":
+            # Focus on code structure and organization
+            return f'''"""
+Well-structured code with clear organization - Sample {index}
+Demonstrating good software engineering practices
+"""
+
+class MathUtils:
+    """Utility class for mathematical operations."""
+
+    @staticmethod
+    def fibonacci(n):
+        """Calculate nth Fibonacci number."""
+        if n <= 1:
+            return n
+        a, b = 0, 1
+        for _ in range(2, n + 1):
+            a, b = b, a + b
+        return b
+
+    @staticmethod
+    def is_prime(num):
+        """Check if number is prime."""
+        if num <= 1:
+            return False
+        if num <= 3:
+            return True
+        if num % 2 == 0 or num % 3 == 0:
+            return False
+        i = 5
+        while i * i <= num:
+            if num % i == 0 or num % (i + 2) == 0:
+                return False
+            i += 6
+        return True
+
+class SortingUtils:
+    """Utility class for sorting operations."""
+
+    @staticmethod
+    def bubble_sort(arr):
+        """Sort array using bubble sort."""
+        n = len(arr)
+        for i in range(n):
+            for j in range(0, n - i - 1):
+                if arr[j] > arr[j + 1]:
+                    arr[j], arr[j + 1] = arr[j + 1], arr[j]
+        return arr
+
+class DataProcessor:
+    """Class for processing data collections."""
+
+    def __init__(self, data):
+        self.data = data
+        self.processed = False
+
+    def process(self):
+        """Process the data."""
+        if self.processed:
+            return self.data
+
+        # Apply mathematical operations
+        self.data = [MathUtils.fibonacci(x) if MathUtils.is_prime(x) else x for x in self.data]
+
+        # Sort the results
+        self.data = SortingUtils.bubble_sort(self.data)
+
+        self.processed = True
+        return self.data
+
+    def get_statistics(self):
+        """Get statistics about the data."""
+        if not self.processed:
+            self.process()
+
+        return {{
+            "count": len(self.data),
+            "sum": sum(self.data),
+            "average": sum(self.data) / len(self.data) if self.data else 0,
+            "is_sorted": all(self.data[i] <= self.data[i+1] for i in range(len(self.data)-1))
+        }}
+
+# Usage example
+processor = DataProcessor([{index}, {index+1}, {index+2}])
+result = processor.process()
+stats = processor.get_statistics()
+
+print(f"Processed data: {{result}}")
+print(f"Statistics: {{stats}}")
+'''
+
+        else:  # semantic_similarity or default
+            # Generate conceptually similar but different implementations
+            return f'''"""
+Creative problem-solving approaches - Sample {index}
+Demonstrating different thinking patterns for same problems
+"""
+
+# Approach 1: Functional programming style
+def compute_sequence_value(position):
+    """Compute value at given position using functional approach."""
+    def fib_generator():
+        a, b = 0, 1
+        while True:
+            yield a
+            a, b = b, a + b
+
+    gen = fib_generator()
+    for _ in range(position + 1):
+        result = next(gen)
+    return result
+
+# Approach 2: Using memoization
+def get_sequence_value(n, cache=None):
+    """Get sequence value with caching for efficiency."""
+    if cache is None:
+        cache = {{}}
+
+    if n in cache:
+        return cache[n]
+
+    if n <= 1:
+        cache[n] = n
+    else:
+        cache[n] = get_sequence_value(n-1, cache) + get_sequence_value(n-2, cache)
+
+    return cache[n]
+
+# Approach 3: Mathematical formula approximation
+def approximate_sequence(n):
+    """Approximate sequence value using mathematical formula."""
+    if n <= 1:
+        return n
+
+    # Using Binet's formula approximation
+    phi = (1 + 5**0.5) / 2
+    return round(phi**n / 5**0.5)
+
+# Different primality testing approaches
+def primality_test_traditional(n):
+    """Traditional primality test."""
+    if n < 2:
+        return False
+    for i in range(2, int(n**0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def primality_test_optimized(n):
+    """Optimized primality test with early exits."""
+    if n <= 1:
+        return False
+    if n <= 3:
+        return True
+    if n % 2 == 0 or n % 3 == 0:
+        return False
+
+    i = 5
+    while i * i <= n:
+        if n % i == 0 or n % (i + 2) == 0:
+            return False
+        i += 6
+    return True
+
+# Test different approaches
+fib1 = compute_sequence_value({index})
+fib2 = get_sequence_value({index})
+fib3 = approximate_sequence({index})
+
+prime1 = primality_test_traditional({index})
+prime2 = primality_test_optimized({index})
+
+print(f"Functional approach: {{fib1}}")
+print(f"Memoized approach: {{fib2}}")
+print(f"Formula approach: {{fib3}}")
+print(f"Traditional prime check: {{prime1}}")
+print(f"Optimized prime check: {{prime2}}")
+'''
+    elif language == "java":
+        base_code = f'''/**
+ * Synthetic Java code sample {index}
+ * Generated for testing purposes
+ */
+public class SampleProgram{index} {{
+    /**
+     * Calculate the nth Fibonacci number
+     */
+    public static int calculateFibonacci(int n) {{
+        if (n <= 1) {{
+            return n;
+        }}
+
+        int a = 0, b = 1;
+        for (int i = 2; i <= n; i++) {{
+            int temp = a + b;
+            a = b;
+            b = temp;
+        }}
+        return b;
+    }}
+
+    /**
+     * Check if a number is prime
+     */
+    public static boolean isPrime(int number) {{
+        if (number <= 1) {{
+            return false;
+        }}
+        if (number <= 3) {{
+            return true;
+        }}
+        if (number % 2 == 0 || number % 3 == 0) {{
+            return false;
+        }}
+
+        for (int i = 5; i * i <= number; i += 6) {{
+            if (number % i == 0 || number % (i + 2) == 0) {{
+                return false;
+            }}
+        }}
+        return true;
+    }}
+
+    public static void main(String[] args) {{
+        int fibResult = calculateFibonacci({index});
+        boolean primeResult = isPrime({index});
+
+        System.out.println("Fibonacci({index}) = " + fibResult);
+        System.out.println("Is {index} prime? " + primeResult);
+    }}
+}}
+'''
+    elif language == "javascript":
+        base_code = f'''/**
+ * Synthetic JavaScript code sample {index}
+ * Generated for testing purposes
+ */
+
+/**
+ * Calculate the nth Fibonacci number using iteration
+ * @param {{number}} n - The index of the Fibonacci number to calculate
+ * @returns {{number}} The nth Fibonacci number
+ */
+function calculateFibonacci(n) {{
+    if (n <= 1) {{
+        return n;
+    }}
+
+    let a = 0, b = 1;
+    for (let i = 2; i <= n; i++) {{
+        [a, b] = [b, a + b];
+    }}
+    return b;
+}}
+
+/**
+ * Check if a number is prime
+ * @param {{number}} number - The number to check
+ * @returns {{boolean}} True if the number is prime, false otherwise
+ */
+function isPrime(number) {{
+    if (number <= 1) {{
+        return false;
+    }}
+    if (number <= 3) {{
+        return true;
+    }}
+    if (number % 2 === 0 || number % 3 === 0) {{
+        return false;
+    }}
+
+    for (let i = 5; i * i <= number; i += 6) {{
+        if (number % i === 0 || number % (i + 2) === 0) {{
+            return false;
+        }}
+    }}
+    return true;
+}}
+
+// Main execution
+const fibResult = calculateFibonacci({index});
+const primeResult = isPrime({index});
+
+console.log(`Fibonacci({index}) = ${{fibResult}}`);
+console.log(`Is {index} prime? ${{primeResult}}`);
+'''
+    else:  # cpp
+        base_code = f'''/**
+ * Synthetic C++ code sample {index}
+ * Generated for testing purposes
+ */
+
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+/**
+ * Calculate the nth Fibonacci number using iteration
+ */
+int calculateFibonacci(int n) {{
+    if (n <= 1) {{
+        return n;
+    }}
+
+    int a = 0, b = 1;
+    for (int i = 2; i <= n; ++i) {{
+        int temp = a + b;
+        a = b;
+        b = temp;
+    }}
+    return b;
+}}
+
+/**
+ * Check if a number is prime
+ */
+bool isPrime(int number) {{
+    if (number <= 1) {{
+        return false;
+    }}
+    if (number <= 3) {{
+        return true;
+    }}
+    if (number % 2 == 0 || number % 3 == 0) {{
+        return false;
+    }}
+
+    for (int i = 5; i * i <= number; i += 6) {{
+        if (number % i == 0 || number % (i + 2) == 0) {{
+            return false;
+        }}
+    }}
+    return true;
+}}
+
+/**
+ * Sort an array using bubble sort
+ */
+void bubbleSort(std::vector<int>& arr) {{
+    int n = arr.size();
+    for (int i = 0; i < n; ++i) {{
+        for (int j = 0; j < n - i - 1; ++j) {{
+            if (arr[j] > arr[j + 1]) {{
+                std::swap(arr[j], arr[j + 1]);
+            }}
+        }}
+    }}
+}}
+
+int main() {{
+    int fibResult = calculateFibonacci({index});
+    bool primeResult = isPrime({index});
+
+    std::cout << "Fibonacci({index}) = " << fibResult << std::endl;
+    std::cout << "Is {index} prime? " << (primeResult ? "true" : "false") << std::endl;
+
+    return 0;
+}}
+'''
+
+    return base_code
+
+
+def apply_plagiarism_transforms(code: str, language: str) -> str:
+    """Apply transformations that simulate plagiarism."""
+    import re
+
+    # Remove comments
+    if language == "python":
+        code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)
+        code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+    elif language == "java":
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+    elif language == "javascript":
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+    elif language == "cpp":
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+
+    # Variable renaming
+    code = re.sub(r'\bfib_result\b', 'fib_num', code)
+    code = re.sub(r'\bprime_result\b', 'is_prime_result', code)
+    code = re.sub(r'\bsample_array\b', 'numbers', code)
+    code = re.sub(r'\bsorted_array\b', 'sorted_numbers', code)
+
+    # Change spacing
+    code = re.sub(r'    ', '  ', code)  # Reduce indentation
+    code = re.sub(r'\n\s*\n', '\n', code)  # Remove extra blank lines
+
+    return code
+
+
+def apply_clone_transforms(code: str, language: str) -> str:
+    """Apply transformations that create Type 1 clones."""
+    import re
+
+    # Minor changes like renaming variables
+    code = re.sub(r'\bcalculateFibonacci\b', 'computeFibonacci', code)
+    code = re.sub(r'\bisPrime\b', 'checkPrime', code)
+    code = re.sub(r'\bbubbleSort\b', 'sortArray', code)
+
+    # Change string literals slightly
+    code = re.sub(r'"', "'", code)
+    code = re.sub(r"'", '"', code)
+
+    return code
+
+
+def apply_mixed_transforms(code: str, language: str) -> str:
+    """Apply mixed transformations."""
+    code = apply_plagiarism_transforms(code, language)
+    code = apply_clone_transforms(code, language)
+    return code
+
+def apply_renaming_transforms(code: str, language: str) -> str:
+    """Apply identifier renaming transformations for Type 2 clones."""
+    import re
+
+    # Rename common variable and function names
+    renames = {
+        r'\bfibonacci_iterative\b': 'compute_fibonacci',
+        r'\bcalculate_fibonacci\b': 'get_fibonacci_value',
+        r'\bcheck_prime\b': 'validate_primality',
+        r'\bis_prime\b': 'test_prime_number',
+        r'\bbubble_sort\b': 'perform_bubble_sort',
+        r'\bsort_bubble\b': 'execute_sorting',
+        r'\bfib_result\b': 'fibonacci_result',
+        r'\bprime_result\b': 'primality_result',
+        r'\bsample_array\b': 'input_data',
+        r'\btest_data\b': 'sample_values',
+        r'\bsorted_array\b': 'ordered_data',
+        r'\ba\b': 'first_value',
+        r'\bb\b': 'second_value',
+        r'\bi\b': 'counter',
+        r'\bj\b': 'inner_counter',
+        r'\bn\b': 'size',
+        r'\barr\b': 'array_data',
+        r'\bnum\b': 'number',
+        r'\bvalue\b': 'current_value',
+        r'\bitem\b': 'element',
+    }
+
+    for pattern, replacement in renames.items():
+        code = re.sub(pattern, replacement, code)
+
+    return code
+
+def apply_structural_transforms(code: str, language: str) -> str:
+    """Apply structural modifications for Type 3 clones."""
+    import re
+
+    # Add comments and restructure code
+    if language == "python":
+        # Add inline comments
+        code = re.sub(r'(\s+)(for.*:)', r'\1\2  # Loop through elements', code)
+        code = re.sub(r'(\s+)(if.*:)', r'\1\2  # Conditional check', code)
+        code = re.sub(r'(\s+)(return.*)', r'\1\2  # Return result', code)
+
+        # Add extra blank lines and reorganize
+        lines = code.split('\n')
+        new_lines = []
+        for i, line in enumerate(lines):
+            new_lines.append(line)
+            # Add blank lines before function definitions and major blocks
+            if re.match(r'\s*def\s+', line) and i > 0:
+                new_lines.append('')
+        code = '\n'.join(new_lines)
+
+    return code
+
+def apply_token_transforms(code: str, language: str) -> str:
+    """Apply token-level transformations for token similarity."""
+    import re
+
+    # Change coding style patterns while keeping similar token usage
+    # Change single quotes to double quotes and vice versa
+    code = re.sub(r"'([^']*)'", r'"\1"', code)
+    code = re.sub(r'"([^"]*)"', r"'\1'", code)
+
+    # Change operator spacing
+    code = re.sub(r'(\w)\s*([+\-*/=<>!&|]+)\s*(\w)', r'\1 \2 \3', code)
+
+    # Change comment style slightly
+    if language == "python":
+        code = re.sub(r'# (.*)', r'# \1 - comment', code)
+
+    return code
+
+def apply_organization_transforms(code: str, language: str) -> str:
+    """Apply organizational changes for structural similarity."""
+    import re
+
+    if language == "python":
+        # Reorganize imports and function definitions
+        lines = code.split('\n')
+        imports = []
+        functions = []
+        other_lines = []
+
+        for line in lines:
+            if re.match(r'^(import|from)', line):
+                imports.append(line)
+            elif re.match(r'^\s*def\s+', line):
+                functions.append(line)
+            else:
+                other_lines.append(line)
+
+        # Reorganize with functions first, then other code
+        code = '\n'.join(functions + [''] + other_lines + [''] + imports)
+
+    return code
+
+def apply_semantic_transforms(code: str, language: str) -> str:
+    """Apply semantic-level transformations."""
+    import re
+
+    # Change algorithmic approaches while maintaining similar functionality
+    # For example, change iterative to recursive approaches (simplified)
+    code = re.sub(r'for.*range.*:', r'# Iterative approach changed to different logic', code, count=1)
+
+    # Add semantic comments
+    code = re.sub(r'(def\s+\w+)',
+                  r'# Function implements core algorithm\n\1',
+                  code)
+
+    return code
+
+
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
@@ -1422,7 +2435,40 @@ BENCHMARK_DATASETS = [
 
 @app.get("/api/benchmark-datasets")
 async def get_benchmark_datasets():
-    return JSONResponse(content={"datasets": BENCHMARK_DATASETS})
+    """Get available benchmark datasets including dynamically discovered demo datasets."""
+    datasets = BENCHMARK_DATASETS.copy()
+
+    # Discover demo datasets
+    if BENCHMARK_DATA_DIR.exists():
+        for item in BENCHMARK_DATA_DIR.iterdir():
+            if item.is_dir() and item.name.startswith('demo_'):
+                metadata_file = item / 'metadata.json'
+                if metadata_file.exists():
+                    try:
+                        import json
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+
+                        # Add to datasets list
+                        demo_dataset = {
+                            "id": item.name,
+                            "name": f"Demo: {metadata.get('name', item.name)}",
+                            "desc": f"Demo dataset - {metadata.get('description', 'Generated test dataset')} ({metadata.get('files_created', 0)} files, {metadata.get('similarity_type', 'unknown')} similarity)",
+                            "icon": "🧪",
+                            "color": "purple",
+                            "language": metadata.get('language', 'mixed'),
+                            "size": f"{metadata.get('files_created', 0)} files",
+                            "created_by": metadata.get('created_by', 'Unknown'),
+                            "created_at": metadata.get('created_at', 'Unknown'),
+                            "similarity_type": metadata.get('similarity_type', 'unknown'),
+                            "is_demo": True
+                        }
+                        datasets.append(demo_dataset)
+                    except Exception as e:
+                        print(f"Error loading demo dataset {item.name}: {e}")
+                        continue
+
+    return JSONResponse(content={"datasets": datasets})
 
 
 @app.post("/api/benchmark")

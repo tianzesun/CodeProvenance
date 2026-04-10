@@ -363,7 +363,8 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   const handleDragOver = (e) => e.preventDefault();
 
-  const activeDataset = DATASETS.find(d => d.id === selectedDataset);
+  // Find active dataset from benchmarkDatasets instead of hardcoded DATASETS
+  const activeDataset = benchmarkDatasets.find(d => d.id === selectedDataset);
   const canProceed = uploadMode === 'builtin' ? !!selectedDataset :
     uploadMode === 'individual' ? files.length >= 2 :
     files.length >= 1;
@@ -400,19 +401,32 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             <div className="space-y-5">
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Built-in Test Suites</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {DATASETS.map(ds => {
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {benchmarkDatasets.map(ds => {
                     const isActive = selectedDataset === ds.id;
+                    const isDemo = ds.is_demo;
                     return (
                       <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
                         className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
                           isActive ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20' : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
                         }`}>
                         {isActive && <div className="absolute top-2 right-2"><CheckCircle2 size={14} className="text-violet-600" /></div>}
-                        <div className="text-xl mb-2">{ds.icon}</div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="text-xl">{ds.icon}</div>
+                          {isDemo && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Demo</span>}
+                        </div>
                         <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
                         <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                        <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} test cases</div>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className={`text-xs font-medium ${
+                            ds.color === 'blue' ? 'text-blue-600' :
+                            ds.color === 'green' ? 'text-green-600' :
+                            ds.color === 'purple' ? 'text-purple-600' :
+                            ds.color === 'violet' ? 'text-violet-600' :
+                            'text-slate-600'
+                          }`}>{ds.language || 'mixed'}</span>
+                          <span className="text-xs text-slate-500">{ds.size}</span>
+                        </div>
                       </button>
                     );
                   })}
@@ -447,20 +461,61 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
               {activeDataset && (
                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Test cases in "{activeDataset.name}"</p>
-                  <div className="grid md:grid-cols-3 gap-2">
-                    {activeDataset.cases.map(tc => (
-                      <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${
-                          tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                        }`} />
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
-                          <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    {activeDataset.is_demo ? 'Dataset Info' : 'Test cases in'} "{activeDataset.name}"
+                  </p>
+                  {activeDataset.is_demo ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                          <div className="text-lg font-bold text-violet-600">{activeDataset.language || 'Mixed'}</div>
+                          <div className="text-xs text-slate-500">Language</div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                          <div className="text-lg font-bold text-violet-600">{activeDataset.size || 'Unknown'}</div>
+                          <div className="text-xs text-slate-500">Size</div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                          <div className="text-lg font-bold text-violet-600 capitalize">{activeDataset.similarity_type || 'Unknown'}</div>
+                          <div className="text-xs text-slate-500">Similarity Type</div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                          <div className="text-lg font-bold text-violet-600">{activeDataset.created_by || 'Unknown'}</div>
+                          <div className="text-xs text-slate-500">Created By</div>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <div className="text-blue-600 mt-0.5">ℹ️</div>
+                          <div>
+                            <div className="text-sm font-medium text-blue-900">Demo Dataset</div>
+                            <div className="text-xs text-blue-700 mt-1">
+                              This dataset contains generated code pairs for testing plagiarism detection algorithms.
+                              Original and modified versions are included for comprehensive evaluation.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-2">
+                      {activeDataset.cases?.map(tc => (
+                        <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${
+                            tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                          }`} />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
+                            <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
+                          </div>
+                        </div>
+                      )) || (
+                        <div className="col-span-full text-center py-4 text-slate-500">
+                          No test cases defined for this dataset
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -539,8 +594,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [results, setResults] = useState(null);
   const cancelRef = useRef(false);
 
-  const activeDataset = DATASETS.find(d => d.id === selectedDataset) ||
-    benchmarkDatasets.find(d => d.id === selectedDataset);
+  const activeDataset = benchmarkDatasets.find(d => d.id === selectedDataset);
 
   const toolNames = selectedTools.map(id => TOOLS.find(t => t.id === id)?.name).filter(Boolean);
 
@@ -552,21 +606,22 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     setProgressPct(10);
 
     try {
-      if (uploadMode === 'builtin' && activeDataset?.cases) {
-        // Run all test cases in the built-in dataset
-        const allResults = [];
-        const cases = activeDataset.cases;
+      if (uploadMode === 'builtin' && activeDataset) {
+        if (activeDataset.cases && !activeDataset.is_demo) {
+          // Run all test cases in the built-in dataset (non-demo)
+          const allResults = [];
+          const cases = activeDataset.cases;
 
-        for (let i = 0; i < cases.length; i++) {
-          if (cancelRef.current) break;
-          const tc = cases[i];
-          setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
-          setProgressPct(10 + ((i / cases.length) * 80));
+          for (let i = 0; i < cases.length; i++) {
+            if (cancelRef.current) break;
+            const tc = cases[i];
+            setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
+            setProgressPct(10 + ((i / cases.length) * 80));
 
-          const blobA = new Blob([tc.codeA], { type: 'text/plain' });
-          const blobB = new Blob([tc.codeB], { type: 'text/plain' });
-          const fileA = new File([blobA], `${tc.id}_a.py`);
-          const fileB = new File([blobB], `${tc.id}_b.py`);
+            const blobA = new Blob([tc.codeA], { type: 'text/plain' });
+            const blobB = new Blob([tc.codeB], { type: 'text/plain' });
+            const fileA = new File([blobA], `${tc.id}_a.py`);
+            const fileB = new File([blobB], `${tc.id}_b.py`);
 
           const formData = new FormData();
           formData.append('files', fileA);
@@ -589,8 +644,34 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           // Merge results
           const merged = allResults[0];
           merged.pair_results = allResults.flatMap(r => r.pair_results || []);
-          setResults({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() });
-          setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
+            setResults({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+            setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
+          }
+        } else if (activeDataset.is_demo) {
+          // Handle demo datasets
+          setProgress('Loading demo dataset...');
+          setProgressPct(30);
+
+          const formData = new FormData();
+          selectedTools.forEach(t => formData.append('tools', t));
+          formData.append('dataset', activeDataset.id);
+
+          try {
+            setProgress('Running benchmark analysis...');
+            setProgressPct(50);
+
+            const res = await axios.post(`${API}/api/benchmark`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+
+            setProgressPct(100);
+            setProgress('Complete!');
+            setResults({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+            setTimeout(() => onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
+          } catch (err) {
+            setError('Failed to run benchmark on demo dataset');
+            setProgress('Error occurred');
+          }
         }
       } else {
         // Upload mode
@@ -1146,7 +1227,7 @@ export default function BenchmarkPage() {
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [selectedTools, setSelectedTools] = useState([]);
-  const [selectedDataset, setSelectedDataset] = useState('basic-clone');
+  const [selectedDataset, setSelectedDataset] = useState(null);
   const [uploadMode, setUploadMode] = useState('builtin');
   const [files, setFiles] = useState([]);
   const [benchmarkDatasets, setBenchmarkDatasets] = useState([]);
