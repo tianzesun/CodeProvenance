@@ -2,7 +2,9 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { useState, useCallback, useEffect } from 'react';
+import { useAuth } from '@/components/AuthProvider';
+import Link from 'next/link';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import {
@@ -17,61 +19,165 @@ import {
 } from 'lucide-react';
 
 const API = '';
+const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
+const UPLOAD_ENGINE_OPTIONS = [
+  { key: 'token', label: 'Token' },
+  { key: 'ast', label: 'AST' },
+  { key: 'winnowing', label: 'Winnowing' },
+  { key: 'gst', label: 'GST' },
+  { key: 'semantic', label: 'Semantic' },
+];
 
 export default function UploadPage() {
   const router = useRouter();
-  const [mode, setMode] = useState(() => {
-    if (typeof window === 'undefined') {
-      return 'individual';
-    }
-
-    const requestedMode = new URLSearchParams(window.location.search).get('mode');
-    return requestedMode === 'individual' || requestedMode === 'zip' ? requestedMode : 'individual';
-  });
+  const { user, loading: authLoading } = useAuth();
   const [files, setFiles] = useState([]);
-  const [zipFile, setZipFile] = useState(null);
   const [courseName, setCourseName] = useState('');
   const [assignmentName, setAssignmentName] = useState('');
   const [threshold, setThreshold] = useState(0.5);
+  const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [thresholdLoading, setThresholdLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const zipFile = useMemo(() => {
+    if (files.length !== 1) {
+      return null;
+    }
+    const [file] = files;
+    return file.name.toLowerCase().endsWith('.zip') ? file : null;
+  }, [files]);
+  const selectedFiles = useMemo(() => (zipFile ? [] : files), [files, zipFile]);
+  const hasMixedZipSelection = useMemo(
+    () => files.length > 1 && files.some((file) => file.name.toLowerCase().endsWith('.zip')),
+    [files],
+  );
+  const canRunCheck = useMemo(() => {
+    if (uploading || hasMixedZipSelection) {
+      return false;
+    }
+    if (activeEngines.length === 0) {
+      return false;
+    }
+    if (zipFile) {
+      return true;
+    }
+    return files.length >= 2;
+  }, [activeEngines.length, files.length, hasMixedZipSelection, uploading, zipFile]);
+  const uploadFormStorageKey = useMemo(
+    () => `${UPLOAD_FORM_STORAGE_KEY}:${user?.tenant_id || 'no-tenant'}:${user?.id || 'guest'}`,
+    [user?.id, user?.tenant_id],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    axios
+      .get(`${API}/api/upload-settings`)
+      .then((res) => {
+        if (!active) {
+          return;
+        }
+        const nextThreshold = Number(res.data?.default_threshold);
+        setThreshold(Number.isFinite(nextThreshold) ? nextThreshold : 0.5);
+        const nextEngineKeys = Array.isArray(res.data?.active_engine_keys) ? res.data.active_engine_keys : [];
+        setActiveEngines(
+          nextEngineKeys.length > 0
+            ? nextEngineKeys
+            : UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key),
+        );
+      })
+      .catch(() => {
+        if (active) {
+          setThreshold(0.5);
+          setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setThresholdLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(uploadFormStorageKey);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.course_name === 'string') {
+        setCourseName(parsed.course_name);
+      }
+      if (typeof parsed.assignment_name === 'string') {
+        setAssignmentName(parsed.assignment_name);
+      }
+    } catch {
+      // Ignore malformed saved form data.
+    }
+  }, [authLoading, uploadFormStorageKey]);
+
+  useEffect(() => {
+    if (authLoading || typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      uploadFormStorageKey,
+      JSON.stringify({
+        course_name: courseName,
+        assignment_name: assignmentName,
+      }),
+    );
+  }, [assignmentName, authLoading, courseName, uploadFormStorageKey]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
-    if (mode === 'individual') {
-      setFiles(Array.from(e.dataTransfer.files));
-    } else {
-      setZipFile(e.dataTransfer.files[0]);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (!droppedFiles.length) {
+      return;
     }
-  }, [mode]);
+    setFiles(droppedFiles);
+  }, []);
 
   const handleSubmit = async () => {
     setError('');
-    if (mode === 'individual' && files.length < 2) {
-      setError('Select at least 2 submissions');
+    if (hasMixedZipSelection) {
+      setError('Upload either one ZIP archive or multiple submission files, not both together.');
       return;
     }
-    if (mode === 'zip' && !zipFile) {
-      setError('Select a ZIP file');
+    if (activeEngines.length === 0) {
+      setError('Select at least one engine for this assignment check.');
+      return;
+    }
+    if (!zipFile && files.length < 2) {
+      setError('Select at least 2 submissions');
       return;
     }
 
     setUploading(true);
     const formData = new FormData();
 
-    if (mode === 'individual') {
-      files.forEach((f) => formData.append('files', f));
-    } else {
+    if (zipFile) {
       formData.append('file', zipFile);
+    } else {
+      files.forEach((f) => formData.append('files', f));
     }
     formData.append('course_name', courseName || assignmentName || 'Assignment Check');
     formData.append('assignment_name', assignmentName || courseName || 'Assignment Check');
     formData.append('threshold', threshold);
+    formData.append('engine_keys', JSON.stringify(activeEngines));
 
     try {
-      const url = mode === 'individual'
-        ? `${API}/api/upload`
-        : `${API}/api/upload-zip`;
+      const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
       const res = await axios.post(url, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -114,111 +220,113 @@ export default function UploadPage() {
     }
   };
 
+  const toggleEngine = useCallback((engineKey) => {
+    setActiveEngines((current) =>
+      current.includes(engineKey)
+        ? current.filter((key) => key !== engineKey)
+        : [...current, engineKey],
+    );
+  }, []);
+
   return (
     <DashboardLayout>
       <div className="p-4 lg:p-6">
         <div className="">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Check Assignment</h1>
-            <p className="text-slate-500 mt-1.5">
-              Upload the submissions for one assignment, run the similarity check, and open the result when it is ready.
-            </p>
-          </div>
-
-          {/* Mode Toggle */}
-          <div className="flex gap-2 mb-6">
+          <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Check Assignment</h1>
+              <p className="mt-1.5 text-slate-500">
+                Upload the submissions for one assignment, run the similarity check, and open the result when it is ready.
+              </p>
+            </div>
             <button
-              onClick={() => setMode('individual')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                mode === 'individual'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'theme-button-secondary'
-              }`}
+              onClick={handleSubmit}
+              disabled={!canRunCheck}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
-              <FileUp size={16} />
-              Individual Files
-            </button>
-            <button
-              onClick={() => setMode('zip')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                mode === 'zip'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                  : 'theme-button-secondary'
-              }`}
-            >
-              <FolderArchive size={16} />
-              ZIP Archive
+              {uploading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  Run Check
+                </>
+              )}
             </button>
           </div>
 
           <div className="theme-card rounded-2xl overflow-hidden">
             <div className="p-6">
-              {/* Drop Zone */}
-              <div
-                onDrop={handleDrop}
-                onDragOver={(e) => e.preventDefault()}
-                className="border-2 border-dashed border-slate-200 rounded-xl p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group"
-                onClick={() => {
-                  if (mode === 'individual') {
+              <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+                {/* Drop Zone */}
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={(e) => e.preventDefault()}
+                  className="border-2 border-dashed border-slate-200 rounded-xl p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group min-h-[260px] h-full flex flex-col items-center justify-center"
+                  onClick={() => {
                     document.getElementById('fileInput').click();
-                  } else {
-                    document.getElementById('zipInput').click();
-                  }
-                }}
-              >
-                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-50 transition-colors">
-                  <UploadIcon size={24} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                  }}
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-50 transition-colors">
+                    <UploadIcon size={24} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-700 mb-1">
+                    Drop submission files or one ZIP archive here
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Upload multiple code files, or one ZIP archive containing the submissions
+                  </p>
+                  <input
+                    id="fileInput"
+                    type="file"
+                    multiple
+                    accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
+                    className="hidden"
+                    onChange={(e) => setFiles(Array.from(e.target.files))}
+                  />
                 </div>
-                <p className="text-sm font-semibold text-slate-700 mb-1">
-                  {mode === 'individual'
-                    ? 'Drop files here or click to browse'
-                    : 'Drop ZIP file here or click to browse'}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {mode === 'individual'
-                    ? 'Python, Java, C/C++, JavaScript, Rust, Go, and 20+ languages'
-                    : 'All code files within the archive will be extracted and analyzed'}
-                </p>
-                <input
-                  id="fileInput"
-                  type="file"
-                  multiple
-                  accept=".py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
-                  className="hidden"
-                  onChange={(e) => setFiles(Array.from(e.target.files))}
-                />
-                <input
-                  id="zipInput"
-                  type="file"
-                  accept=".zip"
-                  className="hidden"
-                  onChange={(e) => setZipFile(e.target.files[0])}
-                />
-              </div>
 
-              {/* File List */}
-              {(files.length > 0 || zipFile) && (
-                <div className="mt-4">
-                  <div className="flex items-center justify-between mb-2">
+                {/* File List */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 min-h-[260px] h-full flex flex-col">
+                  <div className="mb-3 flex items-center justify-between">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      {mode === 'individual' ? `${files.length} files selected` : 'Archive selected'}
+                      {files.length > 0
+                        ? zipFile
+                          ? 'Archive selected'
+                          : `${selectedFiles.length} files selected`
+                        : 'No files selected'}
                     </span>
-                    {mode === 'individual' && files.length > 0 && (
+                    {files.length > 0 ? (
                       <button
                         onClick={() => setFiles([])}
                         className="text-xs text-slate-400 hover:text-red-500 transition-colors"
                       >
                         Clear all
                       </button>
-                    )}
+                    ) : null}
                   </div>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto scrollbar-thin pr-1">
-                    {mode === 'individual'
-                      ? files.map((f, i) => (
+
+                  {files.length > 0 ? (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto scrollbar-thin pr-1">
+                      {zipFile ? (
+                        <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="w-7 h-7 rounded-md bg-amber-50 flex items-center justify-center shrink-0">
+                              <FolderArchive size={12} className="text-amber-600" />
+                            </div>
+                            <span className="font-medium text-slate-700 truncate">{zipFile.name}</span>
+                          </div>
+                          <span className="text-xs text-slate-400 ml-2">{(zipFile.size / 1024).toFixed(1)} KB</span>
+                        </div>
+                      ) : (
+                        selectedFiles.map((f, i) => (
                           <div
                             key={i}
-                            className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm group/file"
+                            className="flex items-center justify-between px-3 py-2.5 bg-white rounded-lg text-sm group/file"
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               <div className="w-7 h-7 rounded-md bg-emerald-50 flex items-center justify-center shrink-0">
@@ -240,20 +348,19 @@ export default function UploadPage() {
                             </div>
                           </div>
                         ))
-                      : zipFile && (
-                          <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 rounded-lg text-sm">
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <div className="w-7 h-7 rounded-md bg-amber-50 flex items-center justify-center shrink-0">
-                                <FolderArchive size={12} className="text-amber-600" />
-                              </div>
-                              <span className="font-medium text-slate-700 truncate">{zipFile.name}</span>
-                            </div>
-                            <span className="text-xs text-slate-400 ml-2">{(zipFile.size / 1024).toFixed(1)} KB</span>
-                          </div>
-                        )}
-                  </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white text-center">
+                      <div className="mb-2 rounded-full bg-slate-100 p-3 text-slate-400">
+                        <FileUp size={18} />
+                      </div>
+                      <p className="text-sm font-medium text-slate-600">Selected files will appear here</p>
+                      <p className="mt-1 text-xs text-slate-400">Choose multiple files or one ZIP archive to begin</p>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Error */}
               {error && (
@@ -266,10 +373,6 @@ export default function UploadPage() {
 
             {/* Settings Footer */}
             <div className="border-t border-slate-100 bg-slate-50/50 p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Settings2 size={16} className="text-slate-400" />
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Check Settings</span>
-              </div>
 
               <div className="grid md:grid-cols-2 gap-4 mb-5">
                 <div>
@@ -298,48 +401,66 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              <div className="mb-6">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Similarity Threshold
-                  </label>
-                  <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-lg">
-                    {(threshold * 100).toFixed(0)}%
+              <div className="mb-6 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Current Similarity Threshold
+                  </div>
+                  <span className="mt-2 inline-flex shrink-0 rounded-lg bg-blue-50 px-2.5 py-1 text-sm font-bold text-blue-600">
+                    {thresholdLoading ? '...' : `${(threshold * 100).toFixed(0)}%`}
                   </span>
+                  <div className="mt-2 text-sm text-slate-600">
+                    {thresholdLoading
+                      ? 'Loading current threshold...'
+                      : 'This score decides when a result is flagged for review after the engines finish scoring it.'}
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="0.9"
-                  step="0.05"
-                  value={threshold}
-                  onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-                <div className="flex justify-between text-xs text-slate-400 mt-1.5">
-                  <span>Strict (10%)</span>
-                  <span>Moderate (50%)</span>
-                  <span>Lenient (90%)</span>
+
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Engines for This Check
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {thresholdLoading ? (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                        Loading...
+                      </span>
+                    ) : (
+                      UPLOAD_ENGINE_OPTIONS.map((engine) => {
+                        const active = activeEngines.includes(engine.key);
+                        return (
+                          <button
+                            key={engine.key}
+                            type="button"
+                            onClick={() => toggleEngine(engine.key)}
+                            className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${active
+                                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
+                              }`}
+                          >
+                            {engine.label}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="mt-2 text-sm text-slate-600">
+                    {thresholdLoading
+                      ? 'Loading current engines...'
+                      : activeEngines.length > 0
+                        ? 'Choose which engines should contribute to the similarity score for this assignment check.'
+                        : 'Select at least one engine for this assignment check.'}
+                  </div>
                 </div>
+                <p className="mt-3 text-xs text-slate-500">
+                  Update these values from the{' '}
+                  <Link href="/settings" className="font-semibold text-blue-600 hover:text-blue-700">
+                    Settings page
+                  </Link>
+                  .
+                </p>
               </div>
 
-              <button
-                onClick={handleSubmit}
-                disabled={uploading}
-                className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 disabled:from-blue-300 disabled:to-blue-200 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 disabled:shadow-none"
-              >
-                {uploading ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Running assignment check...
-                  </>
-                ) : (
-                  <>
-                    <Check size={18} />
-                    Run Assignment Check
-                  </>
-                )}
-              </button>
             </div>
           </div>
         </div>

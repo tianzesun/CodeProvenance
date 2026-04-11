@@ -3,7 +3,11 @@ import type { NextConfig } from 'next';
 const backendOrigin =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.API_URL ||
-  'http://127.0.0.1:8500';
+  process.env.BACKEND_URL;
+
+if (!backendOrigin) {
+  throw new Error('Set BACKEND_URL, API_URL, or NEXT_PUBLIC_API_URL before starting the dashboard.');
+}
 
 const nextConfig: NextConfig = {
   async rewrites() {

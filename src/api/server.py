@@ -21,6 +21,7 @@ import subprocess
 import csv
 import xml.etree.ElementTree as ET
 import urllib.request
+from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
@@ -48,14 +49,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="IntegrityDesk API")
 
+frontend_origin_candidates = {settings.FRONTEND_URL.rstrip("/")}
+parsed_frontend_url = urlparse(settings.FRONTEND_URL)
+if parsed_frontend_url.hostname == "localhost":
+    frontend_origin_candidates.add(settings.FRONTEND_URL.replace("localhost", "127.0.0.1", 1).rstrip("/"))
+elif parsed_frontend_url.hostname == "127.0.0.1":
+    frontend_origin_candidates.add(settings.FRONTEND_URL.replace("127.0.0.1", "localhost", 1).rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3003",
-        "http://127.0.0.1:3003",
-    ],
+    allow_origins=sorted(frontend_origin_candidates),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2233,6 +2236,7 @@ async def upload_files(
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
+    engine_keys: str = Form(default=""),
 ):
     current_user = _require_current_user(request)
     job_id = str(uuid.uuid4())[:8]
@@ -2250,7 +2254,7 @@ async def upload_files(
     if len(saved_files) < 2:
         return JSONResponse(status_code=400, content={"error": "At least 2 code files are required"})
 
-    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user)
+    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user, engine_keys)
 
 
 @app.post("/api/upload-zip")
@@ -2260,6 +2264,7 @@ async def upload_zip(
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
+    engine_keys: str = Form(default=""),
 ):
     current_user = _require_current_user(request)
     if not file.filename or not file.filename.lower().endswith('.zip'):
@@ -2278,10 +2283,21 @@ async def upload_zip(
         shutil.rmtree(job_dir)
         return JSONResponse(status_code=400, content={"error": "Zip must contain at least 2 code files"})
 
-    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user)
+    return await _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user, engine_keys)
 
 
-async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user: Dict[str, Any]):
+async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold, current_user: Dict[str, Any], engine_keys_raw: str = ""):
+    try:
+        requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
+        if not isinstance(requested_engine_keys, list):
+            requested_engine_keys = []
+    except json.JSONDecodeError:
+        requested_engine_keys = []
+
+    engine_weights = _get_upload_engine_weights(current_user.get("tenant_id"), [str(key) for key in requested_engine_keys])
+    selected_engine_keys = [key for key, value in engine_weights.items() if _coerce_float(value) > 0]
+    fusion_weights = _build_fusion_weights(engine_weights)
+
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id, "course_name": course_name or "Unnamed Course",
@@ -2293,6 +2309,7 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         "tenant_id": current_user.get("tenant_id"),
         "owner_user_id": current_user.get("id"),
         "owner_user_email": current_user.get("email"),
+        "active_engines": [ENGINE_DISPLAY_LABELS.get(key, key.title()) for key in selected_engine_keys],
     }
     _persist_job(job_id)
 
@@ -2306,7 +2323,7 @@ async def _run_analysis(job_id, job_dir, course_name, assignment_name, threshold
         _jobs[job_id]["status"] = "analyzing"
         _persist_job(job_id)
 
-        service = BatchDetectionService(threshold=threshold)
+        service = BatchDetectionService(threshold=threshold, weights=fusion_weights or None)
         results = service.compare_all_pairs(submissions)
         report = service.generate_report(results)
         ai_detection = _build_ai_detection_summary(submissions)
@@ -3582,6 +3599,17 @@ SETTINGS_ATTR_MAP = {
 }
 
 SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key"}
+ENGINE_DISPLAY_LABELS = {
+    "token": "Token",
+    "ast": "AST",
+    "winnowing": "Winnowing",
+    "gst": "GST",
+    "semantic": "Semantic",
+    "web": "Web",
+    "ai_detection": "AI Detection",
+    "execution_cfg": "Execution/CFG",
+}
+UPLOAD_ENGINE_KEYS = ("token", "ast", "winnowing", "gst", "semantic")
 
 
 def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
@@ -3616,6 +3644,33 @@ def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
     for key, attr in SETTINGS_ATTR_MAP.items():
         if key in merged:
             setattr(settings, attr, merged[key])
+
+
+def _get_upload_engine_weights(tenant_id: Optional[str], selected_keys: Optional[List[str]] = None) -> Dict[str, float]:
+    payload = _build_settings_payload(tenant_id)
+    engine_weights = _normalize_engine_weights(payload.get("engine_weights"))
+
+    if selected_keys:
+        selected = {key for key in selected_keys if key in UPLOAD_ENGINE_KEYS}
+        if selected:
+            for key in UPLOAD_ENGINE_KEYS:
+                if key not in selected:
+                    engine_weights[key] = 0.0
+
+    return {key: _coerce_float(engine_weights.get(key)) for key in UPLOAD_ENGINE_KEYS}
+
+
+def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
+    fusion_weights = {
+        "fingerprint": _coerce_float(engine_weights.get("token")),
+        "ast": _coerce_float(engine_weights.get("ast")),
+        "winnowing": _coerce_float(engine_weights.get("winnowing")),
+        "ngram": _coerce_float(engine_weights.get("gst")),
+        "embedding": _coerce_float(engine_weights.get("semantic")),
+    }
+    if not any(value > 0 for value in fusion_weights.values()):
+        return {}
+    return fusion_weights
 
 
 def _issue_auth_cookie(response: Response, user: User) -> None:
@@ -4337,6 +4392,25 @@ async def get_settings(request: Request):
     return JSONResponse(content=_build_settings_payload(current_user.get("tenant_id")))
 
 
+@app.get("/api/upload-settings")
+async def get_upload_settings(request: Request):
+    current_user = _require_current_user(request)
+    payload = _build_settings_payload(current_user.get("tenant_id"))
+    engine_weights = _get_upload_engine_weights(current_user.get("tenant_id"))
+    active_engines = [
+        ENGINE_DISPLAY_LABELS.get(key, key.replace("_", " ").title())
+        for key, value in engine_weights.items()
+        if _coerce_float(value) > 0
+    ]
+    return JSONResponse(
+        content={
+            "default_threshold": payload.get("default_threshold", settings.DEFAULT_THRESHOLD),
+            "active_engines": active_engines,
+            "active_engine_keys": [key for key, value in engine_weights.items() if _coerce_float(value) > 0],
+        }
+    )
+
+
 @app.patch("/api/settings")
 async def update_settings(request: Request):
     current_user = _require_current_user(request, admin_only=True)
@@ -4373,7 +4447,7 @@ async def update_settings(request: Request):
 
 def main():
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8500)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("BACKEND_PORT", "8000")))
 
 
 if __name__ == "__main__":

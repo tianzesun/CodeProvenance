@@ -1,13 +1,15 @@
 #!/bin/bash
 # Start IntegrityDesk - Backend API + Next.js Dashboard
-# Usage: ./scripts/start.sh [dashboard_port]
-# Default: Backend on 8500, Dashboard on 3003
+# Usage: ./scripts/start.sh [dashboard_port] [backend_port]
+# Default: Backend on 8000, Dashboard on 3000
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DASHBOARD_PORT="${1:-3003}"
-BACKEND_PORT=8500
+DASHBOARD_PORT="${1:-${PORT:-3000}}"
+BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
+BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
+BACKEND_URL="${BACKEND_URL:-http://${BACKEND_HOST}:${BACKEND_PORT}}"
 VENV_PYTHON="$PROJECT_DIR/venv/bin/python"
 DATABASE_URL="${DATABASE_URL:-sqlite:///./codeprovenance.db}"
 
@@ -15,7 +17,7 @@ echo "============================================"
 echo "  IntegrityDesk - Academic Integrity Platform"
 echo "============================================"
 echo ""
-echo "Backend API:  http://localhost:${BACKEND_PORT}"
+echo "Backend API:  ${BACKEND_URL}"
 echo "Dashboard:    http://localhost:${DASHBOARD_PORT}"
 echo ""
 
@@ -50,6 +52,10 @@ sleep 2
 
 echo "Starting Next.js dashboard on port ${DASHBOARD_PORT}..."
 cd "$DASHBOARD_DIR"
+export PORT="$DASHBOARD_PORT"
+export BACKEND_URL
+export API_URL="$BACKEND_URL"
+export NEXT_PUBLIC_API_URL="$BACKEND_URL"
 npx next dev -p "$DASHBOARD_PORT" &
 DASHBOARD_PID=$!
 
@@ -63,7 +69,7 @@ trap cleanup INT TERM
 
 echo ""
 echo "Services ready:"
-echo "  Backend API: http://localhost:${BACKEND_PORT}"
+echo "  Backend API: ${BACKEND_URL}"
 echo "  Dashboard:   http://localhost:${DASHBOARD_PORT}"
 echo ""
 echo "Press Ctrl+C to stop"; echo ""

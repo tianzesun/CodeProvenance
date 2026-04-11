@@ -203,7 +203,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     db.commit()
 
     # Send email with reset link
-    reset_url = f"http://localhost:3000/reset-password?token={reset_token}"  # TODO: Use settings.FRONTEND_URL
+    reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={reset_token}"
     await EmailService.send_password_reset_email(user.email, reset_url)
 
     return {"message": "If an account with this email exists, a password reset link has been sent."}
@@ -261,5 +261,4 @@ async def update_me(
         "full_name": user.full_name,
         "role": user.role,
         "tenant_id": user.tenant_id
-    }</content>
-<parameter name="filePath">src/api/routes/auth.py
+    }

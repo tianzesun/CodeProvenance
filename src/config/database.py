@@ -1,7 +1,7 @@
 """Database configuration and session management."""
 import os
 from typing import Optional, ContextManager
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 from contextvars import ContextVar
 
@@ -71,9 +71,36 @@ def clear_tenant_context() -> None:
     _tenant_context.set(None)
 
 
+def _apply_sqlite_compat_migrations() -> None:
+    """Patch older SQLite databases with columns added after initial table creation."""
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names:
+        return
+
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    statements = []
+
+    if "reset_token" not in user_columns:
+        statements.append("ALTER TABLE users ADD COLUMN reset_token VARCHAR(255)")
+    if "reset_token_expires" not in user_columns:
+        statements.append("ALTER TABLE users ADD COLUMN reset_token_expires DATETIME")
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def init_db() -> None:
     """Initialize the database, creating all tables."""
     Base.metadata.create_all(bind=engine)
+    _apply_sqlite_compat_migrations()
 
 
 def drop_db() -> None:

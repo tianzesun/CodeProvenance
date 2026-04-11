@@ -11,9 +11,14 @@ echo ""
 # Check backend API
 BACKEND_PID=$(pgrep -f "uvicorn src.api.server:app" 2>/dev/null || echo "")
 if [ -n "$BACKEND_PID" ]; then
+    BACKEND_PORT=$(ss -tulpn | grep "$BACKEND_PID" | grep LISTEN | awk '{print $5}' | cut -d: -f2 | head -1)
     echo "✅ Backend API:     RUNNING (PID: $BACKEND_PID)"
-    echo "                   Listening on http://localhost:8500"
-    echo "                   API docs: http://localhost:8500/docs"
+    if [ -n "$BACKEND_PORT" ]; then
+        echo "                   Listening on http://localhost:$BACKEND_PORT"
+        echo "                   API docs: http://localhost:$BACKEND_PORT/docs"
+    else
+        echo "                   Listening on configured backend port"
+    fi
 else
     echo "❌ Backend API:     STOPPED"
 fi
@@ -26,7 +31,7 @@ if [ -n "$DASHBOARD_PID" ]; then
     if [ -n "$DASHBOARD_PORT" ]; then
         echo "                   Listening on http://localhost:$DASHBOARD_PORT"
     else
-        echo "                   Listening on http://localhost:3000 / 3003"
+        echo "                   Listening on http://localhost:3000"
     fi
 else
     echo "❌ Dashboard:       STOPPED"
@@ -34,5 +39,9 @@ fi
 
 echo ""
 echo "Open ports:"
-ss -tulpn 2>/dev/null | grep -E "(8500|3000|3003)" | awk '{print "  "$5}' | sort
+for PID in $BACKEND_PID $DASHBOARD_PID; do
+    if [ -n "$PID" ]; then
+        ss -tulpn 2>/dev/null | grep "$PID" | grep LISTEN | awk '{print "  "$5}'
+    fi
+done | sort -u
 echo ""
