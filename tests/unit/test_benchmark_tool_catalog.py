@@ -6,15 +6,23 @@ def _tool_by_id(tools, tool_id):
 
 
 def test_list_benchmark_tools_reflects_repo_inventory(tmp_path, monkeypatch):
-    for name in [
-        "JPlag",
-        "NiCad-6.2",
-        "dolos",
-        "dolos-2.9.3",
-        "STRANGE",
-        "gptzero",
-    ]:
-        (tmp_path / name).mkdir()
+    (tmp_path / "JPlag").mkdir()
+    (tmp_path / "JPlag" / "jplag.jar").write_text("jar")
+
+    (tmp_path / "NiCad-6.2").mkdir()
+    (tmp_path / "NiCad-6.2" / "nicad6").write_text("#!/bin/sh\n")
+    (tmp_path / "freetxl" / "current" / "bin").mkdir(parents=True)
+    (tmp_path / "freetxl" / "current" / "bin" / "txl").write_text("#!/bin/sh\n")
+
+    (tmp_path / "dolos").mkdir()
+    (tmp_path / "dolos-2.9.3").mkdir()
+    (tmp_path / "dolos-cli" / "node_modules" / ".bin").mkdir(parents=True)
+    (tmp_path / "dolos-cli" / "node_modules" / ".bin" / "dolos").write_text("#!/bin/sh\n")
+    (tmp_path / "dolos-cli" / "node20" / "bin").mkdir(parents=True)
+    (tmp_path / "dolos-cli" / "node20" / "bin" / "node").write_text("#!/bin/sh\n")
+
+    (tmp_path / "STRANGE").mkdir()
+    (tmp_path / "gptzero").mkdir()
 
     monkeypatch.setattr(server, "TOOLS_DIR", tmp_path)
 
@@ -43,16 +51,40 @@ def test_list_benchmark_tools_reflects_repo_inventory(tmp_path, monkeypatch):
     assert gptzero["paths"] == ["tools/gptzero"]
 
 
-def test_run_competitor_tool_supports_expanded_repo_tools():
+def test_list_runnable_benchmark_tools_only_returns_verified_tools(tmp_path, monkeypatch):
+    (tmp_path / "JPlag").mkdir()
+    (tmp_path / "JPlag" / "jplag.jar").write_text("jar")
+    monkeypatch.setattr(server, "TOOLS_DIR", tmp_path)
+
+    runnable = server._list_runnable_benchmark_tools()
+
+    runnable_ids = {tool["id"] for tool in runnable}
+    assert "integritydesk" in runnable_ids
+    assert "jplag" in runnable_ids
+    assert "moss" not in runnable_ids
+    assert "sherlock" not in runnable_ids
+
+
+def test_run_competitor_tool_only_dispatches_real_cli_integrations(monkeypatch):
+    dispatch_calls = []
+
+    for tool_id in ["moss", "jplag", "dolos", "nicad", "pmd", "ac"]:
+        monkeypatch.setattr(
+            server,
+            f"_run_{tool_id}_cli",
+            lambda submissions, pairs, current=tool_id: dispatch_calls.append(current) or {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.5}]},
+        )
+
     submissions = {
         "a.py": "def add(a, b):\n    return a + b\n",
         "b.py": "def sum_numbers(x, y):\n    return x + y\n",
     }
     pairs = [("a.py", "b.py")]
 
-    for tool_id in ["moss", "jplag", "dolos", "nicad", "pmd", "sherlock", "sim"]:
+    for tool_id in ["moss", "jplag", "dolos", "nicad", "pmd", "ac"]:
         result = server._run_competitor_tool(tool_id, submissions, pairs)
-        assert result is not None, tool_id
-        assert "pairs" in result, tool_id
-        assert len(result["pairs"]) == 1, tool_id
-        assert 0.0 <= result["pairs"][0]["score"] <= 1.0, tool_id
+        assert result == {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.5}]}
+
+    assert dispatch_calls == ["moss", "jplag", "dolos", "nicad", "pmd", "ac"]
+    assert server._run_competitor_tool("sherlock", submissions, pairs) is None
+    assert server._run_competitor_tool("sim", submissions, pairs) is None

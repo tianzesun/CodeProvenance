@@ -495,6 +495,10 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
     return sorted(tools.values(), key=_tool_sort_key)
 
 
+def _list_runnable_benchmark_tools() -> List[Dict[str, Any]]:
+    return [tool for tool in _list_benchmark_tools() if tool.get("runnable")]
+
+
 def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
     extracted = []
     with zipfile.ZipFile(zip_path, 'r') as zf:
@@ -2465,7 +2469,7 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/benchmark-tools")
 async def get_benchmark_tools():
-    tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
+    tools = _list_runnable_benchmark_tools()
     return JSONResponse(content={"tools": tools})
 
 
@@ -2562,6 +2566,19 @@ async def run_benchmark(
     tools: List[str] = Form(default=[]),
     dataset: str = Form(default=""),
 ):
+    requested_tools = list(dict.fromkeys(tools))
+    runnable_tool_ids = {tool["id"] for tool in _list_runnable_benchmark_tools()}
+    invalid_tools = [tool for tool in requested_tools if tool not in runnable_tool_ids]
+    if invalid_tools:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Selected benchmark tools are not runnable in this environment",
+                "invalid_tools": invalid_tools,
+                "available_tools": sorted(runnable_tool_ids),
+            },
+        )
+
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -2584,7 +2601,7 @@ async def run_benchmark(
     all_pairs = [(file_list[i], file_list[j]) for i in range(len(file_list)) for j in range(i + 1, len(file_list))]
     tool_results = {}
 
-    if "integritydesk" in tools:
+    if "integritydesk" in requested_tools:
         try:
             service = BatchDetectionService(threshold=0.3)
             results = service.compare_all_pairs(submissions)
@@ -2593,7 +2610,7 @@ async def run_benchmark(
             logger.exception("IntegrityDesk benchmark failed")
             tool_results["integritydesk"] = {"error": str(e)}
 
-    for tool in tools:
+    for tool in requested_tools:
         if tool == "integritydesk":
             continue
         try:
@@ -2816,12 +2833,6 @@ def _run_pairwise_tool(submissions, pairs, scorer, tolerate_pair_errors: bool = 
     for fa, fb in pairs:
         try:
             score = _coerce_similarity_score(scorer(submissions[fa], submissions[fb]))
-            
-            # GLOBAL JPlag FIX: OVERRIDE ANY PERFECT 1.0 SCORE
-            # No real plagiarism detector ever returns exactly 100%
-            if score >= 0.999:
-                score = 0.87
-            
         except Exception:
             if not tolerate_pair_errors:
                 raise
