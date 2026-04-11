@@ -1,7 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
-import { motion, useScroll, useSpring, useTransform } from 'framer-motion';
+import { ReactNode, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
@@ -13,15 +12,9 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children, requiredRole }: DashboardLayoutProps) {
-  const { scrollY } = useScroll();
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading, bootstrapped } = useAuth();
-  
-  const headerOpacity = useTransform(scrollY, [0, 80], [0.7, 0.95]);
-  const headerBlur = useTransform(scrollY, [0, 80], [8, 20]);
-  const headerShadow = useTransform(scrollY, [0, 80], [0, 1]);
-  const headerBorder = useTransform(scrollY, [0, 80], [0, 1]);
 
   useEffect(() => {
     if (loading) {

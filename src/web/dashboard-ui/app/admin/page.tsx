@@ -26,8 +26,23 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
-function getErrorMessage(error: any): string {
-  return error?.response?.data?.detail || 'Unable to complete that action right now.';
+function getErrorMessage(error: unknown): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response &&
+    typeof error.response.data === 'object' &&
+    error.response.data !== null &&
+    'detail' in error.response.data &&
+    typeof error.response.data.detail === 'string'
+  ) {
+    return error.response.data.detail;
+  }
+
+  return 'Unable to complete that action right now.';
 }
 
 function validatePasswordInput(password: string): string | null {
@@ -52,7 +67,7 @@ export default function AdminPage() {
     tenant_name: '',
   });
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -62,14 +77,14 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [listUsers]);
 
   useEffect(() => {
     if (authLoading || !user || user.role !== 'admin') {
       return;
     }
     loadUsers();
-  }, [authLoading, user]);
+  }, [authLoading, loadUsers, user]);
 
   // Dataset creation state - optimized with refs to prevent unnecessary re-renders
   const datasetFormRef = useRef({
@@ -116,7 +131,7 @@ export default function AdminPage() {
   }, []);
 
   // Optimized form change handlers to prevent unnecessary re-renders
-  const handleDatasetFormChange = useCallback((field: string, value: any) => {
+  const handleDatasetFormChange = useCallback((field: string, value: string | number) => {
     setDatasetForm(prev => ({ ...prev, [field]: value }));
   }, []);
 
@@ -124,6 +139,60 @@ export default function AdminPage() {
   useEffect(() => {
     datasetFormRef.current = datasetForm;
   }, [datasetForm]);
+
+  const similarityHelpText = useMemo(() => {
+    const helpTexts: Record<string, string> = {
+      type1_exact: 'Creates identical code segments for testing exact copy detection.',
+      type2_renamed: 'Generates code with renamed variables and functions.',
+      type3_modified: 'Produces code with added comments, reordered statements, or modified structure.',
+      type4_semantic: 'Creates functionally equivalent code with different algorithms or syntax.',
+      token_similarity: 'Focuses on programming-language token patterns and usage.',
+      structural_similarity: 'Emphasizes code organization and structural similarities.',
+      semantic_similarity: 'Generates conceptually similar solutions using different approaches.',
+    };
+    return helpTexts[datasetForm.similarityType] || '';
+  }, [datasetForm.similarityType]);
+
+  const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const passwordError = validatePasswordInput(form.password);
+    if (!form.full_name.trim() || !form.email.trim()) {
+      setError('Full name and email are required.');
+      return;
+    }
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      await createUser({
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        role: form.role,
+        tenant_name: form.tenant_name.trim(),
+      });
+      setForm({
+        full_name: '',
+        email: '',
+        password: '',
+        role: 'professor',
+        tenant_name: '',
+      });
+      await loadUsers();
+      addNotification('success', 'User Created', 'The new account is ready to use.');
+    } catch (createError) {
+      const message = getErrorMessage(createError);
+      setError(message);
+      addNotification('error', 'User Creation Failed', message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const createDemoDataset = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -154,22 +223,52 @@ export default function AdminPage() {
         description: '',
         language: 'python',
         numFiles: 10,
-        similarityType: 'plagiarism',
+        similarityType: 'type1_exact',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Demo dataset creation error:', error);
 
       let errorTitle = 'Creation Failed';
       let errorMessage = 'Failed to create demo dataset.';
 
-      if (error?.response?.status === 401 || error?.response?.status === 403) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'status' in error.response &&
+        (error.response.status === 401 || error.response.status === 403)
+      ) {
         errorTitle = 'Authentication Required';
         errorMessage = 'Please ensure you are logged in as an administrator.';
-      } else if (error?.response?.data?.detail) {
+      } else if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        typeof error.response.data === 'object' &&
+        error.response.data !== null &&
+        'detail' in error.response.data &&
+        typeof error.response.data.detail === 'string'
+      ) {
         errorMessage = error.response.data.detail;
-      } else if (error?.response?.data?.message) {
+      } else if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        typeof error.response.data === 'object' &&
+        error.response.data !== null &&
+        'message' in error.response.data &&
+        typeof error.response.data.message === 'string'
+      ) {
         errorMessage = error.response.data.message;
-      } else if (error?.message) {
+      } else if (error instanceof Error) {
         errorMessage = 'Please check your connection and try again.';
       } else {
         errorMessage = 'Please check your permissions and try again.';
@@ -184,30 +283,7 @@ export default function AdminPage() {
   return (
     <DashboardLayout requiredRole="admin">
       <div className="px-4 py-4 lg:px-6 lg:py-6">
-        {/* Debug authentication status */}
-        {user && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Debug:</strong> Logged in as {user.email} (Role: {user.role})
-            </p>
-            <button
-              onClick={async () => {
-                try {
-                  const result = await axios.get('/api/auth/me');
-                  addNotification('info', 'API Test', 'Backend connection successful');
-                } catch (error: any) {
-                  addNotification('error', 'API Test Failed', error.message);
-                }
-              }}
-              className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-            >
-              Test API Access
-            </button>
-          </div>
-        )}
-
-        {/* Notification System - Optimized with useMemo */}
-        {useMemo(() => notifications.length > 0 && (
+        {notifications.length > 0 && (
           <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
             {notifications.map((notification) => (
               <div
@@ -247,7 +323,7 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
-        ), [notifications, removeNotification])}
+        )}
         <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="theme-card-strong theme-section-line rounded-[30px] p-6 lg:p-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -317,7 +393,7 @@ export default function AdminPage() {
               Every new account gets its own workspace tenant by default so professor results stay separated.
             </p>
 
-            <form className="mt-6 space-y-6" onSubmit={createDemoDataset}>
+            <form className="mt-6 space-y-6" onSubmit={handleCreateUser}>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Full Name</label>
                 <input
@@ -472,18 +548,7 @@ export default function AdminPage() {
                     <option value="semantic_similarity">Semantic Similarity (Conceptual equivalence)</option>
                   </select>
                   <p className="mt-2 text-xs text-slate-500">
-                    {useMemo(() => {
-                      const helpTexts: Record<string, string> = {
-                        'type1_exact': 'Creates identical code segments for testing exact copy detection',
-                        'type2_renamed': 'Generates code with renamed variables and functions',
-                        'type3_modified': 'Produces code with added comments, reordered statements, or modified structure',
-                        'type4_semantic': 'Creates functionally equivalent code with different algorithms/syntax',
-                        'token_similarity': 'Focuses on programming language token patterns and usage',
-                        'structural_similarity': 'Emphasizes code organization and architectural similarities',
-                        'semantic_similarity': 'Generates conceptually similar solutions using different approaches'
-                      };
-                      return helpTexts[datasetForm.similarityType] || '';
-                    }, [datasetForm.similarityType])}
+                    {similarityHelpText}
                   </p>
                 </div>
               </div>

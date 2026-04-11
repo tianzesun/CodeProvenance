@@ -17,6 +17,10 @@ import logging
 import hashlib
 import secrets
 import time
+import subprocess
+import csv
+import xml.etree.ElementTree as ET
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
@@ -32,6 +36,8 @@ from sqlalchemy import func, select
 from src.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.application.services.batch_detection_service import BatchDetectionService
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
+if settings.MOSS_USER_ID:
+    os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.config.database import SessionLocal
 from src.infrastructure.report_generator import ReportGenerator
 from src.infrastructure.reporting.evidence_pdf_exporter import _minimal_pdf_bytes
@@ -77,11 +83,12 @@ AUTH_EXEMPT_PATHS = {
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-RUNNABLE_BENCHMARK_TOOLS = {
+REAL_BENCHMARK_TOOL_IDS = {
     "integritydesk",
-    "moss",
-    "jplag",
+    "ac",
     "dolos",
+    "jplag",
+    "moss",
     "nicad",
     "pmd",
 }
@@ -152,7 +159,7 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     },
     "dolos": {
         "name": "Dolos",
-        "desc": "Language-aware token streams plus fingerprinting and MOSS-style winnowing.",
+        "desc": "Dodona Dolos CLI using real fingerprint-based plagiarism analysis.",
         "color": "#d97706",
         "gradient": "from-amber-500 to-amber-600",
         "bgLight": "bg-amber-50",
@@ -170,7 +177,7 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     },
     "pmd": {
         "name": "PMD CPD",
-        "desc": "Copy/Paste Detector that flags duplicated token sequences across submissions.",
+        "desc": "PMD Copy/Paste Detector executed from the bundled CLI distribution.",
         "color": "#0f766e",
         "gradient": "from-teal-500 to-teal-600",
         "bgLight": "bg-teal-50",
@@ -215,12 +222,12 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     },
     "ac": {
         "name": "AC",
-        "desc": "Jar-based comparison tool present in tools/, but not yet connected to Benchmark Suite runs.",
+        "desc": "Academic plagiarism comparison tool executed from the bundled CLI JAR.",
         "color": "#ea580c",
         "gradient": "from-orange-500 to-orange-600",
         "bgLight": "bg-orange-50",
         "ring": "ring-orange-500",
-        "engines": ["Installed"],
+        "engines": ["Token", "Distance"],
     },
     "vendetect": {
         "name": "VenDetect",
@@ -341,6 +348,38 @@ def _infer_language_from_filename(filename: str) -> str:
     return language_map.get(suffix, "python")
 
 
+def _infer_pmd_language_from_filename(filename: str) -> str:
+    language = _infer_language_from_filename(filename)
+    pmd_language_map = {
+        "javascript": "ecmascript",
+        "typescript": "typescript",
+        "csharp": "cs",
+    }
+    return pmd_language_map.get(language, language)
+
+
+def _write_submissions_to_directory(target_dir: PathLib, submissions: Dict[str, str]) -> Dict[str, str]:
+    written_paths: Dict[str, str] = {}
+    for filename, content in submissions.items():
+        file_path = target_dir / PathLib(filename).name
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+        written_paths[filename] = str(file_path)
+    return written_paths
+
+
+def _write_submissions_as_submission_dirs(target_dir: PathLib, submissions: Dict[str, str]) -> Dict[str, Dict[str, str]]:
+    written: Dict[str, Dict[str, str]] = {}
+    for index, (filename, content) in enumerate(submissions.items()):
+        submission_id = f"sub{index:03d}"
+        submission_dir = target_dir / submission_id
+        submission_dir.mkdir(parents=True, exist_ok=True)
+        file_path = submission_dir / PathLib(filename).name
+        file_path.write_text(content, encoding="utf-8")
+        written[submission_id] = {"filename": filename, "path": str(file_path)}
+    return written
+
+
 def _ai_bucket(score: float) -> str:
     if score >= AI_HIGH_RISK_THRESHOLD:
         return "high"
@@ -371,7 +410,7 @@ def _canonical_tool_id(directory_name: str) -> str:
 
 def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any]:
     metadata = BENCHMARK_TOOL_METADATA.get(tool_id, {})
-    runnable = tool_id in RUNNABLE_BENCHMARK_TOOLS
+    runnable = _is_real_benchmark_tool_available(tool_id)
     return {
         "id": tool_id,
         "name": metadata.get("name", tool_id.replace("-", " ").title()),
@@ -387,6 +426,32 @@ def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any
         "paths": [],
         "status": "Ready to run" if runnable else "Installed only",
     }
+
+
+def _is_real_benchmark_tool_available(tool_id: str) -> bool:
+    if tool_id not in REAL_BENCHMARK_TOOL_IDS:
+        return False
+    if tool_id == "integritydesk":
+        return True
+    if tool_id == "moss":
+        return bool(os.environ.get("MOSS_USER_ID")) and (TOOLS_DIR / "moss" / "moss.pl").exists()
+    if tool_id == "ac":
+        return (TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar").exists()
+    if tool_id == "dolos":
+        return (
+            (TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos").exists()
+            and (TOOLS_DIR / "dolos-cli" / "node20" / "bin" / "node").exists()
+        )
+    if tool_id == "jplag":
+        return (TOOLS_DIR / "JPlag" / "jplag.jar").exists()
+    if tool_id == "nicad":
+        return (
+            (TOOLS_DIR / "NiCad-6.2" / "nicad6").exists()
+            and (TOOLS_DIR / "freetxl" / "current" / "bin" / "txl").exists()
+        )
+    if tool_id == "pmd":
+        return (TOOLS_DIR / "pmd" / "bin" / "pmd").exists()
+    return False
 
 
 def _tool_sort_key(record: Dict[str, Any]) -> Any:
@@ -407,6 +472,8 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
             if not entry.is_dir():
                 continue
             tool_id = _canonical_tool_id(entry.name)
+            if tool_id not in BENCHMARK_TOOL_METADATA:
+                continue
             record = tools.setdefault(tool_id, _build_tool_record(tool_id))
             record["installed"] = True
             record["paths"].append(str(Path("tools") / entry.name))
@@ -2381,7 +2448,8 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/benchmark-tools")
 async def get_benchmark_tools():
-    return JSONResponse(content={"tools": _list_benchmark_tools()})
+    tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
+    return JSONResponse(content={"tools": tools})
 
 
 BENCHMARK_DATASETS = [
@@ -2701,21 +2769,17 @@ def _compute_auc_fallback(scores: np.ndarray, labels: np.ndarray, curve_type: st
 
 def _run_competitor_tool(tool, submissions, pairs):
     if tool == "moss":
-        return _run_moss_approx(submissions, pairs)
-    elif tool == "jplag":
-        return _run_jplag_approx(submissions, pairs)
+        return _run_moss_cli(submissions, pairs)
     elif tool == "dolos":
-        return _run_dolos_approx(submissions, pairs)
+        return _run_dolos_cli(submissions, pairs)
+    elif tool == "jplag":
+        return _run_jplag_cli(submissions, pairs)
     elif tool == "nicad":
-        return _run_nicad_approx(submissions, pairs)
+        return _run_nicad_cli(submissions, pairs)
     elif tool == "pmd":
-        return _run_pmd_approx(submissions, pairs)
-    elif tool == "sherlock":
-        return _run_sherlock_approx(submissions, pairs)
-    elif tool == "sim":
-        return _run_sim_approx(submissions, pairs)
-    elif tool == "codequiry":
-        return _run_codequiry_approx(submissions, pairs)
+        return _run_pmd_cli(submissions, pairs)
+    elif tool == "ac":
+        return _run_ac_cli(submissions, pairs)
     return None
 
 
@@ -2832,55 +2896,503 @@ def _nicad_score(code_a: str, code_b: str) -> float:
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
-def _run_moss_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _token_jaccard_score)
-
-
-def _run_jplag_approx(submissions, pairs):
-    try:
-        from src.engines.similarity.ast_similarity import ASTSimilarity
-        engine = ASTSimilarity()
-        def jplag_scorer(code_a, code_b):
-            raw_score = engine.compare({"raw": code_a, "tokens": []}, {"raw": code_b, "tokens": []})
-            
-            # FIX: JPlag never returns 100% in real world
-            # Hard clamp all perfect 1.0 scores to realistic values
-            if raw_score >= 0.99:
-                return 0.87
-            
-            # Normal calibration curve
-            calibrated = 0.65 + (raw_score * 0.28)
-            return min(calibrated, 0.91)
-            
-        return _run_pairwise_tool(
-            submissions,
-            pairs,
-            jplag_scorer,
-            tolerate_pair_errors=True,
-        )
-    except Exception:
+def _run_moss_cli(submissions, pairs):
+    moss_user_id = os.environ.get("MOSS_USER_ID")
+    script_path = TOOLS_DIR / "moss" / "moss.pl"
+    if not moss_user_id or not script_path.exists():
         return None
 
+    groups: Dict[str, Dict[str, str]] = {}
+    score_by_pair: Dict[str, float] = {}
+    language_map = {
+        "python": "python",
+        "java": "java",
+        "c": "cc",
+        "cpp": "cc",
+        "javascript": "javascript",
+        "csharp": "csharp",
+    }
 
-def _run_dolos_approx(submissions, pairs):
-    try:
-        from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
-        engine = EnhancedWinnowingSimilarity()
-        return _run_pairwise_tool(
-            submissions,
-            pairs,
-            lambda code_a, code_b: engine.compare({"raw": code_a, "tokens": []}, {"raw": code_b, "tokens": []}),
-        )
-    except Exception:
+    for filename, content in submissions.items():
+        groups.setdefault(_infer_language_from_filename(filename), {})[filename] = content
+
+    for language, language_submissions in groups.items():
+        if len(language_submissions) < 2:
+            continue
+
+        moss_language = language_map.get(language)
+        if not moss_language:
+            continue
+
+        with tempfile.TemporaryDirectory(prefix=f"moss-{language}-") as temp_dir:
+            source_root = PathLib(temp_dir) / "subs"
+            source_root.mkdir(parents=True, exist_ok=True)
+            written_paths = _write_submissions_to_directory(source_root, language_submissions)
+
+            env = os.environ.copy()
+            env["MOSS_USER_ID"] = moss_user_id
+            result = subprocess.run(
+                [
+                    "perl",
+                    str(script_path),
+                    "-l",
+                    moss_language,
+                    *written_paths.values(),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+                cwd=str(TOOLS_DIR / "moss"),
+                env=env,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "MOSS execution failed")
+
+            report_url = None
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("http://moss.stanford.edu/results/") or stripped.startswith("https://moss.stanford.edu/results/"):
+                    report_url = stripped.rstrip("/")
+            if not report_url:
+                continue
+
+            with urllib.request.urlopen(f"{report_url}/") as response:
+                html = response.read().decode("utf-8", "ignore")
+
+            row_pattern = re.compile(
+                r'<TR><TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>\s*<TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>',
+                re.IGNORECASE,
+            )
+            path_to_filename = {path: filename for filename, path in written_paths.items()}
+            for left_path, left_pct, right_path, right_pct in row_pattern.findall(html):
+                left_name = path_to_filename.get(left_path)
+                right_name = path_to_filename.get(right_path)
+                if not left_name or not right_name:
+                    continue
+                similarity = (float(left_pct) + float(right_pct)) / 200.0
+                score_by_pair[_pair_key(left_name, right_name)] = max(
+                    score_by_pair.get(_pair_key(left_name, right_name), 0.0),
+                    max(0.0, min(1.0, similarity)),
+                )
+
+    results = []
+    for fa, fb in pairs:
+        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
+
+
+def _run_jplag_cli(submissions, pairs):
+    jar_path = TOOLS_DIR / "JPlag" / "jplag.jar"
+    if not jar_path.exists():
         return None
 
+    groups: Dict[str, Dict[str, str]] = {}
+    score_by_pair: Dict[str, float] = {}
 
-def _run_nicad_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _nicad_score)
+    for filename, content in submissions.items():
+        groups.setdefault(_infer_language_from_filename(filename), {})[filename] = content
+
+    language_map = {
+        "python": "python3",
+        "javascript": "javascript",
+        "typescript": "typescript",
+        "java": "java",
+        "c": "c",
+        "cpp": "cpp",
+        "csharp": "csharp",
+        "go": "go",
+        "rust": "rust",
+        "kotlin": "kotlin",
+        "swift": "swift",
+    }
+
+    for language, language_submissions in groups.items():
+        if len(language_submissions) < 2:
+            continue
+
+        jplag_language = language_map.get(language)
+        if not jplag_language:
+            continue
+
+        with tempfile.TemporaryDirectory(prefix=f"jplag-{language}-") as temp_dir:
+            source_root = PathLib(temp_dir) / "subs"
+            result_root = PathLib(temp_dir) / "results"
+            source_root.mkdir(parents=True, exist_ok=True)
+            submission_map = _write_submissions_as_submission_dirs(source_root, language_submissions)
+
+            result = subprocess.run(
+                [
+                    "java",
+                    "-jar",
+                    str(jar_path),
+                    "-l",
+                    jplag_language,
+                    "-t",
+                    "3",
+                    "--csv-export",
+                    "-M",
+                    "RUN",
+                    "-r",
+                    str(result_root),
+                    str(source_root),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=240,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "JPlag execution failed")
+
+            csv_path = result_root / "results.csv"
+            if not csv_path.exists():
+                continue
+
+            with csv_path.open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    left_submission = row.get("submissionName1")
+                    right_submission = row.get("submissionName2")
+                    if left_submission not in submission_map or right_submission not in submission_map:
+                        continue
+                    try:
+                        similarity = float(row.get("averageSimilarity", 0.0))
+                    except (TypeError, ValueError):
+                        continue
+                    left_name = submission_map[left_submission]["filename"]
+                    right_name = submission_map[right_submission]["filename"]
+                    score_by_pair[_pair_key(left_name, right_name)] = max(0.0, min(1.0, similarity))
+
+    results = []
+    for fa, fb in pairs:
+        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
 
 
-def _run_pmd_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _sequence_similarity_score)
+def _run_dolos_cli(submissions, pairs):
+    cli_path = TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos"
+    node_bin_dir = TOOLS_DIR / "dolos-cli" / "node20" / "bin"
+    if not cli_path.exists() or not node_bin_dir.exists():
+        return None
+
+    similarity_by_pair: Dict[str, float] = {}
+
+    with tempfile.TemporaryDirectory(prefix="dolos-benchmark-") as temp_dir:
+        source_root = PathLib(temp_dir) / "subs"
+        report_dir = PathLib(temp_dir) / "report"
+        source_root.mkdir(parents=True, exist_ok=True)
+        written_paths = _write_submissions_to_directory(source_root, submissions)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
+
+        result = subprocess.run(
+            [
+                str(cli_path),
+                "run",
+                "--output-format",
+                "csv",
+                "--output-destination",
+                str(report_dir),
+                *written_paths.values(),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+            env=env,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Dolos execution failed")
+
+        pairs_path = report_dir / "pairs.csv"
+        if not pairs_path.exists():
+            return {"pairs": []}
+
+        with pairs_path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                left_name = PathLib(row.get("leftFilePath", "")).name
+                right_name = PathLib(row.get("rightFilePath", "")).name
+                if not left_name or not right_name:
+                    continue
+                try:
+                    similarity = float(row.get("similarity", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                similarity_by_pair[_pair_key(left_name, right_name)] = max(0.0, min(1.0, similarity))
+
+    results = []
+    for fa, fb in pairs:
+        score = similarity_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
+
+
+def _run_nicad_cli(submissions, pairs):
+    nicad_path = TOOLS_DIR / "NiCad-6.2" / "nicad6"
+    txl_bin_dir = TOOLS_DIR / "freetxl" / "current" / "bin"
+    if not nicad_path.exists() or not txl_bin_dir.exists():
+        return None
+
+    groups: Dict[str, Dict[str, str]] = {}
+    score_by_pair: Dict[str, float] = {}
+    language_map = {
+        "python": "py",
+        "java": "java",
+        "csharp": "cs",
+        "php": "php",
+        "ruby": "rb",
+        "swift": "swift",
+        "rust": "rs",
+    }
+
+    for filename, content in submissions.items():
+        groups.setdefault(_infer_language_from_filename(filename), {})[filename] = content
+
+    for language, language_submissions in groups.items():
+        if len(language_submissions) < 2:
+            continue
+
+        nicad_language = language_map.get(language)
+        if not nicad_language:
+            continue
+
+        with tempfile.TemporaryDirectory(prefix=f"nicad-{language}-") as temp_dir:
+            source_root = PathLib(temp_dir) / "subs"
+            source_root.mkdir(parents=True, exist_ok=True)
+            submission_map = _write_submissions_as_submission_dirs(source_root, language_submissions)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{txl_bin_dir}:{env.get('PATH', '')}"
+
+            result = subprocess.run(
+                [
+                    str(nicad_path),
+                    "files",
+                    nicad_language,
+                    str(source_root),
+                    "default-report",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=240,
+                cwd=str(TOOLS_DIR / "NiCad-6.2"),
+                env=env,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "NiCad execution failed")
+
+            report_dir = None
+            for line in result.stdout.splitlines():
+                if line.startswith("Results in "):
+                    report_dir = line.replace("Results in ", "", 1).strip()
+            if not report_dir:
+                continue
+
+            report_path = PathLib(report_dir)
+            xml_candidates = sorted(report_path.glob("*-classes-withsource.xml"))
+            if not xml_candidates:
+                xml_candidates = sorted(report_path.glob("*.xml"))
+            if not xml_candidates:
+                continue
+
+            tree = ET.parse(xml_candidates[0])
+            root = tree.getroot()
+            for class_node in root.findall("class"):
+                try:
+                    similarity = float(class_node.get("similarity", "0")) / 100.0
+                except (TypeError, ValueError):
+                    continue
+                class_files = []
+                for source_node in class_node.findall("source"):
+                    source_path = source_node.get("file", "")
+                    if not source_path:
+                        continue
+                    filename = PathLib(source_path).name
+                    if filename in language_submissions:
+                        class_files.append(filename)
+                        continue
+                    for submission_data in submission_map.values():
+                        if PathLib(submission_data["path"]).name == filename:
+                            class_files.append(submission_data["filename"])
+                            break
+                for i in range(len(class_files)):
+                    for j in range(i + 1, len(class_files)):
+                        pair_key = _pair_key(class_files[i], class_files[j])
+                        score_by_pair[pair_key] = max(score_by_pair.get(pair_key, 0.0), similarity)
+
+    results = []
+    for fa, fb in pairs:
+        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
+
+
+def _run_pmd_cli(submissions, pairs):
+    pmd_path = TOOLS_DIR / "pmd" / "bin" / "pmd"
+    if not pmd_path.exists():
+        return None
+
+    token_counts = {
+        filename: max(1, len(_tokenize_code(content)))
+        for filename, content in submissions.items()
+    }
+    score_by_pair: Dict[str, float] = {}
+    groups: Dict[str, Dict[str, str]] = {}
+
+    for filename, content in submissions.items():
+        groups.setdefault(_infer_pmd_language_from_filename(filename), {})[filename] = content
+
+    for language, language_submissions in groups.items():
+        if len(language_submissions) < 2:
+            continue
+
+        with tempfile.TemporaryDirectory(prefix=f"pmd-{language}-") as temp_dir:
+            source_root = PathLib(temp_dir) / "subs"
+            source_root.mkdir(parents=True, exist_ok=True)
+            written_paths = _write_submissions_to_directory(source_root, language_submissions)
+
+            result = subprocess.run(
+                [
+                    str(pmd_path),
+                    "cpd",
+                    "--language",
+                    language,
+                    "--minimum-tokens",
+                    "5",
+                    "--format",
+                    "csv",
+                    "--no-fail-on-error",
+                    "--no-fail-on-violation",
+                    str(source_root),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "PMD CPD execution failed")
+
+            output_lines = [line for line in result.stdout.splitlines() if line.strip()]
+            if len(output_lines) <= 1:
+                continue
+
+            path_to_filename = {path: filename for filename, path in written_paths.items()}
+            reader = csv.reader(output_lines)
+            next(reader, None)
+
+            for row in reader:
+                if len(row) < 5:
+                    continue
+                try:
+                    duplicated_tokens = int(row[1])
+                    occurrence_count = int(row[2])
+                except (TypeError, ValueError):
+                    continue
+
+                file_names: List[str] = []
+                for index in range(3, min(len(row), 3 + occurrence_count * 2), 2):
+                    file_path = row[index + 1]
+                    filename = path_to_filename.get(file_path)
+                    if filename:
+                        file_names.append(filename)
+
+                for i in range(len(file_names)):
+                    for j in range(i + 1, len(file_names)):
+                        fa = file_names[i]
+                        fb = file_names[j]
+                        denominator = max(1, min(token_counts[fa], token_counts[fb]))
+                        score = max(0.0, min(1.0, duplicated_tokens / denominator))
+                        pair_key = _pair_key(fa, fb)
+                        score_by_pair[pair_key] = max(score_by_pair.get(pair_key, 0.0), score)
+
+    results = []
+    for fa, fb in pairs:
+        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
+
+
+def _run_ac_cli(submissions, pairs):
+    jar_path = TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar"
+    if not jar_path.exists():
+        return None
+
+    distance_by_pair = {}
+
+    with tempfile.TemporaryDirectory(prefix="ac-benchmark-") as temp_dir:
+        source_root = PathLib(temp_dir) / "subs"
+        source_root.mkdir(parents=True, exist_ok=True)
+
+        for filename, content in submissions.items():
+            submission_dir = source_root / PathLib(filename).stem
+            submission_dir.mkdir(parents=True, exist_ok=True)
+            (submission_dir / PathLib(filename).name).write_text(content, encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                "java",
+                "-cp",
+                str(jar_path),
+                "es.ucm.fdi.ac.CommandLineMain",
+                str(source_root),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "AC execution failed")
+
+        csv_lines = []
+        capture = False
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if line.startswith("Distance (0=same, 1=very different),StudentA,StudentB"):
+                capture = True
+                csv_lines.append("distance,student_a,student_b")
+                continue
+            if capture:
+                if not line or line.startswith("Test finished!"):
+                    break
+                if re.match(r"^[0-9.]+,[^,]+,[^,]+$", line):
+                    csv_lines.append(line)
+
+        if len(csv_lines) <= 1:
+            return {"pairs": []}
+
+        reader = csv.DictReader(csv_lines)
+        for row in reader:
+            try:
+                distance = float(row["distance"])
+            except (TypeError, ValueError):
+                continue
+            pair_key = _pair_key(f"{row['student_a']}.py", f"{row['student_b']}.py")
+            distance_by_pair[pair_key] = max(0.0, min(1.0, distance))
+
+    results = []
+    for fa, fb in pairs:
+        distance = distance_by_pair.get(_pair_key(PathLib(fa).stem + ".py", PathLib(fb).stem + ".py"))
+        if distance is None:
+            score = 0.0
+        else:
+            score = 1.0 - distance
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+
+    return {"pairs": results}
 
 
 def _run_sherlock_approx(submissions, pairs):

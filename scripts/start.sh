@@ -8,6 +8,8 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DASHBOARD_PORT="${1:-3003}"
 BACKEND_PORT=8500
+VENV_PYTHON="$PROJECT_DIR/venv/bin/python"
+DATABASE_URL="${DATABASE_URL:-sqlite:///./codeprovenance.db}"
 
 echo "============================================"
 echo "  IntegrityDesk - Academic Integrity Platform"
@@ -25,9 +27,23 @@ if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
     echo ""
 fi
 
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "Creating Python virtual environment..."
+    python3 -m venv "$PROJECT_DIR/venv"
+    echo "Installing Python dependencies..."
+    "$VENV_PYTHON" -m pip install --upgrade pip
+    "$VENV_PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt"
+    echo ""
+fi
+
+echo "Initializing database schema..."
+cd "$PROJECT_DIR"
+DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -c "import src.models.database; from src.config.database import init_db; init_db()"
+echo ""
+
 echo "Starting backend API on port ${BACKEND_PORT}..."
 cd "$PROJECT_DIR"
-"$PROJECT_DIR/venv/bin/python" -m uvicorn src.api.server:app \
+DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -m uvicorn src.api.server:app \
     --host 0.0.0.0 --port "$BACKEND_PORT" --log-level warning &
 BACKEND_PID=$!
 sleep 2

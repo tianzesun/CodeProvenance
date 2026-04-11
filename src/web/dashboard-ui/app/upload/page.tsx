@@ -20,7 +20,14 @@ const API = '';
 
 export default function UploadPage() {
   const router = useRouter();
-  const [mode, setMode] = useState('individual');
+  const [mode, setMode] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 'individual';
+    }
+
+    const requestedMode = new URLSearchParams(window.location.search).get('mode');
+    return requestedMode === 'individual' || requestedMode === 'zip' ? requestedMode : 'individual';
+  });
   const [files, setFiles] = useState([]);
   const [zipFile, setZipFile] = useState(null);
   const [courseName, setCourseName] = useState('');
@@ -28,13 +35,6 @@ export default function UploadPage() {
   const [threshold, setThreshold] = useState(0.5);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    const requestedMode = new URLSearchParams(window.location.search).get('mode');
-    if (requestedMode === 'individual' || requestedMode === 'zip') {
-      setMode(requestedMode);
-    }
-  }, []);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();

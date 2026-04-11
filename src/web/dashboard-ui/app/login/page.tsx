@@ -7,8 +7,23 @@ import axios from 'axios';
 
 import { useAuth } from '@/components/AuthProvider';
 
-function getErrorMessage(error: any): string {
-  return error?.response?.data?.detail || 'Something went wrong. Please try again.';
+function getErrorMessage(error: unknown): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response &&
+    typeof error.response.data === 'object' &&
+    error.response.data !== null &&
+    'detail' in error.response.data &&
+    typeof error.response.data.detail === 'string'
+  ) {
+    return error.response.data.detail;
+  }
+
+  return 'Something went wrong. Please try again.';
 }
 
 function validatePasswordInput(password: string): string | null {
@@ -239,13 +254,13 @@ export default function LoginPage() {
                     </div>
                     <h3 className="mt-4 text-xl font-semibold text-slate-900">Check your email</h3>
                     <p className="mt-2 text-sm text-slate-600">
-                      We've sent password reset instructions to <strong>{email}</strong>
+                      We&apos;ve sent password reset instructions to <strong>{email}</strong>
                     </p>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                     <p>
-                      If you don't see the email in your inbox, please check your spam folder.
+                      If you don&apos;t see the email in your inbox, please check your spam folder.
                       The link will expire in 24 hours.
                     </p>
                   </div>
@@ -266,7 +281,7 @@ export default function LoginPage() {
                     </div>
                     <h3 className="mt-4 text-lg font-semibold text-slate-900">Reset your password</h3>
                     <p className="mt-2 text-sm text-slate-600">
-                      Enter your email address and we'll send you a link to reset your password.
+                      Enter your email address and we&apos;ll send you a link to reset your password.
                     </p>
                   </div>
 

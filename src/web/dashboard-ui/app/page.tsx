@@ -4,7 +4,7 @@
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   ArrowLeft,
@@ -27,10 +27,12 @@ import {
   Shield,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 
 const API = '';
 const HOME_CARD_STORAGE_KEY = 'integritydesk-home-layout-v1';
+const HOME_LAYOUT_TIP_STORAGE_KEY = 'integritydesk-home-layout-tip-v1';
 const HOME_CARD_DEFAULT_ORDER = [
   'recent-checks',
   'report-center',
@@ -139,6 +141,10 @@ function getHomeCardStorageKey(userId) {
   return `${HOME_CARD_STORAGE_KEY}:${userId || 'guest'}`;
 }
 
+function getHomeLayoutTipStorageKey(userId) {
+  return `${HOME_LAYOUT_TIP_STORAGE_KEY}:${userId || 'guest'}`;
+}
+
 function normalizeCardOrder(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]) {
   const validIdSet = new Set(validIds);
   const preferredOrder = validIds;
@@ -192,12 +198,24 @@ export default function Home() {
   const [activeCardId, setActiveCardId] = useState(null);
   const [draggedCardId, setDraggedCardId] = useState(null);
   const [layoutLoaded, setLayoutLoaded] = useState(false);
+  const [showLayoutTip, setShowLayoutTip] = useState(false);
   const longPressTimerRef = useRef(null);
   const longPressTriggeredRef = useRef(false);
   const availableCardIds = user?.role === 'admin'
     ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
     : [...HOME_CARD_DEFAULT_ORDER, 'benchmark-suite'];
   const optionalCardIds = availableCardIds.filter((id) => !HOME_CARD_DEFAULT_ORDER.includes(id));
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/api/jobs`);
+      setJobs(res.data.jobs || []);
+    } catch {
+      setJobs([]);
+    }
+
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (authLoading) {
@@ -212,7 +230,7 @@ export default function Home() {
     const interval = setInterval(fetchJobs, 30000);
 
     return () => clearInterval(interval);
-  }, [authLoading, user]);
+  }, [authLoading, fetchJobs, user]);
 
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') {
@@ -242,6 +260,15 @@ export default function Home() {
   }, [authLoading, availableCardIds.join('|'), optionalCardIds.join('|'), user?.id]);
 
   useEffect(() => {
+    if (authLoading || typeof window === 'undefined') {
+      return;
+    }
+
+    const dismissed = window.localStorage.getItem(getHomeLayoutTipStorageKey(user?.id)) === 'hidden';
+    setShowLayoutTip(!dismissed);
+  }, [authLoading, user?.id]);
+
+  useEffect(() => {
     if (!layoutLoaded || typeof window === 'undefined') {
       return;
     }
@@ -260,17 +287,6 @@ export default function Home() {
       clearTimeout(longPressTimerRef.current);
     }
   }, []);
-
-  const fetchJobs = async () => {
-    try {
-      const res = await axios.get(`${API}/api/jobs`);
-      setJobs(res.data.jobs || []);
-    } catch {
-      setJobs([]);
-    }
-
-    setLoading(false);
-  };
 
   const recentJobs = jobs.slice(0, 4);
   const latestCompleted = jobs.find((job) => job.status === 'completed');
@@ -374,6 +390,13 @@ export default function Home() {
     setEditMode(false);
     setActiveCardId(null);
     setDraggedCardId(null);
+  };
+
+  const dismissLayoutTip = () => {
+    setShowLayoutTip(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(getHomeLayoutTipStorageKey(user?.id), 'hidden');
+    }
   };
 
   const dashboardCards = {
@@ -822,20 +845,27 @@ export default function Home() {
           </section>
 
           <section className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-[28px] border border-[color:var(--border)] bg-[var(--surface-muted)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                  <LayoutGrid size={14} />
-                  Dashboard layout
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {showLayoutTip && !editMode && (
+                <div className="theme-card inline-flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm text-[var(--text-secondary)]">
+                  <span className="inline-flex shrink-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                    <LayoutGrid size={14} />
+                    Tip
+                  </span>
+                  <span>Press and hold any card to customize your dashboard.</span>
+                  <button
+                    type="button"
+                    onClick={dismissLayoutTip}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]"
+                    aria-label="Dismiss layout tip"
+                    title="Dismiss"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
-                <p className="text-sm text-[var(--text-secondary)]">
-                  {editMode
-                    ? 'Layout mode is on. Drag cards to reorder them, hide the ones you do not need, or add more from the card library.'
-                    : 'Press and hold any card for a moment to customize the home dashboard.'}
-                </p>
-              </div>
+              )}
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 sm:ml-auto">
                 {editMode ? (
                   <>
                     <button
@@ -846,6 +876,9 @@ export default function Home() {
                       <RotateCcw size={15} />
                       Reset
                     </button>
+                    <div className="inline-flex items-center rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
+                      Drag to reorder, hide cards, or restore them below.
+                    </div>
                     <button
                       type="button"
                       onClick={() => {

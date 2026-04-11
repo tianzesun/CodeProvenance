@@ -152,13 +152,13 @@ interface Settings {
   max_files_per_job: number;
 }
 
+type SettingsTab = "general" | "llm" | "engines" | "advanced";
+
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<
-    "general" | "llm" | "engines" | "advanced"
-  >("general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   const enginePresets = [
     {
@@ -270,7 +270,7 @@ export default function SettingsPage() {
     });
   };
 
-  const updateSetting = (key: keyof Settings, value: any) => {
+  const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     if (!settings) return;
     setSettings({ ...settings, [key]: value });
   };
@@ -296,7 +296,7 @@ export default function SettingsPage() {
     );
   }
 
-  const tabs = [
+  const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: "general", label: "General" },
     { id: "llm", label: "LLM & AI" },
     { id: "engines", label: "Engines" },
@@ -324,7 +324,7 @@ export default function SettingsPage() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 activeTab === tab.id
                   ? "border-blue-600 text-blue-600"

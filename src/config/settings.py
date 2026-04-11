@@ -50,6 +50,9 @@ class AppSettings(BaseSettings):
     # Auth
     AUTH_JWT_SECRET: Optional[str] = None
     AUTH_TOKEN_EXPIRE_MINUTES: int = 480
+
+    # External plagiarism services
+    MOSS_USER_ID: Optional[str] = None
     
     # Embeddings
     EMBEDDING_RUNTIME: str = "local_unixcoder"

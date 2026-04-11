@@ -1,7 +1,7 @@
 'use client';
 
 import axios from 'axios';
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 export type AuthRole = 'admin' | 'professor';
 
@@ -49,10 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [bootstrapped, setBootstrapped] = useState(true);
 
-  const refreshSession = async () => {
+  useEffect(() => {
+    axios.defaults.withCredentials = true;
+  }, []);
+
+  const refreshSession = useCallback(async () => {
     setLoading(true);
     try {
-      axios.defaults.withCredentials = true;
       const statusRes = await axios.get('/api/auth/status');
       const nextBootstrapped = Boolean(statusRes.data?.bootstrapped);
       setBootstrapped(nextBootstrapped);
@@ -69,11 +72,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshSession();
-  }, []);
+  }, [refreshSession]);
 
   const login = async (email: string, password: string) => {
     const res = await axios.post('/api/auth/login', { email, password });

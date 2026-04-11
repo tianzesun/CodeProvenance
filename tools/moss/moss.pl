@@ -32,7 +32,7 @@ $usage = "usage: moss [-x] [-l language] [-d] [-b basefile1] ... [-b basefilen] 
 #
 # The userid is used to authenticate your queries to the server; don't change it!
 #
-$userid=394450069;
+$userid = $ENV{'MOSS_USER_ID'} || 394450069;
 
 #
 # Process the command line options.  This is done in a non-standard
@@ -231,4 +231,3 @@ print $sock "end\n";
 close($sock);
 
 system("bash", "save_moss_report.sh","$logfile");
-

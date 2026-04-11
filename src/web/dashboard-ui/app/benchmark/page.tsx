@@ -20,11 +20,12 @@ const API = '';
 
 const TOOLS = [
   { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web evidence, with optional AI Detection and Execution/CFG layers', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['Token', 'AST', 'Winnowing', 'GST', 'Semantic', 'Web', 'AI Detection', 'Execution/CFG'] },
-  { id: 'moss', name: 'MOSS', desc: 'Tokenized code comparison with document fingerprinting via the winnowing algorithm', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token', 'Winnowing'] },
-  { id: 'jplag', name: 'JPlag', desc: 'Syntax-aware token comparison over normalized language-specific token streams', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['Token', 'Syntax-Aware'] },
-  { id: 'dolos', name: 'Dolos', desc: 'Language-aware token streams plus fingerprinting and MOSS-style winnowing', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Token', 'Winnowing', 'Syntax-Aware'] },
-  { id: 'nicad', name: 'NiCad', desc: 'Near-miss clone detector with normalization', color: '#e11d48', gradient: 'from-rose-500 to-rose-600', bgLight: 'bg-rose-50', ring: 'ring-rose-500', textColor: 'text-rose-600', engines: ['Normalization'] },
-  { id: 'pmd', name: 'PMD CPD', desc: 'Copy/Paste Detector based on duplicated token sequences', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', textColor: 'text-teal-600', engines: ['Token'] },
+  { id: 'moss', name: 'MOSS', desc: 'Stanford MOSS external service using the configured MOSS user ID', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token', 'Winnowing'] },
+  { id: 'jplag', name: 'JPlag', desc: 'JPlag CLI using real syntax-aware token comparison', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['Token', 'Syntax-Aware'] },
+  { id: 'dolos', name: 'Dolos', desc: 'Dodona Dolos CLI using real fingerprint-based plagiarism analysis', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Token', 'Winnowing', 'Syntax-Aware'] },
+  { id: 'nicad', name: 'NiCad', desc: 'NiCad clone detector using the local FreeTXL runtime', color: '#e11d48', gradient: 'from-rose-500 to-rose-600', bgLight: 'bg-rose-50', ring: 'ring-rose-500', textColor: 'text-rose-600', engines: ['Normalization', 'Near-Miss'] },
+  { id: 'ac', name: 'AC', desc: 'Academic plagiarism comparison tool executed from the bundled CLI JAR', color: '#ea580c', gradient: 'from-orange-500 to-orange-600', bgLight: 'bg-orange-50', ring: 'ring-orange-500', textColor: 'text-orange-600', engines: ['Token', 'Distance'] },
+  { id: 'pmd', name: 'PMD CPD', desc: 'PMD Copy/Paste Detector executed from the bundled CLI distribution', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', textColor: 'text-teal-600', engines: ['Token'] },
   { id: 'sherlock', name: 'Sherlock', desc: 'Text-signature style detector based on textual signatures and attribute-style comparisons', color: '#4f46e5', gradient: 'from-indigo-500 to-indigo-600', bgLight: 'bg-indigo-50', ring: 'ring-indigo-500', textColor: 'text-indigo-600', engines: ['Text-Signature Style', 'Text Similarity'] },
   { id: 'sim', name: 'SIM', desc: 'Software Similarity Tester for common token and text segments', color: '#0891b2', gradient: 'from-cyan-500 to-cyan-600', bgLight: 'bg-cyan-50', ring: 'ring-cyan-500', textColor: 'text-cyan-600', engines: ['Token', 'Text Similarity'] },
   { id: 'strange', name: 'STRANGE', desc: 'Semantic PDG clone detector', color: '#8b5cf6', gradient: 'from-purple-500 to-purple-600', bgLight: 'bg-purple-50', ring: 'ring-purple-500', textColor: 'text-purple-600', engines: ['PDG Analysis'] },
@@ -67,7 +68,6 @@ const DATASETS = [
 ];
 
 const TOOL_COLORS = Object.fromEntries(TOOLS.map(t => [t.id, t.color]));
-const ENGINE_FILTERS = Array.from(new Set(TOOLS.flatMap((tool) => tool.engines))).sort();
 
 function formatChartPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`;
@@ -215,12 +215,13 @@ function StepIndicator({ steps, currentStep, completedSteps, compact = false }) 
 }
 
 // ── Step 1: Tool Selection ──────────────────────────────────────────────────
-function ToolSelectionStep({ selectedTools, setSelectedTools, onNext }) {
+function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error }) {
   const [activeEngines, setActiveEngines] = useState([]);
+  const engineFilters = Array.from(new Set(tools.flatMap((tool) => tool.engines))).sort();
 
   const visibleTools = activeEngines.length
-    ? TOOLS.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))
-    : TOOLS;
+    ? tools.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))
+    : tools;
 
   const toggleTool = (id) => setSelectedTools(prev =>
     prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
@@ -247,19 +248,32 @@ function ToolSelectionStep({ selectedTools, setSelectedTools, onNext }) {
         <div className="flex items-center gap-3">
           <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${
             selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
-          }`}>{selectedTools.length} / {TOOLS.length} selected</span>
+          }`}>{selectedTools.length} / {tools.length} selected</span>
           <div className="flex gap-1">
             <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
           </div>
         </div>
       </div>
       <div className="p-6">
+        {loading && (
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Checking which benchmark tools are available in this environment…
+          </div>
+        )}
+        {error && (
+          <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {error}
+          </div>
+        )}
+        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-800">
+          This list is limited to tools with a real runnable benchmark integration in this environment, so the reported scores come from actual CLI output rather than proxy estimates.
+        </div>
         <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Filter By Engine</div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {ENGINE_FILTERS.map((engine) => {
+                {engineFilters.map((engine) => {
                   const active = activeEngines.includes(engine);
                   return (
                     <button
@@ -363,8 +377,8 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   const handleDragOver = (e) => e.preventDefault();
 
-  // Find active dataset from benchmarkDatasets instead of hardcoded DATASETS
-  const activeDataset = benchmarkDatasets.find(d => d.id === selectedDataset);
+  const libraryDatasets = [...DATASETS, ...benchmarkDatasets];
+  const activeDataset = libraryDatasets.find(d => d.id === selectedDataset);
   const canProceed = uploadMode === 'builtin' ? !!selectedDataset :
     uploadMode === 'individual' ? files.length >= 2 :
     files.length >= 1;
@@ -399,6 +413,27 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         <div className="p-6">
           {uploadMode === 'builtin' && (
             <div className="space-y-5">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Interactive Test Suites</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {DATASETS.map(ds => {
+                    const isActive = selectedDataset === ds.id;
+                    return (
+                      <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
+                        className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                          isActive ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20' : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
+                        }`}>
+                        {isActive && <div className="absolute top-2 right-2"><CheckCircle2 size={14} className="text-violet-600" /></div>}
+                        <div className="text-xl mb-2">{ds.icon}</div>
+                        <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
+                        <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
+                        <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} cases</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Built-in Test Suites</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -462,9 +497,23 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
               {activeDataset && (
                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                    {activeDataset.is_demo ? 'Dataset Info' : 'Test cases in'} "{activeDataset.name}"
+                    {activeDataset.cases ? `Test cases in "${activeDataset.name}"` : `Dataset info for "${activeDataset.name}"`}
                   </p>
-                  {activeDataset.is_demo ? (
+                  {activeDataset.cases ? (
+                    <div className="grid md:grid-cols-3 gap-2">
+                      {activeDataset.cases.map(tc => (
+                        <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${
+                            tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                          }`} />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
+                            <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
@@ -484,34 +533,17 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                           <div className="text-xs text-slate-500">Created By</div>
                         </div>
                       </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <div className="flex items-start gap-2">
-                          <div className="text-blue-600 mt-0.5">ℹ️</div>
-                          <div>
-                            <div className="text-sm font-medium text-blue-900">Demo Dataset</div>
-                            <div className="text-xs text-blue-700 mt-1">
-                              This dataset contains generated code pairs for testing plagiarism detection algorithms.
-                              Original and modified versions are included for comprehensive evaluation.
+                      {activeDataset.is_demo && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <div className="flex items-start gap-2">
+                            <div className="text-blue-600 mt-0.5">ℹ️</div>
+                            <div>
+                              <div className="text-sm font-medium text-blue-900">Demo Dataset</div>
+                              <div className="text-xs text-blue-700 mt-1">
+                                This dataset was generated inside the app and can be run directly through the benchmark flow.
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid md:grid-cols-3 gap-2">
-                      {activeDataset.cases?.map(tc => (
-                        <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${
-                            tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                          }`} />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
-                            <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
-                          </div>
-                        </div>
-                      )) || (
-                        <div className="col-span-full text-center py-4 text-slate-500">
-                          No test cases defined for this dataset
                         </div>
                       )}
                     </div>
@@ -594,7 +626,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [results, setResults] = useState(null);
   const cancelRef = useRef(false);
 
-  const activeDataset = benchmarkDatasets.find(d => d.id === selectedDataset);
+  const activeDataset = [...DATASETS, ...benchmarkDatasets].find(d => d.id === selectedDataset);
 
   const toolNames = selectedTools.map(id => TOOLS.find(t => t.id === id)?.name).filter(Boolean);
 
@@ -607,8 +639,8 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 
     try {
       if (uploadMode === 'builtin' && activeDataset) {
-        if (activeDataset.cases && !activeDataset.is_demo) {
-          // Run all test cases in the built-in dataset (non-demo)
+        if (activeDataset.cases) {
+          // Run all interactive test cases.
           const allResults = [];
           const cases = activeDataset.cases;
 
@@ -647,11 +679,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             setResults({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() });
             setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           }
-        } else if (activeDataset.is_demo) {
-          // Handle demo datasets
-          setProgress('Loading demo dataset...');
+        } else {
+          // Handle backend-provided datasets, including generated demo datasets.
+          setProgress('Loading dataset...');
           setProgressPct(30);
-
           const formData = new FormData();
           selectedTools.forEach(t => formData.append('tools', t));
           formData.append('dataset', activeDataset.id);
@@ -669,7 +700,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             setResults({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
             setTimeout(() => onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           } catch (err) {
-            setError('Failed to run benchmark on demo dataset');
+            setError('Failed to run benchmark on the selected dataset');
             setProgress('Error occurred');
           }
         }
@@ -1231,12 +1262,26 @@ export default function BenchmarkPage() {
   const [uploadMode, setUploadMode] = useState('builtin');
   const [files, setFiles] = useState([]);
   const [benchmarkDatasets, setBenchmarkDatasets] = useState([]);
+  const [availableTools, setAvailableTools] = useState([]);
+  const [toolsLoading, setToolsLoading] = useState(true);
+  const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
 
   useEffect(() => {
     if (authLoading || !user) {
       return;
     }
+    setToolsLoading(true);
+    axios.get(`${API}/api/benchmark-tools`).then(res => {
+      if (res.data?.tools) {
+        setAvailableTools(res.data.tools);
+      }
+    }).catch(() => {
+      setToolsError('Unable to confirm the installed benchmark tools. Showing the last known real-tool set.');
+      setAvailableTools(TOOLS.filter((tool) => ['integritydesk', 'moss', 'jplag', 'dolos', 'nicad', 'ac', 'pmd'].includes(tool.id)));
+    }).finally(() => {
+      setToolsLoading(false);
+    });
     axios.get(`${API}/api/benchmark-datasets`).then(res => {
       if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets);
     }).catch(() => {});
@@ -1292,8 +1337,11 @@ export default function BenchmarkPage() {
         {/* Steps */}
         {step === 0 && (
           <ToolSelectionStep
+            tools={availableTools}
             selectedTools={selectedTools}
             setSelectedTools={setSelectedTools}
+            loading={toolsLoading}
+            error={toolsError}
             onNext={() => goToStep(1, 0)}
           />
         )}

@@ -7,8 +7,23 @@ import { AlertTriangle, CheckCircle, Eye, EyeOff, Loader2, LockKeyhole } from 'l
 
 import axios from 'axios';
 
-function getErrorMessage(error: any): string {
-  return error?.response?.data?.detail || 'Something went wrong. Please try again.';
+function getErrorMessage(error: unknown): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response &&
+    typeof error.response.data === 'object' &&
+    error.response.data !== null &&
+    'detail' in error.response.data &&
+    typeof error.response.data.detail === 'string'
+  ) {
+    return error.response.data.detail;
+  }
+
+  return 'Something went wrong. Please try again.';
 }
 
 function calculatePasswordStrength(password: string): { score: number; label: string; color: string } {

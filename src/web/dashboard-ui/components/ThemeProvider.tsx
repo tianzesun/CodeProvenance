@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 const STORAGE_KEY = 'integritydesk-theme';
 type Theme = 'light' | 'dark';
@@ -19,24 +19,26 @@ interface ThemeProviderProps {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>('light');
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const storedTheme = window.localStorage.getItem(STORAGE_KEY);
-    if (storedTheme === 'dark' || storedTheme === 'light') {
-      setTheme(storedTheme);
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') {
+      return 'light';
     }
-    setMounted(true);
-  }, []);
+
+    const storedTheme = window.localStorage.getItem(STORAGE_KEY);
+    return storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : 'light';
+  });
+  const hasHydratedRef = useRef(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
 
-    if (mounted) {
+    if (hasHydratedRef.current) {
       window.localStorage.setItem(STORAGE_KEY, theme);
+      return;
     }
-  }, [mounted, theme]);
+
+    hasHydratedRef.current = true;
+  }, [theme]);
 
   const value = useMemo(
     () => ({

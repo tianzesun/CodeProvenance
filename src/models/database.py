@@ -21,7 +21,7 @@ class Tenant(Base):
     name = Column(String(255), nullable=False)
     api_key_hash = Column(String(255), unique=True, nullable=False)
     tier = Column(String(50), default="free")
-    settings = Column(JSONB, default=dict)
+    settings = Column(JSON().with_variant(JSONB, "postgresql"), default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
