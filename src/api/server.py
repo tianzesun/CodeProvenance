@@ -325,6 +325,28 @@ def _is_code_file(filename: str) -> bool:
     return PathLib(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
+def _language_file_extension(language: str) -> str:
+    return {
+        "python": ".py",
+        "java": ".java",
+        "javascript": ".js",
+        "cpp": ".cpp",
+    }.get(language, f".{language}")
+
+
+def _normalize_demo_filename(filename: str, language: str, plagiarized: bool = False) -> str:
+    path = PathLib(filename)
+    suffix = path.suffix.lower()
+    normalized_suffix = {
+        ".python": ".py",
+        ".javascript": ".js",
+    }.get(suffix, suffix or _language_file_extension(language))
+    base_name = path.stem or path.name
+    if plagiarized:
+        return f"{base_name}_plagiarized{normalized_suffix}"
+    return f"{base_name}{normalized_suffix}"
+
+
 def _infer_language_from_filename(filename: str) -> str:
     suffix = PathLib(filename).suffix.lower()
     language_map = {
@@ -540,6 +562,15 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
             logger.warning(f"Demo dataset not found: {dataset_dir}")
             return submissions
 
+        metadata = {}
+        metadata_file = dataset_dir / "metadata.json"
+        if metadata_file.exists():
+            try:
+                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning(f"Error reading demo dataset metadata {metadata_file}: {exc}")
+        demo_language = metadata.get("language", "python")
+
         # For demo datasets, combine original and plagiarized files
         submissions = {}
 
@@ -547,10 +578,11 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
         original_dir = dataset_dir / "original"
         if original_dir.exists():
             for file_path in original_dir.glob("*"):
-                if file_path.is_file() and _is_code_file(file_path.name):
+                normalized_name = _normalize_demo_filename(file_path.name, demo_language, plagiarized=False)
+                if file_path.is_file() and (_is_code_file(file_path.name) or _is_code_file(normalized_name)):
                     try:
                         content = file_path.read_text(encoding='utf-8', errors='ignore')
-                        submissions[file_path.name] = content
+                        submissions[normalized_name] = content
                     except Exception as e:
                         logger.warning(f"Error reading file {file_path}: {e}")
 
@@ -558,12 +590,11 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
         plagiarized_dir = dataset_dir / "plagiarized"
         if plagiarized_dir.exists():
             for file_path in plagiarized_dir.glob("*"):
-                if file_path.is_file() and _is_code_file(file_path.name):
+                normalized_name = _normalize_demo_filename(file_path.name, demo_language, plagiarized=True)
+                if file_path.is_file() and (_is_code_file(file_path.name) or _is_code_file(normalized_name)):
                     try:
                         content = file_path.read_text(encoding='utf-8', errors='ignore')
-                        # Add suffix to distinguish plagiarized versions
-                        modified_name = file_path.name.replace('.py', '_plagiarized.py').replace('.java', '_plagiarized.java').replace('.js', '_plagiarized.js').replace('.cpp', '_plagiarized.cpp')
-                        submissions[modified_name] = content
+                        submissions[normalized_name] = content
                     except Exception as e:
                         logger.warning(f"Error reading file {file_path}: {e}")
 
@@ -1289,9 +1320,10 @@ async def create_demo_dataset(request: Request):
         plagiarized_dir.mkdir()
 
         # Create original files
+        file_extension = _language_file_extension(language)
         for i in range(num_files):
             filename = f"{i:02d}"
-            filepath = original_dir / f"{filename}.{language}"
+            filepath = original_dir / f"{filename}{file_extension}"
 
             # Generate synthetic code based on language
             code_content = generate_synthetic_code(i, language, similarity_type)
@@ -1300,8 +1332,8 @@ async def create_demo_dataset(request: Request):
 
         # Create modified versions (plagiarized)
         for i in range(num_files):
-            original_file = original_dir / f"{i:02d}.{language}"
-            plagiarized_file = plagiarized_dir / f"{i:02d}.{language}"
+            original_file = original_dir / f"{i:02d}{file_extension}"
+            plagiarized_file = plagiarized_dir / f"{i:02d}{file_extension}"
 
             if original_file.exists():
                 content = original_file.read_text()
