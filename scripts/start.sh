@@ -75,7 +75,7 @@ DASHBOARD_MODE="${DASHBOARD_MODE:-prod}"
 
 if [ "$DASHBOARD_MODE" = "dev" ]; then
     echo "Starting Next.js dashboard in development mode on port ${DASHBOARD_PORT}..."
-    npx next dev -p "$DASHBOARD_PORT" &
+    npx next dev -p "$DASHBOARD_PORT" --no-server-fast-refresh &
 else
     echo "Building Next.js dashboard for stable startup..."
     npx next build
@@ -96,6 +96,4 @@ echo ""
 echo "Services ready:"
 echo "  Backend API: ${BACKEND_URL}"
 echo "  Dashboard:   http://localhost:${DASHBOARD_PORT}"
-echo ""
-echo "Press Ctrl+C to stop"; echo ""
 wait

@@ -546,6 +546,25 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
     return submissions
 
 
+async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib) -> Dict[str, str]:
+    """Store uploaded benchmark inputs, accepting either source files or zip archives."""
+    for upload in files:
+        if not upload.filename:
+            continue
+
+        filename = PathLib(upload.filename).name
+        if not filename:
+            continue
+
+        destination = target_dir / filename
+        destination.write_bytes(await upload.read())
+
+        if filename.lower().endswith(".zip"):
+            _extract_zip(destination, target_dir)
+
+    return _read_files_from_dir(target_dir)
+
+
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
 BENCHMARK_DATA_DIR = project_root / "data" / "datasets"
@@ -2603,10 +2622,7 @@ async def run_benchmark(
     if dataset and dataset != "custom":
         submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
-        for f in files:
-            if f.filename and _is_code_file(f.filename):
-                (job_dir / f.filename).write_bytes(await f.read())
-        submissions = _read_files_from_dir(job_dir)
+        submissions = await _store_benchmark_uploads(files, job_dir)
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
