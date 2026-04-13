@@ -1,0 +1,31 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "model": "kilo/bytedance-seed/dola-seed-2.0-pro:free",
+  "default_agent": "code",
+  "instructions": [
+    "AGENTS.md",
+    ".ai-rules.md",
+    ".codex/instructions.md",
+    ".codex/project-context.md"
+  ],
+  "permission": {
+    "bash": "allow",
+    "edit": {
+      "src/**": "allow",
+      "tests/**": "allow",
+      "*.md": "allow",
+      "**/migrations/**": "ask",
+      ".env*": "deny"
+    },
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "task": "allow",
+    "todowrite": "allow",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "codesearch": "allow"
+  },
+  "snapshot": true,
+  "autoupdate": "notify"
+}

@@ -82,6 +82,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/bootstrap-admin",
     "/api/benchmark-datasets",
     "/api/benchmark-tools",
+    "/api/benchmark",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -544,6 +545,25 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
             except Exception as e:
                 logger.warning(f"Skipping {f.name}: {e}")
     return submissions
+
+
+async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib) -> Dict[str, str]:
+    """Store uploaded benchmark inputs, accepting either source files or zip archives."""
+    for upload in files:
+        if not upload.filename:
+            continue
+
+        filename = PathLib(upload.filename).name
+        if not filename:
+            continue
+
+        destination = target_dir / filename
+        destination.write_bytes(await upload.read())
+
+        if filename.lower().endswith(".zip"):
+            _extract_zip(destination, target_dir)
+
+    return _read_files_from_dir(target_dir)
 
 
 # Dataset location: All datasets are stored in data/datasets/
@@ -2498,6 +2518,9 @@ async def delete_job(job_id: str, request: Request):
 @app.get("/api/benchmark-tools")
 async def get_benchmark_tools():
     tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
+    # Add 'available' field for frontend compatibility
+    for tool in tools:
+        tool["available"] = tool.get("runnable", False)
     return JSONResponse(content={"tools": tools})
 
 
@@ -2603,10 +2626,7 @@ async def run_benchmark(
     if dataset and dataset != "custom":
         submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
-        for f in files:
-            if f.filename and _is_code_file(f.filename):
-                (job_dir / f.filename).write_bytes(await f.read())
-        submissions = _read_files_from_dir(job_dir)
+        submissions = await _store_benchmark_uploads(files, job_dir)
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -2618,9 +2638,37 @@ async def run_benchmark(
 
     if "integritydesk" in tools:
         try:
+            # Optimize for benchmarks: disable embedding on CPU, keep it on GPU
+            import os
+            original_embedding_runtime = os.environ.get("EMBEDDING_RUNTIME")
+            should_disable_embedding = False
+            
+            # Check if GPU is available
+            try:
+                import torch
+                has_gpu = torch.cuda.is_available()
+                if not has_gpu and settings.EMBEDDING_RUNTIME in ("local_unixcoder", "local", "unixcoder"):
+                    # CPU-only and using local model - disable for speed
+                    should_disable_embedding = True
+                    os.environ["EMBEDDING_RUNTIME"] = "none"
+                    logger.info("Benchmark: Disabled embedding engine (CPU-only mode)")
+            except ImportError:
+                # torch not available, assume CPU
+                if settings.EMBEDDING_RUNTIME in ("local_unixcoder", "local", "unixcoder"):
+                    should_disable_embedding = True
+                    os.environ["EMBEDDING_RUNTIME"] = "none"
+                    logger.info("Benchmark: Disabled embedding engine (no GPU detected)")
+            
             service = BatchDetectionService(threshold=0.3)
             results = service.compare_all_pairs(submissions)
             tool_results["integritydesk"] = {"pairs": [{"file_a": r.file_a, "file_b": r.file_b, "score": round(r.score, 3), "features": {k: round(v, 3) for k, v in r.features.items()}} for r in results]}
+            
+            # Restore original setting
+            if should_disable_embedding:
+                if original_embedding_runtime:
+                    os.environ["EMBEDDING_RUNTIME"] = original_embedding_runtime
+                elif "EMBEDDING_RUNTIME" in os.environ:
+                    del os.environ["EMBEDDING_RUNTIME"]
         except Exception as e:
             logger.exception("IntegrityDesk benchmark failed")
             tool_results["integritydesk"] = {"error": str(e)}

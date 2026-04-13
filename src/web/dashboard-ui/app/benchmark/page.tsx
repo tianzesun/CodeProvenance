@@ -3,10 +3,11 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
+import Link from 'next/link';
 import {
-  BarChart3, Loader2, Trophy, FileUp, FolderArchive, X, AlertCircle,
+  BarChart3, Loader2, Trophy, FileUp, X, AlertCircle,
   Zap, Target, Layers, TrendingUp, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, ArrowRight, Square, Check,
   ChevronRight, UploadCloud, Database, Settings2, ClipboardList,
@@ -16,7 +17,7 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts';
 
-const API = '';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 const TOOLS = [
   { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web evidence, with optional AI Detection and Execution/CFG layers', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['Token', 'AST', 'Winnowing', 'GST', 'Semantic', 'Web', 'AI Detection', 'Execution/CFG'] },
@@ -35,39 +36,176 @@ const TOOLS = [
   { id: 'vendetect', name: 'Vendetect', desc: 'Cross-repository vendored code detection', color: '#ec4899', gradient: 'from-pink-500 to-pink-600', bgLight: 'bg-pink-50', ring: 'ring-pink-500', textColor: 'text-pink-600', engines: ['Cross Repo Matching'] },
 ];
 
-const TEST_CASES = [
-  { id: 'identical', label: 'Identical Files', desc: 'Two copies of the same file', expected: 0.95, codeA: `def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count\n\ndef find_max(data):\n    max_val = data[0]\n    for item in data:\n        if item > max_val:\n            max_val = item\n    return max_val`, codeB: `def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count\n\ndef find_max(data):\n    max_val = data[0]\n    for item in data:\n        if item > max_val:\n            max_val = item\n    return max_val` },
-  { id: 'renamed', label: 'Renamed Variables', desc: 'Same logic, different variable/function names', expected: 0.80, codeA: `def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count`, codeB: `def compute_mean(values):\n    total = sum(values)\n    count = len(values)\n    return total / count` },
-  { id: 'reordered', label: 'Reordered Functions', desc: 'Same functions in different order', expected: 0.70, codeA: `def calc_avg(data):\n    return sum(data)/len(data)\n\ndef find_max(data):\n    return max(data)`, codeB: `def find_max(data):\n    return max(data)\n\ndef calc_avg(data):\n    return sum(data)/len(data)` },
-  { id: 'similar', label: 'Similar Logic', desc: 'Same algorithm, different style', expected: 0.50, codeA: `def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n-i-1):\n            if arr[j] > arr[j+1]:\n                arr[j], arr[j+1] = arr[j+1], arr[j]\n    return arr`, codeB: `def sort_array(data):\n    n = len(data)\n    for i in range(n):\n        for j in range(0, n-i-1):\n            if data[j] > data[j+1]:\n                data[j], data[j+1] = data[j+1], data[j]\n    return data` },
-  { id: 'unrelated', label: 'Unrelated Files', desc: 'Completely different code', expected: 0.10, codeA: `import numpy as np\ndef sharpe_ratio(returns, risk_free_rate=0.02):\n    excess_returns = returns - risk_free_rate\n    return np.mean(excess_returns) / np.std(excess_returns)`, codeB: `from flask import Flask\napp = Flask(__name__)\n@app.route('/users')\ndef get_users():\n    return 'users'` },
-];
+const DATASET_CATEGORY_META = {
+  guided: {
+    label: 'Quick Check',
+    eyebrow: 'Fastest way to validate tools',
+    badgeClass: 'bg-violet-100 text-violet-700',
+    accentClass: 'text-violet-600',
+    panelClass: 'border-violet-200 bg-violet-50/70',
+    summaryLabel: 'Quick check',
+  },
+  preset: {
+    label: 'Preset Dataset',
+    eyebrow: 'Standardized benchmark data',
+    badgeClass: 'bg-emerald-100 text-emerald-700',
+    accentClass: 'text-emerald-600',
+    panelClass: 'border-emerald-200 bg-emerald-50/70',
+    summaryLabel: 'Preset dataset',
+  },
+  demo: {
+    label: 'Demo Dataset',
+    eyebrow: 'Reusable classroom-style demo',
+    badgeClass: 'bg-blue-100 text-blue-700',
+    accentClass: 'text-blue-600',
+    panelClass: 'border-blue-200 bg-blue-50/70',
+    summaryLabel: 'Demo dataset',
+  },
+};
 
-const DATASETS = [
-  { id: 'basic-clone', name: 'Basic Clone Detection', desc: '5 test cases: identical, renamed, reordered, similar, and unrelated code pairs', icon: '🧪', color: 'blue', cases: TEST_CASES },
-  {
-    id: 'obfuscation', name: 'Obfuscation Resistance', desc: 'Tests how well tools detect plagiarism through variable renaming, reordering, and comment changes', icon: '🔍', color: 'violet', cases: [
-      { id: 'obf-rename', label: 'Variable Renaming', desc: 'All identifiers renamed, same logic', expected: 0.80, codeA: `def calculate_average(data):\n    total = sum(data)\n    count = len(data)\n    return total / count`, codeB: `def compute_mean(values):\n    total = sum(values)\n    cnt = len(values)\n    return total / cnt` },
-      { id: 'obf-reorder', label: 'Function Reordering', desc: 'Same functions in different order', expected: 0.70, codeA: `def factorial(n):\n    if n <= 1: return 1\n    return n * factorial(n-1)\n\ndef is_prime(n):\n    if n < 2: return False\n    for i in range(2, int(n**0.5)+1):\n        if n % i == 0: return False\n    return True`, codeB: `def is_prime(n):\n    if n < 2: return False\n    for i in range(2, int(n**0.5)+1):\n        if n % i == 0: return False\n    return True\n\ndef factorial(n):\n    if n <= 1: return 1\n    return n * factorial(n-1)` },
-      { id: 'obf-comments', label: 'Comment/Whitespace Changes', desc: 'Added comments and blank lines', expected: 0.90, codeA: `def binary_search(arr, target):\n    left, right = 0, len(arr)-1\n    while left <= right:\n        mid = (left+right)//2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: left = mid+1\n        else: right = mid-1\n    return -1`, codeB: `# Binary search implementation\ndef binary_search(arr, target):\n    # Initialize boundaries\n    left, right = 0, len(arr)-1\n    while left <= right:\n        mid = (left+right)//2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            left = mid+1\n        else:\n            right = mid-1\n    return -1` },
-    ]
-  },
-  {
-    id: 'multi-file', name: 'Multi-File Class', desc: 'Simulated class of 6 student submissions with varying similarity levels', icon: '👥', color: 'emerald', cases: [
-      { id: 'class-1-2', label: 'Student 1 vs Student 2', desc: 'Direct copy with renamed variables', expected: 0.85, codeA: `class Stack:\n    def __init__(self):\n        self.items = []\n    def push(self, item):\n        self.items.append(item)\n    def pop(self):\n        return self.items.pop()`, codeB: `class Stack:\n    def __init__(self):\n        self.elements = []\n    def push(self, element):\n        self.elements.append(element)\n    def pop(self):\n        return self.elements.pop()` },
-      { id: 'class-3-4', label: 'Student 3 vs Student 4', desc: 'Similar algorithm, different style', expected: 0.55, codeA: `def linear_search(arr, target):\n    for i in range(len(arr)):\n        if arr[i] == target: return i\n    return -1`, codeB: `def search_list(data, key):\n    index = 0\n    while index < len(data):\n        if data[index] == key: return index\n        index += 1\n    return -1` },
-      { id: 'class-5-6', label: 'Student 5 vs Student 6', desc: 'Completely different implementations', expected: 0.15, codeA: `def merge_sort(arr):\n    if len(arr) <= 1: return arr\n    mid = len(arr) // 2\n    return merge(merge_sort(arr[:mid]), merge_sort(arr[mid:]))`, codeB: `def quick_sort(arr):\n    if len(arr) <= 1: return arr\n    pivot = arr[len(arr)//2]\n    return quick_sort([x for x in arr if x < pivot]) + [pivot] + quick_sort([x for x in arr if x > pivot])` },
-    ]
-  },
-  {
-    id: 'java-clone', name: 'Java Clone Detection', desc: 'Java code pairs testing clone detection across languages', icon: '☕', color: 'amber', cases: [
-      { id: 'java-identical', label: 'Identical Java', desc: 'Two copies of the same Java class', expected: 0.95, codeA: `public class Calculator {\n    public int add(int a, int b) { return a + b; }\n    public int subtract(int a, int b) { return a - b; }\n}`, codeB: `public class Calculator {\n    public int add(int a, int b) { return a + b; }\n    public int subtract(int a, int b) { return a - b; }\n}` },
-      { id: 'java-renamed', label: 'Renamed Java Methods', desc: 'Same logic with renamed methods', expected: 0.75, codeA: `public class LinkedList {\n    private Node head;\n    public void insert(int data) {\n        Node newNode = new Node(data);\n        newNode.next = head;\n        head = newNode;\n    }\n}`, codeB: `public class SingleList {\n    private Node first;\n    public void add(int value) {\n        Node node = new Node(value);\n        node.next = first;\n        first = node;\n    }\n}` },
-    ]
-  },
-];
+function getDatasetCategory(dataset) {
+  if (!dataset) {
+    return null;
+  }
 
-const TOOL_COLORS = Object.fromEntries(TOOLS.map(t => [t.id, t.color]));
+  if (dataset.datasetType) {
+    return dataset.datasetType;
+  }
+
+  if (dataset.cases) {
+    return 'guided';
+  }
+
+  return dataset.is_demo ? 'demo' : 'preset';
+}
+
+function getDatasetCategoryMeta(dataset) {
+  const category = getDatasetCategory(dataset);
+  return category ? DATASET_CATEGORY_META[category] : null;
+}
+
+function formatDatasetDate(value) {
+  if (!value) {
+    return 'Recently created';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(parsed);
+}
+
+function summarizeDataset(dataset) {
+  if (!dataset) {
+    return '';
+  }
+
+  if (dataset.cases) {
+    return `${dataset.cases.length} guided scenarios`;
+  }
+
+  if (dataset.is_demo) {
+    const sizeLabel = dataset.size || 'Custom size';
+    const similarityLabel = dataset.similarity_type
+      ? dataset.similarity_type.replaceAll('_', ' ')
+      : 'Classroom-style patterns';
+    return `${sizeLabel} • ${similarityLabel}`;
+  }
+
+  const sizeLabel = dataset.size || 'Benchmark scale';
+  const languageLabel = dataset.language ? dataset.language.toUpperCase() : 'Mixed';
+  return `${languageLabel} • ${sizeLabel}`;
+}
+
+function sortDatasets(datasets, demo = false) {
+  const items = [...datasets];
+  if (demo) {
+    return items.sort((a, b) => {
+      const aTime = Date.parse(a.created_at || '') || 0;
+      const bTime = Date.parse(b.created_at || '') || 0;
+      return bTime - aTime;
+    });
+  }
+
+  return items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+function buildDatasetLibrary(benchmarkDatasets = []) {
+  const presetDatasets = sortDatasets(
+    benchmarkDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' }))
+  );
+  const demoDatasets = sortDatasets(
+    benchmarkDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })),
+    true
+  );
+
+  return {
+    presetDatasets,
+    demoDatasets,
+    allDatasets: [...presetDatasets, ...demoDatasets],
+  };
+}
+
+function DatasetCard({ dataset, isActive, onSelect }) {
+  const categoryMeta = getDatasetCategoryMeta(dataset);
+
+  return (
+    <button
+      onClick={() => onSelect(dataset.id)}
+      className={`relative rounded-2xl border-2 p-4 text-left transition-all duration-200 ${isActive
+        ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
+        : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
+        }`}
+    >
+      {isActive && (
+        <div className="absolute right-3 top-3">
+          <CheckCircle2 size={16} className="text-white" />
+        </div>
+      )}
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-2xl">{dataset.icon}</div>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive ? 'bg-white/15 text-white' : categoryMeta?.badgeClass
+            }`}
+        >
+          {categoryMeta?.label}
+        </span>
+      </div>
+      <div className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] ${isActive ? 'text-slate-300' : 'text-slate-400'
+        }`}>
+        {categoryMeta?.eyebrow}
+      </div>
+      <div className={`mt-2 text-base font-semibold ${isActive ? 'text-white' : 'text-slate-900'}`}>
+        {dataset.name}
+      </div>
+      <div className={`mt-2 text-sm leading-6 ${isActive ? 'text-slate-200' : 'text-slate-500'}`}>
+        {dataset.desc}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'
+            }`}
+        >
+          {summarizeDataset(dataset)}
+        </span>
+        {dataset.created_by && (
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+          >
+            {dataset.created_by}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
 
 function formatChartPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`;
@@ -87,9 +225,8 @@ function ToolBadge({ toolId, compact = false }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${
-        compact ? 'text-[11px]' : 'text-xs'
-      } font-semibold ${tool.bgLight} ${tool.textColor} border-current/10`}
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${compact ? 'text-[11px]' : 'text-xs'
+        } font-semibold ${tool.bgLight} ${tool.textColor} border-current/10`}
     >
       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tool.color }} />
       {tool.name}
@@ -181,31 +318,26 @@ function StepIndicator({ steps, currentStep, completedSteps, compact = false }) 
         const isLast = idx === steps.length - 1;
         return (
           <div key={idx} className="flex items-center flex-1 last:flex-none">
-            <div className={`flex items-center ${compact ? 'gap-2 px-3 py-2 rounded-2xl' : 'gap-3 px-4 py-3 rounded-xl'} transition-all duration-200 ${
-              isCurrent ? 'bg-violet-600 shadow-lg shadow-violet-500/25' :
+            <div className={`flex items-center ${compact ? 'gap-2 px-3 py-2 rounded-2xl' : 'gap-3 px-4 py-3 rounded-xl'} transition-all duration-200 ${isCurrent ? 'bg-violet-600 shadow-lg shadow-violet-500/25' :
               isCompleted ? 'bg-emerald-50 border border-emerald-200' :
-              'bg-white border border-slate-200'
-            }`}>
-              <div className={`${compact ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs'} rounded-full flex items-center justify-center font-bold shrink-0 ${
-                isCurrent ? 'bg-white/20 text-white' :
-                isCompleted ? 'bg-emerald-500 text-white' :
-                'bg-slate-100 text-slate-400'
+                'bg-white border border-slate-200'
               }`}>
+              <div className={`${compact ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs'} rounded-full flex items-center justify-center font-bold shrink-0 ${isCurrent ? 'bg-white/20 text-white' :
+                isCompleted ? 'bg-emerald-500 text-white' :
+                  'bg-slate-100 text-slate-400'
+                }`}>
                 {isCompleted ? <Check size={13} /> : idx + 1}
               </div>
               <div>
-                <div className={`${compact ? 'text-[11px]' : 'text-xs'} font-bold uppercase tracking-wide ${
-                  isCurrent ? 'text-white' : isCompleted ? 'text-emerald-700' : 'text-slate-400'
-                }`}>{step.label}</div>
-                <div className={`${compact ? 'hidden' : 'text-xs mt-0.5 hidden sm:block'} ${
-                  isCurrent ? 'text-violet-200' : isCompleted ? 'text-emerald-500' : 'text-slate-400'
-                }`}>{step.subtitle}</div>
+                <div className={`${compact ? 'text-[11px]' : 'text-xs'} font-bold uppercase tracking-wide ${isCurrent ? 'text-white' : isCompleted ? 'text-emerald-700' : 'text-slate-400'
+                  }`}>{step.label}</div>
+                <div className={`${compact ? 'hidden' : 'text-xs mt-0.5 hidden sm:block'} ${isCurrent ? 'text-violet-200' : isCompleted ? 'text-emerald-500' : 'text-slate-400'
+                  }`}>{step.subtitle}</div>
               </div>
             </div>
             {!isLast && (
-              <div className={`h-px flex-1 ${compact ? 'mx-1.5' : 'mx-2'} ${
-                completedSteps.includes(idx) ? 'bg-emerald-300' : 'bg-slate-200'
-              }`} />
+              <div className={`h-px flex-1 ${compact ? 'mx-1.5' : 'mx-2'} ${completedSteps.includes(idx) ? 'bg-emerald-300' : 'bg-slate-200'
+                }`} />
             )}
           </div>
         );
@@ -231,9 +363,7 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
     prev.includes(engine) ? prev.filter((item) => item !== engine) : [...prev, engine]
   );
 
-  const selectVisibleTools = () => setSelectedTools((prev) => [...new Set([...prev, ...visibleTools.map((tool) => tool.id)])]);
-  const clearVisibleTools = () => setSelectedTools((prev) => prev.filter((toolId) => !visibleTools.some((tool) => tool.id === toolId)));
-  const visibleSelectedCount = visibleTools.filter((tool) => selectedTools.includes(tool.id)).length;
+
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -243,20 +373,19 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
             <Settings2 size={18} className="text-violet-500" />
             Select Detection Tools
           </h2>
-          <p className="text-sm text-slate-500 mt-0.5">Choose which tools to include in the benchmark</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${
-            selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
-          }`}>{selectedTools.length} / {tools.length} selected</span>
-          <div className="flex gap-1">
-            <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-          </div>
+          <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
+            }`}>{selectedTools.length} / {tools.length} selected</span>
+           <div className="flex gap-1">
+             <button onClick={() => setSelectedTools(tools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
+             <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
+           </div>
         </div>
       </div>
       <div className="p-6">
         {loading && (
-          <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <div className="mb-5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
             Checking which benchmark tools are available in this environment…
           </div>
         )}
@@ -265,10 +394,8 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
             {error}
           </div>
         )}
-        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-800">
-          This list is limited to tools with a real runnable benchmark integration in this environment, so the reported scores come from actual CLI output rather than proxy estimates.
-        </div>
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+
+        <div className="mb-5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 p-4">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Filter By Engine</div>
@@ -279,11 +406,10 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
                     <button
                       key={engine}
                       onClick={() => toggleEngine(engine)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-                        active
-                          ? 'border-violet-500 bg-violet-600 text-white shadow-lg shadow-violet-500/20'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${active
+                        ? 'border-violet-500 bg-violet-600 text-white shadow-lg shadow-violet-500/20'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
                     >
                       {engine}
                     </button>
@@ -292,18 +418,6 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200">
-                {visibleTools.length} visible
-              </span>
-              <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200">
-                {visibleSelectedCount} selected in view
-              </span>
-              <button onClick={selectVisibleTools} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:border-blue-300">
-                Select Visible
-              </button>
-              <button onClick={clearVisibleTools} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300">
-                Clear Visible
-              </button>
               {activeEngines.length > 0 && (
                 <button onClick={() => setActiveEngines([])} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300">
                   Show All Engines
@@ -314,47 +428,45 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
         </div>
 
         {visibleTools.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
+          <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 px-6 py-10 text-center">
             <div className="text-sm font-semibold text-slate-700">No tools match the selected engines.</div>
             <div className="mt-2 text-sm text-slate-500">Try clearing one or more engine filters to widen the comparison set.</div>
           </div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-          {visibleTools.map(tool => {
-            const isSelected = selectedTools.includes(tool.id);
-            return (
-              <button key={tool.id} onClick={() => toggleTool(tool.id)}
-                className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${
-                  isSelected
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            {visibleTools.map(tool => {
+              const isSelected = selectedTools.includes(tool.id);
+              return (
+                <button key={tool.id} onClick={() => toggleTool(tool.id)}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${isSelected
                     ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight}`
                     : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm'
-                }`}>
-                {isSelected && (
-                  <div className="absolute top-2 right-2">
-                    <CheckCircle2 size={16} className={tool.textColor} />
+                    }`}>
+                  {isSelected && (
+                    <div className="absolute top-2 right-2">
+                      <CheckCircle2 size={16} className={tool.textColor} />
+                    </div>
+                  )}
+                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm`}>
+                    <Zap size={16} className="text-white" />
                   </div>
-                )}
-                <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm`}>
-                  <Zap size={16} className="text-white" />
-                </div>
-                <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {tool.engines.slice(0, 3).map((engine) => (
-                    <span
-                      key={engine}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'
-                      }`}
-                    >
-                      {engine}
-                    </span>
-                  ))}
-                </div>
-                <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-              </button>
-            );
-          })}
-        </div>
+                  <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {tool.engines.slice(0, 3).map((engine) => (
+                      <span
+                        key={engine}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'
+                          }`}
+                      >
+                        {engine}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
       <div className="px-6 pb-6 flex justify-end">
@@ -369,7 +481,9 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
 }
 
 // ── Step 2: Dataset Selection ───────────────────────────────────────────────
-function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, onBack, onNext }) {
+function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, onBack, onNext }) {
+  const [libraryFilter, setLibraryFilter] = useState('all');
+
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setFiles(Array.from(e.dataTransfer.files));
@@ -377,11 +491,25 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   const handleDragOver = (e) => e.preventDefault();
 
-  const libraryDatasets = [...DATASETS, ...benchmarkDatasets];
-  const activeDataset = libraryDatasets.find(d => d.id === selectedDataset);
-  const canProceed = uploadMode === 'builtin' ? !!selectedDataset :
-    uploadMode === 'individual' ? files.length >= 2 :
-    files.length >= 1;
+  const { presetDatasets, demoDatasets, allDatasets } = useMemo(
+    () => buildDatasetLibrary(benchmarkDatasets),
+    [benchmarkDatasets]
+  );
+  const visibleLibraryDatasets = allDatasets.filter((dataset) => {
+    if (libraryFilter === 'preset') {
+      return dataset.datasetType === 'preset';
+    }
+    if (libraryFilter === 'demo') {
+      return dataset.datasetType === 'demo';
+    }
+    return true;
+  });
+  const activeDataset = allDatasets.find((dataset) => dataset.id === selectedDataset);
+  const activeDatasetMeta = getDatasetCategoryMeta(activeDataset);
+  const hasZipUpload = files.some((file) => file.name?.toLowerCase().endsWith('.zip'));
+  const canProceed = uploadMode === 'builtin'
+    ? !!selectedDataset
+    : hasZipUpload || files.length >= 2;
 
   return (
     <div className="space-y-5">
@@ -390,20 +518,20 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         <div className="px-6 py-5 border-b border-slate-100">
           <h2 className="font-semibold text-slate-900 flex items-center gap-2">
             <Database size={18} className="text-violet-500" />
-            Choose Dataset
+            Choose What To Benchmark
           </h2>
-          <p className="text-sm text-slate-500 mt-0.5">Use a built-in benchmark dataset or upload your own files</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Choose a reusable benchmark dataset from the library, or upload your own files.
+          </p>
         </div>
         <div className="flex border-b border-slate-100">
           {[
-            { id: 'builtin', label: 'Built-in Datasets', icon: FlaskConical },
-            { id: 'individual', label: 'Upload Files', icon: FileUp },
-            { id: 'zip', label: 'Upload ZIP', icon: FolderArchive },
+            { id: 'builtin', label: 'Dataset Library', icon: FlaskConical },
+            { id: 'upload', label: 'Upload Files or ZIP', icon: FileUp },
           ].map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => { setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${
-                uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}>
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}>
               <Icon size={15} />
               {label}
             </button>
@@ -412,100 +540,99 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
         <div className="p-6">
           {uploadMode === 'builtin' && (
-            <div className="space-y-5">
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Interactive Test Suites</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {DATASETS.map(ds => {
-                    const isActive = selectedDataset === ds.id;
-                    return (
-                      <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
-                        className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                          isActive ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20' : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
-                        }`}>
-                        {isActive && <div className="absolute top-2 right-2"><CheckCircle2 size={14} className="text-violet-600" /></div>}
-                        <div className="text-xl mb-2">{ds.icon}</div>
-                        <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                        <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                        <div className="text-xs font-medium text-violet-600 mt-2">{ds.cases.length} cases</div>
-                      </button>
-                    );
-                  })}
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dataset Library</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Choose any reusable benchmark dataset here. Preset datasets and demo datasets all live in one library so you can filter them without switching sections.
+                    </p>
+                  </div>
+                  {canManageDemoDatasets ? (
+                    <Link
+                      href="/admin"
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Create Demo Dataset
+                      <ArrowRight size={15} />
+                    </Link>
+                  ) : null}
                 </div>
-              </div>
 
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Built-in Test Suites</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {benchmarkDatasets.map(ds => {
-                    const isActive = selectedDataset === ds.id;
-                    const isDemo = ds.is_demo;
-                    return (
-                      <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
-                        className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                          isActive ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/20' : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
-                        }`}>
-                        {isActive && <div className="absolute top-2 right-2"><CheckCircle2 size={14} className="text-violet-600" /></div>}
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="text-xl">{ds.icon}</div>
-                          {isDemo && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Demo</span>}
-                        </div>
-                        <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                        <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className={`text-xs font-medium ${
-                            ds.color === 'blue' ? 'text-blue-600' :
-                            ds.color === 'green' ? 'text-green-600' :
-                            ds.color === 'purple' ? 'text-purple-600' :
-                            ds.color === 'violet' ? 'text-violet-600' :
-                            'text-slate-600'
-                          }`}>{ds.language || 'mixed'}</span>
-                          <span className="text-xs text-slate-500">{ds.size}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { id: 'all', label: 'All', count: allDatasets.length },
+                    { id: 'preset', label: 'Preset', count: presetDatasets.length },
+                    { id: 'demo', label: 'Demo', count: demoDatasets.length },
+                  ].map((filter) => (
+                    <button
+                      key={filter.id}
+                      onClick={() => setLibraryFilter(filter.id)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                    >
+                      {filter.label} ({filter.count})
+                    </button>
+                  ))}
+                  {!canManageDemoDatasets && (
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-500">
+                      Need another demo? Ask an administrator to create one.
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {benchmarkDatasets.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Benchmark Datasets</p>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {benchmarkDatasets.map(ds => {
-                      const isActive = selectedDataset === ds.id;
-                      return (
-                        <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
-                          className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                            isActive ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-500/20' : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-md'
-                          }`}>
-                          {isActive && <div className="absolute top-2 right-2"><CheckCircle2 size={14} className="text-emerald-600" /></div>}
-                          <div className="text-xl mb-2">{ds.icon}</div>
-                          <div className="font-semibold text-sm text-slate-900">{ds.name}</div>
-                          <div className="text-xs text-slate-500 mt-1 line-clamp-2">{ds.desc}</div>
-                          <div className="text-xs font-medium text-emerald-600 mt-2 flex items-center gap-2">
-                            {ds.language && <span>{ds.language.toUpperCase()}</span>}
-                            {ds.size && <><span className="text-slate-300">•</span><span>{ds.size}</span></>}
-                          </div>
-                        </button>
-                      );
+                {visibleLibraryDatasets.length > 0 ? (
+                  <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {visibleLibraryDatasets.map((dataset) => {
+                      const isActive = selectedDataset === dataset.id;
+                      return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
                     })}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                    <div className="text-sm font-semibold text-slate-900">
+                      {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-slate-500">
+                      {libraryFilter === 'demo'
+                        ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
+                        : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {activeDataset && (
-                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                    {activeDataset.cases ? `Test cases in "${activeDataset.name}"` : `Dataset info for "${activeDataset.name}"`}
-                  </p>
+                <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Selected dataset
+                      </p>
+                      <div className="mt-2 flex items-center gap-3">
+                        <span className="text-2xl">{activeDataset.icon}</span>
+                        <div>
+                          <div className="text-lg font-semibold text-slate-900">{activeDataset.name}</div>
+                          <div className="text-sm text-slate-600">{activeDatasetMeta.label}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeDatasetMeta.badgeClass}`}>
+                      {activeDatasetMeta.summaryLabel}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
+
                   {activeDataset.cases ? (
-                    <div className="grid md:grid-cols-3 gap-2">
+                    <div className="mt-5 grid md:grid-cols-3 gap-2">
                       {activeDataset.cases.map(tc => (
                         <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${
-                            tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
-                          }`} />
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'
+                            }`} />
                           <div className="min-w-0">
                             <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
                             <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
@@ -514,38 +641,34 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                       ))}
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="mt-5 space-y-3">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className="text-lg font-bold text-violet-600">{activeDataset.language || 'Mixed'}</div>
+                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{activeDataset.language || 'Mixed'}</div>
                           <div className="text-xs text-slate-500">Language</div>
                         </div>
                         <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className="text-lg font-bold text-violet-600">{activeDataset.size || 'Unknown'}</div>
-                          <div className="text-xs text-slate-500">Size</div>
+                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{activeDataset.size || 'Unknown'}</div>
+                          <div className="text-xs text-slate-500">{activeDataset.is_demo ? 'Files' : 'Size'}</div>
                         </div>
                         <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className="text-lg font-bold text-violet-600 capitalize">{activeDataset.similarity_type || 'Unknown'}</div>
-                          <div className="text-xs text-slate-500">Similarity Type</div>
+                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>
+                            {activeDataset.is_demo
+                              ? formatDatasetDate(activeDataset.created_at)
+                              : (activeDataset.similarity_type || 'Standard')}
+                          </div>
+                          <div className="text-xs text-slate-500">{activeDataset.is_demo ? 'Created' : 'Benchmark Type'}</div>
                         </div>
                         <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className="text-lg font-bold text-violet-600">{activeDataset.created_by || 'Unknown'}</div>
-                          <div className="text-xs text-slate-500">Created By</div>
+                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{activeDataset.created_by || 'System'}</div>
+                          <div className="text-xs text-slate-500">{activeDataset.is_demo ? 'Created By' : 'Source'}</div>
                         </div>
                       </div>
-                      {activeDataset.is_demo && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                          <div className="flex items-start gap-2">
-                            <div className="text-blue-600 mt-0.5">ℹ️</div>
-                            <div>
-                              <div className="text-sm font-medium text-blue-900">Demo Dataset</div>
-                              <div className="text-xs text-blue-700 mt-1">
-                                This dataset was generated inside the app and can be run directly through the benchmark flow.
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      <div className="rounded-lg border border-white/70 bg-white/80 p-3 text-sm text-slate-600">
+                        {activeDataset.is_demo
+                          ? 'This demo dataset was created inside the app and is meant for reusable classroom examples, workshops, and faculty demos.'
+                          : 'This dataset is part of the system benchmark library and is best for larger, more standardized tool comparisons.'}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -553,7 +676,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             </div>
           )}
 
-          {(uploadMode === 'individual' || uploadMode === 'zip') && (
+          {uploadMode === 'upload' && (
             <div>
               <div
                 onDrop={handleDrop}
@@ -561,15 +684,15 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                 onClick={() => document.getElementById('file-input').click()}
                 className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all group"
               >
-                <input id="file-input" type="file" className="hidden" multiple={uploadMode === 'individual'}
-                  accept={uploadMode === 'zip' ? '.zip' : undefined}
+                <input id="file-input" type="file" className="hidden" multiple
+                  accept=".zip,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash,.zsh,.ps1,.lua,.pl,.pm,.ex,.exs,.dart,.clj,.hs,.ml,.fs,.erl,.vue,.svelte"
                   onChange={e => setFiles(Array.from(e.target.files))} />
                 <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
                 <p className="font-semibold text-slate-600 mb-1">
-                  {uploadMode === 'zip' ? 'Drop a ZIP archive here' : 'Drop files here'}
+                  Drop source files or a ZIP archive here
                 </p>
                 <p className="text-sm text-slate-400">
-                  {uploadMode === 'individual' ? 'Upload 2 or more source files to compare' : 'ZIP containing source files for bulk comparison'}
+                  Upload 2 or more source files, or a single ZIP containing source files for one-off comparison
                 </p>
                 <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
                   <FileUp size={14} />
@@ -593,9 +716,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                   ))}
                 </div>
               )}
-              {uploadMode === 'individual' && files.length > 0 && files.length < 2 && (
+              {files.length > 0 && !hasZipUpload && files.length < 2 && (
                 <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5">
-                  <AlertCircle size={13} /> Upload at least 2 files to compare
+                  <AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive
                 </p>
               )}
             </div>
@@ -619,22 +742,33 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
 // ── Step 3: Run ─────────────────────────────────────────────────────────────
 function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, onBack, onComplete }) {
+  const { token } = useAuth();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [progressPct, setProgressPct] = useState(0);
   const [error, setError] = useState('');
-  const [results, setResults] = useState(null);
-  const cancelRef = useRef(false);
+  const requestControllerRef = useRef(null);
 
-  const activeDataset = [...DATASETS, ...benchmarkDatasets].find(d => d.id === selectedDataset);
+  const { allDatasets } = useMemo(
+    () => buildDatasetLibrary(benchmarkDatasets),
+    [benchmarkDatasets]
+  );
+  const activeDataset = allDatasets.find((dataset) => dataset.id === selectedDataset);
+  const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
+  const hasZipUpload = files.some((file) => file.name?.toLowerCase().endsWith('.zip'));
 
-  const toolNames = selectedTools.map(id => TOOLS.find(t => t.id === id)?.name).filter(Boolean);
+  const createRequestOptions = () => ({
+    headers: { 'Content-Type': 'multipart/form-data' },
+    withCredentials: true,
+    signal: requestControllerRef.current?.signal,
+  });
 
   const run = async () => {
-    cancelRef.current = false;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setError('');
     setRunning(true);
-    setResults(null);
     setProgressPct(10);
 
     try {
@@ -645,7 +779,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           const cases = activeDataset.cases;
 
           for (let i = 0; i < cases.length; i++) {
-            if (cancelRef.current) break;
             const tc = cases[i];
             setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
             setProgressPct(10 + ((i / cases.length) * 80));
@@ -655,28 +788,27 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             const fileA = new File([blobA], `${tc.id}_a.py`);
             const fileB = new File([blobB], `${tc.id}_b.py`);
 
-          const formData = new FormData();
-          formData.append('files', fileA);
-          formData.append('files', fileB);
-          selectedTools.forEach(t => formData.append('tools', t));
+            const formData = new FormData();
+            formData.append('files', fileA);
+            formData.append('files', fileB);
+            selectedTools.forEach(t => formData.append('tools', t));
 
-          try {
-            const res = await axios.post(`${API}/api/benchmark`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            allResults.push({ testCase: tc, ...res.data });
-          } catch (err) {
-            // Continue with other cases
+            try {
+              const res = await axios.post(`${API}/api/benchmark`, formData, createRequestOptions());
+              allResults.push({ testCase: tc, ...res.data });
+            } catch (err) {
+              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+                break;
+              }
+              // Continue with other cases
+            }
           }
-        }
 
-        if (!cancelRef.current && allResults.length > 0) {
-          setProgressPct(100);
-          setProgress('Complete!');
-          // Merge results
-          const merged = allResults[0];
-          merged.pair_results = allResults.flatMap(r => r.pair_results || []);
-            setResults({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+          if (allResults.length > 0) {
+            setProgressPct(100);
+            setProgress('Complete!');
+            // Merge results without mutating the original response
+            const merged = { ...allResults[0], pair_results: allResults.flatMap(r => r.pair_results || []) };
             setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           }
         } else {
@@ -691,16 +823,13 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             setProgress('Running benchmark analysis...');
             setProgressPct(50);
 
-            const res = await axios.post(`${API}/api/benchmark`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' },
-            });
+            const res = await axios.post(`${API}/api/benchmark`, formData, createRequestOptions());
 
             setProgressPct(100);
             setProgress('Complete!');
-            setResults({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
             setTimeout(() => onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           } catch (err) {
-            setError('Failed to run benchmark on the selected dataset');
+            setError(err.response?.data?.error || 'Failed to run benchmark on the selected dataset');
             setProgress('Error occurred');
           }
         }
@@ -714,25 +843,31 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 
         setProgress('Running analysis across all tools…');
         setProgressPct(50);
-        const res = await axios.post(`${API}/api/benchmark`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        const res = await axios.post(`${API}/api/benchmark`, formData, createRequestOptions());
         setProgressPct(100);
         setProgress('Complete!');
-        setResults({ ...res.data, runAt: new Date().toISOString() });
         setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Benchmark failed. Please try again.');
+      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+        setProgress('Run cancelled');
+      } else {
+        console.error('Benchmark error:', err);
+        setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+      }
+    } finally {
+      // Only clear the ref if it matches the controller that started this invocation
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+      }
+      setRunning(false);
     }
-
-    if (!cancelRef.current) setRunning(false);
   };
 
   const stop = () => {
-    cancelRef.current = true;
+    requestControllerRef.current?.abort();
     setRunning(false);
-    setProgress('');
+    setProgress('Cancelling run…');
     setProgressPct(0);
   };
 
@@ -744,7 +879,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           <ClipboardList size={18} className="text-violet-500" />
           Benchmark Configuration
         </h2>
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Tools</p>
             <div className="flex flex-wrap gap-1.5">
@@ -764,19 +899,18 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             {uploadMode === 'builtin' ? (
               <>
                 <p className="font-semibold text-slate-800 text-sm">{activeDataset?.name || 'Unknown'}</p>
-                <p className="text-xs text-slate-500 mt-1">{activeDataset?.cases?.length || 0} test cases</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {activeDataset?.cases?.length
+                    ? `${activeDataset.cases.length} guided scenarios`
+                    : activeDatasetMeta?.label || 'Dataset library'}
+                </p>
               </>
             ) : (
               <>
                 <p className="font-semibold text-slate-800 text-sm">{files.length} uploaded file{files.length !== 1 ? 's' : ''}</p>
-                <p className="text-xs text-slate-500 mt-1">{uploadMode === 'zip' ? 'ZIP archive' : 'Individual files'}</p>
+                <p className="text-xs text-slate-500 mt-1">{hasZipUpload ? 'ZIP archive or mixed upload' : 'Direct file upload'}</p>
               </>
             )}
-          </div>
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Estimated Time</p>
-            <p className="font-semibold text-slate-800 text-sm">~{Math.ceil(selectedTools.length * ((activeDataset?.cases?.length || files.length) || 1) * 0.5)}s</p>
-            <p className="text-xs text-slate-500 mt-1">{selectedTools.length} tools × {activeDataset?.cases?.length || files.length || 1} pairs</p>
           </div>
         </div>
       </div>
@@ -838,8 +972,11 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 function ReportStep({ results, onRestart }) {
   const [expandedPairs, setExpandedPairs] = useState({});
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState('');
   const { tool_scores, pair_results, summary } = results;
-  const activeTools = Object.keys(tool_scores || {});
+  const activeTools = Object.keys(tool_scores || {}).length
+    ? Object.keys(tool_scores || {})
+    : Array.from(new Set((pair_results || []).flatMap((pair) => (pair.tool_results || []).map((entry) => entry.tool))));
 
   const chartData = (pair_results || []).map(pair => {
     const d = { pair: pair.label };
@@ -866,7 +1003,7 @@ function ReportStep({ results, onRestart }) {
       id: tool,
       name: toolInfo?.name || tool,
       shortName: toolInfo?.name || tool,
-      color: TOOL_COLORS[tool] || '#94a3b8',
+      color: toolInfo?.color ?? '#94a3b8',
       average: Math.round(average * 1000) / 10,
       peak: Math.round(peak * 1000) / 10,
       minimum: Math.round(minimum * 1000) / 10,
@@ -899,8 +1036,8 @@ function ReportStep({ results, onRestart }) {
       });
       const numScores = scores.filter(s => s !== 'N/A').map(Number);
       rows.push([pair.label, pair.file_a || '', pair.file_b || '', ...scores,
-        numScores.length ? Math.max(...numScores).toFixed(1) : 'N/A',
-        numScores.length ? Math.min(...numScores).toFixed(1) : 'N/A',
+      numScores.length ? Math.max(...numScores).toFixed(1) : 'N/A',
+      numScores.length ? Math.min(...numScores).toFixed(1) : 'N/A',
       ]);
     });
     const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
@@ -916,6 +1053,7 @@ function ReportStep({ results, onRestart }) {
   const downloadPDF = async () => {
     try {
       setPdfDownloading(true);
+      setPdfError('');
       const res = await axios.post(`${API}/api/benchmark/export-pdf`, results, {
         responseType: 'blob',
       });
@@ -927,7 +1065,7 @@ function ReportStep({ results, onRestart }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      window.alert('Could not export the benchmark report as PDF.');
+      setPdfError('Could not export the benchmark report as PDF.');
     } finally {
       setPdfDownloading(false);
     }
@@ -971,6 +1109,12 @@ function ReportStep({ results, onRestart }) {
         </div>
       </div>
 
+      {pdfError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {pdfError}
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -1012,7 +1156,7 @@ function ReportStep({ results, onRestart }) {
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} domain={[0, 100]} />
                   <Tooltip content={<PairScoreTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }} />
                   {activeTools.map(tool => (
-                    <Bar key={tool} dataKey={tool} fill={TOOL_COLORS[tool] || '#94a3b8'} radius={[4, 4, 0, 0]} name={TOOLS.find(t => t.id === tool)?.name || tool} />
+                    <Bar key={tool} dataKey={tool} fill={TOOLS.find(t => t.id === tool)?.color ?? '#94a3b8'} radius={[4, 4, 0, 0]} name={TOOLS.find(t => t.id === tool)?.name || tool} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -1056,40 +1200,40 @@ function ReportStep({ results, onRestart }) {
                   <div className="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
                     <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500" />
                     <div className="p-4">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-                      <Trophy size={14} />
-                      Top Average Score
-                    </div>
-                    <div className="mt-3 flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="text-2xl font-bold text-slate-900">{leadingTool.name}</div>
-                        <div className="mt-1 text-sm text-slate-600">
-                          {leadingTool.average.toFixed(1)}% average across {leadingTool.pairCount} pair{leadingTool.pairCount === 1 ? '' : 's'}
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+                        <Trophy size={14} />
+                        Top Average Score
+                      </div>
+                      <div className="mt-3 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-2xl font-bold text-slate-900">{leadingTool.name}</div>
+                          <div className="mt-1 text-sm text-slate-600">
+                            {leadingTool.average.toFixed(1)}% average across {leadingTool.pairCount} pair{leadingTool.pairCount === 1 ? '' : 's'}
+                          </div>
                         </div>
+                        <ToolBadge toolId={leadingTool.id} compact />
                       </div>
-                      <ToolBadge toolId={leadingTool.id} compact />
-                    </div>
-                    {leadingToolInfo?.desc && (
-                      <div className="mt-3 text-sm leading-6 text-slate-600">{leadingToolInfo.desc}</div>
-                    )}
-                    {leadingToolInfo?.engines?.length > 0 && (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {leadingToolInfo.engines.slice(0, 4).map((engine) => (
-                          <span
-                            key={engine}
-                            className="rounded-full border border-blue-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700"
-                          >
-                            {engine}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                      {leadingToolInfo?.desc && (
+                        <div className="mt-3 text-sm leading-6 text-slate-600">{leadingToolInfo.desc}</div>
+                      )}
+                      {leadingToolInfo?.engines?.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {leadingToolInfo.engines.slice(0, 4).map((engine) => (
+                            <span
+                              key={engine}
+                              className="rounded-full border border-blue-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700"
+                            >
+                              {engine}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
                 {toolLeaderboard.slice(0, 4).map((tool, index) => (
-                  <div key={tool.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-slate-300">
+                  <div key={tool.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 p-4 transition hover:-translate-y-0.5 hover:border-slate-300 dark:hover:border-slate-600">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -1150,7 +1294,7 @@ function ReportStep({ results, onRestart }) {
             <div>File Pair</div>
             {activeTools.map(tool => (
               <div key={tool} className="text-center flex items-center justify-center gap-1.5">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: TOOL_COLORS[tool] }} />
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: TOOLS.find(t => t.id === tool)?.color ?? '#94a3b8' }} />
                 {TOOLS.find(t => t.id === tool)?.name || tool}
               </div>
             ))}
@@ -1169,9 +1313,10 @@ function ReportStep({ results, onRestart }) {
               const minScore = valid.length ? Math.min(...valid) : 0;
               const spread = maxScore - minScore;
               const isExpanded = expandedPairs[idx];
+              const pairKey = `${pair.file_a || 'unknown-a'}::${pair.file_b || 'unknown-b'}::${pair.label || idx}`;
 
               return (
-                <div key={idx}>
+                <div key={pairKey}>
                   <button onClick={() => togglePair(idx)}
                     className="w-full px-6 py-4 hover:bg-slate-50/50 transition-colors text-left hidden lg:grid items-center"
                     style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
@@ -1284,7 +1429,7 @@ export default function BenchmarkPage() {
     });
     axios.get(`${API}/api/benchmark-datasets`).then(res => {
       if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [authLoading, user]);
 
   const goToStep = (next, currentCompleted) => {
@@ -1319,7 +1464,6 @@ export default function BenchmarkPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Benchmark Suite</h1>
-              <p className="text-slate-500 text-sm mt-0.5 max-w-2xl">Compare plagiarism detection tools across standardized datasets.</p>
             </div>
           </div>
 
@@ -1355,6 +1499,7 @@ export default function BenchmarkPage() {
             files={files}
             setFiles={setFiles}
             benchmarkDatasets={benchmarkDatasets}
+            canManageDemoDatasets={user?.role === 'admin'}
             onBack={() => setStep(0)}
             onNext={() => goToStep(2, 1)}
           />
