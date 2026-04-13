@@ -2,10 +2,26 @@
 # Start IntegrityDesk - Backend API + Next.js Dashboard
 # Usage: ./scripts/start.sh [dashboard_port] [backend_port]
 # Default: Backend on 8000, Dashboard on 3000
+# Set DASHBOARD_MODE=dev to use Next.js development mode.
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="$PROJECT_DIR/.env.local"
+
+if [ -f "$ENV_FILE" ]; then
+    # Load dotenv-style entries without shell-evaluating special characters in values.
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in
+            ''|\#*)
+                continue
+                ;;
+        esac
+        export "$line"
+    done < "$ENV_FILE"
+fi
+
 DASHBOARD_PORT="${1:-${PORT:-3000}}"
 BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
@@ -50,13 +66,22 @@ DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -m uvicorn src.api.server:app \
 BACKEND_PID=$!
 sleep 2
 
-echo "Starting Next.js dashboard on port ${DASHBOARD_PORT}..."
 cd "$DASHBOARD_DIR"
 export PORT="$DASHBOARD_PORT"
 export BACKEND_URL
 export API_URL="$BACKEND_URL"
 export NEXT_PUBLIC_API_URL="$BACKEND_URL"
-npx next dev -p "$DASHBOARD_PORT" &
+DASHBOARD_MODE="${DASHBOARD_MODE:-prod}"
+
+if [ "$DASHBOARD_MODE" = "dev" ]; then
+    echo "Starting Next.js dashboard in development mode on port ${DASHBOARD_PORT}..."
+    npx next dev -p "$DASHBOARD_PORT" --no-server-fast-refresh &
+else
+    echo "Building Next.js dashboard for stable startup..."
+    npx next build
+    echo "Starting Next.js dashboard in production mode on port ${DASHBOARD_PORT}..."
+    npx next start -p "$DASHBOARD_PORT" &
+fi
 DASHBOARD_PID=$!
 
 cleanup() {
@@ -71,6 +96,4 @@ echo ""
 echo "Services ready:"
 echo "  Backend API: ${BACKEND_URL}"
 echo "  Dashboard:   http://localhost:${DASHBOARD_PORT}"
-echo ""
-echo "Press Ctrl+C to stop"; echo ""
 wait

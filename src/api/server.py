@@ -82,6 +82,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/bootstrap-admin",
     "/api/benchmark-datasets",
     "/api/benchmark-tools",
+    "/api/benchmark",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -325,6 +326,28 @@ def _is_code_file(filename: str) -> bool:
     return PathLib(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
+def _language_file_extension(language: str) -> str:
+    return {
+        "python": ".py",
+        "java": ".java",
+        "javascript": ".js",
+        "cpp": ".cpp",
+    }.get(language, f".{language}")
+
+
+def _normalize_demo_filename(filename: str, language: str, plagiarized: bool = False) -> str:
+    path = PathLib(filename)
+    suffix = path.suffix.lower()
+    normalized_suffix = {
+        ".python": ".py",
+        ".javascript": ".js",
+    }.get(suffix, suffix or _language_file_extension(language))
+    base_name = path.stem or path.name
+    if plagiarized:
+        return f"{base_name}_plagiarized{normalized_suffix}"
+    return f"{base_name}{normalized_suffix}"
+
+
 def _infer_language_from_filename(filename: str) -> str:
     suffix = PathLib(filename).suffix.lower()
     language_map = {
@@ -528,6 +551,25 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
     return submissions
 
 
+async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib) -> Dict[str, str]:
+    """Store uploaded benchmark inputs, accepting either source files or zip archives."""
+    for upload in files:
+        if not upload.filename:
+            continue
+
+        filename = PathLib(upload.filename).name
+        if not filename:
+            continue
+
+        destination = target_dir / filename
+        destination.write_bytes(await upload.read())
+
+        if filename.lower().endswith(".zip"):
+            _extract_zip(destination, target_dir)
+
+    return _read_files_from_dir(target_dir)
+
+
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
 BENCHMARK_DATA_DIR = project_root / "data" / "datasets"
@@ -544,6 +586,15 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
             logger.warning(f"Demo dataset not found: {dataset_dir}")
             return submissions
 
+        metadata = {}
+        metadata_file = dataset_dir / "metadata.json"
+        if metadata_file.exists():
+            try:
+                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning(f"Error reading demo dataset metadata {metadata_file}: {exc}")
+        demo_language = metadata.get("language", "python")
+
         # For demo datasets, combine original and plagiarized files
         submissions = {}
 
@@ -551,10 +602,11 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
         original_dir = dataset_dir / "original"
         if original_dir.exists():
             for file_path in original_dir.glob("*"):
-                if file_path.is_file() and _is_code_file(file_path.name):
+                normalized_name = _normalize_demo_filename(file_path.name, demo_language, plagiarized=False)
+                if file_path.is_file() and (_is_code_file(file_path.name) or _is_code_file(normalized_name)):
                     try:
                         content = file_path.read_text(encoding='utf-8', errors='ignore')
-                        submissions[file_path.name] = content
+                        submissions[normalized_name] = content
                     except Exception as e:
                         logger.warning(f"Error reading file {file_path}: {e}")
 
@@ -562,12 +614,11 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
         plagiarized_dir = dataset_dir / "plagiarized"
         if plagiarized_dir.exists():
             for file_path in plagiarized_dir.glob("*"):
-                if file_path.is_file() and _is_code_file(file_path.name):
+                normalized_name = _normalize_demo_filename(file_path.name, demo_language, plagiarized=True)
+                if file_path.is_file() and (_is_code_file(file_path.name) or _is_code_file(normalized_name)):
                     try:
                         content = file_path.read_text(encoding='utf-8', errors='ignore')
-                        # Add suffix to distinguish plagiarized versions
-                        modified_name = file_path.name.replace('.py', '_plagiarized.py').replace('.java', '_plagiarized.java').replace('.js', '_plagiarized.js').replace('.cpp', '_plagiarized.cpp')
-                        submissions[modified_name] = content
+                        submissions[normalized_name] = content
                     except Exception as e:
                         logger.warning(f"Error reading file {file_path}: {e}")
 
@@ -1293,9 +1344,10 @@ async def create_demo_dataset(request: Request):
         plagiarized_dir.mkdir()
 
         # Create original files
+        file_extension = _language_file_extension(language)
         for i in range(num_files):
             filename = f"{i:02d}"
-            filepath = original_dir / f"{filename}.{language}"
+            filepath = original_dir / f"{filename}{file_extension}"
 
             # Generate synthetic code based on language
             code_content = generate_synthetic_code(i, language, similarity_type)
@@ -1304,8 +1356,8 @@ async def create_demo_dataset(request: Request):
 
         # Create modified versions (plagiarized)
         for i in range(num_files):
-            original_file = original_dir / f"{i:02d}.{language}"
-            plagiarized_file = plagiarized_dir / f"{i:02d}.{language}"
+            original_file = original_dir / f"{i:02d}{file_extension}"
+            plagiarized_file = plagiarized_dir / f"{i:02d}{file_extension}"
 
             if original_file.exists():
                 content = original_file.read_text()
@@ -2469,7 +2521,10 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/benchmark-tools")
 async def get_benchmark_tools():
-    tools = _list_runnable_benchmark_tools()
+    tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
+    # Add 'available' field for frontend compatibility
+    for tool in tools:
+        tool["available"] = tool.get("runnable", False)
     return JSONResponse(content={"tools": tools})
 
 
@@ -2588,10 +2643,7 @@ async def run_benchmark(
     if dataset and dataset != "custom":
         submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
-        for f in files:
-            if f.filename and _is_code_file(f.filename):
-                (job_dir / f.filename).write_bytes(await f.read())
-        submissions = _read_files_from_dir(job_dir)
+        submissions = await _store_benchmark_uploads(files, job_dir)
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -2603,9 +2655,37 @@ async def run_benchmark(
 
     if "integritydesk" in requested_tools:
         try:
+            # Optimize for benchmarks: disable embedding on CPU, keep it on GPU
+            import os
+            original_embedding_runtime = os.environ.get("EMBEDDING_RUNTIME")
+            should_disable_embedding = False
+            
+            # Check if GPU is available
+            try:
+                import torch
+                has_gpu = torch.cuda.is_available()
+                if not has_gpu and settings.EMBEDDING_RUNTIME in ("local_unixcoder", "local", "unixcoder"):
+                    # CPU-only and using local model - disable for speed
+                    should_disable_embedding = True
+                    os.environ["EMBEDDING_RUNTIME"] = "none"
+                    logger.info("Benchmark: Disabled embedding engine (CPU-only mode)")
+            except ImportError:
+                # torch not available, assume CPU
+                if settings.EMBEDDING_RUNTIME in ("local_unixcoder", "local", "unixcoder"):
+                    should_disable_embedding = True
+                    os.environ["EMBEDDING_RUNTIME"] = "none"
+                    logger.info("Benchmark: Disabled embedding engine (no GPU detected)")
+            
             service = BatchDetectionService(threshold=0.3)
             results = service.compare_all_pairs(submissions)
             tool_results["integritydesk"] = {"pairs": [{"file_a": r.file_a, "file_b": r.file_b, "score": round(r.score, 3), "features": {k: round(v, 3) for k, v in r.features.items()}} for r in results]}
+            
+            # Restore original setting
+            if should_disable_embedding:
+                if original_embedding_runtime:
+                    os.environ["EMBEDDING_RUNTIME"] = original_embedding_runtime
+                elif "EMBEDDING_RUNTIME" in os.environ:
+                    del os.environ["EMBEDDING_RUNTIME"]
         except Exception as e:
             logger.exception("IntegrityDesk benchmark failed")
             tool_results["integritydesk"] = {"error": str(e)}
