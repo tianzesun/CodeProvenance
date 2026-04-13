@@ -3,12 +3,13 @@
 
 ## Automatic Rule Enforcement
 
-When working on CodeProvenance, AI MUST:
+When working on IntegrityDesk, AI MUST:
 
 1. **Read these files first** (in order):
    - `.ai-rules.md` - Primary coding rules
    - `.cursorrules` - Additional guidelines
-   - `PROJECT_STRUCTURE.md` - Folder organization
+   - `AGENTS.md` - Working agreements
+   - `README.md` - Project overview
 
 2. **Follow all rules in .ai-rules.md**:
    - Type hints required for all functions
@@ -25,8 +26,9 @@ When working on CodeProvenance, AI MUST:
 
 4. **Before any code change**:
    - Verify rules are understood
-   - Write tests first (TDD approach)
    - Ensure no breaking changes
+   - Check existing patterns in src/
+   - Always use virtual environment: source /home/tsun/Documents/CodeProvenance/venv/bin/activate
 
 ## Quick Reference
 
@@ -34,5 +36,6 @@ When working on CodeProvenance, AI MUST:
 |------|---------|
 | `.ai-rules.md` | Must-read coding rules |
 | `.cursorrules` | IDE-specific guidelines |
-| `PROJECT_STRUCTURE.md` | Folder organization |
-| `PROMPT_TEMPLATE.md` | Ready-to-use prompts |
+| `AGENTS.md` | Working agreements |
+| `.codex/instructions.md` | Codex-specific instructions |
+| `.codex/project-context.md` | Project overview |

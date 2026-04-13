@@ -1,4 +1,4 @@
-# Cursor Rules for CodeProvenance
+# Cursor Rules for IntegrityDesk
 
 This file contains project-specific rules that Cursor AI follows automatically.
 
@@ -6,7 +6,7 @@ This file contains project-specific rules that Cursor AI follows automatically.
 
 1. **Always read** `.ai-rules.md` before making any changes
 2. **Follow** all guidelines in `.ai-rules.md` without exception
-3. **Check** PROJECT_STRUCTURE.md for correct file locations
+3. **Check** project structure below for correct file locations
 
 ## Quick Reference
 
@@ -18,22 +18,26 @@ This file contains project-specific rules that Cursor AI follows automatically.
 - ✅ Write unit tests for new code
 - ✅ Validate ALL input before processing
 - ✅ Prevent path traversal attacks
-- ✅ Use async/await for I/O operations
+- ✅ Prefer sync patterns unless async provides clear benefits
 - ✅ Cache expensive computations
 
 ### Project Structure
 ```
 src/
-├── api/         → REST endpoints
-├── core/        → Similarity detection (parser, processor, similarity, analyzer)
-├── models/      → Data models (Pydantic)
-├── utils/       → Utility functions
-└── config/      → Configuration management
+├── application/services/  # Business logic and orchestration
+├── api/routes/           # FastAPI REST endpoints
+├── engines/similarity/   # 6 similarity detection engines
+├── features/             # Feature extraction
+├── scoring/              # Fusion scoring and ML logic
+├── infrastructure/       # Database, logging, report generation
+├── evaluation/           # Online metrics
+├── evaluation_lab/       # Offline optimization
+└── web_gui.py            # Web interface entry point
 
 tests/
-├── unit/        → Unit tests
-├── integration/ → Integration tests
-└── fixtures/    → Test data
+├── unit/                 # Unit tests
+├── integration/          # Integration tests
+└── fixtures/             # Test data
 ```
 
 ### API Design
@@ -65,11 +69,11 @@ tests/
 
 ## Context for AI
 
-CodeProvenance is a backend service that:
-- Detects software similarity (like MIT MOSS)
-- Runs as background service (no GUI)
-- Accepts submission folders, returns similarity analysis
-- Integrated into external grading platforms
-- Uses REST API for communication
+IntegrityDesk is a code similarity detection platform that:
+- Detects plagiarism and AI-generated code (MOSS replacement)
+- Uses 6 different similarity engines with ML fusion
+- Provides professional HTML/PDF reports
+- Includes teacher review dashboard
+- Built with FastAPI, Python 3.10+
 
 All code must be production-ready, type-safe, and well-documented.
