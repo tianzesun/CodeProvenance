@@ -50,8 +50,12 @@ src/
 │   └── utils/                  # Utilities
 │
 └── frontend/                   # All frontend code (1000+ files)
-    ├── dashboard/              # Next.js dashboard
-    └── shared/                 # Shared utilities
+    ├── app/                    # Next.js app directory
+    ├── components/             # React components
+    ├── package.json
+    ├── tsconfig.json
+    ├── next.config.ts
+    └── [other Next.js files]
 ```
 
 ---
@@ -139,7 +143,7 @@ python -m src.backend.cli --help
 
 ```bash
 # Navigate to frontend
-cd src/frontend/dashboard
+cd src/frontend
 
 # Install dependencies
 npm install

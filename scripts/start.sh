@@ -38,7 +38,7 @@ echo "Dashboard:    http://localhost:${DASHBOARD_PORT}"
 echo ""
 
 # Install dashboard dependencies
-DASHBOARD_DIR="$PROJECT_DIR/src/frontend/dashboard"
+DASHBOARD_DIR="$PROJECT_DIR/src/frontend"
 if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
     echo "Installing dashboard dependencies..."
     cd "$DASHBOARD_DIR" && npm install

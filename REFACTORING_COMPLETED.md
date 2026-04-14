@@ -37,8 +37,9 @@ All Python backend code organized into 21 modules:
 - `models/` - Database models
 
 #### Frontend (src/frontend/)
-- `dashboard/` - Next.js dashboard UI (moved from src/web/dashboard-ui)
-- `shared/` - Shared frontend utilities (hooks, utils, types)
+- Next.js dashboard UI (moved from src/web/dashboard-ui)
+- All frontend files directly in src/frontend/
+- No subdirectories needed since frontend is only dashboard
 
 ### 2. File Migration Statistics
 
@@ -146,15 +147,12 @@ CodeProvenance/
 │   │
 │   └── frontend/                         # All frontend code
 │       ├── __init__.py
-│       ├── dashboard/                    # Next.js dashboard
-│       │   ├── app/
-│       │   ├── components/
-│       │   ├── package.json
-│       │   └── [Next.js files]
-│       └── shared/                       # Shared utilities
-│           ├── hooks/
-│           ├── utils/
-│           └── types/
+│       ├── app/                          # Next.js app directory
+│       ├── components/                   # React components
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── next.config.ts
+│       └── [other Next.js files]
 │
 ├── tests/                                # Test suite
 ├── alembic/                              # Database migrations
