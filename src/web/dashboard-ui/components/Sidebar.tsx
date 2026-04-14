@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
+  Database,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -55,21 +56,27 @@ export default function Sidebar() {
           description: 'Advanced multi-engine comparison',
           icon: BarChart3,
         },
+        {
+          href: '/datasets',
+          label: 'Dataset Manager',
+          description: 'Create and manage test datasets',
+          icon: Database,
+        },
         ...(user?.role === 'admin'
           ? [
-              {
-                href: '/settings',
-                label: 'Preferences',
-                description: 'System-wide model and workflow settings',
-                icon: Settings,
-              },
-              {
-                href: '/admin',
-                label: 'User Admin',
-                description: 'Manage professor and admin accounts',
-                icon: Shield,
-              },
-            ]
+            {
+              href: '/settings',
+              label: 'Preferences',
+              description: 'System-wide model and workflow settings',
+              icon: Settings,
+            },
+            {
+              href: '/admin',
+              label: 'User Management',
+              description: 'Manage professor and admin accounts',
+              icon: Shield,
+            },
+          ]
           : []),
       ],
     },
@@ -102,8 +109,7 @@ export default function Sidebar() {
       </button>
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl shadow-2xl transition-all duration-300 ease-out lg:translate-x-0 ${
-            mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl shadow-2xl transition-all duration-300 ease-out lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
       >
         <div className="theme-section-line border-b border-[color:var(--border)] px-6 py-8">
@@ -145,18 +151,16 @@ export default function Sidebar() {
                       key={item.href}
                       href={item.href}
                       onClick={() => setMobileOpen(false)}
-                      className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${
-                        active
-                          ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
-                          : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
-                      }`}
+                      className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${active
+                        ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
+                        : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
+                        }`}
                     >
                       <span
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${
-                          active
-                            ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
-                            : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
-                        }`}
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${active
+                          ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
+                          : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+                          }`}
                       >
                         <item.icon size={17} />
                       </span>

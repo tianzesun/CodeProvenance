@@ -13,6 +13,7 @@ export interface AuthUser {
   tenant_id: string | null;
   tenant_name: string | null;
   is_active: boolean;
+  suspended: boolean;
   last_login_at: string | null;
   created_at: string | null;
 }

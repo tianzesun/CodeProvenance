@@ -2,13 +2,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import {
-  GlassCard,
-  MagneticButton,
-  TiltCard,
-  FadeIn,
-} from "@/components/Animation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 
 const ENGINE_CATALOG = [
@@ -246,7 +240,7 @@ export default function SettingsPage() {
           engine_weights: normalizeEngineWeights(res.data?.engine_weights),
         }),
       )
-      .catch(() => {});
+      .catch(() => { });
   }, [authLoading, user]);
 
   const handleSave = () => {
@@ -325,11 +319,10 @@ export default function SettingsPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === tab.id
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === tab.id
                   ? "border-blue-600 text-blue-600"
                   : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
+                }`}
             >
               {tab.label}
             </button>
@@ -605,11 +598,10 @@ export default function SettingsPage() {
                           engine_weights: normalizeEngineWeights(preset.weights),
                         })
                       }
-                      className={`p-4 border rounded-xl text-left transition-all hover:border-blue-400 hover:bg-blue-50 ${
-                        areWeightsEqual(engineWeights, preset.weights)
+                      className={`p-4 border rounded-xl text-left transition-all hover:border-blue-400 hover:bg-blue-50 ${areWeightsEqual(engineWeights, preset.weights)
                           ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
                           : "border-slate-200"
-                      }`}
+                        }`}
                     >
                       <div className="font-semibold text-slate-900">
                         {preset.name}
@@ -638,11 +630,10 @@ export default function SettingsPage() {
                       Current combined weight across all engines
                     </div>
                   </div>
-                  <div className={`text-lg font-bold ${
-                    Math.abs(engineWeightTotal - 1) < 0.01
+                  <div className={`text-lg font-bold ${Math.abs(engineWeightTotal - 1) < 0.01
                       ? "text-emerald-600"
                       : "text-amber-600"
-                  }`}>
+                    }`}>
                     {(engineWeightTotal * 100).toFixed(0)}%
                   </div>
                 </div>
@@ -671,11 +662,10 @@ export default function SettingsPage() {
                                     {engine.description}
                                   </div>
                                 </div>
-                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                                  engine.tier === "core"
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${engine.tier === "core"
                                     ? "bg-blue-50 text-blue-700"
                                     : "bg-slate-100 text-slate-600"
-                                }`}>
+                                  }`}>
                                   {engine.tier}
                                 </span>
                               </div>

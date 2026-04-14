@@ -1,10 +1,19 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, LockKeyhole, ShieldCheck, Eye, EyeOff, CheckCircle, XCircle, Loader2, ArrowLeft } from 'lucide-react';
+import {
+  AlertTriangle,
+  LockKeyhole,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  ArrowLeft,
+} from 'lucide-react';
 import axios from 'axios';
-
 import { useAuth } from '@/components/AuthProvider';
 
 function getErrorMessage(error: unknown): string {
@@ -30,11 +39,15 @@ function validatePasswordInput(password: string): string | null {
   if (password.length < 8) {
     return 'Password must be at least 8 characters long.';
   }
-
   return null;
 }
 
-function calculatePasswordStrength(password: string): { score: number; label: string; color: string } {
+function calculatePasswordStrength(password: string): {
+  score: number;
+  label: string;
+  tone: string;
+  bar: string;
+} {
   let score = 0;
 
   if (password.length >= 8) score += 1;
@@ -44,9 +57,30 @@ function calculatePasswordStrength(password: string): { score: number; label: st
   if (/[0-9]/.test(password)) score += 1;
   if (/[^A-Za-z0-9]/.test(password)) score += 1;
 
-  if (score <= 2) return { score, label: 'Weak', color: 'text-red-500' };
-  if (score <= 4) return { score, label: 'Medium', color: 'text-yellow-500' };
-  return { score, label: 'Strong', color: 'text-green-500' };
+  if (score <= 2) {
+    return {
+      score,
+      label: 'Weak',
+      tone: 'text-red-700',
+      bar: 'bg-red-500',
+    };
+  }
+
+  if (score <= 4) {
+    return {
+      score,
+      label: 'Medium',
+      tone: 'text-amber-700',
+      bar: 'bg-amber-500',
+    };
+  }
+
+  return {
+    score,
+    label: 'Strong',
+    tone: 'text-emerald-700',
+    bar: 'bg-emerald-500',
+  };
 }
 
 function validateEmail(email: string): string | null {
@@ -66,12 +100,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+
   const [emailError, setEmailError] = useState('');
-  const [error, setError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [formError, setFormError] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState('/');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+
+  const passwordStrength = useMemo(
+    () => calculatePasswordStrength(password),
+    [password]
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -82,67 +124,84 @@ export default function LoginPage() {
     if (!loading && user) {
       router.replace(nextPath);
     }
-  }, [loading, nextPath, router, user]);
+  }, [loading, user, nextPath, router]);
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    setEmailError(validateEmail(value.trim()) || '');
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    if (passwordError) setPasswordError('');
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError('');
+
+    setFormError('');
     setEmailError('');
+    setPasswordError('');
 
-    const passwordError = validatePasswordInput(password);
-    const emailValidationError = validateEmail(email);
+    const trimmedEmail = email.trim();
+    const trimmedFullName = fullName.trim();
+    const trimmedTenantName = tenantName.trim();
 
+    const emailValidationError = validateEmail(trimmedEmail);
     if (emailValidationError) {
       setEmailError(emailValidationError);
       return;
     }
 
-    if (passwordError) {
-      setError(passwordError);
-      return;
+    if (!bootstrapped) {
+      if (!trimmedFullName) {
+        setFormError('Full name is required.');
+        return;
+      }
+
+      if (!trimmedTenantName) {
+        setFormError('Workspace name is required.');
+        return;
+      }
+
+      const validatedPasswordError = validatePasswordInput(password);
+      if (validatedPasswordError) {
+        setPasswordError(validatedPasswordError);
+        return;
+      }
     }
 
     setSubmitting(true);
 
     try {
       if (bootstrapped) {
-        await login(email, password);
+        await login(trimmedEmail, password);
       } else {
         await bootstrapAdmin({
-          email,
-          full_name: fullName,
+          email: trimmedEmail,
+          full_name: trimmedFullName,
           password,
-          tenant_name: tenantName,
+          tenant_name: trimmedTenantName,
         });
       }
+
       router.replace(nextPath);
     } catch (authError) {
-      setError(getErrorMessage(authError));
+      setFormError(getErrorMessage(authError));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleEmailChange = (value: string) => {
-    setEmail(value);
-    const validationError = validateEmail(value);
-    setEmailError(validationError || '');
-  };
-
-  const handlePasswordChange = (value: string) => {
-    setPassword(value);
-    // Clear password error when user starts typing
-    if (error && error.includes('Password')) {
-      setError('');
-    }
-  };
-
   const handleForgotPasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError('');
+
+    setFormError('');
     setEmailError('');
 
-    const emailValidationError = validateEmail(email);
+    const trimmedEmail = email.trim();
+    const emailValidationError = validateEmail(trimmedEmail);
+
     if (emailValidationError) {
       setEmailError(emailValidationError);
       return;
@@ -151,11 +210,10 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      const API = ''; // Will use environment variable
-      await axios.post(`${API}/api/auth/forgot-password`, { email });
+      await axios.post('/api/auth/forgot-password', { email: trimmedEmail });
       setResetEmailSent(true);
-    } catch (authError) {
-      setError(getErrorMessage(authError));
+    } catch {
+      setResetEmailSent(true);
     } finally {
       setSubmitting(false);
     }
@@ -164,334 +222,358 @@ export default function LoginPage() {
   const handleBackToLogin = () => {
     setShowForgotPassword(false);
     setResetEmailSent(false);
-    setError('');
+    setFormError('');
     setEmailError('');
+    setPasswordError('');
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 sm:py-10">
-      <div className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl gap-6 sm:min-h-[calc(100vh-5rem)] sm:gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="relative order-2 overflow-hidden rounded-[24px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 px-6 py-8 shadow-2xl sm:rounded-[36px] sm:px-8 sm:py-10 lg:order-1">
-          {/* Artistic Background */}
-          <div className="absolute inset-0">
-            {/* Primary gradient */}
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-slate-900/50 to-indigo-900/30" />
-
-            {/* Floating orbs */}
-            <div className="absolute top-20 left-20 w-64 h-64 bg-blue-400/10 rounded-full blur-3xl animate-pulse" />
-            <div className="absolute bottom-20 right-20 w-48 h-48 bg-indigo-400/15 rounded-full blur-2xl animate-pulse" style={{ animationDelay: '1s' }} />
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-slate-300/5 rounded-full blur-xl" />
-
-            {/* Subtle pattern overlay */}
-            <div className="absolute inset-0 opacity-[0.02] bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.3)_1px,transparent_0)] bg-[length:24px_24px]" />
-          </div>
-
-          <div className="relative flex flex-col items-center justify-center min-h-[500px]">
-            {/* Main logo and branding */}
-            <div className="text-center space-y-8 mb-12">
-              <div className="relative">
-                {/* Outer glow ring */}
-                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-blue-400/20 to-indigo-400/20 blur-xl scale-150" />
-                <div className="relative inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 text-white shadow-2xl">
-                  <ShieldCheck size={36} className="drop-shadow-lg" />
+    <div className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl lg:grid-cols-[1fr_520px]">
+        <section className="hidden border-r border-slate-200 bg-slate-950 text-white lg:flex">
+          <div className="flex w-full flex-col justify-between p-12">
+            <div>
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
+                  <ShieldCheck size={22} aria-hidden="true" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-semibold tracking-tight">IntegrityDesk</h1>
+                  <p className="mt-1 text-sm text-slate-300">Academic integrity operations</p>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <h1 className="font-display text-5xl font-bold text-white sm:text-6xl tracking-tight">
-                  IntegrityDesk
-                </h1>
-                <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/30 to-transparent mx-auto" />
-                <p className="text-slate-300 text-sm uppercase tracking-[0.4em] font-light">
-                  Academic Integrity Platform
+              <div className="mt-16 max-w-md">
+                <h2 className="text-4xl font-semibold tracking-tight text-white">
+                  {bootstrapped ? 'Secure sign in for your workspace' : 'Initialize your workspace'}
+                </h2>
+                <p className="mt-4 text-base leading-7 text-slate-300">
+                  {bootstrapped
+                    ? 'Access reports, similarity reviews, policies, and administrative controls from one secure dashboard.'
+                    : 'Create the first administrator account and configure the workspace for your institution.'}
                 </p>
               </div>
             </div>
 
-            {/* Elegant divider */}
-            <div className="w-full max-w-xs mx-auto">
-              <div className="flex items-center justify-center space-x-4">
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/20" />
-                <div className="w-2 h-2 rounded-full bg-white/30" />
-                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/20" />
+            <div className="space-y-4 border-t border-white/10 pt-8 text-sm text-slate-300">
+              <div className="flex items-start gap-3">
+                <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                <span>Protected access for academic and administrative workflows.</span>
               </div>
-            </div>
-
-            {/* Minimal status text */}
-            <div className="text-center mt-8">
-              <p className="text-white/80 text-lg font-light italic">
-                {bootstrapped ? 'Secure Academic Workspace' : 'System Initialization'}
-              </p>
+              <div className="flex items-start gap-3">
+                <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                <span>Designed for clarity, accessibility, and low-friction operations.</span>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="order-1 flex items-center lg:order-2">
-          <div className="w-full rounded-[24px] border border-slate-200/60 bg-white/95 backdrop-blur-xl p-8 shadow-2xl sm:rounded-[32px] sm:p-10">
-            {/* Subtle background pattern */}
-            <div className="absolute inset-0 opacity-[0.02] bg-[radial-gradient(circle_at_1px_1px,rgba(0,0,0,0.3)_1px,transparent_0)] bg-[length:20px_20px] rounded-[24px] sm:rounded-[32px]" />
-
-            <div className="relative mb-8 text-center">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-3xl bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600 mb-6 shadow-lg">
-                <LockKeyhole size={22} />
+        <section className="flex items-center justify-center bg-white">
+          <div className="w-full max-w-md px-6 py-10 sm:px-10">
+            <div className="mb-8 lg:hidden">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                  <ShieldCheck size={20} aria-hidden="true" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-semibold tracking-tight text-slate-900">IntegrityDesk</h1>
+                  <p className="text-sm text-slate-500">Academic integrity operations</p>
+                </div>
               </div>
-              <h2 className="text-3xl font-bold text-slate-900 mb-3 tracking-tight">
-                {bootstrapped ? 'Welcome Back' : 'Initialize System'}
+            </div>
+
+            <div className="mb-8">
+              <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                <LockKeyhole size={20} aria-hidden="true" />
+              </div>
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+                {showForgotPassword
+                  ? resetEmailSent
+                    ? 'Check your email'
+                    : 'Reset password'
+                  : bootstrapped
+                    ? 'Sign in'
+                    : 'Create administrator account'}
               </h2>
-              <p className="text-slate-600 leading-relaxed text-base">
-                {bootstrapped
-                  ? 'Enter your credentials to access the dashboard'
-                  : 'Set up the first administrator account'}
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {showForgotPassword
+                  ? resetEmailSent
+                    ? 'If the account exists, password reset instructions have been sent.'
+                    : 'Enter your email address and we’ll send reset instructions.'
+                  : bootstrapped
+                    ? 'Use your organization credentials to continue.'
+                    : 'Set up the first administrator account for this workspace.'}
               </p>
             </div>
 
             {showForgotPassword ? (
               resetEmailSent ? (
                 <div className="space-y-6">
-                  <div className="text-center">
-                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-green-100 text-green-600">
-                      <CheckCircle size={24} />
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          Reset instructions sent
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          If an account exists for <strong>{email.trim()}</strong>, you’ll receive an email shortly.
+                        </p>
+                      </div>
                     </div>
-                    <h3 className="mt-4 text-xl font-semibold text-slate-900">Check your email</h3>
-                    <p className="mt-2 text-sm text-slate-600">
-                      We&apos;ve sent password reset instructions to <strong>{email}</strong>
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    <p>
-                      If you don&apos;t see the email in your inbox, please check your spam folder.
-                      The link will expire in 24 hours.
-                    </p>
                   </div>
 
                   <button
+                    type="button"
                     onClick={handleBackToLogin}
-                    className="inline-flex w-full items-center gap-3 rounded-2xl bg-slate-900 px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-slate-800 hover:shadow-lg"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800"
                   >
-                    <ArrowLeft size={16} />
-                    Return to Sign In
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Return to sign in
                   </button>
                 </div>
               ) : (
-                <form className="space-y-4" onSubmit={handleForgotPasswordSubmit}>
-                  <div className="text-center">
-                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600">
-                      <LockKeyhole size={20} />
-                    </div>
-                    <h3 className="mt-4 text-lg font-semibold text-slate-900">Reset your password</h3>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Enter your email address and we&apos;ll send you a link to reset your password.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+                <form className="space-y-5" onSubmit={handleForgotPasswordSubmit} noValidate>
+                  <div className="space-y-2">
+                    <label htmlFor="forgot-email" className="block text-sm font-medium text-slate-700">
+                      Email address
+                    </label>
                     <div className="relative">
                       <input
+                        id="forgot-email"
                         type="email"
                         value={email}
                         onChange={(event) => handleEmailChange(event.target.value)}
-                        className={`w-full rounded-2xl border px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none transition focus:ring-2 ${
-                          emailError
-                            ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-                            : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
-                        }`}
-                        placeholder="name@university.edu"
+                        aria-invalid={emailError ? true : undefined}
+                        aria-describedby={emailError ? 'forgot-email-error' : undefined}
+                        autoComplete="email"
+                        placeholder="name@institution.edu"
+                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                          }`}
                       />
                       {email && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
                           {emailError ? (
                             <XCircle size={16} className="text-red-500" />
                           ) : (
-                            <CheckCircle size={16} className="text-green-500" />
+                            <CheckCircle size={16} className="text-emerald-600" />
                           )}
                         </div>
                       )}
                     </div>
                     {emailError && (
-                      <p className="mt-1 text-xs text-red-600">{emailError}</p>
+                      <p id="forgot-email-error" role="alert" className="text-xs text-red-600">
+                        {emailError}
+                      </p>
                     )}
                   </div>
 
-                  {error && (
-                    <div className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                      <span>{error}</span>
+                  {formError && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>{formError}</span>
                     </div>
                   )}
 
                   <button
                     type="submit"
                     disabled={loading || submitting}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {submitting && <Loader2 size={16} className="animate-spin" />}
-                    {submitting ? 'Sending...' : 'Send Reset Link'}
+                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                    {submitting ? 'Sending reset link...' : 'Send reset link'}
                   </button>
 
                   <button
                     type="button"
                     onClick={handleBackToLogin}
-                    className="inline-flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-4 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-50 hover:shadow-md"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                   >
-                    <ArrowLeft size={16} />
-                    Return to Sign In
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back to sign in
                   </button>
                 </form>
               )
             ) : (
-            <form className="relative space-y-6" onSubmit={handleSubmit}>
-              {!bootstrapped && (
-                <>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-800 tracking-wide">Full Name</label>
-                    <input
-                      value={fullName}
-                      onChange={(event) => setFullName(event.target.value)}
-                      className="w-full rounded-2xl border-2 border-slate-200 px-5 py-4 text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300"
-                      placeholder="Professor Ada Lovelace"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-800 tracking-wide">Workspace Name</label>
-                    <input
-                      value={tenantName}
-                      onChange={(event) => setTenantName(event.target.value)}
-                      className="w-full rounded-2xl border-2 border-slate-200 px-5 py-4 text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300"
-                      placeholder="Computer Science Department"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold text-slate-800 tracking-wide">Email Address</label>
-                <div className="relative group">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(event) => handleEmailChange(event.target.value)}
-                    className={`w-full rounded-2xl border-2 px-5 py-4 text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300 focus:ring-4 hover:border-slate-300 ${
-                      emailError
-                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/10'
-                    }`}
-                    placeholder="name@university.edu"
-                  />
-                  {email && (
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 transition-opacity duration-200">
-                      {emailError ? (
-                        <XCircle size={18} className="text-red-500" />
-                      ) : (
-                        <CheckCircle size={18} className="text-green-500" />
-                      )}
+              <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+                {!bootstrapped && (
+                  <>
+                    <div className="space-y-2">
+                      <label htmlFor="full-name" className="block text-sm font-medium text-slate-700">
+                        Full name
+                      </label>
+                      <input
+                        id="full-name"
+                        value={fullName}
+                        onChange={(event) => setFullName(event.target.value)}
+                        autoComplete="name"
+                        placeholder="Professor Ada Lovelace"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
+                      />
                     </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="tenant-name" className="block text-sm font-medium text-slate-700">
+                        Workspace name
+                      </label>
+                      <input
+                        id="tenant-name"
+                        value={tenantName}
+                        onChange={(event) => setTenantName(event.target.value)}
+                        autoComplete="organization"
+                        placeholder="Computer Science Department"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="space-y-2">
+                  <label htmlFor="email" className="block text-sm font-medium text-slate-700">
+                    Email address
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(event) => handleEmailChange(event.target.value)}
+                      aria-invalid={emailError ? true : undefined}
+                      aria-describedby={emailError ? 'login-email-error' : undefined}
+                      autoComplete="email"
+                      placeholder="name@institution.edu"
+                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                        }`}
+                    />
+                    {email && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
+                        {emailError ? (
+                          <XCircle size={16} className="text-red-500" />
+                        ) : (
+                          <CheckCircle size={16} className="text-emerald-600" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {emailError && (
+                    <p id="login-email-error" role="alert" className="text-xs text-red-600">
+                      {emailError}
+                    </p>
                   )}
                 </div>
-                {emailError && (
-                  <p className="mt-2 text-xs text-red-600 font-medium">{emailError}</p>
-                )}
-              </div>
 
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold text-slate-800 tracking-wide">Password</label>
-                <div className="relative group">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(event) => handlePasswordChange(event.target.value)}
-                    className={`w-full rounded-2xl border-2 px-5 py-4 pr-14 text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300 focus:ring-4 hover:border-slate-300 ${
-                      error && error.includes('Password')
-                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/10'
-                    }`}
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors duration-200"
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-                {password && (
-                  <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200/50">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className={`text-sm font-semibold ${calculatePasswordStrength(password).color}`}>
-                        {calculatePasswordStrength(password).label}
-                      </div>
-                      <div className="text-xs text-slate-500 font-medium">
-                        {password.length}/8 characters
-                      </div>
-                    </div>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5, 6].map((level) => (
-                        <div
-                          key={level}
-                          className={`h-2 flex-1 rounded-full transition-all duration-300 ${
-                            level <= calculatePasswordStrength(password).score
-                              ? calculatePasswordStrength(password).color.replace('text-', 'bg-')
-                              : 'bg-slate-200'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {!password && (
-                  <p className="mt-2 text-xs text-slate-500 italic">
-                    Minimum 8 characters with mixed case, numbers, and symbols
-                  </p>
-                )}
-                </div>
-
-              {bootstrapped && (
-                <div className="flex items-center justify-center gap-3 py-2">
-                  <input
-                    type="checkbox"
-                    id="rememberMe"
-                    checked={rememberMe}
-                    onChange={(event) => setRememberMe(event.target.checked)}
-                    className="h-4 w-4 rounded border-2 border-slate-300 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 transition-colors"
-                  />
-                  <label htmlFor="rememberMe" className="text-sm text-slate-600 font-medium cursor-pointer">
-                    Remember me for 30 days
+                <div className="space-y-2">
+                  <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                    Password
                   </label>
-                </div>
-              )}
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(event) => handlePasswordChange(event.target.value)}
+                      aria-invalid={passwordError ? true : undefined}
+                      aria-describedby={passwordError ? 'password-error' : undefined}
+                      autoComplete={bootstrapped ? 'current-password' : 'new-password'}
+                      placeholder="Enter your password"
+                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${passwordError
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                        }`}
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPassword((value) => !value)}
+                      className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                    >
+                      {showPassword ? (
+                        <EyeOff size={18} aria-hidden="true" />
+                      ) : (
+                        <Eye size={18} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
 
-              {error && (
-                <div className="flex items-start gap-3 rounded-2xl border-2 border-red-200 bg-red-50/80 backdrop-blur-sm px-5 py-4 text-sm text-red-700 shadow-sm">
-                  <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-                  <span className="font-medium">{error}</span>
-                </div>
-              )}
+                  {!bootstrapped && password && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className={`text-sm font-medium ${passwordStrength.tone}`}>
+                          Password strength: {passwordStrength.label}
+                        </span>
+                        <span className="text-xs text-slate-500">{password.length} characters</span>
+                      </div>
+                      <div className="flex gap-1" aria-hidden="true">
+                        {[1, 2, 3, 4, 5, 6].map((level) => (
+                          <div
+                            key={level}
+                            className={`h-2 flex-1 rounded-full ${level <= passwordStrength.score ? passwordStrength.bar : 'bg-slate-200'
+                              }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-              <button
-                type="submit"
-                disabled={loading || submitting}
-                className="relative inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 px-8 py-5 text-base font-semibold text-white transition-all duration-300 hover:from-slate-800 hover:to-slate-700 hover:shadow-xl hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 overflow-hidden group"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 to-indigo-600/0 group-hover:from-blue-600/10 group-hover:to-indigo-600/10 transition-all duration-300" />
-                {submitting && <Loader2 size={18} className="animate-spin relative z-10" />}
-                <span className="relative z-10">
-                  {submitting ? 'Processing...' : bootstrapped ? 'Access Dashboard' : 'Initialize System'}
-                </span>
-              </button>
+                  {!bootstrapped && !password && (
+                    <p className="text-xs text-slate-500">
+                      Use at least 8 characters with upper/lowercase letters, a number, and a symbol.
+                    </p>
+                  )}
+
+                  {passwordError && (
+                    <p id="password-error" role="alert" className="text-xs text-red-600">
+                      {passwordError}
+                    </p>
+                  )}
+                </div>
 
                 {bootstrapped && (
-                  <div className="text-center pt-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="rememberMe" className="flex items-center gap-3 text-sm text-slate-600">
+                      <input
+                        id="rememberMe"
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(event) => setRememberMe(event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <span>Remember me</span>
+                    </label>
+
                     <button
                       type="button"
                       onClick={() => setShowForgotPassword(true)}
-                      className="text-sm text-slate-500 hover:text-slate-700 transition-colors duration-200 font-medium hover:underline decoration-2 underline-offset-4"
+                      className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
                     >
-                      Forgot your password?
+                      Forgot password?
                     </button>
                   </div>
                 )}
+
+                {formError && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || submitting}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                  {submitting
+                    ? 'Processing...'
+                    : bootstrapped
+                      ? 'Sign in'
+                      : 'Create administrator account'}
+                </button>
               </form>
             )}
           </div>

@@ -1,12 +1,11 @@
-// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import {
   Upload as UploadIcon,
   FileUp,
@@ -28,10 +27,25 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'semantic', label: 'Semantic' },
 ];
 
+function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
+  if (axios.isAxiosError(error)) {
+    return (
+      (error.response?.data as { detail?: string; error?: string } | undefined)?.detail ||
+      (error.response?.data as { detail?: string; error?: string } | undefined)?.error ||
+      error.message ||
+      fallback
+    );
+  }
+  return fallback;
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const [files, setFiles] = useState([]);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [courseName, setCourseName] = useState('');
   const [assignmentName, setAssignmentName] = useState('');
   const [threshold, setThreshold] = useState(0.5);
@@ -39,6 +53,39 @@ export default function UploadPage() {
   const [thresholdLoading, setThresholdLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
+  }, []);
+
+  // Start job polling with proper cleanup
+  const startPolling = useCallback((jobId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const jobStatus = await axios.get(`${API}/api/job/${jobId}`);
+        if (jobStatus.data.status === 'completed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          router.push(`/results/${jobId}`);
+        } else if (jobStatus.data.status === 'failed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setUploading(false);
+          setError(jobStatus.data.error || 'Analysis failed');
+        }
+      } catch (error) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setUploading(false);
+        setError(getApiErrorMessage(error, 'Could not load analysis status.'));
+      }
+    }, 1000);
+  }, [router]);
+
   const zipFile = useMemo(() => {
     if (files.length !== 1) {
       return null;
@@ -46,11 +93,14 @@ export default function UploadPage() {
     const [file] = files;
     return file.name.toLowerCase().endsWith('.zip') ? file : null;
   }, [files]);
+
   const selectedFiles = useMemo(() => (zipFile ? [] : files), [files, zipFile]);
+
   const hasMixedZipSelection = useMemo(
     () => files.length > 1 && files.some((file) => file.name.toLowerCase().endsWith('.zip')),
     [files],
   );
+
   const canRunCheck = useMemo(() => {
     if (uploading || hasMixedZipSelection) {
       return false;
@@ -63,6 +113,7 @@ export default function UploadPage() {
     }
     return files.length >= 2;
   }, [activeEngines.length, files.length, hasMixedZipSelection, uploading, zipFile]);
+
   const uploadFormStorageKey = useMemo(
     () => `${UPLOAD_FORM_STORAGE_KEY}:${user?.tenant_id || 'no-tenant'}:${user?.id || 'guest'}`,
     [user?.id, user?.tenant_id],
@@ -139,7 +190,7 @@ export default function UploadPage() {
     );
   }, [assignmentName, authLoading, courseName, uploadFormStorageKey]);
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (!droppedFiles.length) {
@@ -173,7 +224,7 @@ export default function UploadPage() {
     }
     formData.append('course_name', courseName || assignmentName || 'Assignment Check');
     formData.append('assignment_name', assignmentName || courseName || 'Assignment Check');
-    formData.append('threshold', threshold);
+    formData.append('threshold', String(threshold));
     formData.append('engine_keys', JSON.stringify(activeEngines));
 
     try {
@@ -197,30 +248,14 @@ export default function UploadPage() {
         return;
       }
 
-      const poll = setInterval(async () => {
-        try {
-          const jobStatus = await axios.get(`${API}/api/job/${jobId}`);
-          if (jobStatus.data.status === 'completed') {
-            clearInterval(poll);
-            router.push(`/results/${jobId}`);
-          } else if (jobStatus.data.status === 'failed') {
-            clearInterval(poll);
-            setUploading(false);
-            setError(jobStatus.data.error || 'Analysis failed');
-          }
-        } catch (pollError) {
-          clearInterval(poll);
-          setUploading(false);
-          setError(pollError.response?.data?.detail || 'Could not load analysis status.');
-        }
-      }, 1000);
+      startPolling(jobId);
     } catch (err) {
       setUploading(false);
-      setError(err.response?.data?.error || 'Upload failed');
+      setError(getApiErrorMessage(err, 'Upload failed'));
     }
   };
 
-  const toggleEngine = useCallback((engineKey) => {
+  const toggleEngine = useCallback((engineKey: string) => {
     setActiveEngines((current) =>
       current.includes(engineKey)
         ? current.filter((key) => key !== engineKey)
@@ -268,7 +303,7 @@ export default function UploadPage() {
                   onDragOver={(e) => e.preventDefault()}
                   className="border-2 border-dashed border-slate-200 rounded-xl p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group min-h-[260px] h-full flex flex-col items-center justify-center"
                   onClick={() => {
-                    document.getElementById('fileInput').click();
+                    fileInputRef.current?.click();
                   }}
                 >
                   <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-50 transition-colors">
@@ -281,12 +316,12 @@ export default function UploadPage() {
                     Upload multiple code files, or one ZIP archive containing the submissions
                   </p>
                   <input
-                    id="fileInput"
+                    ref={fileInputRef}
                     type="file"
                     multiple
                     accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
                     className="hidden"
-                    onChange={(e) => setFiles(Array.from(e.target.files))}
+                    onChange={(e) => setFiles(Array.from(e.target.files || []))}
                   />
                 </div>
 
@@ -434,8 +469,8 @@ export default function UploadPage() {
                             type="button"
                             onClick={() => toggleEngine(engine.key)}
                             className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${active
-                                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
+                              ? 'border-blue-200 bg-blue-50 text-blue-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
                               }`}
                           >
                             {engine.label}

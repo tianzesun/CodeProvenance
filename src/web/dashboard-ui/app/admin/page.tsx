@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { AlertTriangle, ShieldCheck, UserPlus, Users, Database, Download, FileText, Play, Loader2 } from 'lucide-react';
+import { AlertTriangle, ShieldCheck, UserPlus, Users, Database, Download, FileText, Play, Loader2, Edit, UserCheck, UserX } from 'lucide-react';
 import axios from 'axios';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -288,25 +288,23 @@ export default function AdminPage() {
             {notifications.map((notification) => (
               <div
                 key={notification.id}
-                className={`p-4 rounded-lg shadow-lg border backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-right-2 ${
-                  notification.type === 'success'
-                    ? 'bg-green-50 border-green-200 text-green-800'
-                    : notification.type === 'error'
+                className={`p-4 rounded-lg shadow-lg border backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-right-2 ${notification.type === 'success'
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : notification.type === 'error'
                     ? 'bg-red-50 border-red-200 text-red-800'
                     : 'bg-blue-50 border-blue-200 text-blue-800'
-                }`}
+                  }`}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-start space-x-3">
-                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-                      notification.type === 'success'
-                        ? 'bg-green-100'
-                        : notification.type === 'error'
+                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${notification.type === 'success'
+                      ? 'bg-green-100'
+                      : notification.type === 'error'
                         ? 'bg-red-100'
                         : 'bg-blue-100'
-                    }`}>
+                      }`}>
                       {notification.type === 'success' ? '✅' :
-                       notification.type === 'error' ? '❌' : 'ℹ️'}
+                        notification.type === 'error' ? '❌' : 'ℹ️'}
                     </div>
                     <div className="flex-1">
                       <h4 className="text-sm font-semibold">{notification.title}</h4>
@@ -351,11 +349,12 @@ export default function AdminPage() {
             )}
 
             <div className="mt-6 overflow-hidden rounded-[28px] border border-[color:var(--border)] bg-[var(--surface)]">
-              <div className="grid grid-cols-[1.4fr_1fr_1fr_1.1fr] gap-4 border-b border-[color:var(--border)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                <div>User</div>
-                <div>Role</div>
-                <div>Workspace</div>
-                <div>Last Login</div>
+              <div className="grid grid-cols-6 gap-4 border-b border-[color:var(--border)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                <div className="col-span-2">User</div>
+                <div className="col-span-1">Role</div>
+                <div className="col-span-1">Status</div>
+                <div className="col-span-1">Last Login</div>
+                <div className="col-span-1 text-right">Actions</div>
               </div>
               {loading ? (
                 <div className="px-5 py-8 text-sm text-[var(--text-muted)]">Loading users...</div>
@@ -364,18 +363,36 @@ export default function AdminPage() {
               ) : (
                 <div className="divide-y divide-[color:var(--border)]">
                   {users.map((user) => (
-                    <div key={user.id} className="grid grid-cols-[1.4fr_1fr_1fr_1.1fr] gap-4 px-5 py-4 text-sm">
-                      <div className="min-w-0">
+                    <div key={user.id} className="grid grid-cols-6 gap-4 px-5 py-4 text-sm items-center">
+                      <div className="col-span-2 min-w-0">
                         <div className="truncate font-medium text-[var(--text-primary)]">{user.full_name}</div>
                         <div className="truncate text-[var(--text-muted)]">{user.email}</div>
                       </div>
-                      <div>
+                      <div className="col-span-1">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${user.role === 'admin' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>
                           {user.role === 'admin' ? 'Admin' : 'Professor'}
                         </span>
                       </div>
-                      <div className="text-[var(--text-secondary)]">{user.tenant_name || 'No workspace'}</div>
-                      <div className="text-[var(--text-secondary)]">{formatDate(user.last_login_at)}</div>
+                      <div className="col-span-1">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${user.suspended ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {user.suspended ? 'Suspended' : 'Active'}
+                        </span>
+                      </div>
+                      <div className="col-span-1 text-[var(--text-secondary)]">{formatDate(user.last_login_at)}</div>
+                      <div className="col-span-1 flex justify-end gap-2">
+                        <button
+                          className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-50 transition"
+                          title="Edit user"
+                        >
+                          <Edit size={14} />
+                        </button>
+                        <button
+                          className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-amber-600 hover:bg-amber-50 transition"
+                          title={user.suspended ? 'Activate user' : 'Suspend user'}
+                        >
+                          {user.suspended ? <UserCheck size={14} /> : <UserX size={14} />}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -511,13 +528,13 @@ export default function AdminPage() {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Description</label>
-                  <input
-                    type="text"
-                    value={datasetForm.description}
-                    onChange={(event) => handleDatasetFormChange('description', event.target.value)}
-                    className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="Dataset for testing plagiarism detection"
-                  />
+                <input
+                  type="text"
+                  value={datasetForm.description}
+                  onChange={(event) => handleDatasetFormChange('description', event.target.value)}
+                  className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Dataset for testing plagiarism detection"
+                />
               </div>
 
               <div className="grid gap-6 sm:grid-cols-2">
