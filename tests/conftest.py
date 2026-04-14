@@ -1,9 +1,15 @@
 """
 Pytest configuration for IntegrityDesk tests.
 """
+import sys
+from pathlib import Path
 import pytest
 import asyncio
 from typing import Generator, AsyncGenerator
+
+# Add backend to Python path
+backend_path = Path(__file__).parent.parent / "src" / "backend"
+sys.path.insert(0, str(backend_path))
 
 
 @pytest.fixture(scope="session")

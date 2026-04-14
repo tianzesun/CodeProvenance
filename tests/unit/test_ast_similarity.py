@@ -10,7 +10,7 @@ Tests the AST-based similarity algorithm with:
 """
 
 import pytest
-from src.core.similarity.ast_similarity import (
+from src.backend.backend.core.similarity.ast_similarity import (
     ASTSimilarity, ASTNode, TreeEditDistance,
     ControlFlowGraph, DataFlowGraph
 )

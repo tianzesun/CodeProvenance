@@ -1,6 +1,6 @@
 """Unit tests for token-level heatmap module."""
 import pytest
-from src.core.token_heatmap.models import (
+from src.backend.backend.core.token_heatmap.models import (
     TokenSpan,
     MatchType,
     HeatIntensity,
@@ -8,10 +8,10 @@ from src.core.token_heatmap.models import (
     CharacterMap,
     confidence_to_intensity,
 )
-from src.core.token_heatmap.extractor import ASTTokenExtractor
-from src.core.token_heatmap.mapper import CharacterOffsetMapper
-from src.core.token_heatmap.intensity import HeatIntensityCalculator
-from src.core.token_heatmap.engine import TokenHeatmapEngine
+from src.backend.backend.core.token_heatmap.extractor import ASTTokenExtractor
+from src.backend.backend.core.token_heatmap.mapper import CharacterOffsetMapper
+from src.backend.backend.core.token_heatmap.intensity import HeatIntensityCalculator
+from src.backend.backend.core.token_heatmap.engine import TokenHeatmapEngine
 
 
 # ─────────────────────────────────────────────

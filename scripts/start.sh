@@ -38,7 +38,7 @@ echo "Dashboard:    http://localhost:${DASHBOARD_PORT}"
 echo ""
 
 # Install dashboard dependencies
-DASHBOARD_DIR="$PROJECT_DIR/src/web/dashboard-ui"
+DASHBOARD_DIR="$PROJECT_DIR/src/frontend/dashboard"
 if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
     echo "Installing dashboard dependencies..."
     cd "$DASHBOARD_DIR" && npm install
@@ -56,12 +56,12 @@ fi
 
 echo "Initializing database schema..."
 cd "$PROJECT_DIR"
-DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -c "import src.models.database; from src.config.database import init_db; init_db()"
+DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -c "import src.backend.models.database; from src.backend.config.database import init_db; init_db()"
 echo ""
 
 echo "Starting backend API on port ${BACKEND_PORT}..."
 cd "$PROJECT_DIR"
-DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -m uvicorn src.api.server:app \
+DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -m uvicorn src.backend.api.server:app \
     --host 0.0.0.0 --port "$BACKEND_PORT" --log-level warning &
 BACKEND_PID=$!
 sleep 2

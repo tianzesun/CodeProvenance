@@ -13,7 +13,7 @@ services:
       - redis
     volumes:
       - .:/app:cached
-    command: uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn src.backend.api.server:app --host 0.0.0.0 --port 8000 --reload
 
   # Worker Service (for webhook delivery and background jobs)
   worker:
@@ -27,7 +27,7 @@ services:
       - redis
     volumes:
       - .:/app:cached
-    command: python src/workers/webhook_worker.py
+    command: python -m src.backend.workers.webhook_worker
 
   # Redis for caching, rate limiting, and Celery broker
   redis:

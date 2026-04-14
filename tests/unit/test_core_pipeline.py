@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models import Finding
-from src.engines.features.feature_extractor import FeatureExtractor, FeatureVector
-from src.engines.scoring.fusion_engine import FusionEngine, FusedScore, DEFAULT_WEIGHTS
-from src.domain.decision.decision_engine import DecisionEngine, DecisionResult
+from src.backend.backend.domain.models import Finding
+from src.backend.backend.engines.features.feature_extractor import FeatureExtractor, FeatureVector
+from src.backend.backend.engines.scoring.fusion_engine import FusionEngine, FusedScore, DEFAULT_WEIGHTS
+from src.backend.backend.domain.decision.decision_engine import DecisionEngine, DecisionResult
 
 
 # ─── FeatureExtractor ──────────────────────────────────────────────────

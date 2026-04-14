@@ -11,7 +11,7 @@ Tests the super-powered winnowing algorithm with:
 """
 
 import pytest
-from src.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+from src.backend.backend.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
 
 
 class TestEnhancedWinnowingSimilarity:

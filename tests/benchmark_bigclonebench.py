@@ -25,10 +25,10 @@ from collections import defaultdict
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
-from src.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
-from src.core.similarity.ast_similarity import ASTSimilarity
-from src.core.similarity.token_similarity import TokenSimilarity
+from src.backend.backend.core.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+from src.backend.backend.core.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+from src.backend.backend.core.similarity.ast_similarity import ASTSimilarity
+from src.backend.backend.core.similarity.token_similarity import TokenSimilarity
 
 
 @dataclass

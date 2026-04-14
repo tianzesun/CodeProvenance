@@ -5,7 +5,7 @@ import zipfile
 
 from starlette.datastructures import UploadFile
 
-from src.api import server
+from src.backend.backend.api import server
 
 
 def test_load_benchmark_dataset_supports_legacy_demo_python_extensions(tmp_path, monkeypatch):

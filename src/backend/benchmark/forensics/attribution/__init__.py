@@ -1,0 +1,27 @@
+"""Attribution module for code similarity detection.
+
+Provides error categorization and failure pattern detection:
+- ErrorAnalyzer: Categorizes errors by type and characteristics
+- FailurePatternDetector: Detects common failure patterns
+"""
+from src.backend.benchmark.forensics.attribution.error_analysis import (
+    ErrorAnalyzer,
+    ErrorCategory,
+    ErrorReport,
+)
+from src.backend.benchmark.forensics.attribution.failure_patterns import (
+    FailurePatternDetector,
+    FailurePattern,
+    FailurePatternReport,
+)
+
+__all__ = [
+    # Error analysis
+    "ErrorAnalyzer",
+    "ErrorCategory",
+    "ErrorReport",
+    # Failure patterns
+    "FailurePatternDetector",
+    "FailurePattern",
+    "FailurePatternReport",
+]

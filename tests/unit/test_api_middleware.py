@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.api.middleware.auth import AuthMiddleware
-from src.api.middleware.rate_limit import RateLimitMiddleware, RateLimiter
+from src.backend.backend.api.middleware.auth import AuthMiddleware
+from src.backend.backend.api.middleware.rate_limit import RateLimitMiddleware, RateLimiter
 
 
 class TestAuthMiddleware:

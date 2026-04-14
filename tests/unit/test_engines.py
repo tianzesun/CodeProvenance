@@ -11,11 +11,11 @@ from __future__ import annotations
 import pytest
 from typing import Any, Dict
 
-from src.engines.similarity.ast_similarity import ASTSimilarity
-from src.engines.similarity.token_similarity import TokenSimilarity
-from src.engines.similarity.ngram_similarity import NgramSimilarity
-from src.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
-from src.engines.cache import EmbeddingCache, TokenCache, _sha256, get_embedding_cache, get_token_cache, invalidate_all_caches
+from src.backend.backend.engines.similarity.ast_similarity import ASTSimilarity
+from src.backend.backend.engines.similarity.token_similarity import TokenSimilarity
+from src.backend.backend.engines.similarity.ngram_similarity import NgramSimilarity
+from src.backend.backend.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+from src.backend.backend.engines.cache import EmbeddingCache, TokenCache, _sha256, get_embedding_cache, get_token_cache, invalidate_all_caches
 
 
 def _make_parsed(tokens: list[str] | None = None, raw: str | None = None) -> Dict[str, Any]:

@@ -13,10 +13,10 @@ import tempfile
 import os
 from pathlib import Path
 
-from src.core.analyzer.code_analyzer import CodeAnalyzer, analyze_single_code, compare_two_codes
-from src.core.analyzer.batch_analyzer import BatchAnalyzer, analyze_batch
-from src.core.processor.code_processor import CodeProcessor, process_code
-from src.core.processor.submission_processor import SubmissionProcessor, process_submission
+from src.backend.backend.core.analyzer.code_analyzer import CodeAnalyzer, analyze_single_code, compare_two_codes
+from src.backend.backend.core.analyzer.batch_analyzer import BatchAnalyzer, analyze_batch
+from src.backend.backend.core.processor.code_processor import CodeProcessor, process_code
+from src.backend.backend.core.processor.submission_processor import SubmissionProcessor, process_submission
 
 
 class TestCodeAnalyzerIntegration:

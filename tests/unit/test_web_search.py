@@ -1,6 +1,6 @@
 """Unit tests for web search scoring behavior."""
 
-from src.infrastructure.indexing.web_search import WebSearchService
+from src.backend.backend.infrastructure.indexing.web_search import WebSearchService
 
 
 class _MockResponse:

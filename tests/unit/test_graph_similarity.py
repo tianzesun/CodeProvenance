@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from src.engines.similarity.graph_similarity import (
+from src.backend.backend.engines.similarity.graph_similarity import (
     GraphSimilarity,
     GraphSimilarityResult,
     make_graph_similarity,
@@ -89,21 +89,21 @@ class TestGraphSimilarity:
 
     def test_structural_degenerate(self) -> None:
         """Empty graphs should return 0 structural similarity."""
-        from src.core.graph.combined_builder import CombinedGraph
+        from src.backend.backend.core.graph.combined_builder import CombinedGraph
         eng = GraphSimilarity()
         a = CombinedGraph()
         b = CombinedGraph()
         assert eng._structural(a, b) == 0.0
 
     def test_dataflow_degenerate(self) -> None:
-        from src.core.graph.combined_builder import CombinedGraph
+        from src.backend.backend.core.graph.combined_builder import CombinedGraph
         eng = GraphSimilarity()
         a = CombinedGraph()
         b = CombinedGraph()
         assert eng._dataflow(a, b) == 1.0  # Both empty, trivially same
 
     def test_semantic_degenerate(self) -> None:
-        from src.core.graph.combined_builder import CombinedGraph
+        from src.backend.backend.core.graph.combined_builder import CombinedGraph
         eng = GraphSimilarity()
         a = CombinedGraph()
         b = CombinedGraph()
@@ -134,8 +134,8 @@ class TestSimilarityEngineIntegration:
     """Test that graph similarity works with SimilarityEngine."""
 
     def test_register_and_use(self) -> None:
-        from src.engines.similarity.base_similarity import SimilarityEngine
-        from src.engines.similarity.graph_similarity import GraphSimilarity
+        from src.backend.backend.engines.similarity.base_similarity import SimilarityEngine
+        from src.backend.backend.engines.similarity.graph_similarity import GraphSimilarity
 
         engine = SimilarityEngine()
         engine.add_algorithm(GraphSimilarity(), weight=2.0)

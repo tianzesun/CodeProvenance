@@ -1,6 +1,6 @@
 """Tests for execution tool availability reporting."""
 
-from src.engines.execution.execution_engine import (
+from src.backend.backend.engines.execution.execution_engine import (
     DolosRunner,
     ExecutionEngine,
     JPlagRunner,
