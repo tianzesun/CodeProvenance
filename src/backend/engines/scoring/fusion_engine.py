@@ -22,20 +22,21 @@ class FusedScore:
 # Scores at or below baseline are treated as zero similarity.
 LANGUAGE_BASELINE: Dict[str, float] = {
     "embedding": 0.70,    # UniXcoder sees "this is Python code" for both
-    "winnowing": 0.15,    # Common keywords/structures produce some overlap
-    "ngram": 0.05,        # Character n-grams share syntax tokens
-    "ast": 0.05,          # Similar AST node types (functions, returns, etc.)
-    "fingerprint": 0.05,  # Token-level overlap from language keywords
+    "winnowing": 0.25,    # Common keywords/structures produce some overlap
+    "ngram": 0.15,        # Character n-grams share syntax tokens
+    "ast": 0.25,          # Similar AST node types (functions, returns, etc.)
+    "fingerprint": 0.15,  # Token-level overlap from language keywords
 }
 
 
 # JPlag-style weights: structural > semantic > surface
 DEFAULT_WEIGHTS: Dict[str, float] = {
-    "ast": 0.40,        # Highest weight - normalized AST structure
-    "graph": 0.20,      # CFG/PDG structural similarity
+    "ast": 0.65,        # Highest weight - normalized AST structure
     "token": 0.25,      # Normalized token sequence
-    "execution": 0.10,  # Semantic/behavioral similarity
-    "winnowing": 0.05,  # Lowest weight - literal surface matching
+    "winnowing": 0.10,  # Lowest weight - literal surface matching
+    "graph": 0.00,      # Disabled pending implementation
+    "execution": 0.00,  # Disabled pending implementation
+    "embedding": 0.00,  # Disabled - broken fallback produces false 90% scores
 }
 
 
@@ -83,8 +84,6 @@ class FusionEngine:
         # JPlag-style AST boost: if AST similarity is very high, guarantee minimum score
         final_score = arbitration.fused_score
         ast_score = corrected_scores.get("ast", 0.0)
-        if ast_score > 0.85:
-            final_score = max(final_score, 0.9)
         
         # Clamp to valid range
         final_score = min(1.0, max(0.0, final_score))

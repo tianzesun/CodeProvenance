@@ -31,14 +31,15 @@ def _risk_level(score: float) -> str:
 class BatchDetectionService:
     """Process entire folders of student submissions."""
     
-    def __init__(self, threshold: float = 0.5):
+    def __init__(self, threshold: float = 0.5, weights: Optional[Dict[str, float]] = None):
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
         from src.backend.domain.decision import DecisionEngine
         self.extractor = FeatureExtractor()
-        self.fusion = FusionEngine()
+        self.fusion = FusionEngine(weights=weights)
         self.decision = DecisionEngine(threshold)
         self.threshold = threshold
+        self.weights = weights
     
     def ingest_folder(self, folder: Path) -> Dict[str, str]:
         """Read all code files from a folder.
