@@ -568,7 +568,7 @@ async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib)
 
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
-BENCHMARK_DATA_DIR = project_root / "data" / "datasets"
+BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
 
 
 def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, str]:
