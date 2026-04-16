@@ -119,7 +119,13 @@ export default function DatasetsPage() {
       setShowCreateModal(false);
     } catch (error: unknown) {
       console.error('Demo dataset creation error:', error);
-      setError('Failed to create demo dataset.');
+      let errorMessage = 'Failed to create demo dataset.';
+      
+      if (axios.isAxiosError(error)) {
+        errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || errorMessage;
+      }
+      
+      setError(errorMessage);
     } finally {
       setCreatingDataset(false);
     }
@@ -158,7 +164,7 @@ export default function DatasetsPage() {
         {/* Create Dataset Modal */}
         {showCreateModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-[30px] shadow-2xl max-w-2xl w-full p-8">
+            <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8">
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">

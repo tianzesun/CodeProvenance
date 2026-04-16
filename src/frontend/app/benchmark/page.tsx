@@ -19,22 +19,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 
-const TOOLS = [
-  { id: 'integritydesk', name: 'IntegrityDesk', desc: 'Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web evidence, with optional AI Detection and Execution/CFG layers', color: '#0066cc', gradient: 'from-blue-500 to-blue-600', bgLight: 'bg-blue-50', ring: 'ring-blue-500', textColor: 'text-blue-600', engines: ['Token', 'AST', 'Winnowing', 'GST', 'Semantic', 'Web', 'AI Detection', 'Execution/CFG'] },
-  { id: 'moss', name: 'MOSS', desc: 'Stanford MOSS external service using the configured MOSS user ID', color: '#7c3aed', gradient: 'from-violet-500 to-violet-600', bgLight: 'bg-violet-50', ring: 'ring-violet-500', textColor: 'text-violet-600', engines: ['Token', 'Winnowing'] },
-  { id: 'jplag', name: 'JPlag', desc: 'JPlag CLI using real syntax-aware token comparison', color: '#059669', gradient: 'from-emerald-500 to-emerald-600', bgLight: 'bg-emerald-50', ring: 'ring-emerald-500', textColor: 'text-emerald-600', engines: ['Token', 'Syntax-Aware'] },
-  { id: 'dolos', name: 'Dolos', desc: 'Dodona Dolos CLI using real fingerprint-based plagiarism analysis', color: '#d97706', gradient: 'from-amber-500 to-amber-600', bgLight: 'bg-amber-50', ring: 'ring-amber-500', textColor: 'text-amber-600', engines: ['Token', 'Winnowing', 'Syntax-Aware'] },
-  { id: 'nicad', name: 'NiCad', desc: 'NiCad clone detector using the local FreeTXL runtime', color: '#e11d48', gradient: 'from-rose-500 to-rose-600', bgLight: 'bg-rose-50', ring: 'ring-rose-500', textColor: 'text-rose-600', engines: ['Normalization', 'Near-Miss'] },
-  { id: 'ac', name: 'AC', desc: 'Academic plagiarism comparison tool executed from the bundled CLI JAR', color: '#ea580c', gradient: 'from-orange-500 to-orange-600', bgLight: 'bg-orange-50', ring: 'ring-orange-500', textColor: 'text-orange-600', engines: ['Token', 'Distance'] },
-  { id: 'pmd', name: 'PMD CPD', desc: 'PMD Copy/Paste Detector executed from the bundled CLI distribution', color: '#0f766e', gradient: 'from-teal-500 to-teal-600', bgLight: 'bg-teal-50', ring: 'ring-teal-500', textColor: 'text-teal-600', engines: ['Token'] },
-  { id: 'sherlock', name: 'Sherlock', desc: 'Text-signature style detector based on textual signatures and attribute-style comparisons', color: '#4f46e5', gradient: 'from-indigo-500 to-indigo-600', bgLight: 'bg-indigo-50', ring: 'ring-indigo-500', textColor: 'text-indigo-600', engines: ['Text-Signature Style', 'Text Similarity'] },
-  { id: 'sim', name: 'SIM', desc: 'Software Similarity Tester for common token and text segments', color: '#0891b2', gradient: 'from-cyan-500 to-cyan-600', bgLight: 'bg-cyan-50', ring: 'ring-cyan-500', textColor: 'text-cyan-600', engines: ['Token', 'Text Similarity'] },
-  { id: 'strange', name: 'STRANGE', desc: 'Semantic PDG clone detector', color: '#8b5cf6', gradient: 'from-purple-500 to-purple-600', bgLight: 'bg-purple-50', ring: 'ring-purple-500', textColor: 'text-purple-600', engines: ['PDG Analysis'] },
-  { id: 'evalforge', name: 'EvalForge', desc: 'Plagiarism detection evaluation framework', color: '#f59e0b', gradient: 'from-orange-500 to-orange-600', bgLight: 'bg-orange-50', ring: 'ring-orange-500', textColor: 'text-orange-600', engines: ['Benchmark Runner'] },
-  { id: 'gptzero', name: 'GPTZero', desc: 'Open source AI code/text detection', color: '#10b981', gradient: 'from-green-500 to-green-600', bgLight: 'bg-green-50', ring: 'ring-green-500', textColor: 'text-green-600', engines: ['Embedding Analysis'] },
-  { id: 'codequiry', name: 'Codequiry', desc: 'Semantic embedding similarity', color: '#dc2626', gradient: 'from-red-500 to-red-600', bgLight: 'bg-red-50', ring: 'ring-red-500', textColor: 'text-red-600', engines: ['Embedding'] },
-  { id: 'vendetect', name: 'Vendetect', desc: 'Cross-repository vendored code detection', color: '#ec4899', gradient: 'from-pink-500 to-pink-600', bgLight: 'bg-pink-50', ring: 'ring-pink-500', textColor: 'text-pink-600', engines: ['Cross Repo Matching'] },
-];
+let TOOLS = [];
 
 const DATASET_CATEGORY_META = {
   guided: {
@@ -349,7 +334,7 @@ function StepIndicator({ steps, currentStep, completedSteps, compact = false }) 
 // ── Step 1: Tool Selection ──────────────────────────────────────────────────
 function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error }) {
   const [activeEngines, setActiveEngines] = useState([]);
-  const engineFilters = Array.from(new Set(tools.flatMap((tool) => tool.engines))).sort();
+  const engineFilters = Array.from(new Set(tools.flatMap((tool) => tool.engines ?? []))).sort();
 
   const visibleTools = activeEngines.length
     ? tools.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))

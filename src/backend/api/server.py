@@ -1310,7 +1310,7 @@ async def create_user(request: Request):
 @app.post("/api/admin/create-demo-dataset")
 async def create_demo_dataset(request: Request):
     """Create a synthetic demo dataset for testing."""
-    current_user = _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=False)
 
     try:
         data = await request.json()
@@ -2524,89 +2524,93 @@ async def get_benchmark_tools():
     return JSONResponse(content={"tools": tools})
 
 
-BENCHMARK_DATASETS = [
-    {
-        "id": "poj104",
-        "name": "POJ-104",
-        "desc": "53K C programs from 104 programming problems",
-        "icon": "📚",
-        "color": "blue",
-        "language": "c",
-        "size": "33M",
-    },
-    {
-        "id": "codesearchnet",
-        "name": "CodeSearchNet (Python)",
-        "desc": "457K+ Python functions with docstrings",
-        "icon": "🐍",
-        "color": "green",
-        "language": "python",
-        "size": "6.0G",
-    },
-    {
-        "id": "codexglue_clone",
-        "name": "CodeXGLUE Clone",
-        "desc": "1.7M Java clone detection pairs",
-        "icon": "☕",
-        "color": "amber",
-        "language": "java",
-        "size": "5.2G",
-    },
-    {
-        "id": "codexglue_defect",
-        "name": "CodeXGLUE Defect",
-        "desc": "27K C functions with vulnerability labels",
-        "icon": "🐛",
-        "color": "red",
-        "language": "c",
-        "size": "55M",
-    },
-    {
-        "id": "google_codejam",
-        "name": "Google Code Jam",
-        "desc": "Synthetic dataset with plagiarism labels",
-        "icon": "🏆",
-        "color": "emerald",
-        "language": "python",
-        "size": "72K",
-    },
-]
+BENCHMARK_DATASETS = []
 
 
 @app.get("/api/benchmark-datasets")
-async def get_benchmark_datasets():
-    """Get available benchmark datasets including dynamically discovered demo datasets."""
-    datasets = BENCHMARK_DATASETS.copy()
+async def get_benchmark_datasets() -> Dict[str, Any]:
+    """Get available benchmark datasets by scanning data/datasets/ directory."""
+    datasets: List[Dict[str, Any]] = []
+    dataset_icons: Dict[str, str] = {
+        "demo": "🧪",
+        "poj104": "📚",
+        "codesearchnet": "🐍",
+        "codexglue": "☕",
+        "google": "🏆",
+        "bigclone": "🔄",
+        "kaggle": "📊",
+        "synthetic": "⚙️",
+        "ieee": "🎓",
+        "oscar": "🎭",
+        "xiangtan": "🏫",
+    }
+    dataset_colors: Dict[str, str] = {
+        "demo": "purple",
+        "poj104": "blue",
+        "codesearchnet": "green",
+        "codexglue": "amber",
+        "google": "emerald",
+        "bigclone": "cyan",
+        "kaggle": "indigo",
+        "synthetic": "gray",
+        "ieee": "rose",
+        "oscar": "fuchsia",
+        "xiangtan": "sky",
+    }
 
-    # Discover demo datasets
     if BENCHMARK_DATA_DIR.exists():
-        for item in BENCHMARK_DATA_DIR.iterdir():
-            if item.is_dir() and item.name.startswith('demo_'):
-                metadata_file = item / 'metadata.json'
-                if metadata_file.exists():
-                    try:
-                        import json
-                        with open(metadata_file, 'r') as f:
-                            metadata = json.load(f)
+        for item in sorted(BENCHMARK_DATA_DIR.iterdir()):
+            if not item.is_dir():
+                continue
 
-                        # Add to datasets list
-                        demo_dataset = {
-                            "id": item.name,
-                            "name": f"Demo: {metadata.get('name', item.name)}",
-                            "desc": f"Demo dataset - {metadata.get('description', 'Generated test dataset')} ({metadata.get('files_created', 0)} files, {metadata.get('similarity_type', 'unknown')} similarity)",
-                            "icon": "🧪",
-                            "color": "purple",
-                            "language": metadata.get('language', 'mixed'),
-                            "size": f"{metadata.get('files_created', 0)} files",
-                            "created_by": metadata.get('created_by', 'Unknown'),
-                            "created_at": metadata.get('created_at', 'Unknown'),
-                            "similarity_type": metadata.get('similarity_type', 'unknown'),
-                            "is_demo": True
-                        }
-                        datasets.append(demo_dataset)
-                    except Exception as e:
-                        print(f"Error loading demo dataset {item.name}: {e}")
-                        continue
+            dataset_id = item.name
+            metadata_file = item / "metadata.json"
+            metadata: Dict[str, Any] = {}
+
+            # Try to load metadata.json if it exists
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Error loading metadata for {dataset_id}: {e}")
+
+            # Determine if this is a demo dataset
+            is_demo = dataset_id.startswith("demo_")
+
+            # Infer icon and color based on dataset name
+            icon = dataset_icons.get("demo" if is_demo else "synthetic", "📦")
+            color = dataset_colors.get("demo" if is_demo else "gray", "slate")
+
+            # Try to find icon/color for known dataset types
+            for key in dataset_icons.keys():
+                if key in dataset_id.lower():
+                    icon = dataset_icons[key]
+                    color = dataset_colors.get(key, "slate")
+                    break
+
+            # Build dataset record
+            dataset_record: Dict[str, Any] = {
+                "id": dataset_id,
+                "name": metadata.get("name", dataset_id.replace("_", " ").title()),
+                "desc": metadata.get("description", f"Dataset: {dataset_id}"),
+                "icon": icon,
+                "color": color,
+                "language": metadata.get("language", metadata.get("lang", "mixed")),
+                "size": metadata.get("size", f"{metadata.get('files', 0)} files"),
+                "created_by": metadata.get("created_by", "System"),
+                "created_at": metadata.get("created", metadata.get("created_at", "")),
+                "is_demo": is_demo,
+            }
+
+            # Add demo-specific fields if applicable
+            if is_demo:
+                dataset_record["files_created"] = metadata.get("files_created", 0)
+                dataset_record["similarity_type"] = metadata.get(
+                    "similarity_type", "unknown"
+                )
+
+            datasets.append(dataset_record)
 
     return JSONResponse(content={"datasets": datasets})
 
