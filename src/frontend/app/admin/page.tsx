@@ -86,18 +86,6 @@ export default function AdminPage() {
     loadUsers();
   }, [authLoading, loadUsers, user]);
 
-  // Dataset creation state - optimized with refs to prevent unnecessary re-renders
-  const datasetFormRef = useRef({
-    name: '',
-    description: '',
-    language: 'python',
-    numFiles: 10,
-    similarityType: 'type1_exact',
-  });
-
-  const [datasetForm, setDatasetForm] = useState(datasetFormRef.current);
-  const [creatingDataset, setCreatingDataset] = useState(false);
-
   // Notification system
   const [notifications, setNotifications] = useState<Array<{
     id: string;
@@ -129,29 +117,6 @@ export default function AdminPage() {
   const removeNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
-
-  // Optimized form change handlers to prevent unnecessary re-renders
-  const handleDatasetFormChange = useCallback((field: string, value: string | number) => {
-    setDatasetForm(prev => ({ ...prev, [field]: value }));
-  }, []);
-
-  // Update ref when form changes
-  useEffect(() => {
-    datasetFormRef.current = datasetForm;
-  }, [datasetForm]);
-
-  const similarityHelpText = useMemo(() => {
-    const helpTexts: Record<string, string> = {
-      type1_exact: 'Creates identical code segments for testing exact copy detection.',
-      type2_renamed: 'Generates code with renamed variables and functions.',
-      type3_modified: 'Produces code with added comments, reordered statements, or modified structure.',
-      type4_semantic: 'Creates functionally equivalent code with different algorithms or syntax.',
-      token_similarity: 'Focuses on programming-language token patterns and usage.',
-      structural_similarity: 'Emphasizes code organization and structural similarities.',
-      semantic_similarity: 'Generates conceptually similar solutions using different approaches.',
-    };
-    return helpTexts[datasetForm.similarityType] || '';
-  }, [datasetForm.similarityType]);
 
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -194,91 +159,7 @@ export default function AdminPage() {
     }
   };
 
-  const createDemoDataset = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setCreatingDataset(true);
 
-    try {
-      const result = await axios.post('/api/admin/create-demo-dataset', datasetForm);
-
-      if (result.data && result.data.files_created) {
-        const datasetName = result.data.dataset?.name || datasetForm.name;
-        const filesCreated = result.data.files_created;
-        const language = datasetForm.language;
-        const similarityType = datasetForm.similarityType
-          .replace(/_/g, ' ')
-          .replace(/\b\w/g, l => l.toUpperCase())
-          .replace(/Type (\d)/g, 'Type-$1');
-
-        const successMessage = `Dataset: ${datasetName} | Language: ${language.charAt(0).toUpperCase() + language.slice(1)} | Type: ${similarityType} | Files: ${filesCreated}`;
-
-        addNotification('success', 'Demo Dataset Created!', successMessage);
-      } else {
-        addNotification('success', 'Dataset Created', 'Demo dataset has been created successfully.');
-      }
-
-      // Reset form
-      setDatasetForm({
-        name: '',
-        description: '',
-        language: 'python',
-        numFiles: 10,
-        similarityType: 'type1_exact',
-      });
-    } catch (error: unknown) {
-      console.error('Demo dataset creation error:', error);
-
-      let errorTitle = 'Creation Failed';
-      let errorMessage = 'Failed to create demo dataset.';
-
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof error.response === 'object' &&
-        error.response !== null &&
-        'status' in error.response &&
-        (error.response.status === 401 || error.response.status === 403)
-      ) {
-        errorTitle = 'Authentication Required';
-        errorMessage = 'Please ensure you are logged in as an administrator.';
-      } else if (
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof error.response === 'object' &&
-        error.response !== null &&
-        'data' in error.response &&
-        typeof error.response.data === 'object' &&
-        error.response.data !== null &&
-        'detail' in error.response.data &&
-        typeof error.response.data.detail === 'string'
-      ) {
-        errorMessage = error.response.data.detail;
-      } else if (
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof error.response === 'object' &&
-        error.response !== null &&
-        'data' in error.response &&
-        typeof error.response.data === 'object' &&
-        error.response.data !== null &&
-        'message' in error.response.data &&
-        typeof error.response.data.message === 'string'
-      ) {
-        errorMessage = error.response.data.message;
-      } else if (error instanceof Error) {
-        errorMessage = 'Please check your connection and try again.';
-      } else {
-        errorMessage = 'Please check your permissions and try again.';
-      }
-
-      addNotification('error', errorTitle, errorMessage);
-    } finally {
-      setCreatingDataset(false);
-    }
-  };
 
   return (
     <DashboardLayout requiredRole="admin">
@@ -480,108 +361,7 @@ export default function AdminPage() {
             </form>
           </section>
 
-          <section className="theme-card-strong theme-section-line rounded-[30px] p-6 lg:p-8">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600">
-                  <Database size={14} />
-                  Dataset Tools
-                </div>
-                <h1 className="mt-4 text-3xl font-semibold text-[var(--text-primary)]">Demo dataset creation</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-7 text-[var(--text-secondary)]">
-                  Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
-                </p>
-              </div>
-              <div className="rounded-3xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-5 py-4">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Available</div>
-                <div className="mt-2 text-3xl font-semibold text-[var(--text-primary)]">∞</div>
-              </div>
-            </div>
 
-            <form className="mt-6 space-y-6" onSubmit={createDemoDataset}>
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Dataset Name</label>
-                  <input
-                    type="text"
-                    value={datasetForm.name}
-                    onChange={(event) => handleDatasetFormChange('name', event.target.value)}
-                    className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="my_test_dataset"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Programming Language</label>
-                  <select
-                    value={datasetForm.language}
-                    onChange={(event) => handleDatasetFormChange('language', event.target.value)}
-                    className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  >
-                    <option value="python">Python</option>
-                    <option value="java">Java</option>
-                    <option value="javascript">JavaScript</option>
-                    <option value="cpp">C++</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Description</label>
-                <input
-                  type="text"
-                  value={datasetForm.description}
-                  onChange={(event) => handleDatasetFormChange('description', event.target.value)}
-                  className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Dataset for testing plagiarism detection"
-                />
-              </div>
-
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Number of Files</label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="100"
-                    value={datasetForm.numFiles}
-                    onChange={(event) => handleDatasetFormChange('numFiles', parseInt(event.target.value) || 10)}
-                    className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">Similarity Type</label>
-                  <select
-                    value={datasetForm.similarityType}
-                    onChange={(event) => handleDatasetFormChange('similarityType', event.target.value)}
-                    className="w-full rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  >
-                    <option value="type1_exact">Type 1 - Exact Copy (Direct copy-paste)</option>
-                    <option value="type2_renamed">Type 2 - Renamed Identifiers (Variable renaming)</option>
-                    <option value="type3_modified">Type 3 - Modified Structure (Added/removed code)</option>
-                    <option value="type4_semantic">Type 4 - Semantic Equivalence (Different syntax, same behavior)</option>
-                    <option value="token_similarity">Token-Level Similarity (Programming style patterns)</option>
-                    <option value="structural_similarity">Structural Similarity (Code organization)</option>
-                    <option value="semantic_similarity">Semantic Similarity (Conceptual equivalence)</option>
-                  </select>
-                  <p className="mt-2 text-xs text-slate-500">
-                    {similarityHelpText}
-                  </p>
-                </div>
-              </div>
-
-
-
-              <button
-                type="submit"
-                disabled={creatingDataset}
-                className="inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-5 text-base font-semibold text-white transition-colors duration-200 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {creatingDataset && <Loader2 size={18} className="animate-spin" />}
-                {creatingDataset ? 'Generating code samples...' : 'Create Demo Dataset'}
-              </button>
-            </form>
-          </section>
         </div>
       </div>
     </DashboardLayout>
