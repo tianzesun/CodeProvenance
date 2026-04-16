@@ -133,7 +133,7 @@ export default function DatasetsPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto">
+      <div className="px-6">
         <div className="mb-8">
           <div className="flex items-start justify-between">
             <div>
