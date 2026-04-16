@@ -1,0 +1,186 @@
+schema_version: 1
+registry_version: 2026-04-16
+
+tools:
+  - name: moss
+    display_name: MOSS
+    status: benchmark_v1
+    class: plagiarism_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/moss/wrapper/run_moss.sh
+    tool_root: tools/external/moss
+    runtime:
+      - perl
+    output_kind:
+      - html_report
+      - report_url
+    notes: Stanford hosted plagiarism detector; use as anchor baseline.
+
+  - name: jplag
+    display_name: JPlag
+    status: benchmark_v1
+    class: plagiarism_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/jplag/wrapper/run_jplag.sh
+    tool_root: tools/external/jplag
+    runtime:
+      - java
+    output_kind:
+      - report_dir
+      - csv_or_html
+    notes: Source code plagiarism detector.
+
+  - name: dolos
+    display_name: Dolos
+    status: benchmark_v1
+    class: plagiarism_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/dolos-cli/wrapper/run_dolos.sh
+    tool_root: tools/external/dolos-cli
+    runtime:
+      - node
+      - npm
+    output_kind:
+      - csv
+      - web_report
+    notes: Use Dolos only once; do not treat dolos-cli as separate entrant.
+
+  - name: nicad
+    display_name: NiCad
+    status: benchmark_v1
+    class: clone_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/nicad/wrapper/run_nicad.sh
+    tool_root: tools/external/nicad
+    runtime:
+      - shell
+      - txl
+    output_kind:
+      - clone_report
+      - xml_or_text
+    notes: Clone detector baseline.
+
+  - name: pmd
+    display_name: PMD-CPD
+    status: benchmark_v1
+    class: duplication_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/pmd/wrapper/run_pmd.sh
+    tool_root: tools/external/pmd
+    runtime:
+      - java
+    output_kind:
+      - cpd_report
+      - xml_or_text
+    notes: Use CPD functionality for duplication detection.
+
+  - name: sim
+    display_name: SIM
+    status: benchmark_v1
+    class: plagiarism_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/sim/wrapper/run_sim.sh
+    tool_root: tools/external/sim
+    runtime:
+      - shell
+    output_kind:
+      - similarity_report
+    notes: Classical plagiarism/similarity detector.
+
+  - name: sherlock
+    display_name: Sherlock
+    status: benchmark_v1
+    class: plagiarism_detector
+    interface: cli
+    official: true
+    enabled: true
+    wrapper_path: tools/external/sherlock/wrapper/run_sherlock.sh
+    tool_root: tools/external/sherlock
+    runtime:
+      - shell
+      - python
+    output_kind:
+      - similarity_report
+    notes: Keep only one canonical sherlock folder.
+
+  - name: ac
+    display_name: AC
+    status: benchmark_v2
+    class: verify_first
+    interface: unknown
+    official: false
+    enabled: false
+    wrapper_path: tools/external/ac/wrapper/run_ac.sh
+    tool_root: tools/external/ac
+    runtime: []
+    output_kind: []
+    notes: Verify task fit and output schema first.
+
+  - name: code_similarity
+    display_name: code_similarity
+    status: benchmark_v2
+    class: verify_first
+    interface: unknown
+    official: false
+    enabled: false
+    wrapper_path: tools/external/code_similarity/wrapper/run_code_similarity.sh
+    tool_root: tools/external/code_similarity
+    runtime: []
+    output_kind: []
+    notes: Verify whether this is a proper benchmark entrant or helper utility.
+
+  - name: strange
+    display_name: STRANGE
+    status: benchmark_v2
+    class: verify_first
+    interface: unknown
+    official: false
+    enabled: false
+    wrapper_path: tools/external/strange/wrapper/run_strange.sh
+    tool_root: tools/external/strange
+    runtime: []
+    output_kind: []
+    notes: Verify task fit, runtime, and output.
+
+  - name: vendetect
+    display_name: Vendetect
+    status: benchmark_v2
+    class: verify_first
+    interface: unknown
+    official: false
+    enabled: false
+    wrapper_path: tools/external/vendetect/wrapper/run_vendetect.sh
+    tool_root: tools/external/vendetect
+    runtime: []
+    output_kind: []
+    notes: Verify whether it belongs in the code-plagiarism benchmark.
+
+helper_libs:
+  - name: fuzzywuzzy
+    tool_root: tools/libs/fuzzywuzzy
+    used_by:
+      - lexical_baseline
+  - name: py_stringmatching
+    tool_root: tools/libs/py_stringmatching
+    used_by:
+      - lexical_baseline
+  - name: sim_metrics
+    tool_root: tools/libs/sim_metrics
+    used_by:
+      - lexical_baseline
+  - name: textdistance
+    tool_root: tools/libs/textdistance
+    used_by:
+      - lexical_baseline
