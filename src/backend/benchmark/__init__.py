@@ -15,11 +15,13 @@ from .adapters.codeprovenance_engine import CodeProvenanceAdapter as CodeProvena
 from .adapters.codeprovenance_engine_v2 import CodeProvenanceEngineV2
 from .adapters.codeprovenance_engine_v3 import CodeProvenanceEngineV3
 from .adapters.codeprovenance_engine_v4 import CodeProvenanceEngineV4
-from .adapters.jplag_runner import JPlagAdapter as JPlagBenchmarkEngine
-from .adapters.nicad_runner import NiCadAdapter as NiCadBenchmarkEngine
-from .adapters.pmd_runner import PMDBenchmarkEngine
-from .adapters.moss_runner import MossAdapter as MossBenchmarkEngine
-from .adapters.dolos_runner import DolosBenchmarkEngine
+from .adapters.jplag_adapter import JPlagAdapter as JPlagBenchmarkEngine
+from .adapters.nicad_adapter import NiCadAdapter as NiCadBenchmarkEngine
+from .adapters.pmd_adapter import PMDBenchmarkEngine
+from .adapters.moss_adapter import MossAdapter as MossBenchmarkEngine
+from .adapters.dolos_adapter import DolosBenchmarkEngine
+from .adapters.lexical_baseline import LexicalBaselineAdapter
+from .adapters.ast_baseline import ASTBaselineAdapter
 
 
 def _register_builtin_engines() -> None:
@@ -35,6 +37,8 @@ def _register_builtin_engines() -> None:
     registry.register("pmd", PMDBenchmarkEngine)
     registry.register("moss", MossBenchmarkEngine)
     registry.register("dolos", DolosBenchmarkEngine)
+    registry.register("lexical_baseline", LexicalBaselineAdapter)
+    registry.register("ast_baseline", ASTBaselineAdapter)
     registry.register("codeprovenance_v4", CodeProvenanceEngineV4)
 
 

@@ -8,10 +8,13 @@ from .codeprovenance_engine import CodeProvenanceAdapter as CodeProvenanceEngine
 # New registry-based adapters (versioned strategy pattern)
 
 # External tool adapters
-from .jplag_runner import JPlagAdapter as JPlagBenchmarkEngine
-from .nicad_runner import NiCadAdapter as NiCadBenchmarkEngine
-from .pmd_runner import PMDBenchmarkEngine
-from .moss_runner import MossAdapter as MossBenchmarkEngine
+from .jplag_adapter import JPlagAdapter as JPlagBenchmarkEngine
+from .nicad_adapter import NiCadAdapter as NiCadBenchmarkEngine
+from .pmd_adapter import PMDBenchmarkEngine
+from .moss_adapter import MossAdapter as MossBenchmarkEngine
+from .dolos_adapter import DolosAdapter
+from .lexical_baseline import LexicalBaselineAdapter
+from .ast_baseline import ASTBaselineAdapter
 
 __all__ = [
     # Legacy
