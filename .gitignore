@@ -122,3 +122,5 @@ tools/
 *.db.*
 .codex/
 tsunn*
+sandbox/
+outputs/
