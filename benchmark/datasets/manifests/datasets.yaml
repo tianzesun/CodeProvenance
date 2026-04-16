@@ -1,0 +1,110 @@
+---
+# Benchmark dataset manifest
+# Defines all supported datasets and their configuration
+
+datasets:
+  - name: codesearchnet
+    task: retrieval
+    languages: [python, javascript, java, go, ruby, php]
+    format: jsonl
+    raw_path: datasets/raw/codesearchnet
+    normalized_path: datasets/normalized/codesearchnet
+    loader: codesearchnet_loader
+    normalizer: codesearchnet_normalizer
+    runner: retrieval_runner
+    evaluator: retrieval_evaluator
+    metrics:
+      - mrr
+      - recall@1
+      - recall@5
+      - recall@10
+      - ndcg
+
+  - name: codexglue_clone
+    task: binary_classification
+    languages: [java]
+    format: jsonl
+    raw_path: datasets/raw/codexglue_clone
+    normalized_path: datasets/normalized/codexglue_clone
+    loader: codexglue_clone_loader
+    normalizer: codexglue_clone_normalizer
+    runner: classification_runner
+    evaluator: classification_evaluator
+    metrics:
+      - accuracy
+      - precision
+      - recall
+      - f1
+      - roc_auc
+
+  - name: codexglue_defect
+    task: binary_classification
+    languages: [c]
+    format: jsonl
+    raw_path: datasets/raw/codexglue_defect
+    normalized_path: datasets/normalized/codexglue_defect
+    loader: codexglue_defect_loader
+    normalizer: codexglue_defect_normalizer
+    runner: classification_runner
+    evaluator: classification_evaluator
+    metrics:
+      - accuracy
+      - precision
+      - recall
+      - f1
+      - roc_auc
+
+  - name: human_eval
+    task: generation_exec
+    languages: [python]
+    format: jsonl
+    raw_path: datasets/raw/human_eval
+    normalized_path: datasets/normalized/human_eval
+    loader: humaneval_loader
+    normalizer: humaneval_normalizer
+    runner: python_codegen_runner
+    evaluator: pass_at_k_evaluator
+    requires_execution: true
+    metrics:
+      - pass@1
+      - pass@10
+      - compile_rate
+      - exec_success_rate
+    timeouts:
+      seconds: 5
+    memory_mb: 512
+
+  - name: mbpp
+    task: generation_exec
+    languages: [python]
+    format: json
+    raw_path: datasets/raw/mbpp
+    normalized_path: datasets/normalized/mbpp
+    loader: mbpp_loader
+    normalizer: mbpp_normalizer
+    runner: python_codegen_runner
+    evaluator: pass_at_k_evaluator
+    requires_execution: true
+    metrics:
+      - pass@1
+      - pass@10
+      - compile_rate
+      - exec_success_rate
+    timeouts:
+      seconds: 5
+    memory_mb: 512
+
+  - name: poj104
+    task: similarity
+    languages: [c_cpp]
+    format: txt
+    raw_path: datasets/raw/poj104
+    normalized_path: datasets/normalized/poj104
+    loader: poj104_loader
+    normalizer: poj104_normalizer
+    runner: similarity_runner
+    evaluator: similarity_evaluator
+    metrics:
+      - accuracy
+      - f1
+      - map

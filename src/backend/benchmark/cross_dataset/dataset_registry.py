@@ -186,13 +186,16 @@ def build_default_registry(
 
     try:
         from src.backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
-        loader = ExternalDatasetLoader(data_root=data_root, seed=seed)
     except ImportError:
         try:
-            from src.backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
-            loader = ExternalDatasetLoader(data_root=data_root, seed=seed)
-        except ImportError:
-            return registry
+            from backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
+        except ImportError as e:
+            raise ImportError(
+                "Failed to import ExternalDatasetLoader. "
+                "Check PYTHONPATH and package layout."
+            ) from e
+
+    loader = ExternalDatasetLoader(data_root=data_root, seed=seed)
 
     dataset_methods = {
         "poj104": {
@@ -243,6 +246,22 @@ def build_default_registry(
                 "language": "python",
                 "description": "Kaggle Student Code Similarity",
                 "type": "plagiarism_detection",
+            },
+        },
+        "human_eval": {
+            "method": "load_human_eval",
+            "metadata": {
+                "language": "python",
+                "description": "HumanEval Python code generation benchmark",
+                "type": "generation_exec",
+            },
+        },
+        "mbpp": {
+            "method": "load_mbpp",
+            "metadata": {
+                "language": "python",
+                "description": "Mostly Basic Python Problems",
+                "type": "generation_exec",
             },
         },
     }
