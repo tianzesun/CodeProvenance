@@ -1288,7 +1288,7 @@ function ReportStep({ results, onRestart }) {
             <div className="text-center">Spread</div>
           </div>
           <div className="divide-y divide-slate-50">
-            {(pair_results || []).map((pair, idx) => {
+            {(pair_results || []).slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((pair, idx) => {
               const scores = activeTools.map(t => {
                 const tr = pair.tool_results?.find(r => r.tool === t);
                 return tr ? tr.score : null;
@@ -1396,6 +1396,10 @@ export default function BenchmarkPage() {
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
+
+  // Pagination for detailed results table
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   useEffect(() => {
     if (authLoading || !user) {
