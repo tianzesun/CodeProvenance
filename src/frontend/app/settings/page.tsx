@@ -745,46 +745,54 @@ export default function SettingsPage() {
                         {section.engines.map((engine) => {
                           const weight = engineWeights[engine.key] || 0;
 
-                          return (
-                            <div key={engine.key} className="rounded-xl border border-slate-200 p-4">
-                              <div className="mb-3 flex items-start justify-between gap-3">
-                                <div>
-                                  <div className="text-sm font-semibold text-slate-900">
-                                    {engine.label}
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-500">
-                                    {engine.description}
-                                  </div>
-                                </div>
-                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${engine.tier === "core"
-                                    ? "bg-blue-50 text-blue-700"
-                                    : "bg-slate-100 text-slate-600"
-                                  }`}>
-                                  {engine.tier}
-                                </span>
-                              </div>
+                           return (
+                             <div key={engine.key} className={`rounded-xl border ${weight < 0.01 ? 'border-slate-200 opacity-60' : 'border-slate-200'} p-4`}>
+                               <div className="mb-3 flex items-start justify-between gap-3">
+                                 <div>
+                                   <div className="text-sm font-semibold text-slate-900">
+                                     {engine.label}
+                                   </div>
+                                   <div className="mt-1 text-xs text-slate-500">
+                                     {engine.description}
+                                   </div>
+                                 </div>
+                                 <div className="flex items-center gap-3">
+                                   <button
+                                     onClick={() => updateEngineWeight(engine.key, weight > 0.01 ? 0 : engine.tier === "core" ? 0.15 : 0.05)}
+                                     className={`w-10 h-5 rounded-full transition-colors ${weight > 0.01 ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                   >
+                                     <div className={`w-4 h-4 rounded-full bg-white shadow transform transition-transform ${weight > 0.01 ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                                   </button>
+                                   <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${engine.tier === "core"
+                                       ? "bg-blue-50 text-blue-700"
+                                       : "bg-slate-100 text-slate-600"
+                                     }`}>
+                                     {engine.tier}
+                                   </span>
+                                 </div>
+                               </div>
 
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max="1"
-                                  step="0.05"
-                                  value={weight}
-                                  onChange={(e) =>
-                                    updateEngineWeight(
-                                      engine.key,
-                                      parseFloat(e.target.value),
-                                    )
-                                  }
-                                  className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                />
-                                <span className="w-14 text-right text-sm font-medium text-blue-600">
-                                  {(weight * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            </div>
-                          );
+                               <div className="flex items-center gap-3">
+                                 <input
+                                   type="range"
+                                   min="0"
+                                   max="1"
+                                   step="0.05"
+                                   value={weight}
+                                   onChange={(e) =>
+                                     updateEngineWeight(
+                                       engine.key,
+                                       parseFloat(e.target.value),
+                                     )
+                                   }
+                                   className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                 />
+                                 <span className="w-14 text-right text-sm font-medium text-blue-600">
+                                   {(weight * 100).toFixed(0)}%
+                                 </span>
+                               </div>
+                             </div>
+                           );
                         })}
                       </div>
                     </div>
