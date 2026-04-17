@@ -736,6 +736,23 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     </div>
+
+                    <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          Baseline coverage total
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Combined noise floor threshold
+                        </div>
+                      </div>
+                      <div className={`text-lg font-bold ${Math.abs(Object.values(settings.baseline_correction?.baselines || {}).reduce((a, b) => a + (b as number), 0) - 1) < 0.01
+                          ? "text-emerald-600"
+                          : "text-amber-600"
+                        }`}>
+                        {(Object.values(settings.baseline_correction?.baselines || {}).reduce((a, b) => a + (b as number), 0) * 100).toFixed(0)}%
+                      </div>
+                    </div>
                     
                     <div className="grid grid-cols-2 gap-4">
                       {[
@@ -745,27 +762,50 @@ export default function SettingsPage() {
                         { key: "embedding", label: "Embedding" },
                       ].map((item) => {
                         const value = settings.baseline_correction?.baselines?.[item.key] || 0
+                        
+                        // Auto normalize baselines to always sum exactly 1.0
+                        const handleBaselineChange = (key: string, newValue: number) => {
+                          const current = { ...settings.baseline_correction.baselines }
+                          const othersSum = Object.entries(current)
+                            .filter(([k]) => k !== key)
+                            .reduce((a, [, v]) => a + (v as number), 0)
+                          
+                          if (othersSum === 0) {
+                            // All other values are zero, distribute remaining equally
+                            const count = Object.keys(current).length - 1
+                            const equalShare = count > 0 ? (1 - newValue) / count : 0
+                            Object.keys(current).forEach(k => {
+                              if (k !== key) current[k] = equalShare
+                            })
+                          } else {
+                            // Scale all other values proportionally to maintain total 1.0
+                            const scaleFactor = (1 - newValue) / othersSum
+                            Object.keys(current).forEach(k => {
+                              if (k !== key) current[k] = Math.max(0, Math.min(1, (current[k] as number) * scaleFactor))
+                            })
+                          }
+                          
+                          current[key] = newValue
+                          
+                          setSettings({
+                            ...settings,
+                            baseline_correction: {
+                              ...settings.baseline_correction,
+                              baselines: current
+                            }
+                          })
+                        }
+                        
                         return (
                         <div key={item.key} className="flex items-center gap-3">
                           <span className="text-sm text-slate-600 w-24">{item.label}</span>
                           <input
                             type="range"
                             min="0"
-                            max="0.5"
+                            max="1.0"
                             step="0.05"
                             value={value}
-                            onChange={(e) => {
-                              setSettings({
-                                ...settings,
-                                baseline_correction: {
-                                  ...settings.baseline_correction,
-                                  baselines: {
-                                    ...settings.baseline_correction.baselines,
-                                    [item.key]: parseFloat(e.target.value)
-                                  }
-                                }
-                              })
-                            }}
+                            onChange={(e) => handleBaselineChange(item.key, parseFloat(e.target.value))}
                             className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                           />
                           <span className="w-10 text-right text-sm font-medium text-blue-600">

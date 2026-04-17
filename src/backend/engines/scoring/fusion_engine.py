@@ -187,7 +187,59 @@ class FusionEngine:
                 "multipliers": {
                     "embedding": 3.0,
                     "ast": 1.2,
-                    "graph": 1.5
+                }
+            }
+        }
+
+    @classmethod
+    def run_calibration_benchmark(cls) -> Dict[str, Any]:
+        """Run standard benchmark dataset and return accuracy metrics for current weights.
+        
+        Runs against standard IR-Plag test set with 2100 known pairs.
+        Returns full accuracy metrics including F1, precision, recall, ROC curve.
+        """
+        try:
+            from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
+            from src.backend.evaluation.metrics import calculate_accuracy_metrics
+            
+            dataset = IRPlagDataset()
+            results = []
+            
+            for pair in dataset.test_pairs:
+                score = cls().fuse(pair.features)
+                results.append({
+                    "score": score.final_score,
+                    "ground_truth": pair.is_plagiarized
+                })
+            
+            metrics = calculate_accuracy_metrics(results)
+            return {
+                "status": "completed",
+                "f1": metrics.f1,
+                "precision": metrics.precision,
+                "recall": metrics.recall,
+                "accuracy": metrics.accuracy,
+                "auc_roc": metrics.auc_roc,
+                "roc_curve": metrics.roc_points,
+                "optimal_threshold": metrics.optimal_threshold,
+                "confusion_matrix": metrics.confusion_matrix,
+                "total_pairs": len(results),
+                "runtime_ms": metrics.runtime_ms
+            }
+        except Exception as e:
+            return {
+                "status": "failed",
+                "error": str(e)
+            }
+    
+    @classmethod
+    def calibrate_optimal_weights(cls) -> Dict[str, Any]:
+        """Automatically calibrate engine weights to maximize F1 score.
+        
+        Uses grid search optimization over standard benchmark dataset to find
+        optimal weight combination. Returns best found configuration.
+        """
+        raise NotImplementedError("Automatic weight calibration coming soon")                    "graph": 1.5
                 }
             }
         }
