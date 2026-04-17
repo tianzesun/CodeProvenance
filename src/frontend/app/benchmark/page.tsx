@@ -667,8 +667,8 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                    </div>
                  </div>
 
-                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <div className="flex items-center gap-1 pr-3 border-r border-slate-200">
+                 <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
                     {[
                       { id: 'all', label: 'All', count: allDatasets.length },
                       { id: 'preset', label: 'Preset', count: presetDatasets.length },
