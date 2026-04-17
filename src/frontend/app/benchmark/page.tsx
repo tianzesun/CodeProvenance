@@ -10,7 +10,7 @@ import {
   BarChart3, Loader2, Trophy, FileUp, X, AlertCircle,
   Zap, Target, Layers, TrendingUp, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, ArrowRight, Square, Check,
-  ChevronRight, UploadCloud, Database, Settings2, ClipboardList,
+  ChevronRight, UploadCloud, Database, Settings2, ClipboardList, Plus,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -557,6 +557,41 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
 // ── Step 2: Dataset Selection ───────────────────────────────────────────────
 function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, onBack, onNext }) {
   const [libraryFilter, setLibraryFilter] = useState('all');
+  const [languageFilter, setLanguageFilter] = useState('all');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creatingDataset, setCreatingDataset] = useState(false);
+  const [datasetForm, setDatasetForm] = useState({
+    name: '',
+    description: '',
+    language: 'python',
+    numFiles: 10,
+    similarityType: 'type1_exact',
+  });
+
+  const handleDatasetFormChange = useCallback((field: string, value: string | number) => {
+    setDatasetForm(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  const createDemoDataset = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreatingDataset(true);
+
+    try {
+      await axios.post(`${API}/api/admin/create-demo-dataset`, datasetForm, { withCredentials: true });
+      setShowCreateModal(false);
+      setDatasetForm({
+        name: '',
+        description: '',
+        language: 'python',
+        numFiles: 10,
+        similarityType: 'type1_exact',
+      });
+    } catch (error) {
+      console.error('Demo dataset creation error:', error);
+    } finally {
+      setCreatingDataset(false);
+    }
+  };
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -569,6 +604,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     () => buildDatasetLibrary(benchmarkDatasets),
     [benchmarkDatasets]
   );
+
+  const availableLanguages = useMemo(() => {
+    const langs = new Set(allDatasets.map(d => d.language?.toLowerCase() || 'mixed').filter(Boolean));
+    return Array.from(langs).sort();
+  }, [allDatasets]);
+
   const visibleLibraryDatasets = allDatasets.filter((dataset) => {
     if (libraryFilter === 'preset') {
       return dataset.datasetType === 'preset';
@@ -577,6 +618,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
       return dataset.datasetType === 'demo';
     }
     return true;
+  }).filter((dataset) => {
+    if (languageFilter === 'all') return true;
+    return dataset.language?.toLowerCase() === languageFilter.toLowerCase();
   });
   const activeDataset = allDatasets.find((dataset) => dataset.id === selectedDataset);
   const activeDatasetMeta = getDatasetCategoryMeta(activeDataset);
@@ -624,34 +668,53 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                       Choose any reusable benchmark dataset here. Preset datasets and demo datasets all live in one library so you can filter them without switching sections.
                     </p>
                   </div>
-                  {canManageDemoDatasets ? (
-                    <Link
-                      href="/admin"
-                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
-                    >
-                      Create Demo Dataset
-                      <ArrowRight size={15} />
-                    </Link>
-                  ) : null}
+                  {canManageDemoDatasets ? null : null}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {[
-                    { id: 'all', label: 'All', count: allDatasets.length },
-                    { id: 'preset', label: 'Preset', count: presetDatasets.length },
-                    { id: 'demo', label: 'Demo', count: demoDatasets.length },
-                  ].map((filter) => (
-                    <button
-                      key={filter.id}
-                      onClick={() => setLibraryFilter(filter.id)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id
-                        ? 'bg-slate-900 text-white'
-                        : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                        }`}
-                    >
-                      {filter.label} ({filter.count})
-                    </button>
-                  ))}
+                  <div className="flex items-center gap-1 pr-3 border-r border-slate-200">
+                    {[
+                      { id: 'all', label: 'All', count: allDatasets.length },
+                      { id: 'preset', label: 'Preset', count: presetDatasets.length },
+                      { id: 'demo', label: 'Demo', count: demoDatasets.length },
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setLibraryFilter(filter.id)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id
+                          ? 'bg-slate-900 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                          }`}
+                      >
+                        {filter.label} ({filter.count})
+                      </button>
+                    ))}
+                  </div>
+                  {availableLanguages.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setLanguageFilter('all')}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${languageFilter === 'all'
+                          ? 'bg-slate-900 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                          }`}
+                      >
+                        All Languages
+                      </button>
+                      {availableLanguages.map(lang => (
+                        <button
+                          key={lang}
+                          onClick={() => setLanguageFilter(lang)}
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition capitalize ${languageFilter === lang
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                            }`}
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {!canManageDemoDatasets && (
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-500">
                       Need another demo? Ask an administrator to create one.
@@ -659,25 +722,37 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                   )}
                 </div>
 
-                {visibleLibraryDatasets.length > 0 ? (
-                  <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {visibleLibraryDatasets.map((dataset) => {
-                      const isActive = selectedDataset === dataset.id;
-                      return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
-                    <div className="text-sm font-semibold text-slate-900">
-                      {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
-                    </div>
-                    <div className="mt-2 text-sm leading-6 text-slate-500">
-                      {libraryFilter === 'demo'
-                        ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
-                        : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
-                    </div>
-                  </div>
-                )}
+                 {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
+                   <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                     {visibleLibraryDatasets.map((dataset) => {
+                       const isActive = selectedDataset === dataset.id;
+                       return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
+                     })}
+                     {canManageDemoDatasets && libraryFilter !== 'preset' && (
+                       <button
+                         onClick={() => setShowCreateModal(true)}
+                         className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]"
+                       >
+                         <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+                           <Plus size={24} className="text-blue-600" />
+                         </div>
+                         <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
+                         <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
+                       </button>
+                     )}
+                   </div>
+                 ) : (
+                   <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                     <div className="text-sm font-semibold text-slate-900">
+                       {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
+                     </div>
+                     <div className="mt-2 text-sm leading-6 text-slate-500">
+                       {libraryFilter === 'demo'
+                         ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
+                         : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
+                     </div>
+                   </div>
+                 )}
               </div>
 
               {activeDataset && (
@@ -804,18 +879,156 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">
-          ← Back
-        </button>
-        <button onClick={onNext} disabled={!canProceed}
-          className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl disabled:shadow-none">
-          Ready to Run
-          <ChevronRight size={18} />
-        </button>
-      </div>
-    </div>
-  );
+       <div className="flex items-center justify-between">
+         <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">
+           ← Back
+         </button>
+         <button onClick={onNext} disabled={!canProceed}
+           className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl disabled:shadow-none">
+           Ready to Run
+           <ChevronRight size={18} />
+         </button>
+       </div>
+
+       {/* Create Demo Dataset Modal */}
+       {showCreateModal && (
+         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+           <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8">
+             <div className="flex items-start justify-between mb-6">
+               <div>
+                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">
+                   <Database size={14} />
+                   Dataset Tools
+                 </div>
+                 <h3 className="text-2xl font-semibold text-slate-900">Demo dataset creation</h3>
+                 <p className="mt-2 text-sm text-slate-600 max-w-xl">
+                   Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
+                 </p>
+               </div>
+               <button 
+                 onClick={() => {
+                   setShowCreateModal(false);
+                   setDatasetForm({
+                     name: '',
+                     description: '',
+                     language: 'python',
+                     numFiles: 10,
+                     similarityType: 'type1_exact',
+                   });
+                 }}
+                 className="p-2 hover:bg-slate-100 rounded-xl transition text-slate-500"
+               >
+                 ✕
+               </button>
+             </div>
+             
+             <form className="space-y-6 mt-6" onSubmit={createDemoDataset}>
+               <div className="grid gap-4 sm:grid-cols-2">
+                 <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">Dataset Name</label>
+                   <input
+                     type="text"
+                     value={datasetForm.name}
+                     onChange={(event) => handleDatasetFormChange('name', event.target.value)}
+                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                     placeholder="my_test_dataset"
+                     required
+                   />
+                 </div>
+                 <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">Programming Language</label>
+                   <select
+                     value={datasetForm.language}
+                     onChange={(event) => handleDatasetFormChange('language', event.target.value)}
+                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                   >
+                     <option value="python">Python</option>
+                     <option value="java">Java</option>
+                     <option value="javascript">JavaScript</option>
+                     <option value="cpp">C++</option>
+                   </select>
+                 </div>
+               </div>
+
+               <div>
+                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                 <input
+                   type="text"
+                   value={datasetForm.description}
+                   onChange={(event) => handleDatasetFormChange('description', event.target.value)}
+                   className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                   placeholder="Dataset for testing plagiarism detection"
+                 />
+               </div>
+
+               <div className="grid gap-4 sm:grid-cols-2">
+                 <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">Number of Files</label>
+                   <input
+                     type="number"
+                     min="5"
+                     max="100"
+                     value={datasetForm.numFiles}
+                     onChange={(event) => handleDatasetFormChange('numFiles', parseInt(event.target.value) || 10)}
+                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                   />
+                 </div>
+                 <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">Similarity Type</label>
+                   <select
+                     value={datasetForm.similarityType}
+                     onChange={(event) => handleDatasetFormChange('similarityType', event.target.value)}
+                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                   >
+                     <option value="type1_exact">Type 1 - Exact Copy</option>
+                     <option value="type2_renamed">Type 2 - Renamed Identifiers</option>
+                     <option value="type3_modified">Type 3 - Modified Structure</option>
+                     <option value="type4_semantic">Type 4 - Semantic Equivalence</option>
+                     <option value="token_similarity">Token-Level Similarity</option>
+                     <option value="structural_similarity">Structural Similarity</option>
+                     <option value="semantic_similarity">Semantic Similarity</option>
+                   </select>
+                 </div>
+               </div>
+             
+               <div className="mt-8 flex justify-end gap-3">
+                 <button
+                   type="button"
+                   onClick={() => {
+                     setShowCreateModal(false);
+                     setDatasetForm({
+                       name: '',
+                       description: '',
+                       language: 'python',
+                       numFiles: 10,
+                       similarityType: 'type1_exact',
+                     });
+                   }}
+                   className="px-5 py-3 text-slate-700 hover:bg-slate-100 rounded-xl transition font-medium"
+                 >
+                   Cancel
+                 </button>
+                 <button
+                   type="submit"
+                   disabled={creatingDataset || !datasetForm.name.trim()}
+                   className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl transition flex items-center gap-3 font-semibold min-w-[200px] justify-center"
+                 >
+                   {creatingDataset ? (
+                     <>
+                       <Loader2 size={18} className="animate-spin" />
+                       Generating code samples...
+                     </>
+                   ) : (
+                     'Create Demo Dataset'
+                   )}
+                 </button>
+               </div>
+             </form>
+           </div>
+         </div>
+       )}
+     </div>
+   );
 }
 
 // ── Step 3: Run ─────────────────────────────────────────────────────────────
