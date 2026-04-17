@@ -1,0 +1,38 @@
+raw_root: "/home/tsun/CodeProvenance/benchmark/datasets/raw"
+
+datasets:
+  codesearchnet:
+    enabled: true
+    task: retrieval
+    path: "codesearchnet"
+    languages: ["python", "java", "javascript", "go", "php", "ruby"]
+
+  codexglue_clone:
+    enabled: true
+    task: clone_detection
+    path: "codexglue_clone"
+    languages: ["java"]
+
+  codexglue_defect:
+    enabled: true
+    task: defect_detection
+    path: "codexglue_defect"
+    languages: ["c"]
+
+  human_eval:
+    enabled: true
+    task: generation_exec
+    path: "human_eval"
+    languages: ["python"]
+
+  mbpp:
+    enabled: true
+    task: generation_exec
+    path: "mbpp"
+    languages: ["python"]
+
+  poj104:
+    enabled: true
+    task: clone_or_similarity
+    path: "poj104"
+    languages: ["c_cpp"]

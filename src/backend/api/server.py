@@ -384,6 +384,242 @@ def _infer_pmd_language_from_filename(filename: str) -> str:
     return pmd_language_map.get(language, language)
 
 
+def _read_json_file(path: PathLib) -> Dict[str, Any]:
+    """Read a JSON file and return a dictionary."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"Error reading JSON file {path}: {exc}")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_dataset_metadata(dataset_root: PathLib) -> Dict[str, Any]:
+    """Load optional dataset metadata from a dataset root."""
+    metadata_path = dataset_root / "metadata.json"
+    if not metadata_path.exists():
+        return {}
+    return _read_json_file(metadata_path)
+
+
+def _normalize_submission_name(path: PathLib, root_dir: PathLib) -> str:
+    """Create a stable, collision-resistant submission name within a dataset root."""
+    try:
+        relative_path = path.relative_to(root_dir)
+    except ValueError:
+        relative_path = PathLib(path.name)
+    return "__".join(relative_path.parts)
+
+
+def _infer_language_from_code(code: str, fallback: str = "python") -> str:
+    """Infer a likely language from code content when metadata is missing."""
+    sample = code[:2000]
+    if not sample.strip():
+        return fallback
+
+    if (
+        "import java." in sample
+        or "System.out." in sample
+        or re.search(r"\b(public|private|protected)\s+(class|static|void)\b", sample)
+    ):
+        return "java"
+    if (
+        "#include" in sample
+        or re.search(r"\bprintf\s*\(", sample)
+        or re.search(r"\bscanf\s*\(", sample)
+    ):
+        return "c"
+    if re.search(r"^\s*def\s+\w+\s*\(", sample, re.MULTILINE):
+        return "python"
+    if "console.log" in sample or re.search(r"\bfunction\b|\=\>", sample):
+        return "javascript"
+
+    return fallback
+
+
+def _dataset_default_language(dataset_id: str) -> str:
+    """Return the default language for a known benchmark dataset."""
+    return {
+        "poj104": "mixed",
+        "codesearchnet": "mixed",
+        "codexglue_clone": "java",
+        "codexglue_defect": "c",
+        "google_codejam": "python",
+        "human_eval": "python",
+        "mbpp": "python",
+        "kaggle_student_code": "python",
+    }.get(dataset_id, "mixed")
+
+
+def _resolve_benchmark_dataset_dir(dataset_id: str) -> Optional[PathLib]:
+    """Resolve the on-disk directory for a benchmark dataset."""
+    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    if not dataset_root.exists():
+        return None
+
+    for candidate in (
+        dataset_root / "huggingface" / "train",
+        dataset_root / "huggingface" / "test",
+        dataset_root / "huggingface" / "validation",
+        dataset_root / "submissions",
+        dataset_root,
+    ):
+        if candidate.exists():
+            return candidate
+
+    return dataset_root
+
+
+def _dataset_snippets_per_row(dataset_info: Dict[str, Any]) -> int:
+    """Estimate how many code files one dataset row can yield."""
+    features = dataset_info.get("features") or {}
+    if not isinstance(features, dict):
+        return 1
+    if "func1" in features and "func2" in features:
+        return 2
+    return 1
+
+
+def _infer_dataset_language(
+    dataset_id: str,
+    metadata: Dict[str, Any],
+    dataset_info: Dict[str, Any],
+    dataset_dir: Optional[PathLib] = None,
+) -> str:
+    """Infer a dataset language from metadata or dataset schema."""
+    language = metadata.get("language") or metadata.get("lang")
+    if isinstance(language, str) and language.strip():
+        return language.strip().lower()
+
+    default_language = _dataset_default_language(dataset_id)
+    features = dataset_info.get("features") or {}
+    if isinstance(features, dict) and "language" in features and default_language == "mixed":
+        return "mixed"
+
+    if dataset_dir is not None and dataset_dir.exists():
+        inferred = _infer_language_from_directory(dataset_dir)
+        if inferred:
+            return inferred
+
+    return default_language
+
+
+def _infer_dataset_size_label(
+    dataset_dir: PathLib,
+    metadata: Dict[str, Any],
+    dataset_info: Dict[str, Any],
+    is_demo: bool,
+) -> str:
+    """Build the display size label for a dataset card."""
+    explicit_size = metadata.get("size")
+    if isinstance(explicit_size, str) and explicit_size.strip():
+        return explicit_size
+
+    if is_demo:
+        demo_files = metadata.get("files_created")
+        if isinstance(demo_files, int) and demo_files > 0:
+            return f"{demo_files} files"
+
+    splits = dataset_info.get("splits") or {}
+    if isinstance(splits, dict):
+        train_info = splits.get("train") or next(iter(splits.values()), {})
+        if isinstance(train_info, dict):
+            num_examples = train_info.get("num_examples")
+            if isinstance(num_examples, int) and num_examples > 0:
+                total_files = num_examples * _dataset_snippets_per_row(dataset_info)
+                return f"{total_files:,} files"
+
+    return f"{_count_unique_code_files(dataset_dir)} files"
+
+
+def _count_unique_code_files(root_dir: PathLib) -> int:
+    """Count unique code files using the same naming rules as the loader."""
+    unique_names = {
+        _normalize_submission_name(file_path, root_dir)
+        for file_path in root_dir.rglob("*")
+        if file_path.is_file() and _is_code_file(file_path.name)
+    }
+    return len(unique_names)
+
+
+def _infer_language_from_directory(root_dir: PathLib) -> Optional[str]:
+    """Infer the dominant language from code file extensions in a raw dataset folder."""
+    counts: Dict[str, int] = {}
+    for file_path in root_dir.rglob("*"):
+        if not file_path.is_file() or not _is_code_file(file_path.name):
+            continue
+        language = _infer_language_from_filename(file_path.name)
+        counts[language] = counts.get(language, 0) + 1
+
+    if not counts:
+        return None
+
+    top_language, top_count = max(counts.items(), key=lambda item: item[1])
+    total = sum(counts.values())
+    if total == 0:
+        return None
+    if top_count / total >= 0.8:
+        return top_language
+    return "mixed"
+
+
+def _extract_code_entries_from_row(
+    item: Dict[str, Any],
+    dataset_id: str,
+    index: int,
+) -> List[Dict[str, str]]:
+    """Extract one or more source files from a Hugging Face dataset row."""
+    if not isinstance(item, dict):
+        return []
+
+    code_entries: List[Dict[str, str]] = []
+    per_row_fields = ("func1", "func2")
+    default_language = _dataset_default_language(dataset_id)
+    item_language = str(item.get("language") or default_language).lower()
+
+    for position, field_name in enumerate(per_row_fields):
+        code = item.get(field_name)
+        if not isinstance(code, str) or len(code.strip()) <= 10:
+            continue
+        inferred_language = _infer_language_from_code(code, fallback=item_language)
+        code_entries.append(
+            {
+                "filename": (
+                    f"{dataset_id}_{index:04d}_{position}"
+                    f"{_language_file_extension(inferred_language)}"
+                ),
+                "code": code,
+            }
+        )
+
+    if code_entries:
+        return code_entries
+
+    for field_name in (
+        "code",
+        "func_code_string",
+        "func",
+        "whole_func_string",
+        "canonical_solution",
+        "prompt",
+    ):
+        code = item.get(field_name)
+        if not isinstance(code, str) or len(code.strip()) <= 10:
+            continue
+        inferred_language = _infer_language_from_code(code, fallback=item_language)
+        return [
+            {
+                "filename": (
+                    f"{dataset_id}_{index:04d}"
+                    f"{_language_file_extension(inferred_language)}"
+                ),
+                "code": code,
+            }
+        ]
+
+    return []
+
+
 def _write_submissions_to_directory(target_dir: PathLib, submissions: Dict[str, str]) -> Dict[str, str]:
     written_paths: Dict[str, str] = {}
     for filename, content in submissions.items():
@@ -541,7 +777,7 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
             try:
                 content = f.read_text(encoding='utf-8', errors='ignore')
                 if len(content.strip()) > 10:
-                    submissions[f.name] = content
+                    submissions[_normalize_submission_name(f, directory)] = content
             except Exception as e:
                 logger.warning(f"Skipping {f.name}: {e}")
     return submissions
@@ -620,23 +856,15 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
 
         return submissions
 
-    # Handle regular datasets
-    if dataset_id == "poj104":
-        dataset_dir = BENCHMARK_DATA_DIR / "poj104" / "huggingface" / "train"
-    elif dataset_id == "codesearchnet":
-        dataset_dir = BENCHMARK_DATA_DIR / "codesearchnet" / "huggingface" / "train"
-    elif dataset_id == "codexglue_clone":
-        dataset_dir = BENCHMARK_DATA_DIR / "codexglue_clone" / "huggingface" / "train"
-    elif dataset_id == "codexglue_defect":
-        dataset_dir = BENCHMARK_DATA_DIR / "codexglue_defect" / "huggingface" / "train"
-    elif dataset_id == "google_codejam":
-        dataset_dir = BENCHMARK_DATA_DIR / "google_codejam" / "submissions"
-    else:
-        logger.warning(f"Unknown dataset: {dataset_id}")
+    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    metadata = _load_dataset_metadata(dataset_root)
+    if metadata.get("exclude_from_benchmark"):
+        logger.warning(f"Dataset {dataset_id} is marked as not benchmark-ready")
         return submissions
 
-    if not dataset_dir.exists():
-        logger.warning(f"Dataset not found: {dataset_dir}")
+    dataset_dir = _resolve_benchmark_dataset_dir(dataset_id)
+    if dataset_dir is None:
+        logger.warning(f"Unknown dataset: {dataset_id}")
         return submissions
 
     try:
@@ -650,37 +878,27 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
                 if i >= max_samples:
                     break
 
-                if dataset_id == "poj104":
-                    code = item.get("code", "")
-                    ext = ".c"
-                elif dataset_id == "codesearchnet":
-                    code = item.get("func_code_string", "")
-                    ext = ".py"
-                elif dataset_id == "codexglue_clone":
-                    code = item.get("func1", "")
-                    ext = ".java"
-                elif dataset_id == "codexglue_defect":
-                    code = item.get("func", "")
-                    ext = ".c"
-                else:
-                    code = ""
-                    ext = ".txt"
-
-                if code and len(code.strip()) > 10:
-                    filename = f"{dataset_id}_{i:04d}{ext}"
-                    (target_dir / filename).write_text(code)
+                for entry in _extract_code_entries_from_row(item, dataset_id, i):
+                    filename = entry["filename"]
+                    code = entry["code"]
+                    (target_dir / filename).write_text(code, encoding="utf-8")
                     submissions[filename] = code
     except Exception as e:
         logger.error(f"Failed to load dataset {dataset_id}: {e}")
 
-    if not submissions and dataset_id == "google_codejam":
-        for f in dataset_dir.rglob("*.py"):
+    if not submissions:
+        for f in dataset_dir.rglob("*"):
+            if not f.is_file() or not _is_code_file(f.name):
+                continue
             try:
-                content = f.read_text(encoding='utf-8')
+                content = f.read_text(encoding='utf-8', errors='ignore')
                 if len(content.strip()) > 10:
-                    submissions[f.name] = content
+                    storage_name = _normalize_submission_name(f, dataset_dir)
+                    submissions[storage_name] = content
                     target_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy(f, target_dir / f.name)
+                    destination = target_dir / storage_name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(f, destination)
             except Exception as e:
                 logger.warning(f"Skipping {f.name}: {e}")
 
@@ -2564,19 +2782,18 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 continue
 
             dataset_id = item.name
-            metadata_file = item / "metadata.json"
-            metadata: Dict[str, Any] = {}
+            metadata = _load_dataset_metadata(item)
+            dataset_info: Dict[str, Any] = {}
 
-            # Try to load metadata.json if it exists
-            if metadata_file.exists():
-                try:
-                    with open(metadata_file, "r") as f:
-                        metadata = json.load(f)
-                except Exception as e:
-                    logger.warning(f"Error loading metadata for {dataset_id}: {e}")
+            if metadata.get("exclude_from_benchmark"):
+                continue
 
             # Determine if this is a demo dataset
             is_demo = dataset_id.startswith("demo_")
+            dataset_dir = _resolve_benchmark_dataset_dir(dataset_id) or item
+
+            if not is_demo and dataset_dir.name in {"train", "test", "validation"}:
+                dataset_info = _read_json_file(dataset_dir / "dataset_info.json")
 
             # Infer icon and color based on dataset name
             icon = dataset_icons.get("demo" if is_demo else "synthetic", "📦")
@@ -2596,8 +2813,13 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 "desc": metadata.get("description", f"Dataset: {dataset_id}"),
                 "icon": icon,
                 "color": color,
-                "language": metadata.get("language", metadata.get("lang", "mixed")),
-                "size": metadata.get("size", f"{metadata.get('files', 0)} files"),
+                "language": _infer_dataset_language(
+                    dataset_id,
+                    metadata,
+                    dataset_info,
+                    dataset_dir=dataset_dir,
+                ),
+                "size": _infer_dataset_size_label(dataset_dir, metadata, dataset_info, is_demo),
                 "created_by": metadata.get("created_by", "System"),
                 "created_at": metadata.get("created", metadata.get("created_at", "")),
                 "is_demo": is_demo,
