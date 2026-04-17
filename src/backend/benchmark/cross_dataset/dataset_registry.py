@@ -248,6 +248,14 @@ def build_default_registry(
                 "type": "plagiarism_detection",
             },
         },
+        "kaggle_student_code": {
+            "method": "load_kaggle_student_code",
+            "metadata": {
+                "language": "python",
+                "description": "Kaggle Student Code Similarity",
+                "type": "plagiarism_detection",
+            },
+        },
         "human_eval": {
             "method": "load_human_eval",
             "metadata": {

@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import json
 
-from src.backend.benchmark.datasets.schema import CodePair, GroundTruthLabel
+from src.backend.benchmark.datasets.schema import CodePair
 
 
 # Ground truth labels: 0=unrelated, 1=weak, 2=semantic clone, 3=exact clone

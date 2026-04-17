@@ -1,7 +1,0 @@
-LICENSES
-benchmarks
-build
-build_tools
-docs
-py_stringmatching
-wheelhouse

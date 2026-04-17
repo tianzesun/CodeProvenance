@@ -20,7 +20,13 @@ from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, 
 class MossAdapter(BaseAdapter):
     """MOSS adapter with canonical output."""
 
-    MOSS_DIR = Path(__file__).parent.parent.parent / "tools" / "moss"
+    MOSS_DIR = (
+        Path(__file__).resolve().parents[4]
+        / "tools"
+        / "external"
+        / "moss"
+        / "bin"
+    )
 
     def __init__(self, language: str = "python", max_matches: int = 10, threshold: float = 0.5):
         self._language = language

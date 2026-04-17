@@ -124,9 +124,11 @@ class EvaluationMetrics:
                 cm.fn += 1
         return cm
     
-    def compute_roc_pr_curves(self, 
-                             scores: List[float], 
-                             labels: List[int]) -> Tuple[List[float], List[float], List[float]]:
+    def compute_roc_pr_curves(
+        self,
+        scores: List[float],
+        labels: List[int],
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Compute ROC and PR curve data points."""
         sorted_indices = np.argsort(scores)[::-1]
         sorted_scores = np.array(scores)[sorted_indices]
@@ -135,15 +137,17 @@ class EvaluationMetrics:
         # ROC curve: TPR vs FPR
         tpr_list = [0.0]
         fpr_list = [0.0]
-        tp, fp, tn, fn = 0, 0, sum(labels == 0), sum(labels == 1)
+        n_neg = int(np.sum(sorted_labels == 0))
+        n_pos = int(np.sum(sorted_labels == 1))
+        tp, fp = 0, 0
         
         for score, label in zip(sorted_scores, sorted_labels):
             if label == 1:
                 tp += 1
             else:
                 fp += 1
-            tpr = tp / (tp + fn) if (tp + fn) > 0 else 0
-            fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+            tpr = tp / n_pos if n_pos > 0 else 0
+            fpr = fp / n_neg if n_neg > 0 else 0
             tpr_list.append(tpr)
             fpr_list.append(fpr)
         
@@ -158,7 +162,7 @@ class EvaluationMetrics:
             else:
                 fp += 1
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            recall = tp / n_pos if n_pos > 0 else 0
             precision_list.append(precision)
             recall_list.append(recall)
         

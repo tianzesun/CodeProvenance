@@ -25,7 +25,7 @@ from src.backend.benchmark.pipeline.loader import CanonicalDataset, CodePair
 class ExternalDatasetLoader:
     """Load external benchmark datasets into CanonicalDataset format."""
 
-    def __init__(self, data_root: str = "benchmark/data", seed: int = 42):
+    def __init__(self, data_root: str = "data/datasets", seed: int = 42):
         """Initialize loader.
 
         Args:
@@ -724,7 +724,6 @@ class ExternalDatasetLoader:
                     code_b=item.get("code2", ""),
                     label=int(item.get("label", 0)),
                     clone_type=4,  # All are T4 semantic clones
-                    similarity=float(item.get("similarity", 0.0)),
                 )
             )
             pair_id += 1
@@ -852,6 +851,7 @@ class ExternalDatasetLoader:
                 "java", split, max_pairs if max_pairs is not None else 500
             ),
             "kaggle": lambda: self.load_kaggle_student_code(max_pairs),
+            "kaggle_student_code": lambda: self.load_kaggle_student_code(max_pairs),
             "human_eval": lambda: self.load_human_eval(split, max_pairs),
             "mbpp": lambda: self.load_mbpp(split, max_pairs),
         }

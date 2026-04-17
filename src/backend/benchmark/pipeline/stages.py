@@ -213,46 +213,6 @@ class SimilarityStage(PipelineStage):
             engine_name=engine_name,
             clone_type=clone_type
         )
-        if len(code_b.raw_code) > max_code_size:
-            raise ValueError(
-                f"Code B ({code_b.code_id}) exceeds max size "
-                f"({len(code_b.raw_code)} > {max_code_size} bytes)"
-            )
-        
-        if not code_a.raw_code.strip() and not code_b.raw_code.strip():
-            return SimilarityResult(
-                id_a=code_a.code_id,
-                id_b=code_b.code_id,
-                score=1.0,
-                engine_name="",
-                clone_type=config.get("clone_type", 0),
-            )
-        if not code_a.raw_code.strip() or not code_b.raw_code.strip():
-            return SimilarityResult(
-                id_a=code_a.code_id,
-                id_b=code_b.code_id,
-                score=0.0,
-                engine_name="",
-                clone_type=config.get("clone_type", 0),
-            )
-        
-        score = engine.compare(code_a.raw_code, code_b.raw_code)
-        score = max(0.0, min(1.0, score))
-        
-        engine_name = ""
-        if hasattr(engine, 'name'):
-            name_attr = getattr(engine, 'name')
-            engine_name = name_attr() if callable(name_attr) else name_attr
-        
-        clone_type = config.get("clone_type", 0)
-        
-        return SimilarityResult(
-            id_a=code_a.code_id,
-            id_b=code_b.code_id,
-            score=score,
-            engine_name=engine_name,
-            clone_type=clone_type
-        )
 
 
 class EvaluationStage(PipelineStage):
@@ -280,7 +240,6 @@ class EvaluationStage(PipelineStage):
         config: Dict[str, Any]
     ) -> List[SimilarityResult]:
         results, ground_truth = input_data
-        threshold = config.get("threshold", 0.5)
         
         evaluated = []
         for result in results:

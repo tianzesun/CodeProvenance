@@ -29,6 +29,9 @@ from src.backend.benchmark.datasets.code_similarity_dataset import CodeSimilarit
 from src.backend.benchmark.datasets.codexglue_clone import CodeXGLUECloneDataset
 from src.backend.benchmark.datasets.codexglue_defect import CodeXGLUEDefectDataset
 from src.backend.benchmark.datasets.poj104 import POJ104Dataset
+from src.backend.benchmark.datasets.human_eval import HumanEvalDataset
+from src.backend.benchmark.datasets.mbpp import MBPPDataset
+from src.backend.benchmark.datasets.kaggle_student_code import KaggleStudentCodeDataset
 
 __all__ = [
     # Schema and validators
@@ -50,4 +53,7 @@ __all__ = [
     'CodeXGLUECloneDataset',
     'CodeXGLUEDefectDataset',
     'POJ104Dataset',
+    'HumanEvalDataset',
+    'MBPPDataset',
+    'KaggleStudentCodeDataset',
 ]

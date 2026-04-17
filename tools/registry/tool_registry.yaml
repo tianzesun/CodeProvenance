@@ -40,16 +40,16 @@ tools:
     class: plagiarism_detector
     interface: cli
     official: true
-    enabled: true
-    wrapper_path: tools/external/dolos-cli/wrapper/run_dolos.sh
-    tool_root: tools/external/dolos-cli
+    enabled: false
+    wrapper_path: tools/external/dolos/wrapper/run_dolos.sh
+    tool_root: tools/external/dolos
     runtime:
       - node
       - npm
     output_kind:
       - csv
       - web_report
-    notes: Use Dolos only once; do not treat dolos-cli as separate entrant.
+    notes: Disabled by default until @dodona/dolos CLI is installed and validated in this environment.
 
   - name: nicad
     display_name: NiCad
@@ -105,7 +105,7 @@ tools:
     class: plagiarism_detector
     interface: cli
     official: true
-    enabled: true
+    enabled: false
     wrapper_path: tools/external/sherlock/wrapper/run_sherlock.sh
     tool_root: tools/external/sherlock
     runtime:
@@ -113,7 +113,7 @@ tools:
       - python
     output_kind:
       - similarity_report
-    notes: Keep only one canonical sherlock folder.
+    notes: Disabled by default because this repository snapshot does not contain a runnable Sherlock binary.
 
   - name: ac
     display_name: AC

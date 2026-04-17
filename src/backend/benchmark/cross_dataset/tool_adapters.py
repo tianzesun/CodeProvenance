@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import time
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 class ToolAdapter(ABC):
@@ -315,7 +315,7 @@ class MOSSAdapter(BaseToolAdapter):
                 f.write(code_a)
             with open(os.path.join(tmpdir, "b.py"), "w") as f:
                 f.write(code_b)
-            moss_pl = os.path.join(PROJECT_ROOT, "tools", "moss", "moss.pl")
+            moss_pl = os.path.join(PROJECT_ROOT, "tools", "external", "moss", "bin", "moss.pl")
             result = subprocess.run(
                 ["perl", moss_pl, "-l", "python", "-c", "benchmark",
                  "-m", "10",
@@ -367,7 +367,14 @@ class JPlagAdapter(BaseToolAdapter):
 
     def __init__(self):
         super().__init__(name="jplag")
-        self._jar = os.path.join(PROJECT_ROOT, "tools", "JPlag", "jplag-6.3.0-jar-with-dependencies.jar")
+        self._jar = os.path.join(
+            PROJECT_ROOT,
+            "tools",
+            "external",
+            "jplag",
+            "bin",
+            "jplag-6.3.0-jar-with-dependencies.jar",
+        )
 
     def score(self, code_a: str, code_b: str) -> float:
         if not os.path.exists(self._jar):
@@ -437,7 +444,14 @@ class DolosAdapter(BaseToolAdapter):
 
     def __init__(self):
         super().__init__(name="dolos")
-        self._wrapper = os.path.join(PROJECT_ROOT, "tools", "dolos", "dolos-wrapper.sh")
+        self._wrapper = os.path.join(
+            PROJECT_ROOT,
+            "tools",
+            "external",
+            "dolos",
+            "wrapper",
+            "run_dolos.sh",
+        )
 
     def score(self, code_a: str, code_b: str) -> float:
         if os.path.exists(self._wrapper):
@@ -542,7 +556,14 @@ class SherlockAdapter(BaseToolAdapter):
 
     def __init__(self):
         super().__init__(name="sherlock")
-        self._binary = os.path.join(PROJECT_ROOT, "tools", "Sherlock", "sherlock")
+        self._binary = os.path.join(
+            PROJECT_ROOT,
+            "tools",
+            "external",
+            "sherlock",
+            "bin",
+            "sherlock",
+        )
 
     def score(self, code_a: str, code_b: str) -> float:
         if not os.path.exists(self._binary):
@@ -602,7 +623,7 @@ class SimAdapter(BaseToolAdapter):
 
     def __init__(self):
         super().__init__(name="sim")
-        self._binary = os.path.join(PROJECT_ROOT, "tools", "sim", "sim_text.exe")
+        self._binary = os.path.join(PROJECT_ROOT, "tools", "external", "sim", "sim_text")
 
     def score(self, code_a: str, code_b: str) -> float:
         if not os.path.exists(self._binary):
@@ -658,7 +679,7 @@ class NiCadAdapter(BaseToolAdapter):
 
     def __init__(self):
         super().__init__(name="nicad")
-        self._nicad_dir = os.path.join(PROJECT_ROOT, "tools", "NiCad-6.2")
+        self._nicad_dir = os.path.join(PROJECT_ROOT, "tools", "external", "nicad")
         self._clonepairs = os.path.join(self._nicad_dir, "tools", "clonepairs.x")
 
     def score(self, code_a: str, code_b: str) -> float:

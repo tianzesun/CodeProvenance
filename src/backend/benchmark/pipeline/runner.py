@@ -54,13 +54,6 @@ try:
 except ImportError:
     pass
 
-# Auto-load plugins
-try:
-    import plugins
-    plugins.load_plugins()
-except ImportError:
-    pass
-
 
 def _parse_code_single(args):
     """Top-level function for ProcessPoolExecutor (must be picklable).
@@ -531,79 +524,6 @@ class BenchmarkRunner:
             success=True,
         )
 
-        # Stratified split: shuffle each class separately, then distribute
-        rng.shuffle(pos_pairs)
-        rng.shuffle(neg_pairs)
-
-        pos_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
-        neg_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
-
-        for i, p in enumerate(pos_pairs):
-            pos_folds[i % actual_folds].append(p)
-        for i, p in enumerate(neg_pairs):
-            neg_folds[i % actual_folds].append(p)
-
-        folds = [pos_folds[i] + neg_folds[i] for i in range(actual_folds)]
-
-        all_metrics = []
-        for fold_idx in range(actual_folds):
-            test_pairs = folds[fold_idx]
-            train_pairs = [p for i, fold in enumerate(folds) if i != fold_idx for p in fold]
-
-            train_ds = CanonicalDataset(
-                name=f"{dataset.name}_train_{fold_idx}",
-                version=dataset.version,
-                pairs=train_pairs,
-                language=dataset.language,
-            )
-            test_ds = CanonicalDataset(
-                name=f"{dataset.name}_test_{fold_idx}",
-                version=dataset.version,
-                pairs=test_pairs,
-                language=dataset.language,
-            )
-
-            train_result = self.run(train_ds, config)
-            if not train_result.success:
-                continue
-
-            test_result = self.run(test_ds, config)
-            if test_result.success:
-                all_metrics.append(test_result.metrics)
-
-        if not all_metrics:
-            return BenchmarkRunResult(
-                config_hash=config.config_hash(),
-                dataset_name=dataset.name, dataset_version=dataset.version,
-                engine_name=config.engine.name,
-                metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-                success=False, error="All CV folds failed",
-            )
-
-        avg = MetricsResult(
-            precision=sum(m.precision for m in all_metrics) / len(all_metrics),
-            recall=sum(m.recall for m in all_metrics) / len(all_metrics),
-            f1=sum(m.f1 for m in all_metrics) / len(all_metrics),
-            accuracy=sum(m.accuracy for m in all_metrics) / len(all_metrics),
-            map_score=sum(m.map_score for m in all_metrics) / len(all_metrics),
-            mrr_score=sum(m.mrr_score for m in all_metrics) / len(all_metrics),
-            ndcg=sum(m.ndcg for m in all_metrics) / len(all_metrics),
-            top_k_precision=sum(m.top_k_precision for m in all_metrics) / len(all_metrics),
-            threshold=sum(m.threshold for m in all_metrics) / len(all_metrics),
-            tp=int(sum(m.tp for m in all_metrics) / len(all_metrics)),
-            fp=int(sum(m.fp for m in all_metrics) / len(all_metrics)),
-            tn=int(sum(m.tn for m in all_metrics) / len(all_metrics)),
-            fn=int(sum(m.fn for m in all_metrics) / len(all_metrics)),
-        )
-
-        return BenchmarkRunResult(
-            config_hash=config.config_hash(),
-            dataset_name=dataset.name, dataset_version=dataset.version,
-            engine_name=config.engine.name,
-            metrics=avg,
-            success=True,
-        )
-
     def run_comparison(
         self,
         dataset: CanonicalDataset,
@@ -620,14 +540,15 @@ class BenchmarkRunner:
         Returns:
             Dict mapping engine name to BenchmarkRunResult.
         """
+        import copy
+
         results = {}
         for engine_name in engine_names:
-            engine_config = BenchmarkConfig()
             if config:
-                engine_config = config
-                engine_config.engine.name = engine_name
+                engine_config = copy.deepcopy(config)
             else:
-                engine_config.engine.name = engine_name
+                engine_config = BenchmarkConfig()
+            engine_config.engine.name = engine_name
             results[engine_name] = self.run(dataset, engine_config)
         return results
 

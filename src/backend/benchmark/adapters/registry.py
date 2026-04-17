@@ -91,9 +91,9 @@ def initialize_registry() -> None:
     from .baselines.ast_baseline import ASTBaselineAdapter
     from .external.moss_adapter import MossAdapter
     from .external.jplag_adapter import JPlagAdapter
-    from .external.dolos_adapter import DolosAdapter
+    from .external.dolos_adapter import DolosBenchmarkEngine
     from .external.nicad_adapter import NiCadAdapter
-    from .external.pmd_adapter import PMDAdapter
+    from .external.pmd_adapter import PMDBenchmarkEngine
     from .internal.codeprovenance_engine import CodeProvenanceAdapter
 
     # Internal baselines
@@ -101,9 +101,9 @@ def initialize_registry() -> None:
         "lexical_baseline",
         LexicalBaselineAdapter,
         ToolCategory.BASELINE,
-        ["all",
+        ["all"],
         is_external_dependency=False,
-        description="Simple n-gram winnowing baseline"
+        description="Simple n-gram winnowing baseline",
     )
 
     adapter_registry.register(
@@ -138,12 +138,12 @@ def initialize_registry() -> None:
 
     adapter_registry.register(
         "dolos",
-        DolosAdapter,
+        DolosBenchmarkEngine,
         ToolCategory.EXTERNAL_TOOL,
         ["python", "javascript", "java"],
         is_external_dependency=True,
         description="Dolos plagiarism detector",
-        reference_paper="De Sutter et al. 2022"
+        reference_paper="De Sutter et al. 2022",
     )
 
     adapter_registry.register(
@@ -158,11 +158,11 @@ def initialize_registry() -> None:
 
     adapter_registry.register(
         "pmd",
-        PMDAdapter,
+        PMDBenchmarkEngine,
         ToolCategory.EXTERNAL_TOOL,
         ["java"],
         is_external_dependency=True,
-        description="PMD Copy-Paste Detector"
+        description="PMD Copy-Paste Detector",
     )
 
     # Internal engines
@@ -172,5 +172,5 @@ def initialize_registry() -> None:
         ToolCategory.INTERNAL,
         ["all"],
         is_external_dependency=False,
-        description="CodeProvenance core detection engine"
+        description="CodeProvenance core detection engine",
     )

@@ -8,11 +8,9 @@ FROZEN INTERFACE: evaluate() returns canonical EvaluationResult.
 from __future__ import annotations
 
 import csv
-import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
 from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
@@ -21,7 +19,14 @@ from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, 
 class JPlagAdapter(BaseAdapter):
     """JPlag adapter with canonical output."""
 
-    JPLAG_DIR = Path(__file__).parent.parent.parent / "tools" / "JPlag"
+    JPLAG_WRAPPER = (
+        Path(__file__).resolve().parents[4]
+        / "tools"
+        / "external"
+        / "jplag"
+        / "wrapper"
+        / "run_jplag.sh"
+    )
 
     def __init__(self, min_tokens: int = 6, threshold: float = 0.5):
         self._min_tokens = min_tokens
@@ -57,21 +62,32 @@ class JPlagAdapter(BaseAdapter):
         if not code_a or not code_b:
             return 0.0
         with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "a.py").write_text(code_a, encoding="utf-8")
-            (Path(tmpdir) / "b.py").write_text(code_b, encoding="utf-8")
-            result = Path(tmpdir) / "results"
+            tmp = Path(tmpdir)
+            (tmp / "subA").mkdir(parents=True, exist_ok=True)
+            (tmp / "subB").mkdir(parents=True, exist_ok=True)
+            (tmp / "subA" / "main.py").write_text(code_a, encoding="utf-8")
+            (tmp / "subB" / "main.py").write_text(code_b, encoding="utf-8")
+            result = tmp / "results.jplag"
             args = [
-                "mvn", "-q", "exec:java",
-                f"-Dexec.mainClass=de.jplag.cli.CLI",
-                f"-Dexec.args=-t {self._min_tokens} -l python3 --csv-export -r {result} {tmpdir}",
+                str(self.JPLAG_WRAPPER),
+                "-M", "RUN",
+                "-t", str(self._min_tokens),
+                "-l", "python3",
+                "--csv-export",
+                "-r", str(result),
+                str(tmp),
             ]
             try:
-                subprocess.run(
-                    args, cwd=str(self.JPLAG_DIR / "cli"),
-                    capture_output=True, timeout=120,
-                    env={**os.environ, "MAVEN_OPTS": "-Xmx2g"},
+                completed = subprocess.run(
+                    args,
+                    capture_output=True,
+                    timeout=120,
+                    text=True,
+                    check=False,
                 )
-                return self._parse_csv(result)
+                if completed.returncode != 0:
+                    return self._fallback(code_a, code_b)
+                return self._parse_csv(tmp / "results")
             except Exception:
                 return self._fallback(code_a, code_b)
 
