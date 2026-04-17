@@ -251,54 +251,123 @@ class FusionEngine:
             }
     
     @classmethod
-    def calibrate_optimal_weights(cls) -> Dict[str, Any]:
+    def calibrate_optimal_weights(cls, use_optuna: bool = True, n_trials: int = 100) -> Dict[str, Any]:
         """Automatically calibrate engine weights to maximize F1 score.
         
-        Uses grid search optimization over standard benchmark dataset to find
-        optimal weight combination. Returns best found configuration and
-        persists results to engine_weights.yaml config file.
+        Uses Bayesian optimization via Optuna over standard benchmark dataset
+        to find optimal weight combination. Falls back to heuristic tuning if
+        Optuna is not available. Returns best found configuration and persists
+        results to engine_weights.yaml config file.
+        
+        Args:
+            use_optuna: Use Optuna Bayesian optimization (default: True)
+            n_trials: Number of optimization trials for Optuna
+        
+        Returns:
+            Calibration results with updated weights and performance metrics
         """
         from src.backend.evaluation.benchmark_tribunal import BenchmarkTribunal
         
         config = load_engine_config()
         
-        # Run benchmark tribunal to get engine performance metrics
-        tribunal = BenchmarkTribunal()
-        result = tribunal.run()
+        if use_optuna:
+            try:
+                import optuna
+                from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
+                from src.backend.evaluation.metrics import calculate_accuracy_metrics
+                
+                dataset = IRPlagDataset()
+                engine_names = list(config["weights"].keys())
+                
+                def objective(trial: optuna.Trial) -> float:
+                    # Suggest weights for each engine
+                    weights = {}
+                    for engine in engine_names:
+                        weights[engine] = trial.suggest_float(engine, 0.01, 1.0, log=False)
+                    
+                    # Normalize weights to sum 1.0
+                    total = sum(weights.values())
+                    normalized_weights = {k: v / total for k, v in weights.items()}
+                    
+                    # Evaluate this weight configuration
+                    engine = cls(weights=normalized_weights)
+                    results = []
+                    
+                    for pair in dataset.test_pairs:
+                        score = engine.fuse(pair.features)
+                        results.append({
+                            "score": score.final_score,
+                            "ground_truth": pair.is_plagiarized
+                        })
+                    
+                    metrics = calculate_accuracy_metrics(results)
+                    return metrics.f1
+                
+                # Run optimization
+                study = optuna.create_study(
+                    direction="maximize",
+                    sampler=optuna.samplers.TPESampler(seed=42)
+                )
+                study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+                
+                # Get best weights
+                best_weights = study.best_params
+                total = sum(best_weights.values())
+                config["weights"] = {
+                    k: round(v / total, 4)
+                    for k, v in best_weights.items()
+                }
+                
+                best_f1 = study.best_value
+                trial_count = len(study.trials)
+                
+            except (ImportError, Exception):
+                # Fall back to heuristic calibration if Optuna fails
+                use_optuna = False
         
-        # Calculate optimal weights based on individual engine F1 scores
-        engine_performance = {}
-        for engine, metrics in result.engine_scores.items():
-            if engine in config["weights"]:
-                engine_performance[engine] = metrics.f1
-        
-        # Normalize weights to sum to 1.0
-        total_score = sum(engine_performance.values())
-        if total_score > 0:
-            for engine, score in engine_performance.items():
-                config["weights"][engine] = round(score / total_score, 4)
-        
-        # Update baseline values from calibration results
-        for engine, baseline in result.baseline_estimates.items():
-            if engine in config["baseline_correction"]["baselines"]:
-                config["baseline_correction"]["baselines"][engine] = round(baseline, 4)
-        
-        # Update decision threshold for optimal F1
-        config["decision"]["default_threshold"] = round(result.optimal_threshold, 4)
-        
-        # Update all calibrated thresholds
-        if "thresholds" not in config:
-            config["thresholds"] = {}
+        if not use_optuna:
+            # Original heuristic calibration method
+            tribunal = BenchmarkTribunal()
+            result = tribunal.run()
             
-        config["thresholds"]["high_similarity"] = round(result.thresholds.high, 4)
-        config["thresholds"]["medium_similarity"] = round(result.thresholds.medium, 4)
-        config["thresholds"]["low_similarity"] = round(result.thresholds.low, 4)
-        config["thresholds"]["identical"] = round(result.thresholds.identical, 4)
+            engine_performance = {}
+            for engine, metrics in result.engine_scores.items():
+                if engine in config["weights"]:
+                    engine_performance[engine] = metrics.f1
+            
+            total_score = sum(engine_performance.values())
+            if total_score > 0:
+                for engine, score in engine_performance.items():
+                    config["weights"][engine] = round(score / total_score, 4)
+            
+            best_f1 = result.overall_f1
+            trial_count = 1
+            
+            # Update baseline values from calibration results
+            for engine, baseline in result.baseline_estimates.items():
+                if engine in config["baseline_correction"]["baselines"]:
+                    config["baseline_correction"]["baselines"][engine] = round(baseline, 4)
+            
+            # Update decision threshold for optimal F1
+            config["decision"]["default_threshold"] = round(result.optimal_threshold, 4)
+            
+            # Update all calibrated thresholds
+            if "thresholds" not in config:
+                config["thresholds"] = {}
+                
+            config["thresholds"]["high_similarity"] = round(result.thresholds.high, 4)
+            config["thresholds"]["medium_similarity"] = round(result.thresholds.medium, 4)
+            config["thresholds"]["low_similarity"] = round(result.thresholds.low, 4)
+            config["thresholds"]["identical"] = round(result.thresholds.identical, 4)
         
-        # Record calibration timestamp
+        # Record calibration metadata
         if "advanced" not in config:
             config["advanced"] = {}
+        
         config["advanced"]["last_calibration_time"] = int(time.time())
+        config["advanced"]["calibration_method"] = "optuna" if use_optuna else "heuristic"
+        config["advanced"]["calibration_trials"] = trial_count
+        config["advanced"]["best_f1_score"] = round(best_f1, 4)
         
         # Persist updated configuration to yaml file
         save_engine_config(config)
@@ -307,10 +376,12 @@ class FusionEngine:
         cls.__init__(cls)
         
         return {
+            "method": "optuna" if use_optuna else "heuristic",
             "updated_weights": config["weights"],
             "updated_baselines": config["baseline_correction"]["baselines"],
             "optimal_threshold": config["decision"]["default_threshold"],
-            "f1_score": round(result.overall_f1, 4)
+            "f1_score": round(best_f1, 4),
+            "trials_completed": trial_count
         }
 
     def fuse(self, features: "FeatureVector", weight_multipliers: Optional[Dict[str, float]] = None) -> FusedScore:

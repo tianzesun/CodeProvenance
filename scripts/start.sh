@@ -1,129 +1,161 @@
 #!/bin/bash
-# Start IntegrityDesk - Backend API + Next.js Dashboard
-# Usage: ./scripts/start.sh [dashboard_port] [backend_port]
-# Default: Backend on 8000, Dashboard on 3000
-# Set DASHBOARD_MODE=dev to use Next.js development mode.
+# IntegrityDesk - Robust Startup Script
+# Backend + Embedding Server + Next.js Dashboard
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$PROJECT_DIR/.env.local"
 
+# ----------------------------
+# Load environment variables
+# ----------------------------
 if [ -f "$ENV_FILE" ]; then
-    # Load dotenv-style entries without shell-evaluating special characters in values.
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%$'\r'}"
         case "$line" in
-            ''|\#*)
-                continue
-                ;;
+            ''|\#*) continue ;;
         esac
         export "$line"
     done < "$ENV_FILE"
 fi
 
+# ----------------------------
+# Config
+# ----------------------------
 DASHBOARD_PORT="${1:-${PORT:-3000}}"
 BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
 EMBEDDING_PORT="${EMBEDDING_PORT:-8001}"
+
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
-BACKEND_URL="${BACKEND_URL:-http://${BACKEND_HOST}:${BACKEND_PORT}}"
-EMBEDDING_URL="${EMBEDDING_URL:-http://${BACKEND_HOST}:${EMBEDDING_PORT}}"
+BACKEND_URL="http://${BACKEND_HOST}:${BACKEND_PORT}"
+EMBEDDING_URL="http://${BACKEND_HOST}:${EMBEDDING_PORT}"
+
 VENV_PYTHON="$PROJECT_DIR/venv/bin/python"
-DATABASE_URL="${DATABASE_URL:-sqlite:///./codeprovenance.db}"
-
-echo "============================================"
-echo "  IntegrityDesk - Academic Integrity Platform"
-echo "============================================"
-echo ""
-echo "Backend API:    ${BACKEND_URL}"
-echo "Dashboard:      http://localhost:${DASHBOARD_PORT}"
-echo "Embedding API:  ${EMBEDDING_URL}"
-echo ""
-
-# Install dashboard dependencies
 DASHBOARD_DIR="$PROJECT_DIR/src/frontend"
-if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
-    echo "Installing dashboard dependencies..."
-    cd "$DASHBOARD_DIR" && npm install
-    echo ""
-fi
 
-if [ ! -x "$VENV_PYTHON" ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv "$PROJECT_DIR/venv"
-    echo "Installing Python dependencies..."
-    "$VENV_PYTHON" -m pip install --upgrade pip
-    "$VENV_PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt"
-    echo ""
-fi
+BACKEND_LOG="$PROJECT_DIR/backend.log"
+EMBEDDING_LOG="$PROJECT_DIR/embedding.log"
 
-echo "Initializing database schema..."
-cd "$PROJECT_DIR"
-DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -c "import src.backend.models.database; from src.backend.config.database import init_db; init_db()"
+echo "============================================"
+echo "  IntegrityDesk - Startup"
+echo "============================================"
+echo ""
+echo "Backend API:    $BACKEND_URL"
+echo "Embedding API:  $EMBEDDING_URL"
+echo "Dashboard:      http://localhost:$DASHBOARD_PORT"
 echo ""
 
-# Check if backend is already running
-if pgrep -f "uvicorn src.backend.api.server:app" >/dev/null 2>&1; then
-    echo "Backend API is already running on port ${BACKEND_PORT}"
-    BACKEND_PID=$(pgrep -f "uvicorn src.backend.api.server:app")
+# ----------------------------
+# Ensure venv exists
+# ----------------------------
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv "$PROJECT_DIR/venv"
+fi
+
+# ----------------------------
+# Install backend deps if needed
+# ----------------------------
+echo "Ensuring Python dependencies..."
+"$VENV_PYTHON" -m pip install --upgrade pip >/dev/null
+"$VENV_PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt" >/dev/null
+
+# ----------------------------
+# Database init
+# ----------------------------
+echo "Initializing database..."
+cd "$PROJECT_DIR"
+"$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()"
+echo ""
+
+# ----------------------------
+# BACKEND START
+# ----------------------------
+echo "Starting backend..."
+
+if lsof -i :$BACKEND_PORT >/dev/null 2>&1; then
+    echo "✔ Backend already running"
 else
-    echo "Starting backend API on port ${BACKEND_PORT}..."
-    cd "$PROJECT_DIR"
-    DATABASE_URL="$DATABASE_URL" "$VENV_PYTHON" -m uvicorn src.backend.api.server:app \
-        --host 0.0.0.0 --port "$BACKEND_PORT" --log-level warning &
-    BACKEND_PID=$!
+    nohup "$VENV_PYTHON" -m uvicorn src.backend.api.server:app \
+        --host 127.0.0.1 \
+        --port "$BACKEND_PORT" \
+        --log-level warning > "$BACKEND_LOG" 2>&1 &
+
     sleep 2
 fi
 
-# Check if embedding server is already running
-if pgrep -f "uvicorn embedding_server:app" >/dev/null 2>&1; then
-    echo "Embedding API is already running on port ${EMBEDDING_PORT}"
-    EMBEDDING_PID=$(pgrep -f "uvicorn embedding_server:app")
+# ----------------------------
+# EMBEDDING START (FIXED)
+# ----------------------------
+echo "Starting embedding server..."
+
+if lsof -i :$EMBEDDING_PORT >/dev/null 2>&1; then
+    echo "✔ Embedding API already running"
 else
-    echo "Starting embedding server on port ${EMBEDDING_PORT}..."
-    cd "$PROJECT_DIR"
-    source "$PROJECT_DIR/venv/bin/activate" && \
-    uvicorn embedding_server:app --host 127.0.0.1 --port "$EMBEDDING_PORT" --log-level info &
-    EMBEDDING_PID=$!
-    sleep 1
+    nohup "$VENV_PYTHON" -m uvicorn src.backend.services.embedding_server:app \
+        --host 127.0.0.1 \
+        --port "$EMBEDDING_PORT" \
+        --log-level info > "$EMBEDDING_LOG" 2>&1 &
+
+    echo "Waiting for embedding model to be ready..."
+
+    for i in {1..30}; do
+        if curl -s "http://$BACKEND_HOST:$EMBEDDING_PORT/health" | grep -q "healthy" && [ "$(lsof -i :$EMBEDDING_PORT >/dev/null 2>&1 && echo 1 || echo 0)" = "1" ]; then
+            echo "✔ Embedding API ready"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "❌ Embedding API timed out during model load"
+            echo "---- Last logs ----"
+            tail -n 30 "$EMBEDDING_LOG"
+            exit 1
+        fi
+        sleep 1
+    done
 fi
 
-# Check if dashboard is already running
-if pgrep -f "next dev\|next start\|next-server" >/dev/null 2>&1; then
-    echo "Dashboard is already running on port ${DASHBOARD_PORT}"
-    DASHBOARD_PID=$(pgrep -f "next dev\|next start\|next-server" | head -1)
-else
-    cd "$DASHBOARD_DIR"
-    export PORT="$DASHBOARD_PORT"
-    export BACKEND_URL
-    export API_URL="$BACKEND_URL"
-    export NEXT_PUBLIC_API_URL="$BACKEND_URL"
-    DASHBOARD_MODE="${DASHBOARD_MODE:-prod}"
+# ----------------------------
+# DASHBOARD START
+# ----------------------------
+echo "Starting dashboard..."
 
-    if [ "$DASHBOARD_MODE" = "dev" ]; then
-    echo "Starting Next.js dashboard in development mode on port ${DASHBOARD_PORT}..."
-    npx next dev -p "$DASHBOARD_PORT" --no-server-fast-refresh &
+cd "$DASHBOARD_DIR"
+
+export PORT="$DASHBOARD_PORT"
+export API_URL="$BACKEND_URL"
+export NEXT_PUBLIC_API_URL="$BACKEND_URL"
+
+if [ ! -d "node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    npm install
+fi
+
+if [ "${DASHBOARD_MODE:-prod}" = "dev" ]; then
+    echo "Running Next.js in DEV mode..."
+    nohup npx next dev -p "$DASHBOARD_PORT" > "$PROJECT_DIR/dashboard.log" 2>&1 &
 else
-    echo "Building Next.js dashboard for stable startup..."
+    echo "Building Next.js..."
     npx next build
-    echo "Starting Next.js dashboard in production mode on port ${DASHBOARD_PORT}..."
-    npx next start -p "$DASHBOARD_PORT" &
-    fi
-    DASHBOARD_PID=$!
+
+    echo "Running Next.js in PROD mode..."
+    nohup npx next start -p "$DASHBOARD_PORT" > "$PROJECT_DIR/dashboard.log" 2>&1 &
 fi
 
-cleanup() {
-    echo ""; echo "Shutting down..."
-    kill $BACKEND_PID 2>/dev/null
-    kill $EMBEDDING_PID 2>/dev/null
-    kill $DASHBOARD_PID 2>/dev/null
-    exit 0
-}
-trap cleanup INT TERM
+sleep 2
 
+# ----------------------------
+# FINAL CHECK
+# ----------------------------
 echo ""
 echo "Services ready:"
-echo "  Backend API:   ${BACKEND_URL}"
-echo "  Embedding API: ${EMBEDDING_URL}"
-echo "  Dashboard:     http://localhost:${DASHBOARD_PORT}"
-wait
+echo "  Backend API:   $BACKEND_URL"
+echo "  Embedding API: $EMBEDDING_URL"
+echo "  Dashboard:     http://localhost:$DASHBOARD_PORT"
+echo ""
+echo "Logs:"
+echo "  Backend:   $BACKEND_LOG"
+echo "  Embedding: $EMBEDDING_LOG"
+echo "  Dashboard:  dashboard.log"
+echo ""
+echo "Startup complete ✔"

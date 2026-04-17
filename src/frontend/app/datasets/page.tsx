@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, FormEvent } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { Database, Plus, FileText, Trash2, Edit, ExternalLink, Loader2 } from 'lucide-react';
+import { Database, Plus, FileText, Trash2, Edit, ExternalLink, Loader2, Grid, List } from 'lucide-react';
 import axios from 'axios';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
@@ -38,6 +38,7 @@ export default function DatasetsPage() {
   const [error, setError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creatingDataset, setCreatingDataset] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Dataset creation state - same implementation as admin page
   const datasetFormRef = useRef({
@@ -155,11 +156,42 @@ export default function DatasetsPage() {
           </div>
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-            {error}
-          </div>
-        )}
+         {error && (
+           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+             {error}
+           </div>
+         )}
+
+         {/* View Toggle */}
+         <div className="flex items-center justify-between mb-6">
+           <p className="text-slate-600 text-sm">
+             {datasets.length} dataset{datasets.length !== 1 ? 's' : ''} available
+           </p>
+           <div className="flex items-center bg-slate-100 rounded-xl p-1">
+             <button
+               onClick={() => setViewMode('grid')}
+               className={`p-2 rounded-lg transition ${
+                 viewMode === 'grid'
+                   ? 'bg-white shadow-sm text-blue-600'
+                   : 'text-slate-500 hover:text-slate-700'
+               }`}
+               aria-label="Grid view"
+             >
+               <Grid size={18} />
+             </button>
+             <button
+               onClick={() => setViewMode('list')}
+               className={`p-2 rounded-lg transition ${
+                 viewMode === 'list'
+                   ? 'bg-white shadow-sm text-blue-600'
+                   : 'text-slate-500 hover:text-slate-700'
+               }`}
+               aria-label="List view"
+             >
+               <List size={18} />
+             </button>
+           </div>
+         </div>
 
         {/* Create Dataset Modal */}
         {showCreateModal && (
@@ -304,63 +336,117 @@ export default function DatasetsPage() {
           </div>
         )}
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={32} className="animate-spin text-blue-600" />
-            <span className="ml-3 text-slate-600">Loading datasets...</span>
-          </div>
-        ) : datasets.length === 0 ? (
-          <div className="text-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-            <Database size={48} className="mx-auto text-slate-400 mb-4" />
-            <h3 className="font-semibold text-slate-700">No datasets found</h3>
-            <p className="text-slate-500 mt-2">Create your first dataset or import one from the benchmark library</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {datasets.map((dataset) => (
-              <div key={dataset.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Database size={18} className="text-blue-600" />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
-                      <Edit size={14} />
-                    </button>
-                    <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
-                      <Trash2 size={14} />
-                    </button>
-                    <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
-                      <ExternalLink size={14} />
-                    </button>
-                  </div>
-                </div>
+         {loading ? (
+           <div className="flex items-center justify-center py-20">
+             <Loader2 size={32} className="animate-spin text-blue-600" />
+             <span className="ml-3 text-slate-600">Loading datasets...</span>
+           </div>
+         ) : datasets.length === 0 ? (
+           <div className="text-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+             <Database size={48} className="mx-auto text-slate-400 mb-4" />
+             <h3 className="font-semibold text-slate-700">No datasets found</h3>
+             <p className="text-slate-500 mt-2">Create your first dataset or import one from the benchmark library</p>
+           </div>
+         ) : viewMode === 'grid' ? (
+           // Grid View (existing)
+           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+             {datasets.map((dataset) => (
+               <div key={dataset.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
+                 <div className="flex items-start justify-between mb-4">
+                   <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                     <Database size={18} className="text-blue-600" />
+                   </div>
+                   <div className="flex items-center gap-1">
+                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
+                       <Edit size={14} />
+                     </button>
+                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
+                       <Trash2 size={14} />
+                     </button>
+                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
+                       <ExternalLink size={14} />
+                     </button>
+                   </div>
+                 </div>
 
-                <h3 className="font-semibold text-slate-900">{dataset.name}</h3>
-                <p className="text-sm text-slate-500 mt-1 line-clamp-2">{dataset.desc}</p>
+                 <h3 className="font-semibold text-slate-900">{dataset.name}</h3>
+                 <p className="text-sm text-slate-500 mt-1 line-clamp-2">{dataset.desc}</p>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-lg font-medium">
-                    {dataset.language?.toUpperCase() || 'Mixed'}
-                  </span>
-                  <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-lg font-medium">
-                    {dataset.size}
-                  </span>
-                  {dataset.is_demo && (
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-lg font-medium">
-                      Demo
-                    </span>
-                  )}
-                </div>
+                 <div className="mt-4 flex flex-wrap gap-2">
+                   <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-lg font-medium">
+                     {dataset.language?.toUpperCase() || 'Mixed'}
+                   </span>
+                   <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-lg font-medium">
+                     {dataset.size}
+                   </span>
+                   {dataset.is_demo && (
+                     <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-lg font-medium">
+                       Demo
+                     </span>
+                   )}
+                 </div>
 
-                <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                  <span>Created by {dataset.created_by || 'System'}</span>
-                  <span>{new Date(dataset.created_at).toLocaleDateString()}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                 <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                   <span>Created by {dataset.created_by || 'System'}</span>
+                   {dataset.created_at && !isNaN(Date.parse(dataset.created_at)) && (
+                     <span>{new Date(dataset.created_at).toLocaleDateString()}</span>
+                   )}
+                 </div>
+               </div>
+             ))}
+           </div>
+         ) : (
+           // List View
+           <div className="space-y-3">
+             {datasets.map((dataset) => (
+               <div
+                 key={dataset.id}
+                 className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition flex items-center gap-4"
+               >
+                 {/* Icon */}
+                 <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                   <Database size={20} className="text-blue-600" />
+                 </div>
+
+                 {/* Main Content */}
+                 <div className="flex-1 min-w-0">
+                   <h3 className="font-semibold text-slate-900 truncate">{dataset.name}</h3>
+                   <p className="text-sm text-slate-500 truncate mt-0.5">{dataset.desc}</p>
+                   
+                   <div className="flex items-center gap-3 mt-2">
+                     <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md font-medium">
+                       {dataset.language?.toUpperCase() || 'Mixed'}
+                     </span>
+                     <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md font-medium">
+                       {dataset.size}
+                     </span>
+                     {dataset.is_demo && (
+                       <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-md font-medium">
+                         Demo
+                       </span>
+                     )}
+                     <span className="text-xs text-slate-400">
+                       Created by {dataset.created_by || 'System'} • {dataset.created_at && !isNaN(Date.parse(dataset.created_at)) ? new Date(dataset.created_at).toLocaleDateString() : ''}
+                     </span>
+                   </div>
+                 </div>
+
+                 {/* Action Buttons */}
+                 <div className="flex items-center gap-1 flex-shrink-0">
+                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
+                     <Edit size={16} />
+                   </button>
+                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
+                     <Trash2 size={16} />
+                   </button>
+                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
+                     <ExternalLink size={16} />
+                   </button>
+                 </div>
+               </div>
+             ))}
+           </div>
+         )}
       </div>
     </DashboardLayout>
   );

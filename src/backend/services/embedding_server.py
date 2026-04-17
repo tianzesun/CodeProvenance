@@ -18,8 +18,11 @@ API Endpoints:
 
 import os
 import sys
+import uuid
+import asyncio
 import logging
 import time
+from collections import deque
 from typing import List, Union, Optional
 from contextlib import asynccontextmanager
 
@@ -55,30 +58,80 @@ class EmbeddingResponse(BaseModel):
 # Global model variable
 embedding_model = None
 
+# Batching queue system
+BATCH_QUEUE = deque()
+BATCH_RESULTS = {}
+BATCH_LOCK = asyncio.Lock()
+
+BATCH_SIZE = 32
+BATCH_TIMEOUT = 0.05  # 50ms window for batching
+
 def load_model():
-    """Load the sentence transformer model."""
+    """Load and warmup the sentence transformer model safely."""
     global embedding_model
-    try:
-        logger.info(f"Loading embedding model: {DEFAULT_MODEL}")
-        from sentence_transformers import SentenceTransformer
-        embedding_model = SentenceTransformer(DEFAULT_MODEL)
-        logger.info("Model loaded successfully")
+
+    if embedding_model is not None:
         return embedding_model
-    except ImportError as e:
-        logger.error(f"Failed to import sentence_transformers: {e}")
-        logger.error("Please install with: pip install sentence-transformers")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to load model {DEFAULT_MODEL}: {e}")
-        raise
+
+    logger.info(f"Loading embedding model: {DEFAULT_MODEL}")
+    start = time.time()
+
+    from sentence_transformers import SentenceTransformer
+    embedding_model = SentenceTransformer(DEFAULT_MODEL, device="cpu")
+
+    # 🔥 Warmup run to eliminate first request latency
+    embedding_model.encode("warmup")
+
+    load_time = time.time() - start
+    logger.info(f"✅ Model loaded and warmed up in {load_time:.2f}s")
+
+    return embedding_model
+
+async def batch_worker():
+    """Background batch processing worker."""
+    global embedding_model
+
+    while True:
+        await asyncio.sleep(BATCH_TIMEOUT)
+
+        async with BATCH_LOCK:
+            if not BATCH_QUEUE:
+                continue
+
+            batch = []
+            ids = []
+
+            while BATCH_QUEUE and len(batch) < BATCH_SIZE:
+                item = BATCH_QUEUE.popleft()
+                batch.append(item["text"])
+                ids.append(item["id"])
+
+        # Process embedding batch outside lock
+        vectors = embedding_model.encode(
+            batch,
+            normalize_embeddings=True,
+            batch_size=BATCH_SIZE,
+            show_progress_bar=False
+        )
+
+        for i, _id in enumerate(ids):
+            BATCH_RESULTS[_id] = vectors[i].tolist()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan manager for model loading/cleanup."""
-    # Load model on startup
-    load_model()
+    """FastAPI lifespan manager with controlled model preload."""
+    # Preload model immediately before accepting any requests
+    try:
+        load_model()
+    except Exception as e:
+        logger.critical(f"Failed to load embedding model: {e}")
+        raise SystemExit(1)
+
+    # Start background batch worker
+    asyncio.create_task(batch_worker())
+
     yield
-    # Cleanup on shutdown (if needed)
     logger.info("Shutting down embedding server")
 
 # Create FastAPI app with lifespan management
@@ -129,6 +182,7 @@ async def create_embeddings(request: EmbeddingRequest):
         vectors = embedding_model.encode(
             texts,
             normalize_embeddings=True,
+            batch_size=32,
             show_progress_bar=False
         )
         elapsed_seconds = time.time() - start_time
@@ -155,7 +209,7 @@ async def create_embeddings(request: EmbeddingRequest):
             elapsed_seconds=round(elapsed_seconds, 3)
         )
 
-        logger.info(".3f")
+        logger.info(f"Embedding generated in {elapsed_seconds:.3f}s")
         return response
 
     except Exception as e:
