@@ -1,8 +1,9 @@
 """Fusion Engine - Combined multi-engine scoring with configurable weights."""
+from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 
 import yaml
@@ -239,10 +240,7 @@ class FusionEngine:
         Uses grid search optimization over standard benchmark dataset to find
         optimal weight combination. Returns best found configuration.
         """
-        raise NotImplementedError("Automatic weight calibration coming soon")                    "graph": 1.5
-                }
-            }
-        }
+        raise NotImplementedError("Automatic weight calibration coming soon")
 
     def fuse(self, features: "FeatureVector", weight_multipliers: Optional[Dict[str, float]] = None) -> FusedScore:
         """Combine engine outputs into a single similarity score using Bayesian arbitration.
