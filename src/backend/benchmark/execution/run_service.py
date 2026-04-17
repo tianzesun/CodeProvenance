@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import signal
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -39,6 +41,8 @@ class BenchmarkRunRecord:
     started_at_utc: str | None = None
     finished_at_utc: str | None = None
     return_code: int | None = None
+    pid: int | None = None
+    process_group_id: int | None = None
     cwd: str = ""
     command: list[str] = field(default_factory=list)
     command_shell: str = ""
@@ -101,9 +105,6 @@ class BenchmarkRunService:
         run_dir = self._run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        stdout_path = self._stdout_path(run_id)
-        stderr_path = self._stderr_path(run_id)
-
         record = BenchmarkRunRecord(
             run_id=run_id,
             dataset_id=dataset_id,
@@ -115,8 +116,8 @@ class BenchmarkRunService:
             command=plan.command,
             command_shell=shlex.join(plan.command),
             output_dir=plan.output_dir,
-            stdout_path=str(stdout_path),
-            stderr_path=str(stderr_path),
+            stdout_path=str(self._stdout_path(run_id)),
+            stderr_path=str(self._stderr_path(run_id)),
             metadata_path=str(self._metadata_path(run_id)),
             inputs=plan.inputs,
         )
@@ -133,6 +134,10 @@ class BenchmarkRunService:
 
     def _execute_plan(self, run_id: str, plan: ToolExecutionPlan) -> None:
         record = self._load_record(run_id)
+        if record.status == "cancelled":
+            self._save_record(record)
+            return
+
         record.status = "running"
         record.started_at_utc = utc_now()
         self._save_record(record)
@@ -144,24 +149,45 @@ class BenchmarkRunService:
         env = os.environ.copy()
         env.update(plan.env or {})
 
+        popen_kwargs: dict[str, Any] = {
+            "cwd": plan.cwd,
+            "env": env,
+            "stdout": None,
+            "stderr": None,
+            "text": True,
+        }
+
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
         try:
             with stdout_path.open("w", encoding="utf-8") as stdout_fh, stderr_path.open(
                 "w", encoding="utf-8"
             ) as stderr_fh:
-                completed = subprocess.run(
-                    plan.command,
-                    cwd=plan.cwd,
-                    env=env,
-                    stdout=stdout_fh,
-                    stderr=stderr_fh,
-                    text=True,
-                    check=False,
-                )
+                popen_kwargs["stdout"] = stdout_fh
+                popen_kwargs["stderr"] = stderr_fh
 
-            record.return_code = int(completed.returncode)
-            record.finished_at_utc = utc_now()
-            record.status = "completed" if completed.returncode == 0 else "failed"
-            self._save_record(record)
+                process = subprocess.Popen(plan.command, **popen_kwargs)
+                record.pid = int(process.pid)
+                if os.name != "nt":
+                    try:
+                        record.process_group_id = int(os.getpgid(process.pid))
+                    except Exception:
+                        record.process_group_id = None
+                self._save_record(record)
+
+                return_code = process.wait()
+                record.return_code = int(return_code)
+                record.finished_at_utc = utc_now()
+
+                refreshed = self._load_record(run_id)
+                if refreshed.status == "cancelled":
+                    record.status = "cancelled"
+                else:
+                    record.status = "completed" if return_code == 0 else "failed"
+                self._save_record(record)
 
         except Exception as exc:
             record.finished_at_utc = utc_now()
@@ -176,15 +202,13 @@ class BenchmarkRunService:
         path = self._stdout_path(run_id)
         if not path.exists():
             return ""
-        content = path.read_text(encoding="utf-8", errors="replace")
-        return content[-max_chars:]
+        return path.read_text(encoding="utf-8", errors="replace")[-max_chars:]
 
     def get_run_stderr(self, run_id: str, max_chars: int = 20000) -> str:
         path = self._stderr_path(run_id)
         if not path.exists():
             return ""
-        content = path.read_text(encoding="utf-8", errors="replace")
-        return content[-max_chars:]
+        return path.read_text(encoding="utf-8", errors="replace")[-max_chars:]
 
     def list_runs(self, limit: int = 50) -> list[BenchmarkRunRecord]:
         records: list[BenchmarkRunRecord] = []
@@ -197,15 +221,62 @@ class BenchmarkRunService:
                 break
         return records
 
+    def _terminate_process_group(self, record: BenchmarkRunRecord) -> None:
+        if not record.pid:
+            return
+
+        if os.name == "nt":
+            try:
+                os.kill(record.pid, signal.SIGTERM)
+            except Exception:
+                pass
+            time.sleep(1)
+            try:
+                os.kill(record.pid, signal.SIGKILL)
+            except Exception:
+                pass
+            return
+
+        pgid = record.process_group_id
+        if not pgid:
+            try:
+                pgid = os.getpgid(record.pid)
+            except Exception:
+                pgid = None
+
+        if pgid:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except Exception:
+                pass
+            time.sleep(1)
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except Exception:
+                pass
+        else:
+            try:
+                os.kill(record.pid, signal.SIGTERM)
+            except Exception:
+                pass
+            time.sleep(1)
+            try:
+                os.kill(record.pid, signal.SIGKILL)
+            except Exception:
+                pass
+
     def cancel_run(self, run_id: str) -> BenchmarkRunRecord:
         record = self._load_record(run_id)
         if record.status in {"completed", "failed", "cancelled"}:
             return record
+
         record.status = "cancelled"
         record.finished_at_utc = utc_now()
-        record.error = "Cancellation requested; hard process termination not yet implemented."
+        record.error = "Cancellation requested by user."
         self._save_record(record)
-        return record
+
+        self._terminate_process_group(record)
+        return self._load_record(run_id)
 
 
 _service: BenchmarkRunService | None = None
