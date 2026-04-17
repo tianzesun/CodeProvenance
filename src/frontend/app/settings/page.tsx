@@ -587,6 +587,90 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
+
+                  <div className="mt-6">
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                      Decision Thresholds
+                    </label>
+
+                    <div className="rounded-xl border border-slate-200 p-4 space-y-4">
+                      {[
+                        { key: "default_threshold", label: "Default Detection Threshold", min: 0.1, max: 0.9, step: 0.05, value: settings.default_threshold, description: "Pairs above this score will be flagged" },
+                        { key: "minimum_confidence", label: "Minimum Confidence", min: 0.0, max: 1.0, step: 0.05, value: 0.4, description: "Minimum confidence required to flag results" },
+                        { key: "minimum_engine_agreement", label: "Required Engine Agreement", min: 1, max: 8, step: 1, value: 2, description: "Minimum number of engines that must agree" },
+                      ].map((item) => (
+                        <div key={item.key} className="flex items-center gap-4">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                            <div className="text-xs text-slate-500 mt-1">{item.description}</div>
+                          </div>
+                          <input
+                            type="range"
+                            min={item.min}
+                            max={item.max}
+                            step={item.step}
+                            value={item.value}
+                            className="w-48 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                          <span className="w-16 text-right text-sm font-bold text-blue-600">
+                            {item.value < 10 ? `${(item.value * 100).toFixed(0)}%` : item.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                      Feature Toggles
+                    </label>
+
+                    <div className="rounded-xl border border-slate-200 p-4 space-y-4">
+                      {[
+                        { key: "baseline_correction", label: "Baseline Noise Correction", enabled: true, description: "Subtract language noise floor from all scores" },
+                        { key: "bayesian_arbitration", label: "Bayesian Score Fusion", enabled: true, description: "Statistical arbitration between engine scores" },
+                        { key: "ast_boost", label: "AST High Score Boost", enabled: true, description: "Guarantee minimum score for high AST similarity" },
+                        { key: "result_caching", label: "Result Caching", enabled: true, description: "Cache similarity calculation results" },
+                      ].map((item) => (
+                        <div key={item.key} className="flex items-center gap-4">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                            <div className="text-xs text-slate-500 mt-1">{item.description}</div>
+                          </div>
+                          <button
+                            className={`w-12 h-6 rounded-full transition-colors ${item.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                          >
+                            <div className={`w-5 h-5 rounded-full bg-white shadow transform transition-transform ${item.enabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                      Performance Tuning
+                    </label>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[
+                        { key: "parallel_engine_execution", label: "Parallel Engine Execution", value: 4 },
+                        { key: "result_cache_ttl", label: "Cache TTL (seconds)", value: 3600 },
+                        { key: "engine_timeout_ms", label: "Engine Timeout (ms)", value: 15000 },
+                        { key: "maximum_batch_size", label: "Maximum Batch Size", value: 256 },
+                      ].map((item) => (
+                        <div key={item.key} className="rounded-xl border border-slate-200 p-4">
+                          <label className="block text-sm font-medium text-slate-700 mb-2">{item.label}</label>
+                          <input
+                            type="number"
+                            value={item.value}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </>
