@@ -660,18 +660,14 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         <div className="p-6">
           {uploadMode === 'builtin' && (
             <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dataset Library</p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Choose any reusable benchmark dataset here. Preset datasets and demo datasets all live in one library so you can filter them without switching sections.
-                    </p>
-                  </div>
-                  {canManageDemoDatasets ? null : null}
-                </div>
+               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
+                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
+                   <div>
+                     <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dataset Library</p>
+                   </div>
+                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <div className="flex items-center gap-1 pr-3 border-r border-slate-200">
                     {[
                       { id: 'all', label: 'All', count: allDatasets.length },
@@ -723,7 +719,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                 </div>
 
                  {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
-                   <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                   <div className={`mt-5 grid gap-4 ${libraryFilter === 'demo' && visibleLibraryDatasets.length === 0 && canManageDemoDatasets ? 'grid-cols-1 md:grid-cols-1 xl:grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
                      {visibleLibraryDatasets.map((dataset) => {
                        const isActive = selectedDataset === dataset.id;
                        return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
