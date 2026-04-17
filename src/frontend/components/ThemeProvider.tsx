@@ -19,26 +19,25 @@ interface ThemeProviderProps {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') {
-      return 'light';
-    }
-
+  const [theme, setTheme] = useState<Theme>('light'); // Start with light theme
+  const [hasHydrated, setHasHydrated] = useState(false);
+  useEffect(() => {
+    // Load theme from localStorage after hydration
     const storedTheme = window.localStorage.getItem(STORAGE_KEY);
-    return storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : 'light';
-  });
-  const hasHydratedRef = useRef(false);
+    const initialTheme = storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : 'light';
+
+    if (initialTheme !== theme) {
+      setTheme(initialTheme);
+    }
+    setHasHydrated(true);
+  }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-
-    if (hasHydratedRef.current) {
+    if (hasHydrated) {
+      document.documentElement.dataset.theme = theme;
       window.localStorage.setItem(STORAGE_KEY, theme);
-      return;
     }
-
-    hasHydratedRef.current = true;
-  }, [theme]);
+  }, [theme, hasHydrated]);
 
   const value = useMemo(
     () => ({

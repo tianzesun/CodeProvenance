@@ -1,12 +1,12 @@
 weights:
-  token: 0.1
-  ast: 0.17
-  winnowing: 0.08
-  gst: 0.1
-  semantic: 0.35
-  web: 0.1
-  ai_detection: 0.05
-  execution_cfg: 0.05
+  token: 0.03
+  ast: 0.7508
+  winnowing: 0.024
+  gst: 0.03
+  semantic: 0.1051
+  web: 0.03
+  ai_detection: 0.015
+  execution_cfg: 0.015
 baseline_correction:
   baselines:
     winnowing: 0.35
@@ -23,27 +23,33 @@ ast_boost:
   minimum_guaranteed_score: 0.75
 decision:
   default_threshold: 0.65
-  minimum_confidence: 0.40
+  minimum_confidence: 0.4
   minimum_engine_agreement: 2
   uncertainty_review_threshold: 0.75
   false_positive_bias: 1.2
 
+thresholds:
+  identical: 0.85
+  high_similarity: 0.70
+  medium_similarity: 0.50
+  low_similarity: 0.30
+  auto_refer: 0.90
+  embedding_match: 0.85
+  minimum_reportable: 0.20
 toggles:
   baseline_correction: true
   bayesian_arbitration: true
   ast_boost: true
   execution_similarity: true
   result_caching: true
-
 performance:
   parallel_engine_execution: 4
   result_cache_ttl: 3600
   engine_timeout_ms: 15000
   maximum_batch_size: 256
-
 advanced:
-  auto_calibrate: false
+  auto_calibrate: true
   hot_reload: true
   reload_interval: 10
-  benchmark_dataset: "ir_plag"
-  auto_optimize_thresholds: false
+  benchmark_dataset: ir_plag
+  auto_optimize_thresholds: true

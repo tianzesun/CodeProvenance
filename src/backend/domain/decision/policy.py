@@ -92,14 +92,19 @@ def load_policy(path: Path) -> PolicyConfig:
 
 
 def get_default_policy() -> PolicyConfig:
-    """Return default policy with safe defaults."""
+    """Return default policy with thresholds loaded from central engine config."""
+    from src.backend.engines.scoring.fusion_engine import load_engine_config
+    
+    config = load_engine_config()
+    thresholds = config.get("thresholds", {})
+    
     return PolicyConfig(
         institution_name="Academic Integrity System",
-        identical_threshold=0.85,
-        high_similarity_threshold=0.70,
-        medium_similarity_threshold=0.50,
-        low_similarity_threshold=0.30,
-        auto_refer_threshold=0.90,
+        identical_threshold=thresholds.get("identical", 0.85),
+        high_similarity_threshold=thresholds.get("high_similarity", 0.70),
+        medium_similarity_threshold=thresholds.get("medium_similarity", 0.50),
+        low_similarity_threshold=thresholds.get("low_similarity", 0.30),
+        auto_refer_threshold=thresholds.get("auto_refer", 0.90),
         require_human_review=True,
         data_retention_days=365,
         pII_masking_enabled=True,

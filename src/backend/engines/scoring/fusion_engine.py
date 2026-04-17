@@ -52,7 +52,24 @@ def load_engine_config() -> Dict:
 
 
 def save_engine_config(config: Dict) -> None:
-    """Save engine configuration to YAML config file."""
+    """Save engine configuration to YAML config file with validation."""
+    # Validate weights sum correctly
+    if "weights" in config:
+        total = sum(config["weights"].values())
+        if abs(total - 1.0) > 0.001:
+            # Normalize weights automatically
+            config["weights"] = {
+                k: round(v / total, 4)
+                for k, v in config["weights"].items()
+            }
+    
+    # Validate all values are within 0-1 range
+    for section in ["weights", "baseline_correction"]:
+        if section in config:
+            for key, value in config[section].items():
+                if isinstance(value, (int, float)):
+                    config[section][key] = max(0.0, min(1.0, value))
+    
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
 
@@ -238,9 +255,63 @@ class FusionEngine:
         """Automatically calibrate engine weights to maximize F1 score.
         
         Uses grid search optimization over standard benchmark dataset to find
-        optimal weight combination. Returns best found configuration.
+        optimal weight combination. Returns best found configuration and
+        persists results to engine_weights.yaml config file.
         """
-        raise NotImplementedError("Automatic weight calibration coming soon")
+        from src.backend.evaluation.benchmark_tribunal import BenchmarkTribunal
+        
+        config = load_engine_config()
+        
+        # Run benchmark tribunal to get engine performance metrics
+        tribunal = BenchmarkTribunal()
+        result = tribunal.run()
+        
+        # Calculate optimal weights based on individual engine F1 scores
+        engine_performance = {}
+        for engine, metrics in result.engine_scores.items():
+            if engine in config["weights"]:
+                engine_performance[engine] = metrics.f1
+        
+        # Normalize weights to sum to 1.0
+        total_score = sum(engine_performance.values())
+        if total_score > 0:
+            for engine, score in engine_performance.items():
+                config["weights"][engine] = round(score / total_score, 4)
+        
+        # Update baseline values from calibration results
+        for engine, baseline in result.baseline_estimates.items():
+            if engine in config["baseline_correction"]["baselines"]:
+                config["baseline_correction"]["baselines"][engine] = round(baseline, 4)
+        
+        # Update decision threshold for optimal F1
+        config["decision"]["default_threshold"] = round(result.optimal_threshold, 4)
+        
+        # Update all calibrated thresholds
+        if "thresholds" not in config:
+            config["thresholds"] = {}
+            
+        config["thresholds"]["high_similarity"] = round(result.thresholds.high, 4)
+        config["thresholds"]["medium_similarity"] = round(result.thresholds.medium, 4)
+        config["thresholds"]["low_similarity"] = round(result.thresholds.low, 4)
+        config["thresholds"]["identical"] = round(result.thresholds.identical, 4)
+        
+        # Record calibration timestamp
+        if "advanced" not in config:
+            config["advanced"] = {}
+        config["advanced"]["last_calibration_time"] = int(time.time())
+        
+        # Persist updated configuration to yaml file
+        save_engine_config(config)
+        
+        # Reload instance with new values
+        cls.__init__(cls)
+        
+        return {
+            "updated_weights": config["weights"],
+            "updated_baselines": config["baseline_correction"]["baselines"],
+            "optimal_threshold": config["decision"]["default_threshold"],
+            "f1_score": round(result.overall_f1, 4)
+        }
 
     def fuse(self, features: "FeatureVector", weight_multipliers: Optional[Dict[str, float]] = None) -> FusedScore:
         """Combine engine outputs into a single similarity score using Bayesian arbitration.

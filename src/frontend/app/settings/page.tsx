@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
+import { Settings, Cpu, Zap, Shield, Database, RefreshCw, Save, AlertTriangle, CheckCircle } from 'lucide-react';
 
 const ENGINE_CATALOG = [
   {
@@ -124,6 +125,18 @@ function areWeightsEqual(a?: Record<string, number>, b?: Record<string, number>)
   );
 }
 
+interface EngineConfig {
+  weights: Record<string, number>;
+  baselines: Record<string, number>;
+  arbitration: Record<string, any>;
+  ast_boost: Record<string, any>;
+  decision: Record<string, any>;
+  thresholds: Record<string, any>;
+  toggles: Record<string, boolean>;
+  performance: Record<string, any>;
+  advanced: Record<string, any>;
+}
+
 interface Settings {
   default_threshold: number;
   openai_api_key: string;
@@ -147,13 +160,18 @@ interface Settings {
   max_files_per_job: number;
 }
 
-type SettingsTab = "general" | "llm" | "engines" | "calibration" | "advanced";
+type SettingsTab = "general" | "llm" | "engines" | "engine-config" | "calibration" | "advanced";
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [engineConfig, setEngineConfig] = useState<EngineConfig | null>(null);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const enginePresets = [
     {
@@ -233,6 +251,7 @@ export default function SettingsPage() {
     if (authLoading || !user || user.role !== "admin") {
       return;
     }
+    // Load legacy settings
     axios
       .get("/api/settings")
       .then((res) =>
@@ -250,10 +269,20 @@ export default function SettingsPage() {
         }),
       )
       .catch(() => { });
+
+    // Load new engine configuration
+    axios
+      .get("/api/settings/engine-config")
+      .then((res) => setEngineConfig(res.data))
+      .catch((err) => console.error("Failed to load engine config:", err));
   }, [authLoading, user]);
 
   const handleSave = () => {
     if (!settings) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
     axios.patch("/api/settings", settings).then(() => {
       setSettings((current) => {
         if (!current) return current;
@@ -268,9 +297,49 @@ export default function SettingsPage() {
             current.anthropic_api_key_configured || current.anthropic_api_key.trim().length > 0,
         };
       });
+      setSuccess("Legacy settings saved successfully");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    }).catch((err) => {
+      setError(err.response?.data?.detail || "Failed to save settings");
+    }).finally(() => {
+      setSaving(false);
     });
+  };
+
+  const handleSaveEngineConfig = async () => {
+    if (!engineConfig) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await axios.put('/api/settings/engine-config', engineConfig);
+      setSuccess(response.data.message || "Engine configuration saved successfully");
+    } catch (err: any) {
+      setError(err.response?.data?.detail || "Failed to save engine configuration");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCalibration = async () => {
+    setCalibrating(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await axios.post('/api/settings/calibrate');
+      setSuccess(response.data.message || "Calibration completed successfully");
+
+      // Reload engine config after calibration
+      const configResponse = await axios.get('/api/settings/engine-config');
+      setEngineConfig(configResponse.data);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || "Calibration failed");
+    } finally {
+      setCalibrating(false);
+    }
   };
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -302,7 +371,8 @@ export default function SettingsPage() {
   const tabs: Array<{ id: SettingsTab; label: string; adminOnly?: boolean }> = [
     { id: "general", label: "General" },
     { id: "llm", label: "LLM & AI" },
-    { id: "engines", label: "Engines" },
+    { id: "engines", label: "Legacy Engines" },
+    { id: "engine-config", label: "Engine Configuration", adminOnly: true },
     { id: "calibration", label: "Calibration", adminOnly: true },
     { id: "advanced", label: "Advanced" },
   ];
@@ -802,6 +872,252 @@ export default function SettingsPage() {
             </>
           )}
 
+          {activeTab === "engine-config" && (
+            <>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Engine Configuration</h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Configure similarity detection engines, weights, and thresholds
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCalibration}
+                    disabled={calibrating}
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {calibrating ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Auto-Calibrate
+                  </button>
+                  <button
+                    onClick={handleSaveEngineConfig}
+                    disabled={saving}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save Config
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                    <span className="font-semibold text-red-900">Error</span>
+                  </div>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                </div>
+              )}
+
+              {success && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <span className="font-semibold text-green-900">Success</span>
+                  </div>
+                  <p className="text-sm text-green-700 mt-1">{success}</p>
+                </div>
+              )}
+
+              {!engineConfig ? (
+                <div className="flex items-center justify-center h-64">
+                  <RefreshCw className="h-8 w-8 animate-spin text-slate-400" />
+                  <span className="ml-2 text-slate-600">Loading engine configuration...</span>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Engine Weights */}
+                  <div className="rounded-xl border border-slate-200 p-6">
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Engine Weights</h4>
+                    <p className="text-sm text-slate-600 mb-4">
+                      Configure how much each similarity engine contributes to the final score.
+                    </p>
+
+                    <div className="space-y-4">
+                      {Object.entries(engineConfig.weights).map(([engine, weight]) => (
+                        <div key={engine} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <label className="font-medium capitalize text-slate-700">{engine}</label>
+                            <span className="text-sm font-bold text-blue-600">
+                              {(weight * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={weight}
+                            onChange={(e) => {
+                              const newConfig = { ...engineConfig };
+                              newConfig.weights[engine] = parseFloat(e.target.value);
+                              setEngineConfig(newConfig);
+                            }}
+                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                        </div>
+                      ))}
+
+                      <div className="pt-4 border-t border-slate-100">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-slate-700">Total</span>
+                          <span className={`font-bold ${Math.abs(Object.values(engineConfig.weights).reduce((a, b) => a + b, 0) - 1) < 0.001 ? 'text-green-600' : 'text-red-600'}`}>
+                            {(Object.values(engineConfig.weights).reduce((a, b) => a + b, 0) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Baseline Correction */}
+                  <div className="rounded-xl border border-slate-200 p-6">
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Baseline Correction Values</h4>
+                    <p className="text-sm text-slate-600 mb-4">
+                      Expected similarity scores for unrelated files in the same language.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {Object.entries(engineConfig.baselines).map(([engine, baseline]) => (
+                        <div key={engine} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <label className="font-medium capitalize text-slate-700">{engine}</label>
+                            <span className="text-sm font-bold text-blue-600">
+                              {(baseline * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={baseline}
+                            onChange={(e) => {
+                              const newConfig = { ...engineConfig };
+                              newConfig.baselines[engine] = parseFloat(e.target.value);
+                              setEngineConfig(newConfig);
+                            }}
+                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Thresholds */}
+                  <div className="rounded-xl border border-slate-200 p-6">
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Similarity Thresholds</h4>
+                    <p className="text-sm text-slate-600 mb-4">
+                      Decision boundaries for different levels of similarity detection.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {Object.entries(engineConfig.thresholds).map(([key, value]) => (
+                        <div key={key} className="space-y-2">
+                          <label className="block text-sm font-medium text-slate-700 capitalize">
+                            {key.replace('_', ' ')}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="1"
+                            value={value}
+                            onChange={(e) => {
+                              const newConfig = { ...engineConfig };
+                              newConfig.thresholds[key] = parseFloat(e.target.value);
+                              setEngineConfig(newConfig);
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Feature Toggles */}
+                  <div className="rounded-xl border border-slate-200 p-6">
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Feature Toggles</h4>
+                    <p className="text-sm text-slate-600 mb-4">
+                      Enable or disable various detection features.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {Object.entries(engineConfig.toggles).map(([feature, enabled]) => (
+                        <div key={feature} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
+                          <div>
+                            <label className="font-medium text-slate-700 capitalize">
+                              {feature.replace('_', ' ')}
+                            </label>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {feature === 'baseline_correction' && 'Subtract language noise floor from all scores'}
+                              {feature === 'bayesian_arbitration' && 'Statistical arbitration between engine scores'}
+                              {feature === 'ast_boost' && 'Guarantee minimum score for high AST similarity'}
+                              {feature === 'execution_similarity' && 'Enable execution-based similarity detection'}
+                              {feature === 'result_caching' && 'Cache similarity calculation results'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const newConfig = { ...engineConfig };
+                              newConfig.toggles[feature] = !enabled;
+                              setEngineConfig(newConfig);
+                            }}
+                            className={`w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                          >
+                            <div className={`w-5 h-5 rounded-full bg-white shadow transform transition-transform ${enabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Performance Settings */}
+                  <div className="rounded-xl border border-slate-200 p-6">
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Performance Settings</h4>
+                    <p className="text-sm text-slate-600 mb-4">
+                      Optimize system performance and resource usage.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {[
+                        { key: 'parallel_engine_execution', label: 'Parallel Engines', type: 'number', min: 1, max: 16 },
+                        { key: 'result_cache_ttl', label: 'Cache TTL (sec)', type: 'number', min: 60, max: 36000 },
+                        { key: 'engine_timeout_ms', label: 'Timeout (ms)', type: 'number', min: 1000, max: 60000 },
+                        { key: 'maximum_batch_size', label: 'Batch Size', type: 'number', min: 1, max: 1024 },
+                      ].map((item) => (
+                        <div key={item.key} className="space-y-2">
+                          <label className="block text-sm font-medium text-slate-700">{item.label}</label>
+                          <input
+                            type={item.type}
+                            min={item.min}
+                            max={item.max}
+                            value={engineConfig.performance[item.key]}
+                            onChange={(e) => {
+                              const newConfig = { ...engineConfig };
+                              newConfig.performance[item.key] = item.type === 'number' ? parseInt(e.target.value) : e.target.value;
+                              setEngineConfig(newConfig);
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
           {activeTab === "calibration" && (
             <>
               <div>
@@ -980,12 +1296,25 @@ export default function SettingsPage() {
           )}
 
           <div className="pt-4 border-t border-slate-100">
-            <button
-              onClick={handleSave}
-              className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              {saved ? "✓ Saved!" : "Save Settings"}
-            </button>
+            {activeTab === "engine-config" ? (
+              <button
+                onClick={handleSaveEngineConfig}
+                disabled={saving}
+                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? "Saving..." : "Save Engine Configuration"}
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+                {saved ? "✓ Saved!" : "Save Settings"}
+              </button>
+            )}
           </div>
         </div>
       </div>

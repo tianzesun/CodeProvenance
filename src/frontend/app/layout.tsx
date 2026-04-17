@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Manrope, Space_Grotesk } from 'next/font/google';
 
@@ -16,9 +16,17 @@ const displayFont = Space_Grotesk({
   variable: '--font-display',
 });
 
+export function generateViewport(): Viewport {
+  return {
+    width: 'device-width',
+    initialScale: 1,
+  };
+}
+
 export const metadata: Metadata = {
   title: 'IntegrityDesk | Academic Integrity Platform',
   description: 'Professional code similarity detection and academic integrity analysis',
+  robots: 'noindex, nofollow', // Since this is a private academic tool
 };
 
 interface RootLayoutProps {
@@ -27,7 +35,7 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en" suppressHydrationWarning data-theme="light">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${bodyFont.variable} ${displayFont.variable} antialiased`}>
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
