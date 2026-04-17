@@ -222,6 +222,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/openapi.json",
             "/health",
             "/api/v1/health",
+            "/api/v1/auth",
         ]
         self.exclude_paths = self.excluded_paths
     
