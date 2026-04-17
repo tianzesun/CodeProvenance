@@ -32,6 +32,7 @@ from src.backend.benchmark.datasets.poj104 import POJ104Dataset
 from src.backend.benchmark.datasets.human_eval import HumanEvalDataset
 from src.backend.benchmark.datasets.mbpp import MBPPDataset
 from src.backend.benchmark.datasets.kaggle_student_code import KaggleStudentCodeDataset
+from src.backend.benchmark.datasets.karnalim import KarnalimDataset
 
 __all__ = [
     # Schema and validators
@@ -56,4 +57,5 @@ __all__ = [
     'HumanEvalDataset',
     'MBPPDataset',
     'KaggleStudentCodeDataset',
+    'KarnalimDataset',
 ]
