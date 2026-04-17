@@ -1,0 +1,27 @@
+weights:
+  token: 0.22
+  ast: 0.22
+  winnowing: 0.18
+  gst: 0.18
+  semantic: 0.1
+  web: 0.8
+  ai_detection: 0.02
+  execution_cfg: 0.03
+baseline_correction:
+  baselines:
+    winnowing: 0.35
+    ast: 0.25
+    token: 0.1
+    embedding: 0.7
+arbitration:
+  enabled: true
+  prior_precision_multiplier: 20.0
+  minimum_agreement: 0.3
+ast_boost:
+  enabled: true
+  threshold: 0.9
+  minimum_guaranteed_score: 0.75
+advanced:
+  auto_calibrate: false
+  hot_reload: true
+  reload_interval: 10

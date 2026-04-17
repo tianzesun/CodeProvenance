@@ -141,12 +141,13 @@ interface Settings {
   embedding_device: string;
   embedding_batch_size: number;
   engine_weights: { [key: string]: number };
+  baseline_correction: { baselines: { [key: string]: number } };
   batch_size: number;
   max_file_size_mb: number;
   max_files_per_job: number;
 }
 
-type SettingsTab = "general" | "llm" | "engines" | "advanced";
+type SettingsTab = "general" | "llm" | "engines" | "calibration" | "advanced";
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
@@ -236,6 +237,14 @@ export default function SettingsPage() {
       .get("/api/settings")
       .then((res) =>
         setSettings({
+          baseline_correction: {
+            baselines: {
+              winnowing: 0.25,
+              ast: 0.25,
+              token: 0.15,
+              embedding: 0.70,
+            }
+          },
           ...res.data,
           engine_weights: normalizeEngineWeights(res.data?.engine_weights),
         }),
@@ -290,10 +299,11 @@ export default function SettingsPage() {
     );
   }
 
-  const tabs: Array<{ id: SettingsTab; label: string }> = [
+  const tabs: Array<{ id: SettingsTab; label: string; adminOnly?: boolean }> = [
     { id: "general", label: "General" },
     { id: "llm", label: "LLM & AI" },
     { id: "engines", label: "Engines" },
+    { id: "calibration", label: "Calibration", adminOnly: true },
     { id: "advanced", label: "Advanced" },
   ];
   const engineWeights = normalizeEngineWeights(settings.engine_weights);
@@ -315,7 +325,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="flex gap-2 mb-6 border-b border-slate-200">
-          {tabs.map((tab) => (
+          {tabs.filter(tab => !tab.adminOnly || user?.role === "admin").map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -695,6 +705,85 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "calibration" && (
+            <>
+              <div>
+                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="font-semibold text-amber-900">⚠️ Admin Calibration Mode</div>
+                  <p className="text-xs text-amber-700 mt-1">
+                    Changes here are system wide and affect all users. These values control base detection accuracy.
+                  </p>
+                </div>
+                
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                  Baseline Correction Values
+                </label>
+                
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 p-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          Baseline Noise Floor
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Scores below this threshold are treated as zero similarity
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      {[
+                        { key: "winnowing", label: "Winnowing" },
+                        { key: "ast", label: "AST" },
+                        { key: "token", label: "Token" },
+                        { key: "embedding", label: "Embedding" },
+                      ].map((item) => {
+                        const value = settings.baseline_correction?.baselines?.[item.key] || 0
+                        return (
+                        <div key={item.key} className="flex items-center gap-3">
+                          <span className="text-sm text-slate-600 w-24">{item.label}</span>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.5"
+                            step="0.05"
+                            value={value}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                baseline_correction: {
+                                  ...settings.baseline_correction,
+                                  baselines: {
+                                    ...settings.baseline_correction.baselines,
+                                    [item.key]: parseFloat(e.target.value)
+                                  }
+                                }
+                              })
+                            }}
+                            className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                          <span className="w-10 text-right text-sm font-medium text-blue-600">
+                            {(value * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      )})}
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button className="px-4 py-3 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors">
+                    Run Benchmark Test
+                  </button>
+                  <button className="px-4 py-3 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+                    Auto Calibrate Weights
+                  </button>
                 </div>
               </div>
             </>

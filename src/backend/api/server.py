@@ -4748,6 +4748,18 @@ async def update_settings(request: Request):
         db.commit()
 
     _apply_runtime_settings_from_record(stored_settings)
+    
+    # Persist engine weights and calibration config to yaml file
+    from src.backend.engines.scoring.fusion_engine import FusionEngine
+    engine_config = FusionEngine.get_current_config()
+    
+    if "engine_weights" in data:
+        engine_config["weights"] = _normalize_engine_weights(data["engine_weights"])
+    if "baseline_correction" in data:
+        engine_config["baseline_correction"] = data["baseline_correction"]
+    
+    FusionEngine.update_config(engine_config)
+    
     return JSONResponse(content={"status": "ok", "settings": applied, "source": "database"})
 
 
