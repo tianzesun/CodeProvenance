@@ -162,6 +162,7 @@ class BenchmarkResultsLoader:
                 "return_code": record.get("return_code"),
                 "stdout_path": str(stdout_path),
                 "stderr_path": str(stderr_path),
+                "embed_url": result_url,
             },
         )
 
