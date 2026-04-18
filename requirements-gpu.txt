@@ -1,17 +1,12 @@
 # GPU Server Requirements for CodeBERT/UniXcoder
-# Install: pip install -r requirements-gpu.txt
+# Install on GPU servers only: pip install -r requirements-gpu.txt
 
-# Core ML
-transformers>=4.30
+# Core ML / GPU Acceleration
+transformers==4.41.2
 torch>=2.0
-accelerate>=0.20
+accelerate>=0.28
+optuna==3.6.1
+huggingface-hub==0.25.1
 
-# Queue (production GPU worker)
-redis>=4.0
-celery>=5.0
-
-# Batch processing
-numpy>=1.24
-
-# Monitoring
-psutil>=5.0
+# Included dependencies are already covered in base requirements.txt
+# Install base requirements first, then this file for GPU support

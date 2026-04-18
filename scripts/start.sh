@@ -34,8 +34,8 @@ EMBEDDING_URL="http://${BACKEND_HOST}:${EMBEDDING_PORT}"
 VENV_PYTHON="$PROJECT_DIR/venv/bin/python"
 DASHBOARD_DIR="$PROJECT_DIR/src/frontend"
 
-BACKEND_LOG="$PROJECT_DIR/backend.log"
-EMBEDDING_LOG="$PROJECT_DIR/embedding.log"
+BACKEND_LOG="$PROJECT_DIR/logs/backend.log"
+EMBEDDING_LOG="$PROJECT_DIR/logs/embedding.log"
 
 echo "============================================"
 echo "  IntegrityDesk - Startup"
@@ -133,13 +133,13 @@ fi
 
 if [ "${DASHBOARD_MODE:-prod}" = "dev" ]; then
     echo "Running Next.js in DEV mode..."
-    nohup npx next dev -p "$DASHBOARD_PORT" > "$PROJECT_DIR/dashboard.log" 2>&1 &
+    nohup npx next dev -p "$DASHBOARD_PORT" > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
 else
     echo "Building Next.js..."
     npx next build
 
     echo "Running Next.js in PROD mode..."
-    nohup npx next start -p "$DASHBOARD_PORT" > "$PROJECT_DIR/dashboard.log" 2>&1 &
+    nohup npx next start -p "$DASHBOARD_PORT" > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
 fi
 
 sleep 2
@@ -156,6 +156,6 @@ echo ""
 echo "Logs:"
 echo "  Backend:   $BACKEND_LOG"
 echo "  Embedding: $EMBEDDING_LOG"
-echo "  Dashboard:  dashboard.log"
+echo "  Dashboard:  $PROJECT_DIR/logs/dashboard.log"
 echo ""
 echo "Startup complete ✔"

@@ -4,18 +4,20 @@
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+LOG_DIR="$PROJECT_DIR/logs"
+
 case "${1:-all}" in
   backend)
     echo "Following backend API logs..."
-    journalctl -f _PID=$(pgrep -f "uvicorn src.backend.api.server:app" 2>/dev/null) 2>/dev/null || echo "Backend not running"
+    tail -f "$LOG_DIR/backend.log" 2>/dev/null || echo "Backend log file not found"
     ;;
   embedding)
     echo "Following embedding server logs..."
-    journalctl -f _PID=$(pgrep -f "uvicorn embedding_server:app" 2>/dev/null) 2>/dev/null || echo "Embedding server not running"
+    tail -f "$LOG_DIR/embedding.log" 2>/dev/null || echo "Embedding log file not found"
     ;;
   dashboard)
     echo "Following dashboard logs..."
-    journalctl -f _PID=$(pgrep -f "next dev" 2>/dev/null) 2>/dev/null || echo "Dashboard not running"
+    tail -f "$LOG_DIR/dashboard.log" 2>/dev/null || echo "Dashboard log file not found"
     ;;
   *)
     echo "Usage: ./scripts/logs.sh [backend|embedding|dashboard]"
