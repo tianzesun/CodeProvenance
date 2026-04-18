@@ -72,7 +72,13 @@ log/
 ###############
 # Data Directory (immutable datasets - too large for git)
 ###############
-data/
+data/*
+
+# Keep only dataset scripts, metadata and documentation
+!data/datasets/*.sh
+!data/datasets/*.md
+!data/datasets/*.json
+!data/datasets/*.lock
 
 ###############
 # Uploads (user-submitted files - not tracked)
@@ -117,7 +123,28 @@ test_results/
 .pyright/
 
 # Temporary tools and databases
-tools/
+tools/*
+
+# Keep tool scripts, configs and documentation
+!tools/*.sh
+!tools/*.py
+!tools/*.md
+!tools/__init__.py
+!tools/.gitkeep
+!tools/configs/
+!tools/registry/
+
+# Ignore actual downloaded tool binaries
+tools/JPlag/
+tools/pmd/
+tools/sim/
+tools/dolos-cli/
+tools/NiCad-6.2/
+tools/sherlock/
+tools/libs/
+tools/outputs/
+tools/external/
+tools/sandbox/
 *.db
 *.db.*
 .codex/
