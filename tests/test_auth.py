@@ -3,9 +3,9 @@ Authentication tests for IntegrityDesk API.
 """
 import pytest
 from fastapi.testclient import TestClient
-from src.backend.backend.main import app
-from src.backend.backend.config.database import SessionLocal
-from src.backend.backend.models.database import Tenant, ApiKey
+from src.backend.main import app
+from src.backend.config.database import SessionLocal
+from src.backend.models.database import Tenant, ApiKey
 import hashlib
 
 client = TestClient(app)

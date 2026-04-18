@@ -12,6 +12,7 @@ Rules:
 3. One-way data flow - no backward dependencies
 4. Parallel execution support for large datasets
 """
+
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass
@@ -21,14 +22,21 @@ from threading import Lock
 
 try:
     from tqdm import tqdm
+
     _HAS_TQDM = True
 except ImportError:
+
     def tqdm(iterable, **kwargs):
         return iterable
+
     _HAS_TQDM = False
 
-from src.backend.benchmark.pipeline.config import BenchmarkConfig
-from src.backend.benchmark.pipeline.loader import CanonicalDataset, CodePair, DatasetLoader
+from src.backend.benchmark.pipeline.benchmark_config import BenchmarkConfig
+from src.backend.benchmark.pipeline.loader import (
+    CanonicalDataset,
+    CodePair,
+    DatasetLoader,
+)
 from src.backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
 from src.backend.benchmark.pipeline.stages import (
     NormalizerStage,
@@ -50,6 +58,7 @@ from src.backend.benchmark.forensics.clone_type_breakdown import (
 # Auto-load plugins
 try:
     import plugins
+
     plugins.load_plugins()
 except ImportError:
     pass
@@ -57,10 +66,10 @@ except ImportError:
 
 def _parse_code_single(args):
     """Top-level function for ProcessPoolExecutor (must be picklable).
-    
+
     Args:
         args: Tuple of (code_id, norm_code, parser_type).
-    
+
     Returns:
         Tuple of (code_id, ParsedCode).
     """
@@ -76,6 +85,7 @@ def _parse_code_single(args):
 @dataclass
 class BenchmarkRunResult:
     """Result of a benchmark run."""
+
     config_hash: str
     dataset_name: str
     dataset_version: str
@@ -146,25 +156,32 @@ class BenchmarkRunner:
             # Validate dataset
             if not dataset.pairs:
                 return BenchmarkRunResult(
-                    config_hash="", dataset_name=dataset.name,
-                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    config_hash="",
+                    dataset_name=dataset.name,
+                    dataset_version=dataset.version,
+                    engine_name=config.engine.name,
                     metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-                    success=False, error="Dataset contains no pairs",
+                    success=False,
+                    error="Dataset contains no pairs",
                 )
             pos = sum(1 for p in dataset.pairs if p.label == 1)
             neg = sum(1 for p in dataset.pairs if p.label == 0)
             if pos == 0:
                 return BenchmarkRunResult(
-                    config_hash="", dataset_name=dataset.name,
-                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    config_hash="",
+                    dataset_name=dataset.name,
+                    dataset_version=dataset.version,
+                    engine_name=config.engine.name,
                     metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                     success=False,
                     error=f"Dataset has no positive pairs (all {len(dataset.pairs)} pairs are negative)",
                 )
             if neg == 0:
                 return BenchmarkRunResult(
-                    config_hash="", dataset_name=dataset.name,
-                    dataset_version=dataset.version, engine_name=config.engine.name,
+                    config_hash="",
+                    dataset_name=dataset.name,
+                    dataset_version=dataset.version,
+                    engine_name=config.engine.name,
                     metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                     success=False,
                     error=f"Dataset has no negative pairs (all {len(dataset.pairs)} pairs are positive)",
@@ -187,10 +204,13 @@ class BenchmarkRunner:
 
             # Determine parallelism
             num_pairs = len(dataset.pairs)
-            num_workers = max(1, min(
-                num_pairs,
-                getattr(config, 'parallel_workers', None) or (os.cpu_count() or 4),
-            ))
+            num_workers = max(
+                1,
+                min(
+                    num_pairs,
+                    getattr(config, "parallel_workers", None) or (os.cpu_count() or 4),
+                ),
+            )
             use_parallel = num_pairs > 50
 
             # ===== Stage 1: Normalize all code =====
@@ -199,7 +219,10 @@ class BenchmarkRunner:
 
             def _normalize_one(pair: CodePair) -> None:
                 """Normalize one pair's code."""
-                for code_id, raw_code in [(pair.id_a, pair.code_a), (pair.id_b, pair.code_b)]:
+                for code_id, raw_code in [
+                    (pair.id_a, pair.code_a),
+                    (pair.id_b, pair.code_b),
+                ]:
                     if code_id not in all_code:
                         normalized = normalizer_stage.execute([raw_code], {})[0]
                         with all_code_lock:
@@ -208,10 +231,17 @@ class BenchmarkRunner:
             if use_parallel and num_pairs > 100:
                 with ThreadPoolExecutor(max_workers=num_workers) as ex:
                     futs = {ex.submit(_normalize_one, p): p for p in dataset.pairs}
-                    for f in tqdm(as_completed(futs), total=len(futs), desc="Normalizing", disable=not _HAS_TQDM):
+                    for f in tqdm(
+                        as_completed(futs),
+                        total=len(futs),
+                        desc="Normalizing",
+                        disable=not _HAS_TQDM,
+                    ):
                         f.result()
             else:
-                for pair in tqdm(dataset.pairs, desc="Normalizing", disable=not _HAS_TQDM):
+                for pair in tqdm(
+                    dataset.pairs, desc="Normalizing", disable=not _HAS_TQDM
+                ):
                     _normalize_one(pair)
 
             # ===== Stage 2: Parse all code =====
@@ -229,10 +259,19 @@ class BenchmarkRunner:
 
             parser_type = config.parser.type
             if use_parallel and num_pairs > 20:
-                with ProcessPoolExecutor(max_workers=min(num_workers, os.cpu_count() or 4)) as ex:
-                    parse_args = [(cid, nc, parser_type) for cid, nc in all_code.items()]
+                with ProcessPoolExecutor(
+                    max_workers=min(num_workers, os.cpu_count() or 4)
+                ) as ex:
+                    parse_args = [
+                        (cid, nc, parser_type) for cid, nc in all_code.items()
+                    ]
                     futs = {ex.submit(_parse_code_single, a): a[0] for a in parse_args}
-                    for f in tqdm(as_completed(futs), total=len(futs), desc="Parsing", disable=not _HAS_TQDM):
+                    for f in tqdm(
+                        as_completed(futs),
+                        total=len(futs),
+                        desc="Parsing",
+                        disable=not _HAS_TQDM,
+                    ):
                         cid, result = f.result()
                         parsed[cid] = result
             elif use_parallel:
@@ -240,10 +279,17 @@ class BenchmarkRunner:
                     futs = [
                         ex.submit(_parse_one, cid, nc) for cid, nc in all_code.items()
                     ]
-                    for f in tqdm(as_completed(futs), total=len(futs), desc="Parsing", disable=not _HAS_TQDM):
+                    for f in tqdm(
+                        as_completed(futs),
+                        total=len(futs),
+                        desc="Parsing",
+                        disable=not _HAS_TQDM,
+                    ):
                         f.result()
             else:
-                for cid, nc in tqdm(all_code.items(), desc="Parsing", disable=not _HAS_TQDM):
+                for cid, nc in tqdm(
+                    all_code.items(), desc="Parsing", disable=not _HAS_TQDM
+                ):
                     _parse_one(cid, nc)
 
             # ===== Stage 3: Compute similarity =====
@@ -260,8 +306,10 @@ class BenchmarkRunner:
                         cached = self._sim_cache.get(cache_key)
                     if cached is not None:
                         result = SimilarityResult(
-                            id_a=pair.id_a, id_b=pair.id_b,
-                            score=cached, engine_name=getattr(engine, 'name', ''),
+                            id_a=pair.id_a,
+                            id_b=pair.id_b,
+                            score=cached,
+                            engine_name=getattr(engine, "name", ""),
                             clone_type=pair.clone_type,
                         )
                     else:
@@ -286,7 +334,9 @@ class BenchmarkRunner:
             # ===== Stage 4: Optimize threshold =====
             if config.threshold.optimize:
                 best_threshold = self._optimize_threshold(
-                    results, ground_truth, config.threshold.strategy,
+                    results,
+                    ground_truth,
+                    config.threshold.strategy,
                 )
             else:
                 best_threshold = 0.5
@@ -332,7 +382,8 @@ class BenchmarkRunner:
                 "clone_type_breakdown": clone_type_results,
             }
             report_paths = reporting_stage.execute(
-                (metrics, extra_info), pipeline_config,
+                (metrics, extra_info),
+                pipeline_config,
             )
 
             return BenchmarkRunResult(
@@ -397,7 +448,12 @@ class BenchmarkRunner:
                 else:
                     fn += 1
 
-            from src.backend.benchmark.evaluation.metrics import precision, recall, f1_score
+            from src.backend.benchmark.evaluation.metrics import (
+                precision,
+                recall,
+                f1_score,
+            )
+
             prec = precision(tp, fp)
             rec = recall(tp, fn)
             f1 = f1_score(prec, rec)
@@ -431,6 +487,7 @@ class BenchmarkRunner:
             BenchmarkRunResult with averaged metrics.
         """
         import random as _random
+
         rng = _random.Random(self._seed)
 
         pos_pairs = [p for p in dataset.pairs if p.label == 1]
@@ -442,13 +499,14 @@ class BenchmarkRunner:
         if actual_folds < 2:
             return BenchmarkRunResult(
                 config_hash=config.config_hash(),
-                dataset_name=dataset.name, dataset_version=dataset.version,
+                dataset_name=dataset.name,
+                dataset_version=dataset.version,
                 engine_name=config.engine.name,
                 metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 success=False,
                 error=f"Dataset too small for {n_folds}-fold CV: "
-                      f"need at least 2 positive and 2 negative pairs "
-                      f"(have {len(pos_pairs)} pos, {len(neg_pairs)} neg)",
+                f"need at least 2 positive and 2 negative pairs "
+                f"(have {len(pos_pairs)} pos, {len(neg_pairs)} neg)",
             )
 
         # Stratified split: shuffle each class separately, then distribute
@@ -468,7 +526,9 @@ class BenchmarkRunner:
         all_metrics = []
         for fold_idx in range(actual_folds):
             test_pairs = folds[fold_idx]
-            train_pairs = [p for i, fold in enumerate(folds) if i != fold_idx for p in fold]
+            train_pairs = [
+                p for i, fold in enumerate(folds) if i != fold_idx for p in fold
+            ]
 
             train_ds = CanonicalDataset(
                 name=f"{dataset.name}_train_{fold_idx}",
@@ -494,10 +554,12 @@ class BenchmarkRunner:
         if not all_metrics:
             return BenchmarkRunResult(
                 config_hash=config.config_hash(),
-                dataset_name=dataset.name, dataset_version=dataset.version,
+                dataset_name=dataset.name,
+                dataset_version=dataset.version,
                 engine_name=config.engine.name,
                 metrics=MetricsResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-                success=False, error="All CV folds failed",
+                success=False,
+                error="All CV folds failed",
             )
 
         avg = MetricsResult(
@@ -508,7 +570,8 @@ class BenchmarkRunner:
             map_score=sum(m.map_score for m in all_metrics) / len(all_metrics),
             mrr_score=sum(m.mrr_score for m in all_metrics) / len(all_metrics),
             ndcg=sum(m.ndcg for m in all_metrics) / len(all_metrics),
-            top_k_precision=sum(m.top_k_precision for m in all_metrics) / len(all_metrics),
+            top_k_precision=sum(m.top_k_precision for m in all_metrics)
+            / len(all_metrics),
             threshold=sum(m.threshold for m in all_metrics) / len(all_metrics),
             tp=int(sum(m.tp for m in all_metrics) / len(all_metrics)),
             fp=int(sum(m.fp for m in all_metrics) / len(all_metrics)),
@@ -518,7 +581,8 @@ class BenchmarkRunner:
 
         return BenchmarkRunResult(
             config_hash=config.config_hash(),
-            dataset_name=dataset.name, dataset_version=dataset.version,
+            dataset_name=dataset.name,
+            dataset_version=dataset.version,
             engine_name=config.engine.name,
             metrics=avg,
             success=True,
@@ -593,7 +657,9 @@ class BenchmarkRunner:
         # Statistical significance
         if len(engine_names) >= 2:
             import numpy as np
-            from src.backend.benchmark.evaluation.metrics.significance import compare_engines_significance
+            from src.backend.benchmark.evaluation.metrics.significance import (
+                compare_engines_significance,
+            )
 
             scores_by_engine = {}
             for name in engine_names:

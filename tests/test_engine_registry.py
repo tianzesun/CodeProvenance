@@ -5,7 +5,7 @@ Verifies that the versioned engine registration system works correctly.
 """
 
 import pytest
-from src.backend.backend.engines.similarity.codeprovenance import (
+from src.backend.engines.similarity.codeprovenance import (
     get_engine,
     list_engines,
     is_registered,

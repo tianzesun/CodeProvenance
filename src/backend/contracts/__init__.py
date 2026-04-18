@@ -3,7 +3,8 @@
 This module provides the Schema Registry and validation enforcement
 for the entire benchmark system.
 """
-from .registry import SchemaRegistry, registry, ValidationError
+
+from .schema_registry import SchemaRegistry, registry, ValidationError
 from .validation import (
     ValidationGate,
     ValidationResult,

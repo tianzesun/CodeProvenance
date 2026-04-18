@@ -1,9 +1,9 @@
-"""
-Benchmark adapter registry.
+"""Benchmark adapter registry.
 
 Central registry for all official benchmark participants.
 Only tools that appear in validation results are registered here.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 class ToolCategory(Enum):
     """Official benchmark tool categories."""
+
     EXTERNAL_TOOL = "external_tool"
     BASELINE = "baseline"
     INTERNAL = "internal"
@@ -21,6 +22,7 @@ class ToolCategory(Enum):
 @dataclass(frozen=True)
 class AdapterMetadata:
     """Metadata for registered benchmark adapters."""
+
     name: str
     adapter_class: Any
     category: ToolCategory
@@ -51,7 +53,7 @@ class AdapterRegistry:
         is_external_dependency: bool = False,
         enabled: bool = True,
         description: str = "",
-        reference_paper: str = ""
+        reference_paper: str = "",
     ) -> None:
         """Register an adapter as official benchmark participant."""
         self._adapters[name] = AdapterMetadata(
@@ -62,7 +64,7 @@ class AdapterRegistry:
             is_external_dependency=is_external_dependency,
             enabled=enabled,
             description=description,
-            reference_paper=reference_paper
+            reference_paper=reference_paper,
         )
 
     def get(self, name: str) -> Optional[AdapterMetadata]:
@@ -112,7 +114,7 @@ def initialize_registry() -> None:
         ToolCategory.BASELINE,
         ["python", "java"],
         is_external_dependency=False,
-        description="AST histogram structural baseline"
+        description="AST histogram structural baseline",
     )
 
     # External plagiarism tools
@@ -123,7 +125,7 @@ def initialize_registry() -> None:
         ["all"],
         is_external_dependency=True,
         description="MOSS (Measure Of Software Similarity)",
-        reference_paper="Aiken 1998"
+        reference_paper="Aiken 1998",
     )
 
     adapter_registry.register(
@@ -133,7 +135,7 @@ def initialize_registry() -> None:
         ["java", "python", "c", "cpp", "csharp"],
         is_external_dependency=True,
         description="JPlag code similarity detector",
-        reference_paper="Prechelt et al. 2002"
+        reference_paper="Prechelt et al. 2002",
     )
 
     adapter_registry.register(
@@ -153,7 +155,7 @@ def initialize_registry() -> None:
         ["c", "java", "python"],
         is_external_dependency=True,
         description="NiCad Clone Detector",
-        reference_paper="Roy and Cordy 2008"
+        reference_paper="Roy and Cordy 2008",
     )
 
     adapter_registry.register(

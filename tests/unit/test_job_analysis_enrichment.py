@@ -1,6 +1,6 @@
 """Tests for assignment-level AI and web analysis payload enrichment."""
 
-from src.backend.backend.api.server import (
+from src.backend.api.server import (
     _build_ai_detection_summary,
     _build_web_analysis_summary,
     _normalize_job,

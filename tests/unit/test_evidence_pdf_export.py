@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.backend.backend.infrastructure.reporting.visualizations import (
+from src.backend.infrastructure.reporting.visualizations import (
     generate_similarity_heatmap,
     generate_code_diff_image,
     generate_ai_probability_chart,
@@ -14,7 +14,7 @@ from src.backend.backend.infrastructure.reporting.visualizations import (
     generate_confusion_matrix_image,
     generate_qr_code,
 )
-from src.backend.backend.infrastructure.reporting.evidence_pdf_exporter import (
+from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     EvidenceChainPdfExporter,
 )
 
@@ -190,7 +190,7 @@ class TestEvidenceChainPdfExporter:
         assert "Committee Chair" in content
 
     def test_export_pdf_requires_backend(self, exporter, tmp_path):
-        from src.backend.backend.infrastructure.reporting.evidence_pdf_exporter import PDF_BACKEND
+        from src.backend.infrastructure.reporting.evidence_pdf_exporter import PDF_BACKEND
         if PDF_BACKEND is None:
             result = exporter.export(SAMPLE_CASE_DATA, tmp_path / "test.pdf")
             assert result is None

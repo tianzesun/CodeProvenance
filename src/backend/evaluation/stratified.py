@@ -7,12 +7,16 @@ This is the sales weapon: explicit performance breakdown by:
 
 This becomes what competitors usually lack.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.backend.benchmark.contracts.evaluation_result import (
+    EnrichedPair,
+    EvaluationResult,
+)
 from evaluation.core.metrics import compute_metrics
 
 
@@ -32,6 +36,7 @@ class StratifiedMetrics:
         fn: False negatives.
         tn: True negatives.
     """
+
     stratum_name: str
     n_samples: int
     precision: float
@@ -70,6 +75,7 @@ class StratifiedMatrix:
         by_language: Metrics broken down by language.
         overall: Overall metrics.
     """
+
     engine_name: str
     by_clone_type: Dict[str, StratifiedMetrics] = field(default_factory=dict)
     by_difficulty: Dict[str, StratifiedMetrics] = field(default_factory=dict)
@@ -93,22 +99,30 @@ class StratifiedMatrix:
         lines.append("=" * 60)
 
         if self.overall:
-            lines.append(f"Overall: P={self.overall.precision:.4f} R={self.overall.recall:.4f} F1={self.overall.f1:.4f}")
+            lines.append(
+                f"Overall: P={self.overall.precision:.4f} R={self.overall.recall:.4f} F1={self.overall.f1:.4f}"
+            )
 
         lines.append("\nBy Clone Type:")
         lines.append("-" * 40)
         for name, m in sorted(self.by_clone_type.items()):
-            lines.append(f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})")
+            lines.append(
+                f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})"
+            )
 
         lines.append("\nBy Difficulty:")
         lines.append("-" * 40)
         for name, m in sorted(self.by_difficulty.items()):
-            lines.append(f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})")
+            lines.append(
+                f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})"
+            )
 
         lines.append("\nBy Language:")
         lines.append("-" * 40)
         for name, m in sorted(self.by_language.items()):
-            lines.append(f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})")
+            lines.append(
+                f"  {name:12s}: P={m.precision:.4f} R={m.recall:.4f} F1={m.f1:.4f} (n={m.n_samples})"
+            )
 
         return "\n".join(lines)
 
@@ -146,7 +160,11 @@ def _compute_stratum_metrics(
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
     accuracy = (tp + tn) / n_samples if n_samples > 0 else 0.0
 
     return StratifiedMetrics(
@@ -184,7 +202,13 @@ def compute_stratified_matrix(
     engine_name = results[0].engine if results else "unknown"
 
     # Clone type names
-    clone_type_names = {0: "non-clone", 1: "type-1", 2: "type-2", 3: "type-3", 4: "type-4"}
+    clone_type_names = {
+        0: "non-clone",
+        1: "type-1",
+        2: "type-2",
+        3: "type-3",
+        4: "type-4",
+    }
 
     # Group by clone type
     by_clone_type: Dict[str, Tuple[List[EvaluationResult], List[EnrichedPair]]] = {}

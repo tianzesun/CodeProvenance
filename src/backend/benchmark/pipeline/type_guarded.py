@@ -19,7 +19,7 @@ from contracts import (
     validate_evaluation_result,
     validate_enriched_pair,
 )
-from contracts.registry import registry
+from contracts.schema_registry import registry
 from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
 
 T = TypeVar("T")

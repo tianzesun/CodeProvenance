@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from typing import Dict, Any
 
-from src.backend.backend.engines.similarity.prl_v4 import (
+from src.backend.engines.similarity.prl_v4 import (
     GraphEmbedding,
     SemanticEmbedding,
     LLMReasoningResult,

@@ -5,7 +5,7 @@ Verifies that the Intermediate Representation layer works correctly.
 """
 
 import pytest
-from src.backend.backend.core.ir import (
+from src.backend.core.ir import (
     ASTIR,
     TokenIR,
     GraphIR,

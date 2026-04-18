@@ -1,6 +1,6 @@
 """Unit tests for AI Detection Engine."""
 import pytest
-from src.backend.backend.engines.similarity.ai_detection import AIDetectionEngine
+from src.backend.engines.similarity.ai_detection import AIDetectionEngine
 
 
 @pytest.fixture

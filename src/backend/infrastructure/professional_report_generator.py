@@ -1,4 +1,4 @@
-"""Professional Report Generator for Code Similarity Analysis.
+"""Professional report generator for code similarity analysis.
 
 Generates HTML, PDF, and JSON reports with:
 - Side-by-side code highlighting
@@ -8,11 +8,12 @@ Generates HTML, PDF, and JSON reports with:
 - Professional formatting
 
 Usage:
-    from src.backend.infrastructure.report_generator import ReportGenerator
+    from src.backend.infrastructure.professional_report_generator import ReportGenerator
     generator = ReportGenerator()
     html_report = generator.generate_html_report(analysis_results)
     generator.save_report(html_report, "report.html")
 """
+
 import json
 import logging
 from datetime import datetime
@@ -24,30 +25,32 @@ logger = logging.getLogger(__name__)
 
 class ReportGenerator:
     """Generate professional plagiarism detection reports."""
-    
-    def __init__(self, institution_name: str = "CodeProvenance", branding_color: str = "#2563eb") -> None:
+
+    def __init__(
+        self, institution_name: str = "CodeProvenance", branding_color: str = "#2563eb"
+    ) -> None:
         """Initialize report generator.
-        
+
         Args:
             institution_name: Name of the institution/course
             branding_color: Primary color for branding (hex)
         """
         self.institution_name = institution_name
         self.branding_color = branding_color
-    
+
     def generate_html_report(self, results: Dict[str, Any]) -> str:
         """Generate a comprehensive HTML report.
-        
+
         Args:
             results: Analysis results from the detection service
-            
+
         Returns:
             HTML string of the report
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         summary = results.get("summary", {})
         pairs = results.get("pairs", [])
-        
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -189,15 +192,15 @@ class ReportGenerator:
     </script>
 </body>
 </html>"""
-        
+
         return html
-    
+
     def generate_json_report(self, results: Dict[str, Any]) -> str:
         """Generate a JSON report for API consumption.
-        
+
         Args:
             results: Analysis results from the detection service
-            
+
         Returns:
             JSON string of the report
         """
@@ -214,12 +217,12 @@ class ReportGenerator:
             "web_analysis": results.get("web_analysis", {}),
             "recommendations": self._generate_recommendations(results),
         }
-        
+
         return json.dumps(report, indent=2, default=str)
-    
+
     def save_report(self, content: str, filepath: str) -> None:
         """Save report to file.
-        
+
         Args:
             content: Report content (HTML or JSON)
             filepath: Path to save the file
@@ -228,16 +231,32 @@ class ReportGenerator:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
         logger.info(f"Report saved to {filepath}")
-    
+
     def _generate_risk_cards(self, distribution: Dict[str, int]) -> str:
         """Generate risk level cards HTML."""
         risk_levels = [
-            ("Critical", distribution.get("critical", 0), "bg-red-100 text-red-800 border-red-200"),
-            ("High", distribution.get("high", 0), "bg-orange-100 text-orange-800 border-orange-200"),
-            ("Medium", distribution.get("medium", 0), "bg-yellow-100 text-yellow-800 border-yellow-200"),
-            ("Low", distribution.get("low", 0), "bg-green-100 text-green-800 border-green-200"),
+            (
+                "Critical",
+                distribution.get("critical", 0),
+                "bg-red-100 text-red-800 border-red-200",
+            ),
+            (
+                "High",
+                distribution.get("high", 0),
+                "bg-orange-100 text-orange-800 border-orange-200",
+            ),
+            (
+                "Medium",
+                distribution.get("medium", 0),
+                "bg-yellow-100 text-yellow-800 border-yellow-200",
+            ),
+            (
+                "Low",
+                distribution.get("low", 0),
+                "bg-green-100 text-green-800 border-green-200",
+            ),
         ]
-        
+
         cards = []
         for name, count, color_class in risk_levels:
             cards.append(f"""
@@ -246,17 +265,17 @@ class ReportGenerator:
                 <dd class="mt-1 text-2xl font-bold">{count}</dd>
             </div>
             """)
-        
+
         return "".join(cards)
-    
+
     def _generate_ai_summary(self, ai_data: Dict[str, Any]) -> str:
         """Generate AI detection summary section."""
         if not ai_data:
             return ""
-        
+
         ai_flagged = ai_data.get("flagged_count", 0)
         total_files = ai_data.get("total_files", 0)
-        
+
         return f"""
         <div class="bg-white rounded-lg shadow mb-8">
             <div class="px-6 py-4 border-b border-gray-200">
@@ -280,22 +299,24 @@ class ReportGenerator:
             </div>
         </div>
         """
-    
+
     def _generate_heatmap(self, pairs: List[Dict[str, Any]]) -> str:
         """Generate similarity heatmap visualization."""
         if not pairs:
             return "<p class='text-gray-500'>No pairs to display.</p>"
-        
+
         # Sort by similarity score
-        sorted_pairs = sorted(pairs, key=lambda x: x.get("similarity_score", 0), reverse=True)
-        
+        sorted_pairs = sorted(
+            pairs, key=lambda x: x.get("similarity_score", 0), reverse=True
+        )
+
         rows = []
         for i, pair in enumerate(sorted_pairs[:20]):  # Top 20
             score = pair.get("similarity_score", 0)
             file_a = pair.get("file_a", "Unknown")
             file_b = pair.get("file_b", "Unknown")
             risk = pair.get("risk_level", "LOW")
-            
+
             # Color based on score
             if score >= 0.9:
                 color = "bg-red-500"
@@ -305,7 +326,7 @@ class ReportGenerator:
                 color = "bg-yellow-500"
             else:
                 color = "bg-green-500"
-            
+
             rows.append(f"""
             <div class="flex items-center py-3 border-b border-gray-100 last:border-0">
                 <div class="w-8 h-8 rounded {color} flex items-center justify-center text-white text-sm font-bold mr-4">
@@ -323,18 +344,18 @@ class ReportGenerator:
                 <span class="ml-4 px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">{risk}</span>
             </div>
             """)
-        
+
         return f"""
         <div class="space-y-2">
             {''.join(rows)}
         </div>
         """
-    
+
     def _generate_pair_details(self, pairs: List[Dict[str, Any]]) -> str:
         """Generate detailed pair comparison sections."""
         if not pairs:
             return "<p class='p-6 text-gray-500'>No pairs to display.</p>"
-        
+
         details = []
         for pair in pairs:
             file_a = pair.get("file_a", "Unknown")
@@ -343,7 +364,7 @@ class ReportGenerator:
             risk = pair.get("risk_level", "LOW")
             engines = pair.get("engine_scores", {})
             ai_info = pair.get("ai_detection", {})
-            
+
             # Risk badge color
             risk_colors = {
                 "CRITICAL": "bg-red-100 text-red-800",
@@ -352,7 +373,7 @@ class ReportGenerator:
                 "LOW": "bg-green-100 text-green-800",
             }
             risk_class = risk_colors.get(risk, "bg-gray-100 text-gray-800")
-            
+
             # Engine scores
             engine_html = ""
             for engine_name, engine_score in engines.items():
@@ -362,14 +383,14 @@ class ReportGenerator:
                     <span class="text-sm font-medium">{engine_score:.1%}</span>
                 </div>
                 """
-            
+
             # AI detection info
             ai_html = ""
             if ai_info:
                 ai_prob = ai_info.get("ai_probability", 0)
                 ai_confidence = ai_info.get("confidence", 0)
                 indicators = ai_info.get("indicators", [])
-                
+
                 ai_html = f"""
                 <div class="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
                     <h4 class="text-sm font-medium text-purple-900 mb-2">AI Detection</h4>
@@ -386,7 +407,7 @@ class ReportGenerator:
                     {f'<p class="mt-2 text-xs text-purple-700">Indicators: {", ".join(indicators[:3])}</p>' if indicators else ''}
                 </div>
                 """
-            
+
             details.append(f"""
             <div class="p-6 hover:bg-gray-50 transition-colors">
                 <div class="flex justify-between items-start">
@@ -416,28 +437,34 @@ class ReportGenerator:
                 </div>
             </div>
             """)
-        
+
         return "".join(details)
-    
+
     def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:
         """Generate actionable recommendations based on results."""
         recommendations = []
         summary = results.get("summary", {})
-        
+
         suspicious_count = summary.get("suspicious_pairs", 0)
         total_pairs = summary.get("total_pairs", 0)
-        
+
         if suspicious_count > 0:
-            recommendations.append(f"Review {suspicious_count} suspicious pairs manually")
-        
+            recommendations.append(
+                f"Review {suspicious_count} suspicious pairs manually"
+            )
+
         if total_pairs > 0 and suspicious_count / total_pairs > 0.3:
-            recommendations.append("High plagiarism rate detected - consider reviewing assignment design")
-        
+            recommendations.append(
+                "High plagiarism rate detected - consider reviewing assignment design"
+            )
+
         ai_data = results.get("ai_detection", {})
         if ai_data.get("flagged_count", 0) > 0:
-            recommendations.append(f"Investigate {ai_data['flagged_count']} files for potential AI-generated code")
-        
+            recommendations.append(
+                f"Investigate {ai_data['flagged_count']} files for potential AI-generated code"
+            )
+
         if not recommendations:
             recommendations.append("No significant issues detected")
-        
+
         return recommendations

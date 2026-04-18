@@ -11,8 +11,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backend.backend.engines.features.feature_extractor import FeatureExtractor
-from src.backend.backend.engines.scoring.fusion_engine import FusionEngine
+from src.backend.engines.features.feature_extractor import FeatureExtractor
+from src.backend.engines.scoring.fusion_engine import FusionEngine
 
 THRESHOLD = 0.5
 

@@ -1,5 +1,5 @@
 """Similarity Engines - pure computation via registry."""
-from src.backend.engines.similarity.registry import SimilarityRegistry
+from src.backend.engines.similarity.similarity_registry import SimilarityRegistry
 __all__ = ['SimilarityRegistry', 'BaseSimilarityAlgorithm', 'SimilarityEngine']
 
 def __getattr__(name):

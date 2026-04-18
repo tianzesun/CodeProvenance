@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from typing import Dict, Any
 
-from src.backend.backend.engines.similarity.structural_ast_similarity import (
+from src.backend.engines.similarity.structural_ast_similarity import (
     ASTStructuralNode,
     ControlFlowGraph,
     DataFlowGraph,

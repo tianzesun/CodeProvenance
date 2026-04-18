@@ -2,6 +2,7 @@
 
 Adapters wrap external tools to make them compatible with the benchmark interface.
 """
+
 # Legacy adapter (backward compatibility)
 from .codeprovenance_engine import CodeProvenanceAdapter as CodeProvenanceEngine
 
@@ -15,8 +16,7 @@ from .moss_adapter import MossAdapter as MossBenchmarkEngine
 from .dolos_adapter import DolosBenchmarkEngine
 from .lexical_baseline import LexicalBaselineAdapter
 from .ast_baseline import ASTBaselineAdapter
-from .registry import adapter_registry, initialize_registry
-
+from .adapter_registry import adapter_registry, initialize_registry
 
 _REGISTRY_READY = False
 
@@ -42,14 +42,15 @@ def get_adapter(name: str):
         raise KeyError(f"Unknown adapter: {name}")
     return metadata.adapter_class()
 
+
 __all__ = [
     # Legacy
-    'CodeProvenanceEngine',
+    "CodeProvenanceEngine",
     # External tools
-    'JPlagBenchmarkEngine',
-    'NiCadBenchmarkEngine',
-    'PMDBenchmarkEngine',
-    'MossBenchmarkEngine',
-    'DolosBenchmarkEngine',
-    'get_adapter',
+    "JPlagBenchmarkEngine",
+    "NiCadBenchmarkEngine",
+    "PMDBenchmarkEngine",
+    "MossBenchmarkEngine",
+    "DolosBenchmarkEngine",
+    "get_adapter",
 ]

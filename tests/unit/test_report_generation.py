@@ -15,7 +15,7 @@ from pathlib import Path
 import tempfile
 import os
 
-from src.backend.backend.utils.report import ReportGenerator, generate_full_report
+from src.backend.utils.report import ReportGenerator, generate_full_report
 
 
 class TestReportGenerator:

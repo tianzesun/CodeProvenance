@@ -16,8 +16,8 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta
 
-from src.backend.backend.services.webhook_delivery import WebhookDeliveryService
-from src.backend.backend.api.schemas.webhook import WebhookDeliveryConfig
+from src.backend.services.webhook_delivery import WebhookDeliveryService
+from src.backend.api.schemas.webhook import WebhookDeliveryConfig
 
 
 class TestWebhookDeliveryService:

@@ -19,7 +19,7 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from src.backend.backend.core.graph.models import (
+from src.backend.core.graph.models import (
     CFGNode,
     CFGEdge,
     CombinedGraph,
@@ -30,16 +30,16 @@ from src.backend.backend.core.graph.models import (
     EdgeType,
     VariableState,
 )
-from src.backend.backend.core.graph.cfg_builder import (
+from src.backend.core.graph.cfg_builder import (
     ControlFlowGraphBuilder,
     build_cfg,
     build_cfg_for_function,
 )
-from src.backend.backend.core.graph.dfg_builder import (
+from src.backend.core.graph.dfg_builder import (
     DataFlowGraphBuilder,
     build_dfg,
 )
-from src.backend.backend.core.graph.combined_builder import (
+from src.backend.core.graph.combined_builder import (
     CFGDFGBuilder,
     build_combined,
     build_combined_for_function,

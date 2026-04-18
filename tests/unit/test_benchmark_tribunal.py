@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from src.backend.backend.evaluation.dataset.ground_truth import (
+from src.backend.evaluation.dataset.ground_truth import (
     GroundTruthPair,
     EvaluationProtocol,
     DEFAULT_PROTOCOL,
     SyntheticDatasetGenerator,
     build_score_label_arrays,
 )
-from src.backend.backend.evaluation.comparison_engine import (
+from src.backend.evaluation.comparison_engine import (
     ToolMetrics,
     PairwiseSignificance,
     SignificanceMatrix,
@@ -22,17 +22,17 @@ from src.backend.backend.evaluation.comparison_engine import (
     rank_tools,
     _cohens_d,
 )
-from src.backend.backend.evaluation.ieee_report_generator import (
+from src.backend.evaluation.ieee_report_generator import (
     BenchmarkReport,
     IEEEStyleReportGenerator,
     generate_benchmark_report,
 )
-from src.backend.backend.evaluation.benchmark_tribunal import BenchmarkTribunal, TribunalResult
-from src.backend.backend.engines.execution.execution_engine import (
+from src.backend.evaluation.benchmark_tribunal import BenchmarkTribunal, TribunalResult
+from src.backend.engines.execution.execution_engine import (
     ExecutionResult,
     DeterministicEnv,
 )
-from src.backend.backend.engines.execution.adapter_layer import (
+from src.backend.engines.execution.adapter_layer import (
     ToolFinding,
     MossAdapter,
     JPlagAdapter,
@@ -217,7 +217,7 @@ class TestComparisonEngine:
 class TestIEEEStyleReportGenerator:
     @pytest.fixture
     def sample_report(self, tmp_path):
-        from src.backend.backend.evaluation.comparison_engine import rank_tools
+        from src.backend.evaluation.comparison_engine import rank_tools
 
         tool_scores = {
             "moss": [0.9, 0.85, 0.1, 0.05, 0.92, 0.08],

@@ -19,7 +19,7 @@ try:
 except ImportError:
     WEASYPRINT_AVAILABLE = False
 
-from src.backend.backend.utils.report import PDFReportGenerator, ReportGenerator
+from src.backend.utils.report import PDFReportGenerator, ReportGenerator
 
 
 class TestPDFReportGenerator:
@@ -284,7 +284,7 @@ class TestPDFExportIntegration:
     
     def test_generate_full_report_with_pdf(self):
         """Test full report generation including PDF."""
-        from src.backend.backend.utils.report import generate_full_report
+        from src.backend.utils.report import generate_full_report
         
         with tempfile.TemporaryDirectory() as tmpdir:
             # Generate all formats including PDF
