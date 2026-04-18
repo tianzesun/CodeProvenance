@@ -1,0 +1,223 @@
+version: 1
+default_profile_id: balanced_general
+profiles:
+  - id: balanced_general
+    name: Balanced General CS
+    description: General-purpose profile for mixed programming assignments.
+    course_tags: [general, mixed_language, default]
+    friendly_weights:
+      ast: 0.18
+      winnowing: 0.14
+      token: 0.14
+      embedding: 0.16
+      graph: 0.14
+      sql: 0.06
+      web: 0.08
+      execution: 0.10
+    backend_weights:
+      ast: 0.22
+      token: 0.16
+      winnowing: 0.14
+      graph: 0.14
+      execution: 0.10
+      embedding: 0.12
+      ngram: 0.06
+      codebert: 0.06
+  - id: intro_programming_python
+    name: Intro Programming Python
+    description: Emphasizes token and semantic similarity for beginner Python work.
+    course_tags: [python, cs1, beginner]
+    friendly_weights:
+      ast: 0.14
+      winnowing: 0.18
+      token: 0.19
+      embedding: 0.16
+      graph: 0.08
+      sql: 0.03
+      web: 0.07
+      execution: 0.15
+    backend_weights:
+      ast: 0.16
+      token: 0.20
+      winnowing: 0.18
+      graph: 0.08
+      execution: 0.15
+      embedding: 0.13
+      ngram: 0.06
+      codebert: 0.04
+  - id: data_structures_algorithms
+    name: Data Structures and Algorithms
+    description: Heavier structure and graph weighting for algorithmic coursework.
+    course_tags: [algorithms, data_structures, java, cpp]
+    friendly_weights:
+      ast: 0.22
+      winnowing: 0.12
+      token: 0.10
+      embedding: 0.10
+      graph: 0.18
+      sql: 0.02
+      web: 0.04
+      execution: 0.22
+    backend_weights:
+      ast: 0.28
+      token: 0.10
+      winnowing: 0.12
+      graph: 0.18
+      execution: 0.16
+      embedding: 0.08
+      ngram: 0.04
+      codebert: 0.04
+  - id: object_oriented_design
+    name: Object-Oriented Design
+    description: Focuses on structure, class design, and semantic similarity.
+    course_tags: [oop, java, software_design]
+    friendly_weights:
+      ast: 0.23
+      winnowing: 0.10
+      token: 0.10
+      embedding: 0.16
+      graph: 0.15
+      sql: 0.02
+      web: 0.04
+      execution: 0.20
+    backend_weights:
+      ast: 0.28
+      token: 0.10
+      winnowing: 0.10
+      graph: 0.16
+      execution: 0.14
+      embedding: 0.12
+      ngram: 0.05
+      codebert: 0.05
+  - id: database_systems_sql
+    name: Database Systems SQL
+    description: Intended for SQL-heavy coursework where query shape matters most.
+    course_tags: [sql, database, data]
+    friendly_weights:
+      ast: 0.08
+      winnowing: 0.10
+      token: 0.10
+      embedding: 0.12
+      graph: 0.10
+      sql: 0.32
+      web: 0.03
+      execution: 0.15
+    backend_weights:
+      ast: 0.12
+      token: 0.12
+      winnowing: 0.12
+      graph: 0.18
+      execution: 0.14
+      embedding: 0.14
+      ngram: 0.10
+      codebert: 0.08
+  - id: web_development
+    name: Web Development
+    description: Intended for HTML, CSS, and JavaScript assignments with UI structure.
+    course_tags: [web, html, css, javascript]
+    friendly_weights:
+      ast: 0.12
+      winnowing: 0.14
+      token: 0.12
+      embedding: 0.14
+      graph: 0.08
+      sql: 0.04
+      web: 0.24
+      execution: 0.12
+    backend_weights:
+      ast: 0.16
+      token: 0.16
+      winnowing: 0.16
+      graph: 0.10
+      execution: 0.10
+      embedding: 0.14
+      ngram: 0.10
+      codebert: 0.08
+  - id: systems_programming
+    name: Systems Programming
+    description: Emphasizes control flow, execution behavior, and low-level structure.
+    course_tags: [systems, c, cpp, operating_systems]
+    friendly_weights:
+      ast: 0.18
+      winnowing: 0.10
+      token: 0.10
+      embedding: 0.08
+      graph: 0.18
+      sql: 0.01
+      web: 0.01
+      execution: 0.34
+    backend_weights:
+      ast: 0.24
+      token: 0.10
+      winnowing: 0.10
+      graph: 0.18
+      execution: 0.22
+      embedding: 0.06
+      ngram: 0.05
+      codebert: 0.05
+  - id: ai_llm_sensitive
+    name: AI and LLM Sensitive
+    description: Pushes semantic evidence higher for AI-assisted rewrites.
+    course_tags: [ai, llm, semantic, anti_obfuscation]
+    friendly_weights:
+      ast: 0.14
+      winnowing: 0.08
+      token: 0.08
+      embedding: 0.28
+      graph: 0.14
+      sql: 0.02
+      web: 0.06
+      execution: 0.20
+    backend_weights:
+      ast: 0.16
+      token: 0.08
+      winnowing: 0.08
+      graph: 0.14
+      execution: 0.18
+      embedding: 0.18
+      ngram: 0.06
+      codebert: 0.12
+  - id: competitive_programming
+    name: Competitive Programming
+    description: Strong on structure and behavior for short algorithm-heavy solutions.
+    course_tags: [competitive_programming, algorithms, short_code]
+    friendly_weights:
+      ast: 0.20
+      winnowing: 0.12
+      token: 0.10
+      embedding: 0.08
+      graph: 0.20
+      sql: 0.00
+      web: 0.00
+      execution: 0.30
+    backend_weights:
+      ast: 0.26
+      token: 0.10
+      winnowing: 0.12
+      graph: 0.20
+      execution: 0.20
+      embedding: 0.06
+      ngram: 0.03
+      codebert: 0.03
+  - id: research_project_semantic
+    name: Research Project Semantic
+    description: For large open-ended projects where exact overlap is weak evidence.
+    course_tags: [research, project, semantic]
+    friendly_weights:
+      ast: 0.14
+      winnowing: 0.06
+      token: 0.08
+      embedding: 0.26
+      graph: 0.18
+      sql: 0.06
+      web: 0.10
+      execution: 0.12
+    backend_weights:
+      ast: 0.18
+      token: 0.08
+      winnowing: 0.08
+      graph: 0.18
+      execution: 0.12
+      embedding: 0.18
+      ngram: 0.06
+      codebert: 0.12
