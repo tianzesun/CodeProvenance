@@ -203,7 +203,7 @@ export default function Home() {
   const longPressTriggeredRef = useRef(false);
   const availableCardIds = user?.role === 'admin'
     ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
-    : [...HOME_CARD_DEFAULT_ORDER, 'benchmark-suite'];
+    : HOME_CARD_DEFAULT_ORDER;
   const optionalCardIds = availableCardIds.filter((id) => !HOME_CARD_DEFAULT_ORDER.includes(id));
 
   const fetchJobs = useCallback(async () => {
@@ -648,40 +648,31 @@ export default function Home() {
               <div className="space-y-8">
                 <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">
                   <Shield size={13} />
-                  Integrity workspace
+                  Professor Workspace
                 </div>
 
                 <div className="space-y-6">
                   <h1 className="font-display max-w-4xl text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
-                    Review suspicious similarity, benchmark tools, and move through cases without dashboard clutter.
+                    Run new similarity checks and review assignment results.
                   </h1>
                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)] sm:text-base lg:text-lg">
-                    Use one workspace for assignment review, benchmark comparisons, and follow-up decisions without
-                    bouncing between separate tools.
+                    Upload assignments, review flagged cases, and document review decisions all from one workspace.
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-3 lg:gap-4">
                   <Link
-                    href="/upload?mode=individual"
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
+                    href="/upload"
+                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-8 py-4 text-base font-semibold transition hover:scale-105"
                   >
-                    <Upload size={16} />
-                    Upload Files
-                  </Link>
-
-                  <Link
-                    href="/upload?mode=zip"
-                    className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
-                  >
-                    <FolderArchive size={16} />
-                    Upload ZIP
+                    <Plus size={18} />
+                    New Check
                   </Link>
 
                   {latestCompleted && (
                     <Link
                       href={`/results/${latestCompleted.id}`}
-                      className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold transition hover:scale-105"
+                      className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-sm font-semibold transition hover:scale-105"
                     >
                       <FileSearch size={16} />
                       Open Latest Result
@@ -694,7 +685,7 @@ export default function Home() {
                     {runningCount > 0 ? `${runningCount} check${runningCount === 1 ? '' : 's'} in progress` : 'No checks running'}
                   </span>
                   <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
-                    {latestCompleted ? `Latest result ready ${formatTimestamp(latestCompleted.created_at)}` : 'No completed result yet'}
+                    {jobs.length} total check{jobs.length === 1 ? '' : 's'}
                   </span>
                 </div>
               </div>

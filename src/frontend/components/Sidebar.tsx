@@ -50,20 +50,20 @@ export default function Sidebar() {
     {
       label: 'Tools',
       items: [
-        {
-          href: '/benchmark',
-          label: 'Benchmark Lab',
-          description: 'Advanced multi-engine comparison',
-          icon: BarChart3,
-        },
-        {
-          href: '/datasets',
-          label: 'Dataset Manager',
-          description: 'Create and manage test datasets',
-          icon: Database,
-        },
         ...(user?.role === 'admin'
           ? [
+            {
+              href: '/benchmark',
+              label: 'Benchmark Lab',
+              description: 'Advanced multi-engine comparison',
+              icon: BarChart3,
+            },
+            {
+              href: '/datasets',
+              label: 'Dataset Manager',
+              description: 'Create and manage test datasets',
+              icon: Database,
+            },
             {
               href: '/settings',
               label: 'Preferences',
@@ -77,7 +77,14 @@ export default function Sidebar() {
               icon: Shield,
             },
           ]
-          : []),
+          : [
+            {
+              href: '/settings',
+              label: 'Preferences',
+              description: 'Review threshold and notification settings',
+              icon: Settings,
+            },
+          ]),
       ],
     },
   ];
