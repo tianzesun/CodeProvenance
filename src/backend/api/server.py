@@ -1,4 +1,9 @@
-"""IntegrityDesk Backend API - FastAPI server for professor dashboard."""
+"""IntegrityDesk Backend API Server"""
+# LOAD ENVIRONMENT FIRST BEFORE ANY OTHER IMPORTS
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent.parent / ".env.local")
+
 
 import sys
 from pathlib import Path
