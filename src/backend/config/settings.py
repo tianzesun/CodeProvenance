@@ -1,7 +1,9 @@
 """Application Settings - Centralized configuration management."""
 
+from pathlib import Path
+from typing import Dict, Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, Dict, Any
 
 
 DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
@@ -27,23 +29,23 @@ DEFAULT_DETECTION_MODES = [
 
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file='.env.local',
-        env_file_encoding='utf-8',
-        extra='ignore'
+        env_file=Path(__file__).parent.parent / ".env.local",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     # Core
-    DATABASE_URL: str = "sqlite:///./codeprovenance.db"
+    DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
-    
+
     # Similarity
     DEFAULT_THRESHOLD: float = 0.5
-    
+
     # LLM / AI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-3.5-turbo"
-    
+
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
 
@@ -54,7 +56,7 @@ class AppSettings(BaseSettings):
 
     # External plagiarism services
     MOSS_USER_ID: Optional[str] = None
-    
+
     # Embeddings
     EMBEDDING_RUNTIME: str = "local_unixcoder"
     EMBEDDING_MODEL: str = "microsoft/unixcoder-base"
@@ -63,14 +65,14 @@ class AppSettings(BaseSettings):
     EMBEDDING_SERVER_PORT: int = 8000
     EMBEDDING_DEVICE: str = "auto"
     EMBEDDING_BATCH_SIZE: int = 32
-    
+
     # AI Detection
     GPTZERO_API_KEY: Optional[str] = None
     GRAMMARLY_API_KEY: Optional[str] = None
-    
+
     # Engine Weights
     ENGINE_WEIGHTS: Dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()
-    
+
     # Advanced
     BATCH_SIZE: int = 32
     MAX_FILE_SIZE_MB: int = 10

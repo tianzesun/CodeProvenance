@@ -87,10 +87,12 @@ app.add_middleware(
 
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
+BENCHMARK_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR = project_root / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-TOOLS_DIR = project_root / "tools"
-ENV_SETTINGS_PATH = project_root / ".env.local"
+TOOLS_DIR = project_root.parent / "tools"
+ENV_SETTINGS_PATH = project_root / "backend" / ".env.local"
 AUTH_COOKIE_NAME = "integritydesk_session"
 AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
 AUTH_EXEMPT_PATHS = {
@@ -515,6 +517,7 @@ def _dataset_default_language(dataset_id: str) -> str:
         "human_eval": "python",
         "mbpp": "python",
         "kaggle_student_code": "python",
+        "synthetic": "python",
     }.get(dataset_id, "mixed")
 
 
@@ -590,6 +593,26 @@ def _infer_dataset_size_label(
         demo_files = metadata.get("files_created")
         if isinstance(demo_files, int) and demo_files > 0:
             return f"{demo_files} files"
+
+    generated_pairs = dataset_dir / "generated_pairs.jsonl"
+    if generated_pairs.exists():
+        try:
+            payload = json.loads(generated_pairs.read_text(encoding="utf-8"))
+            pair_count = len(payload.get("pairs", []))
+            if pair_count > 0:
+                return f"{pair_count:,} labeled pairs"
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    cheating_csv = dataset_dir / "cheating_dataset.csv"
+    if cheating_csv.exists():
+        try:
+            with cheating_csv.open("r", encoding="utf-8", newline="") as csv_file:
+                pair_count = max(0, sum(1 for _ in csv_file) - 1)
+            if pair_count > 0:
+                return f"{pair_count:,} labeled pairs"
+        except OSError:
+            pass
 
     splits = dataset_info.get("splits") or {}
     if isinstance(splits, dict):
@@ -745,6 +768,48 @@ def _canonical_tool_id(directory_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
 
 
+def _find_jplag_jar() -> Optional[PathLib]:
+    candidates = [TOOLS_DIR / "JPlag" / "jplag.jar"]
+    candidates.extend(sorted((TOOLS_DIR / "JPlag").glob("*jar-with-dependencies.jar")))
+    candidates.extend(sorted((TOOLS_DIR / "JPlag").glob("*.jar")))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _find_dolos_cli() -> Optional[PathLib]:
+    candidates = [
+        TOOLS_DIR / "dolos" / "node_modules" / ".bin" / "dolos",
+        TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _unavailable_tool_reason(tool_id: str) -> str:
+    if tool_id == "moss":
+        missing = []
+        if not (TOOLS_DIR / "moss" / "moss.pl").exists():
+            missing.append("tools/moss/moss.pl")
+        if not os.environ.get("MOSS_USER_ID"):
+            missing.append("MOSS_USER_ID")
+        return f"Needs {', '.join(missing)}" if missing else "Not ready"
+    if tool_id == "jplag":
+        return "Needs a JPlag jar in tools/JPlag" if not _find_jplag_jar() else "Not ready"
+    if tool_id == "dolos":
+        return "Needs Dolos npm dependencies and CLI build" if not _find_dolos_cli() else "Not ready"
+    if tool_id == "ac":
+        return "Needs the AC Java archive"
+    if tool_id == "nicad":
+        return "Needs NiCad and TXL binaries"
+    if tool_id == "pmd":
+        return "Needs the PMD CLI"
+    return "Not ready"
+
+
 def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any]:
     metadata = BENCHMARK_TOOL_METADATA.get(tool_id, {})
     runnable = _is_real_benchmark_tool_available(tool_id)
@@ -763,7 +828,7 @@ def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any
         "installed": False,
         "source_type": metadata.get("source_type", source_type),
         "paths": [],
-        "status": "Ready to run" if runnable else "Installed only",
+        "status": "Ready to run" if runnable else _unavailable_tool_reason(tool_id),
     }
 
 
@@ -780,11 +845,9 @@ def _is_real_benchmark_tool_available(tool_id: str) -> bool:
     if tool_id == "ac":
         return (TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar").exists()
     if tool_id == "dolos":
-        return (
-            TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos"
-        ).exists() and (TOOLS_DIR / "dolos-cli" / "node20" / "bin" / "node").exists()
+        return _find_dolos_cli() is not None
     if tool_id == "jplag":
-        return (TOOLS_DIR / "JPlag" / "jplag.jar").exists()
+        return _find_jplag_jar() is not None
     if tool_id == "nicad":
         return (TOOLS_DIR / "NiCad-6.2" / "nicad6").exists() and (
             TOOLS_DIR / "freetxl" / "current" / "bin" / "txl"
@@ -804,7 +867,11 @@ def _tool_sort_key(record: Dict[str, Any]) -> Any:
 
 def _list_benchmark_tools() -> List[Dict[str, Any]]:
     tools: Dict[str, Dict[str, Any]] = {
-        "integritydesk": _build_tool_record("integritydesk", source_type="built-in"),
+        tool_id: _build_tool_record(
+            tool_id,
+            source_type="built-in" if tool_id == "integritydesk" else "repo",
+        )
+        for tool_id in REAL_BENCHMARK_TOOL_IDS
     }
 
     if TOOLS_DIR.exists():
@@ -824,10 +891,12 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
             record["status"] = "Built in"
         elif record["runnable"] and record["installed"]:
             record["status"] = "Installed and ready"
+        elif record["runnable"]:
+            record["status"] = "Ready to run"
         elif record["installed"]:
-            record["status"] = "Installed only"
+            record["status"] = _unavailable_tool_reason(record["id"])
         else:
-            record["status"] = "Available"
+            record["status"] = _unavailable_tool_reason(record["id"])
 
     return sorted(tools.values(), key=_tool_sort_key)
 
@@ -885,6 +954,257 @@ async def _store_benchmark_uploads(
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
 BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
+PAIR_BENCHMARK_MAX_PAIRS = 400
+
+
+def _label_to_clone_grade(label: Any, clone_type: Any = None) -> int:
+    """Convert dataset labels into the benchmark's 0/2/3 clone scale."""
+    try:
+        numeric_label = int(label)
+    except (TypeError, ValueError):
+        numeric_label = 1 if str(label).strip().lower() in {"true", "yes"} else 0
+
+    if numeric_label <= 0:
+        return 0
+
+    try:
+        numeric_clone_type = int(clone_type)
+    except (TypeError, ValueError):
+        numeric_clone_type = 3
+
+    if numeric_clone_type <= 1:
+        return 3
+    return max(2, min(3, numeric_clone_type))
+
+
+def _write_pair_submission(
+    submissions: Dict[str, str], target_dir: PathLib, filename: str, code: str
+) -> str:
+    """Store one pair-based benchmark snippet and return its stable filename."""
+    safe_name = PathLib(filename).name
+    submissions[safe_name] = code
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / safe_name).write_text(code, encoding="utf-8")
+    return safe_name
+
+
+def _load_pair_labeled_benchmark_dataset(
+    dataset_id: str, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load datasets that already define explicit labeled comparison pairs."""
+    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    if dataset_id == "synthetic":
+        return _load_synthetic_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "kaggle_student_code":
+        return _load_kaggle_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "codexglue_clone":
+        return _load_codexglue_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "poj104":
+        return _load_poj104_pair_dataset(dataset_root, target_dir)
+    return {}, []
+
+
+def _load_synthetic_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load generated synthetic clone/non-clone pairs from JSON."""
+    pairs_path = dataset_root / "generated_pairs.jsonl"
+    if not pairs_path.exists():
+        return {}, []
+
+    payload = json.loads(pairs_path.read_text(encoding="utf-8"))
+    raw_pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+
+    for idx, item in enumerate(raw_pairs[:PAIR_BENCHMARK_MAX_PAIRS]):
+        pair_id = str(item.get("id") or f"synthetic_{idx:05d}")
+        file_a = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_a.py", str(item.get("code_a", ""))
+        )
+        file_b = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_b.py", str(item.get("code_b", ""))
+        )
+        explicit_pairs.append(
+            {
+                "file_a": file_a,
+                "file_b": file_b,
+                "label": _label_to_clone_grade(
+                    item.get("label", 0), item.get("clone_type")
+                ),
+            }
+        )
+
+    return submissions, explicit_pairs
+
+
+def _load_kaggle_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load Kaggle student plagiarism pairs from the labeled CSV."""
+    csv_path = dataset_root / "cheating_dataset.csv"
+    if not csv_path.exists():
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for idx, row in enumerate(reader):
+            if idx >= PAIR_BENCHMARK_MAX_PAIRS:
+                break
+            source_a = dataset_root / str(row.get("File_1", ""))
+            source_b = dataset_root / str(row.get("File_2", ""))
+            if not source_a.exists() or not source_b.exists():
+                continue
+            file_a = _write_pair_submission(
+                submissions,
+                target_dir,
+                source_a.name,
+                source_a.read_text(encoding="utf-8", errors="ignore"),
+            )
+            file_b = _write_pair_submission(
+                submissions,
+                target_dir,
+                source_b.name,
+                source_b.read_text(encoding="utf-8", errors="ignore"),
+            )
+            explicit_pairs.append(
+                {
+                    "file_a": file_a,
+                    "file_b": file_b,
+                    "label": _label_to_clone_grade(row.get("Label", 0)),
+                }
+            )
+
+    return submissions, explicit_pairs
+
+
+def _load_codexglue_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced sample from CodeXGLUE clone detection pairs."""
+    hf_path = dataset_root / "huggingface"
+    if not hf_path.exists():
+        return {}, []
+
+    from datasets import load_from_disk
+
+    dataset = load_from_disk(str(hf_path))
+    split = dataset["test"] if "test" in dataset else next(iter(dataset.values()))
+    return _load_hf_binary_pair_rows(
+        split,
+        target_dir,
+        prefix="codexglue",
+        code_a_key="func1",
+        code_b_key="func2",
+        label_key="label",
+        extension="java",
+    )
+
+
+def _load_hf_binary_pair_rows(
+    rows: Any,
+    target_dir: PathLib,
+    prefix: str,
+    code_a_key: str,
+    code_b_key: str,
+    label_key: str,
+    extension: str,
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced positive/negative sample from pair-based HF rows."""
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
+    counts = {0: 0, 1: 0}
+
+    for idx, item in enumerate(rows):
+        binary_label = 1 if bool(item.get(label_key)) else 0
+        if counts[binary_label] >= target_per_class:
+            if all(value >= target_per_class for value in counts.values()):
+                break
+            continue
+
+        code_a = str(item.get(code_a_key, ""))
+        code_b = str(item.get(code_b_key, ""))
+        if not code_a.strip() or not code_b.strip():
+            continue
+
+        pair_id = f"{prefix}_{idx:06d}"
+        file_a = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_a.{extension}", code_a
+        )
+        file_b = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_b.{extension}", code_b
+        )
+        explicit_pairs.append(
+            {"file_a": file_a, "file_b": file_b, "label": 3 if binary_label else 0}
+        )
+        counts[binary_label] += 1
+
+    return submissions, explicit_pairs
+
+
+def _load_poj104_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Create same-problem positive and different-problem negative POJ-104 pairs."""
+    hf_path = dataset_root / "huggingface"
+    if not hf_path.exists():
+        return {}, []
+
+    from datasets import load_from_disk
+
+    dataset = load_from_disk(str(hf_path))
+    split = dataset["test"] if "test" in dataset else next(iter(dataset.values()))
+    by_label: Dict[str, List[Dict[str, Any]]] = {}
+    for item in split:
+        by_label.setdefault(str(item.get("label")), []).append(item)
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    labels = [label for label, items in by_label.items() if len(items) >= 2]
+    target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
+
+    for idx, label in enumerate(labels):
+        if (
+            len([pair for pair in explicit_pairs if pair["label"] >= 2])
+            >= target_per_class
+        ):
+            break
+        a, b = by_label[label][0], by_label[label][1]
+        pair_id = f"poj104_pos_{idx:05d}"
+        file_a = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_a.c", str(a.get("code", ""))
+        )
+        file_b = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_b.c", str(b.get("code", ""))
+        )
+        explicit_pairs.append({"file_a": file_a, "file_b": file_b, "label": 3})
+
+    negative_count = 0
+    for idx in range(max(0, len(labels) - 1)):
+        if negative_count >= target_per_class:
+            break
+        left_label = labels[idx]
+        right_label = labels[idx + 1]
+        pair_id = f"poj104_neg_{idx:05d}"
+        file_a = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_a.c",
+            str(by_label[left_label][0].get("code", "")),
+        )
+        file_b = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_b.c",
+            str(by_label[right_label][0].get("code", "")),
+        )
+        explicit_pairs.append({"file_a": file_a, "file_b": file_b, "label": 0})
+        negative_count += 1
+
+    return submissions, explicit_pairs
 
 
 def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, str]:
@@ -3048,6 +3368,240 @@ async def get_benchmark_tools():
 
 BENCHMARK_DATASETS = []
 
+BENCHMARK_WORKFLOW_PRESETS: List[Dict[str, Any]] = [
+    {
+        "id": "quick_precision_check",
+        "name": "Quick Precision Check",
+        "mode": "pan_optimization",
+        "dataset": "synthetic",
+        "tools": ["integritydesk", "jplag"],
+        "cadence": "Run after every scoring or threshold change.",
+        "goal": "Catch false positives quickly before spending time on larger datasets.",
+        "success_criteria": {
+            "precision": 0.9,
+            "false_positive_rate": 0.05,
+            "f1_score": 0.75,
+        },
+    },
+    {
+        "id": "student_code_regression",
+        "name": "Student Code Regression",
+        "mode": "pan_optimization",
+        "dataset": "kaggle_student_code",
+        "tools": ["integritydesk", "jplag"],
+        "cadence": "Run before committing product scoring changes.",
+        "goal": "Validate classroom-style behavior on real student-code pairs.",
+        "success_criteria": {
+            "precision": 0.9,
+            "false_positive_rate": 0.08,
+            "f1_score": 0.75,
+        },
+    },
+    {
+        "id": "main_clone_benchmark",
+        "name": "Main Clone Benchmark",
+        "mode": "pan_optimization",
+        "dataset": "codexglue_clone",
+        "tools": ["integritydesk", "jplag", "dolos", "moss"],
+        "cadence": "Run when a smaller benchmark shows improvement.",
+        "goal": "Stress-test IntegrityDesk against a large labeled clone-pair corpus.",
+        "success_criteria": {
+            "precision": 0.92,
+            "false_positive_rate": 0.05,
+            "plagdet": 0.85,
+        },
+    },
+    {
+        "id": "tool_comparison_full",
+        "name": "Tool Comparison Full",
+        "mode": "tool_comparison",
+        "dataset": "codexglue_clone",
+        "tools": ["integritydesk", "jplag", "dolos", "moss"],
+        "cadence": "Run for competitive comparison screenshots and release notes.",
+        "goal": "Compare IntegrityDesk with available external plagiarism detectors.",
+        "success_criteria": {
+            "plagdet": 0.85,
+            "auc_pr": 0.9,
+            "avg_runtime_seconds": 0.5,
+        },
+    },
+]
+
+
+def _benchmark_history_path() -> PathLib:
+    """Return the JSON file used for lightweight benchmark run history."""
+    return BENCHMARK_RUNS_DIR / "history.json"
+
+
+def _read_benchmark_history() -> List[Dict[str, Any]]:
+    """Read recent benchmark run summaries from disk."""
+    history_path = _benchmark_history_path()
+    if not history_path.exists():
+        return []
+    try:
+        payload = json.loads(history_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to read benchmark history")
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _write_benchmark_history(history: List[Dict[str, Any]]) -> None:
+    """Persist benchmark run history with a bounded number of recent entries."""
+    history_path = _benchmark_history_path()
+    history_path.write_text(
+        json.dumps(history[:100], indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+
+def _metric_from_benchmark_response(response: Dict[str, Any], metric: str) -> float:
+    """Extract an IntegrityDesk metric from a benchmark response."""
+    integrity_metrics = (response.get("evaluation") or {}).get("integritydesk") or {}
+    if metric in integrity_metrics:
+        return float(integrity_metrics.get(metric) or 0.0)
+    if metric == "runtime_seconds":
+        return float(
+            ((response.get("tool_scores") or {}).get("integritydesk") or {}).get(
+                "runtime_seconds", 0.0
+            )
+        )
+    if metric == "avg_runtime_seconds":
+        return float(
+            ((response.get("tool_scores") or {}).get("integritydesk") or {}).get(
+                "avg_runtime_seconds", 0.0
+            )
+        )
+    return 0.0
+
+
+def _benchmark_run_summary(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a compact benchmark run summary for history and comparisons."""
+    metrics = {
+        "precision": _metric_from_benchmark_response(response, "precision"),
+        "recall": _metric_from_benchmark_response(response, "recall"),
+        "f1_score": _metric_from_benchmark_response(response, "f1_score"),
+        "plagdet": _metric_from_benchmark_response(response, "plagdet"),
+        "auc_pr": _metric_from_benchmark_response(response, "auc_pr"),
+        "false_positive_rate": _metric_from_benchmark_response(
+            response, "false_positive_rate"
+        ),
+        "avg_runtime_seconds": _metric_from_benchmark_response(
+            response, "avg_runtime_seconds"
+        ),
+    }
+    return {
+        "job_id": response.get("job_id"),
+        "preset_id": response.get("preset_id") or "",
+        "preset_name": response.get("preset_name") or "",
+        "dataset": (response.get("summary") or {}).get("dataset_name", ""),
+        "benchmark_type": response.get("benchmark_type", ""),
+        "tools": response.get("requested_tools", []),
+        "run_at": response.get("runAt") or datetime.now(timezone.utc).isoformat(),
+        "pairs_tested": (response.get("summary") or {}).get("pairs_tested", 0),
+        "has_ground_truth": response.get("has_ground_truth", False),
+        "metrics": {key: round(value, 6) for key, value in metrics.items()},
+    }
+
+
+def _find_previous_benchmark_run(
+    history: List[Dict[str, Any]], current: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Find the latest comparable prior run for the same workflow and dataset."""
+    for item in history:
+        if item.get("job_id") == current.get("job_id"):
+            continue
+        same_preset = item.get("preset_id") and item.get("preset_id") == current.get(
+            "preset_id"
+        )
+        same_dataset = item.get("dataset") == current.get("dataset")
+        same_mode = item.get("benchmark_type") == current.get("benchmark_type")
+        if same_dataset and same_mode and (same_preset or not current.get("preset_id")):
+            return item
+    return None
+
+
+def _build_benchmark_delta(
+    current: Dict[str, Any], previous: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Compute metric deltas against a previous comparable run."""
+    if not previous:
+        return {"has_previous": False, "metrics": {}}
+
+    deltas = {}
+    current_metrics = current.get("metrics", {})
+    previous_metrics = previous.get("metrics", {})
+    for metric, value in current_metrics.items():
+        prior = float(previous_metrics.get(metric, 0.0) or 0.0)
+        deltas[metric] = round(float(value or 0.0) - prior, 6)
+
+    return {
+        "has_previous": True,
+        "previous_job_id": previous.get("job_id"),
+        "previous_run_at": previous.get("run_at"),
+        "metrics": deltas,
+    }
+
+
+def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Save a full benchmark response and update the compact run history."""
+    summary = _benchmark_run_summary(response)
+    history = _read_benchmark_history()
+    comparison = _build_benchmark_delta(summary, _find_previous_benchmark_run(history, summary))
+    summary["comparison"] = comparison
+
+    run_path = BENCHMARK_RUNS_DIR / f"{summary['job_id']}.json"
+    response["history_summary"] = summary
+    response["comparison"] = comparison
+    response["runAt"] = summary["run_at"]
+    run_path.write_text(json.dumps(response, indent=2, sort_keys=True), encoding="utf-8")
+
+    history = [item for item in history if item.get("job_id") != summary["job_id"]]
+    history.insert(0, summary)
+    _write_benchmark_history(history)
+    return response
+
+
+@app.get("/api/benchmark-presets")
+async def get_benchmark_presets() -> Dict[str, Any]:
+    """Return repeatable benchmark workflows for product optimization."""
+    available_tools = {
+        tool["id"]: tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS
+    }
+    datasets = {item.name for item in BENCHMARK_DATA_DIR.iterdir()} if BENCHMARK_DATA_DIR.exists() else set()
+    presets = []
+    for preset in BENCHMARK_WORKFLOW_PRESETS:
+        runnable_tools = [
+            tool_id
+            for tool_id in preset["tools"]
+            if available_tools.get(tool_id, {}).get("runnable")
+        ]
+        blocked_tools = [
+            {
+                "id": tool_id,
+                "status": available_tools.get(tool_id, {}).get("status", "Not installed"),
+            }
+            for tool_id in preset["tools"]
+            if tool_id not in runnable_tools
+        ]
+        presets.append(
+            {
+                **preset,
+                "runnable_tools": runnable_tools,
+                "blocked_tools": blocked_tools,
+                "dataset_ready": preset["dataset"] in datasets,
+            }
+        )
+    return {"presets": presets}
+
+
+@app.get("/api/benchmark-history")
+async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
+    """Return recent benchmark run summaries."""
+    safe_limit = max(1, min(100, int(limit)))
+    return {"runs": _read_benchmark_history()[:safe_limit]}
+
 
 @app.get("/api/benchmark-datasets")
 async def get_benchmark_datasets() -> Dict[str, Any]:
@@ -3150,6 +3704,12 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
         return (dataset_root / "original").exists() and (
             dataset_root / "plagiarized"
         ).exists()
+    if dataset_id == "synthetic":
+        return (dataset_root / "generated_pairs.jsonl").exists()
+    if dataset_id == "kaggle_student_code":
+        return (dataset_root / "cheating_dataset.csv").exists()
+    if dataset_id in {"codexglue_clone", "poj104"}:
+        return (dataset_root / "huggingface" / "dataset_dict.json").exists()
     if dataset_id.startswith("synthetic"):
         has_original = any(dataset_root.glob("original_*"))
         has_plagiarized = any(dataset_root.glob("plagiarized_*"))
@@ -3163,6 +3723,7 @@ async def run_benchmark(
     tools: List[str] = Form(default=[]),
     dataset: str = Form(default=""),
     benchmark_type: str = Form(default="tool_comparison"),
+    preset_id: str = Form(default=""),
 ):
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
@@ -3180,11 +3741,16 @@ async def run_benchmark(
     )
 
     submissions = {}
+    explicit_pairs: List[Dict[str, Any]] = []
 
     logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
         logger.info(f"[BENCHMARK {job_id}] Loading dataset: {dataset}")
-        submissions = _load_benchmark_dataset(dataset, job_dir)
+        submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
+            dataset, job_dir
+        )
+        if not submissions:
+            submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
         logger.info(f"[BENCHMARK {job_id}] Processing {len(files)} uploaded files")
         submissions = await _store_benchmark_uploads(files, job_dir)
@@ -3199,12 +3765,19 @@ async def run_benchmark(
             status_code=400, content={"error": "At least 2 code files required"}
         )
 
-    file_list = list(submissions.keys())
-    all_pairs = [
-        (file_list[i], file_list[j])
-        for i in range(len(file_list))
-        for j in range(i + 1, len(file_list))
-    ]
+    if explicit_pairs:
+        all_pairs = [
+            (str(pair["file_a"]), str(pair["file_b"]))
+            for pair in explicit_pairs
+            if pair.get("file_a") in submissions and pair.get("file_b") in submissions
+        ]
+    else:
+        file_list = list(submissions.keys())
+        all_pairs = [
+            (file_list[i], file_list[j])
+            for i in range(len(file_list))
+            for j in range(i + 1, len(file_list))
+        ]
     logger.info(f"[BENCHMARK {job_id}] Generated {len(all_pairs)} comparison pairs")
 
     tool_results = {}
@@ -3251,7 +3824,10 @@ async def run_benchmark(
             logger.info(
                 f"[BENCHMARK {job_id}] Starting IntegrityDesk all-pairs comparison on {len(submissions)} files"
             )
-            results = service.compare_all_pairs(submissions)
+            if explicit_pairs:
+                results = service.compare_pairs(submissions, explicit_pairs)
+            else:
+                results = service.compare_all_pairs(submissions)
             logger.info(
                 f"[BENCHMARK {job_id}] IntegrityDesk completed successfully, got {len(results)} results"
             )
@@ -3262,6 +3838,9 @@ async def run_benchmark(
                         "file_b": r.file_b,
                         "score": round(r.score, 3),
                         "features": {k: round(v, 3) for k, v in r.features.items()},
+                        "contributions": {
+                            k: round(v, 3) for k, v in r.contributions.items()
+                        },
                     }
                     for r in results
                 ]
@@ -3301,6 +3880,12 @@ async def run_benchmark(
         finally:
             tool_timings[tool] = time.perf_counter() - tool_started
 
+    explicit_pair_labels = {
+        frozenset((str(pair.get("file_a", "")), str(pair.get("file_b", "")))): int(
+            pair.get("label", 0)
+        )
+        for pair in explicit_pairs
+    }
     pair_results = []
     for fa, fb in all_pairs:
         entry = {
@@ -3309,6 +3894,9 @@ async def run_benchmark(
             "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
             "tool_results": [],
         }
+        label_key = frozenset((fa, fb))
+        if label_key in explicit_pair_labels:
+            entry["ground_truth_label"] = explicit_pair_labels[label_key]
         for tool_name, tool_data in tool_results.items():
             if "pairs" in tool_data:
                 for p in tool_data["pairs"]:
@@ -3320,6 +3908,7 @@ async def run_benchmark(
                                 "tool": tool_name,
                                 "score": p["score"],
                                 "features": p.get("features", {}),
+                                "contributions": p.get("contributions", {}),
                             }
                         )
         pair_results.append(entry)
@@ -3384,6 +3973,16 @@ async def run_benchmark(
 
     response = {
         "job_id": job_id,
+        "preset_id": preset_id,
+        "preset_name": next(
+            (
+                preset["name"]
+                for preset in BENCHMARK_WORKFLOW_PRESETS
+                if preset["id"] == preset_id
+            ),
+            "",
+        ),
+        "requested_tools": tools,
         "tool_scores": {
             k: {
                 "pairs": len(v.get("pairs", [])),
@@ -3428,6 +4027,7 @@ async def run_benchmark(
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
 
+    response = _persist_benchmark_response(response)
     return JSONResponse(content=response)
 
 
@@ -3441,6 +4041,14 @@ def _get_ground_truth_labels(
     """
     if not pair_results:
         return []
+
+    explicit_labels = [
+        int(pair["ground_truth_label"])
+        for pair in pair_results
+        if "ground_truth_label" in pair
+    ]
+    if len(explicit_labels) == len(pair_results) and explicit_labels:
+        return explicit_labels
 
     inferred = _infer_filename_ground_truth_labels(dataset, pair_results)
     if inferred:
@@ -3551,12 +4159,27 @@ def _compute_evaluation_metrics(
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
-    # Find best threshold by F1
+    # Find best threshold. PAN optimization is precision-sensitive because false
+    # positives create noisy product feedback and reviewer distrust.
     best_f1 = 0
     best_threshold = 0.5
     best_cm = None
+    threshold_candidates = []
+    sweep_thresholds = sorted(
+        {
+            round(float(threshold), 6)
+            for threshold in np.concatenate(
+                [
+                    np.linspace(0.05, 0.95, 91),
+                    scores_arr,
+                    np.maximum(0.0, scores_arr - 1e-6),
+                    np.minimum(1.0, scores_arr + 1e-6),
+                ]
+            )
+        }
+    )
 
-    for threshold in np.linspace(0.1, 0.9, 17):
+    for threshold in sweep_thresholds:
         preds = (scores_arr >= threshold).astype(int)
 
         tp = np.sum((preds == 1) & (labels_arr == 1))
@@ -3571,11 +4194,47 @@ def _compute_evaluation_metrics(
             if (precision + recall) > 0
             else 0
         )
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
+        candidate = {
+            "threshold": float(threshold),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "false_positive_rate": float(false_positive_rate),
+            "cm": {"tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn)},
+        }
+        threshold_candidates.append(candidate)
 
         if best_cm is None or f1 > best_f1:
             best_f1 = f1
             best_threshold = threshold
-            best_cm = {"tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn)}
+            best_cm = candidate["cm"]
+
+    from src.backend.engines.scoring.fusion_engine import load_engine_config
+
+    config = load_engine_config()
+    decision_config = config.get("decision", {})
+    precision_target = float(decision_config.get("precision_target", 0.9))
+    false_positive_bias = float(decision_config.get("false_positive_bias", 1.0))
+    if false_positive_bias > 1.0:
+        precision_candidates = [
+            candidate
+            for candidate in threshold_candidates
+            if candidate["precision"] >= precision_target and candidate["cm"]["tp"] > 0
+        ]
+        if precision_candidates:
+            chosen = max(
+                precision_candidates,
+                key=lambda item: (
+                    item["f1"],
+                    item["recall"],
+                    -item["false_positive_rate"],
+                    item["threshold"],
+                ),
+            )
+            best_f1 = chosen["f1"]
+            best_threshold = chosen["threshold"]
+            best_cm = chosen["cm"]
 
     # Compute ROC-AUC and PR-AUC
     try:
@@ -3607,14 +4266,17 @@ def _compute_evaluation_metrics(
     )
     granularity = 1.0
     plagdet = f1_score / math.log2(1 + granularity)
-    top_10_retrieval = _compute_top_k_retrieval(scores, binary_labels, k=10)
-    top_20_retrieval = _compute_top_k_retrieval(scores, binary_labels, k=20)
+    top_10_retrieval = _compute_top_k_precision(scores, binary_labels, k=10)
+    top_20_retrieval = _compute_top_k_precision(scores, binary_labels, k=20)
+    top_10_recall = _compute_top_k_recall(scores, binary_labels, k=10)
+    top_20_recall = _compute_top_k_recall(scores, binary_labels, k=20)
     avg_runtime_seconds = runtime_seconds / max(1, len(scores))
     false_positive_rate = (
         best_cm["fp"] / (best_cm["fp"] + best_cm["tn"])
         if best_cm and (best_cm["fp"] + best_cm["tn"]) > 0
         else 0
     )
+    score_diagnostics = _build_score_diagnostics(scores_arr, labels_arr)
 
     return {
         "tool": tool_name,
@@ -3632,6 +4294,8 @@ def _compute_evaluation_metrics(
         "plagdet_percent": round(plagdet * 100, 2),
         "top_10_retrieval": round(top_10_retrieval, 4),
         "top_20_retrieval": round(top_20_retrieval, 4),
+        "top_10_recall": round(top_10_recall, 4),
+        "top_20_recall": round(top_20_recall, 4),
         "false_positive_rate": round(false_positive_rate, 4),
         "auc_pr": round(pr_auc, 4),
         "engine_contribution": engine_contribution or {},
@@ -3641,6 +4305,7 @@ def _compute_evaluation_metrics(
         "roc_auc": round(roc_auc, 4),
         "pr_auc": round(pr_auc, 4),
         "confusion_matrix": best_cm,
+        "score_diagnostics": score_diagnostics,
         "pan_metrics": {
             "precision": round(precision, 4),
             "recall": round(recall, 4),
@@ -3649,20 +4314,94 @@ def _compute_evaluation_metrics(
             "plagdet": round(plagdet, 4),
             "top_10_retrieval": round(top_10_retrieval, 4),
             "top_20_retrieval": round(top_20_retrieval, 4),
+            "top_10_recall": round(top_10_recall, 4),
+            "top_20_recall": round(top_20_recall, 4),
             "false_positive_rate": round(false_positive_rate, 4),
             "auc_pr": round(pr_auc, 4),
             "engine_contribution": engine_contribution or {},
             "ai_generated_recall": None,
             "avg_runtime_seconds": round(avg_runtime_seconds, 6),
+            "score_diagnostics": score_diagnostics,
         },
         "granularity_basis": "pair_level_single_detection",
     }
 
 
-def _compute_top_k_retrieval(
+def _build_score_diagnostics(
+    scores_arr: np.ndarray, labels_arr: np.ndarray
+) -> Dict[str, Any]:
+    """Summarize score separation to explain precision and retrieval failures."""
+    positives = scores_arr[labels_arr == 1]
+    negatives = scores_arr[labels_arr == 0]
+
+    diagnostics: Dict[str, Any] = {
+        "positive_count": int(len(positives)),
+        "negative_count": int(len(negatives)),
+        "label_conflict": False,
+        "message": "",
+    }
+    if len(positives) == 0 or len(negatives) == 0:
+        diagnostics["message"] = (
+            "Need both positive and negative labeled pairs to explain score separation."
+        )
+        return diagnostics
+
+    max_positive = float(np.max(positives))
+    min_positive = float(np.min(positives))
+    mean_positive = float(np.mean(positives))
+    max_negative = float(np.max(negatives))
+    mean_negative = float(np.mean(negatives))
+    negatives_above_best_positive = int(np.sum(negatives > max_positive))
+    negatives_above_worst_positive = int(np.sum(negatives >= min_positive))
+    label_conflict = bool(
+        max_negative >= max_positive or mean_negative >= mean_positive
+    )
+
+    diagnostics.update(
+        {
+            "max_positive_score": round(max_positive, 4),
+            "min_positive_score": round(min_positive, 4),
+            "mean_positive_score": round(mean_positive, 4),
+            "max_negative_score": round(max_negative, 4),
+            "mean_negative_score": round(mean_negative, 4),
+            "negatives_above_best_positive": negatives_above_best_positive,
+            "negatives_above_worst_positive": negatives_above_worst_positive,
+            "label_conflict": label_conflict,
+        }
+    )
+
+    if label_conflict:
+        diagnostics["message"] = (
+            "Some labeled negatives score as high as or higher than labeled positives. "
+            "Inspect dataset labels and common starter-code/template pairs before "
+            "treating every high-scoring negative as an engine false positive."
+        )
+    else:
+        diagnostics["message"] = (
+            "Positive scores are separated from negatives; tune the decision threshold "
+            "and feature weights around this margin."
+        )
+    return diagnostics
+
+
+def _compute_top_k_precision(
     scores: List[float], binary_labels: List[int], k: int = 10
 ) -> float:
-    """Compute recall@k for retrieving true plagiarism pairs."""
+    """Compute precision@k for whether the top-ranked pairs are true positives."""
+    if k <= 0 or not scores:
+        return 0.0
+
+    ranked = sorted(zip(scores, binary_labels), key=lambda item: item[0], reverse=True)
+    top_k = ranked[: min(k, len(ranked))]
+    if not top_k:
+        return 0.0
+    return sum(label for _, label in top_k) / len(top_k)
+
+
+def _compute_top_k_recall(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
+    """Compute recall@k as a supplemental retrieval diagnostic."""
     total_positives = sum(binary_labels)
     if total_positives <= 0:
         return 0.0
@@ -3672,12 +4411,19 @@ def _compute_top_k_retrieval(
     return retrieved_positives / total_positives
 
 
+def _compute_top_k_retrieval(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
+    """Backward-compatible alias for top-k precision."""
+    return _compute_top_k_precision(scores, binary_labels, k)
+
+
 def _compute_engine_contribution(pairs: List[Dict[str, Any]]) -> Dict[str, float]:
     """Estimate per-engine contribution from IntegrityDesk feature scores."""
     totals: Dict[str, float] = {}
     for pair in pairs:
-        features = pair.get("features") or {}
-        for name, value in features.items():
+        contribution_source = pair.get("contributions") or pair.get("features") or {}
+        for name, value in contribution_source.items():
             numeric_value = _coerce_float(value)
             if numeric_value > 0:
                 totals[str(name)] = totals.get(str(name), 0.0) + numeric_value
@@ -3992,8 +4738,8 @@ def _run_moss_cli(submissions, pairs):
 
 
 def _run_jplag_cli(submissions, pairs):
-    jar_path = TOOLS_DIR / "JPlag" / "jplag.jar"
-    if not jar_path.exists():
+    jar_path = _find_jplag_jar()
+    if not jar_path:
         return None
 
     groups: Dict[str, Dict[str, str]] = {}
@@ -4095,9 +4841,9 @@ def _run_jplag_cli(submissions, pairs):
 
 
 def _run_dolos_cli(submissions, pairs):
-    cli_path = TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos"
+    cli_path = _find_dolos_cli()
     node_bin_dir = TOOLS_DIR / "dolos-cli" / "node20" / "bin"
-    if not cli_path.exists() or not node_bin_dir.exists():
+    if not cli_path:
         return None
 
     similarity_by_pair: Dict[str, float] = {}
@@ -4109,7 +4855,8 @@ def _run_dolos_cli(submissions, pairs):
         written_paths = _write_submissions_to_directory(source_root, submissions)
 
         env = os.environ.copy()
-        env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
+        if node_bin_dir.exists():
+            env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
 
         result = subprocess.run(
             [
@@ -5058,6 +5805,170 @@ async def export_benchmark_pdf(request: Request):
     summary = payload.get("summary") or {}
     dataset_name = payload.get("datasetName") or "Benchmark"
     generated_at = payload.get("runAt") or datetime.now().isoformat()
+    benchmark_type = payload.get("benchmark_type") or payload.get("benchmarkMode")
+    evaluation = payload.get("evaluation") or {}
+
+    if benchmark_type == "pan_optimization" and evaluation:
+        import html
+
+        metric_source = evaluation.get("integritydesk")
+        if not metric_source:
+            metric_source = next(
+                (
+                    metrics
+                    for metrics in evaluation.values()
+                    if metrics and not metrics.get("error")
+                ),
+                {},
+            )
+
+        def metric_value(name: str, fallback: float = 0.0) -> float:
+            """Read a numeric metric from the selected PAN result."""
+            value = metric_source.get(name, fallback) if metric_source else fallback
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        metrics = [
+            (
+                "PlagDet",
+                metric_value("plagdet"),
+                "Primary PAN score; combines detection quality with granularity penalty.",
+                "Optimize threshold and fusion weights against PlagDet directly.",
+            ),
+            (
+                "Precision",
+                metric_value("precision"),
+                "Low precision means clean pairs are being flagged as plagiarism.",
+                "Raise decision threshold and require stronger multi-engine agreement.",
+            ),
+            (
+                "Recall",
+                metric_value("recall"),
+                "Low recall means known plagiarism pairs are being missed.",
+                "Widen candidate retrieval and strengthen renamed/structural clone handling.",
+            ),
+            (
+                "F1 Score",
+                metric_value("f1_score", metric_value("best_f1")),
+                "Balances precision and recall for the selected operating threshold.",
+                "Run threshold sweeps and keep the point that maximizes F1 and PlagDet.",
+            ),
+            (
+                "Granularity",
+                metric_value("granularity", 1.0),
+                "Values above 1 mean detections are split into too many fragments.",
+                "Merge adjacent or overlapping evidence for the same pair.",
+            ),
+            (
+                "AUC-PR",
+                metric_value("auc_pr", metric_value("pr_auc")),
+                "Measures whether true plagiarism ranks above negative pairs.",
+                "Tune fusion weights with PR-AUC as an objective and add harder negatives.",
+            ),
+            (
+                "False Positive Rate",
+                metric_value("false_positive_rate"),
+                "High FPR creates noisy admin feedback and weakens reviewer trust.",
+                "Add boilerplate/template suppression and stricter negative filters.",
+            ),
+            (
+                "Top-10 Retrieval",
+                metric_value("top_10_retrieval"),
+                "Measures how cleanly true positives appear in the first ranked candidates.",
+                "Tune retrieval with precision@10 and rerank using token/AST/winnowing evidence.",
+            ),
+            (
+                "Avg Runtime",
+                metric_value("avg_runtime_seconds"),
+                "Slow runtime makes iterative optimization and larger datasets expensive.",
+                "Cache parsing and run heavy engines only on shortlisted candidates.",
+            ),
+        ]
+
+        rows = ""
+        for name, value, why, action in metrics:
+            display = (
+                f"{value:.3f}s" if name == "Avg Runtime" else f"{value * 100:.1f}%"
+            )
+            if name == "Granularity":
+                display = f"{value:.3f}"
+            rows += f"""
+                <tr>
+                    <td>{html.escape(name)}</td>
+                    <td><strong>{html.escape(display)}</strong></td>
+                    <td>{html.escape(why)}</td>
+                    <td>{html.escape(action)}</td>
+                </tr>
+            """
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>{html.escape(dataset_name)} PAN Optimization Report</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }}
+                h1 {{ font-size: 24px; margin-bottom: 8px; }}
+                p {{ color: #475569; font-size: 13px; line-height: 1.6; }}
+                .meta {{ color: #64748b; font-size: 12px; margin-bottom: 20px; }}
+                .context {{ border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; padding: 14px 16px; margin-bottom: 20px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+                th, td {{ border: 1px solid #e2e8f0; padding: 9px 10px; text-align: left; vertical-align: top; }}
+                th {{ background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }}
+                td {{ font-size: 12px; line-height: 1.5; }}
+            </style>
+        </head>
+        <body>
+            <h1>{html.escape(dataset_name)} PAN Optimization Report</h1>
+            <div class="meta">Generated: {html.escape(str(generated_at))}</div>
+            <div class="context">
+                <p><strong>Dataset:</strong> {html.escape(str(summary.get("dataset_name", dataset_name)))} · {int(summary.get("dataset_size", 0) or 0)} submissions · {int(summary.get("positive_pairs", 0) or 0)} plagiarized pairs</p>
+                <p><strong>Purpose:</strong> Track PAN-style scores so source-code changes can improve detection accuracy with measurable feedback.</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Score</th>
+                        <th>Why It Matters</th>
+                        <th>Next Action</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </body>
+        </html>
+        """
+
+        try:
+            import weasyprint
+
+            pdf = weasyprint.HTML(string=html_content).write_pdf()
+            response = Response(content=pdf, media_type="application/pdf")
+            response.headers["Content-Disposition"] = (
+                "attachment; filename=pan_optimization_report.pdf"
+            )
+            return response
+        except ImportError:
+            return Response(
+                content=html_content,
+                media_type="text/html",
+                headers={
+                    "Content-Disposition": "attachment; filename=pan_optimization_report.html"
+                },
+            )
+        except Exception as exc:
+            logger.warning("PAN PDF export fell back to minimal PDF: %s", exc)
+            response = Response(
+                content=_minimal_pdf_bytes(f"{dataset_name} PAN Optimization Report"),
+                media_type="application/pdf",
+            )
+            response.headers["Content-Disposition"] = (
+                "attachment; filename=pan_optimization_report.pdf"
+            )
+            return response
 
     html_content = f"""
     <!DOCTYPE html>

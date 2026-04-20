@@ -7,17 +7,20 @@ Tests:
 - CodeBERTSimilarity / UniXcoderSimilarity (embedding engines)
 - TokenSimilarity (token-based similarity)
 """
+
 from __future__ import annotations
 
-import pytest
-
 from src.backend.domain.models import Finding
-from src.backend.engines.features.feature_extractor import FeatureExtractor, FeatureVector
-from src.backend.engines.scoring.fusion_engine import FusionEngine, FusedScore, DEFAULT_WEIGHTS
-from src.backend.domain.decision.decision_engine import DecisionEngine, DecisionResult
+from src.backend.engines.features.feature_extractor import (
+    FeatureExtractor,
+    FeatureVector,
+)
+from src.backend.engines.scoring.fusion_engine import FusionEngine
+from src.backend.domain.decision.decision_engine import DecisionEngine
 
 
 # ─── FeatureExtractor ──────────────────────────────────────────────────
+
 
 class TestFeatureExtractor:
     """Tests for the FeatureExtractor class."""
@@ -36,7 +39,9 @@ class TestFeatureExtractor:
 
     def test_to_features_order(self) -> None:
         """to_features() returns features in FEATURE_ORDER."""
-        fv = FeatureVector(ast=0.1, fingerprint=0.2, embedding=0.3, ngram=0.4, winnowing=0.5)
+        fv = FeatureVector(
+            ast=0.1, fingerprint=0.2, embedding=0.3, ngram=0.4, winnowing=0.5
+        )
         result = self.extractor.to_features(fv)
         assert result == [0.1, 0.2, 0.3, 0.4, 0.5]
 
@@ -64,7 +69,7 @@ class TestFeatureExtractor:
 
     def test_extract_empty_strings(self) -> None:
         """Empty code pairs should return valid floats without crashing.
-        
+
         Note: Identical empty code returns 1.0 similarity (100% match).
         """
         fv = self.extractor.extract("", "")
@@ -107,6 +112,7 @@ class TestFeatureExtractor:
 
 # ─── FusionEngine ────────────────────────────────────────────────────────
 
+
 class TestFusionEngine:
     """Tests for the FusionEngine class."""
 
@@ -119,15 +125,52 @@ class TestFusionEngine:
     def test_custom_weights_normalized(self) -> None:
         """Custom weights are normalized to sum 1.0."""
         # Raw weights sum to 10, should normalize
-        engine = FusionEngine(weights={"ast": 5, "fingerprint": 5, "embedding": 0, "ngram": 0, "winnowing": 0})
+        engine = FusionEngine(
+            weights={
+                "ast": 5,
+                "fingerprint": 5,
+                "embedding": 0,
+                "ngram": 0,
+                "winnowing": 0,
+            }
+        )
         assert abs(sum(engine.weights.values()) - 1.0) < 1e-9
         assert engine.weights["ast"] == 0.5
         assert engine.weights["fingerprint"] == 0.5
 
+    def test_config_weight_aliases_map_to_feature_names(self) -> None:
+        """Config-facing weight names must map to extracted feature names."""
+        engine = FusionEngine(weights={"ast": 5, "token": 3, "semantic": 1, "gst": 1})
+
+        assert engine.weights["ast"] == 0.5
+        assert engine.weights["fingerprint"] == 0.3
+        assert engine.weights["embedding"] == 0.1
+        assert engine.weights["ngram"] == 0.1
+
+    def test_config_baseline_aliases_map_to_feature_names(self) -> None:
+        """Baseline correction must use the same feature names as extraction."""
+        engine = FusionEngine(weights={"fingerprint": 1.0})
+        fv = FeatureVector(fingerprint=0.3)
+
+        result = engine.fuse(fv)
+
+        assert result.final_score == 0.0
+
+    def test_precision_guard_caps_single_engine_high_scores(self) -> None:
+        """High-risk scores require agreement from multiple concrete engines."""
+        engine = FusionEngine(weights={"ast": 1.0})
+        fv = FeatureVector(ast=1.0)
+
+        result = engine.fuse(fv)
+
+        assert result.final_score <= 0.58
+
     def test_fuse_all_max(self) -> None:
         """All features = 1.0 → final score = 1.0."""
         engine = FusionEngine()
-        fv = FeatureVector(ast=1.0, fingerprint=1.0, embedding=1.0, ngram=1.0, winnowing=1.0)
+        fv = FeatureVector(
+            ast=1.0, fingerprint=1.0, embedding=1.0, ngram=1.0, winnowing=1.0
+        )
         result = engine.fuse(fv)
         assert result.final_score == 1.0
 
@@ -140,10 +183,18 @@ class TestFusionEngine:
 
     def test_fuse_partial(self) -> None:
         """Mixed features produce weighted average."""
-        engine = FusionEngine(weights={
-            "ast": 0.5, "fingerprint": 0.5, "embedding": 0.0, "ngram": 0.0, "winnowing": 0.0,
-        })
-        fv = FeatureVector(ast=1.0, fingerprint=0.0, embedding=0.0, ngram=0.0, winnowing=0.0)
+        engine = FusionEngine(
+            weights={
+                "ast": 0.5,
+                "fingerprint": 0.5,
+                "embedding": 0.0,
+                "ngram": 0.0,
+                "winnowing": 0.0,
+            }
+        )
+        fv = FeatureVector(
+            ast=1.0, fingerprint=0.0, embedding=0.0, ngram=0.0, winnowing=0.0
+        )
         result = engine.fuse(fv)
         assert result.final_score == 0.5
 
@@ -151,14 +202,18 @@ class TestFusionEngine:
         """Fusion output is clamped to [0, 1]."""
         engine = FusionEngine()
         # Use mock-like fv with values > 1 to test clamp (shouldn't happen in practice)
-        fv = FeatureVector(ast=1.0, fingerprint=1.0, embedding=1.0, ngram=1.0, winnowing=1.0)
+        fv = FeatureVector(
+            ast=1.0, fingerprint=1.0, embedding=1.0, ngram=1.0, winnowing=1.0
+        )
         result = engine.fuse(fv)
         assert 0.0 <= result.final_score <= 1.0
 
     def test_fuse_returns_components(self) -> None:
         """FusedScore contains per-engine component breakdown."""
         engine = FusionEngine()
-        fv = FeatureVector(ast=0.3, fingerprint=0.5, embedding=0.7, ngram=0.1, winnowing=0.2)
+        fv = FeatureVector(
+            ast=0.3, fingerprint=0.5, embedding=0.7, ngram=0.1, winnowing=0.2
+        )
         result = engine.fuse(fv)
         assert "ast" in result.components
         assert "fingerprint" in result.components
@@ -175,12 +230,15 @@ class TestFusionEngine:
     def test_set_weights(self) -> None:
         """set_weights updates and normalizes new weights."""
         engine = FusionEngine()
-        engine.set_weights({"ast": 10, "fingerprint": 0, "embedding": 0, "ngram": 0, "winnowing": 0})
+        engine.set_weights(
+            {"ast": 10, "fingerprint": 0, "embedding": 0, "ngram": 0, "winnowing": 0}
+        )
         assert engine.weights["ast"] == 1.0
         assert engine.weights["fingerprint"] == 0.0
 
 
 # ─── DecisionEngine ────────────────────────────────────────────────────
+
 
 class TestDecisionEngine:
     """Tests for the DecisionEngine class."""

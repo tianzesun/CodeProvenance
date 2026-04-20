@@ -322,6 +322,23 @@ function formatRuntime(value) {
   return Number(value).toFixed(2);
 }
 
+function formatDelta(value, lowerIsBetter = false) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'N/A';
+  }
+  const numeric = Number(value);
+  const direction = numeric > 0 ? '+' : '';
+  const display = lowerIsBetter ? numeric * 100 : numeric * 100;
+  return `${direction}${display.toFixed(1)}%`;
+}
+
+function deltaTone(value, lowerIsBetter = false) {
+  const numeric = Number(value || 0);
+  if (Math.abs(numeric) < 0.0001) return 'text-slate-500 bg-slate-100';
+  const improved = lowerIsBetter ? numeric < 0 : numeric > 0;
+  return improved ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50';
+}
+
 function formatEngineContribution(contribution = {}) {
   const entries = Object.entries(contribution || {})
     .filter(([, value]) => typeof value === 'number' && value > 0)
@@ -465,13 +482,13 @@ function buildPanFeedback(row) {
   if (row.top10Retrieval < 0.9) {
     suggestions.push({
       title: 'Top-10 retrieval is weak',
-      detail: 'The retrieval stage is not surfacing enough true positives. Increase candidate pool size, improve LSH/vector indexing, then rerank top 50-100 candidates with heavier engines.',
+      detail: 'The highest-ranked results are still noisy. Improve cheap lexical/AST retrieval, apply stricter negative filters before ranking, then rerank top candidates with heavier engines.',
     });
   }
   if (row.top20Retrieval < 0.95) {
     suggestions.push({
       title: 'Top-20 retrieval still loses positives',
-      detail: 'Increase candidate pool breadth before heavy reranking. If Top-20 is low, final scoring cannot recover missed plagiarism pairs.',
+      detail: 'The first page of candidates is not clean enough. Tune ranking with precision@20/PR-AUC so true plagiarism consistently appears above negatives.',
     });
   }
   if (row.falsePositiveRate > 0.1) {
@@ -505,6 +522,244 @@ function buildPanFeedback(row) {
     });
   }
   return suggestions;
+}
+
+function metricTone(score, mode = 'higher') {
+  if (mode === 'lower') {
+    if (score <= 0.05) return 'good';
+    if (score <= 0.15) return 'watch';
+    return 'bad';
+  }
+  if (mode === 'granularity') {
+    if (score <= 1.05) return 'good';
+    if (score <= 1.2) return 'watch';
+    return 'bad';
+  }
+  if (mode === 'runtime') {
+    if (score <= 0.5) return 'good';
+    if (score <= 2) return 'watch';
+    return 'bad';
+  }
+  if (score >= 0.9) return 'good';
+  if (score >= 0.75) return 'watch';
+  return 'bad';
+}
+
+function metricToneClasses(tone) {
+  if (tone === 'good') {
+    return {
+      border: 'border-emerald-200',
+      bg: 'bg-emerald-50',
+      text: 'text-emerald-700',
+      bar: 'bg-emerald-500',
+      badge: 'bg-emerald-100 text-emerald-700',
+      label: 'Strong',
+    };
+  }
+  if (tone === 'watch') {
+    return {
+      border: 'border-amber-200',
+      bg: 'bg-amber-50',
+      text: 'text-amber-700',
+      bar: 'bg-amber-500',
+      badge: 'bg-amber-100 text-amber-700',
+      label: 'Needs attention',
+    };
+  }
+  return {
+    border: 'border-red-200',
+    bg: 'bg-red-50',
+    text: 'text-red-700',
+    bar: 'bg-red-500',
+    badge: 'bg-red-100 text-red-700',
+    label: 'Optimization priority',
+  };
+}
+
+function formatPanMetricValue(metric) {
+  if (metric.value === null || metric.value === undefined || Number.isNaN(Number(metric.value))) {
+    return 'N/A';
+  }
+  if (metric.format === 'seconds') {
+    return `${Number(metric.value).toFixed(3)}s`;
+  }
+  if (metric.format === 'plain') {
+    return Number(metric.value).toFixed(3);
+  }
+  return `${(Number(metric.value) * 100).toFixed(1)}%`;
+}
+
+function metricBarWidth(metric) {
+  if (metric.mode === 'runtime') {
+    return `${Math.max(8, Math.min(100, (2 - Math.min(Number(metric.value || 0), 2)) / 2 * 100))}%`;
+  }
+  if (metric.mode === 'lower') {
+    return `${Math.max(8, Math.min(100, (1 - Number(metric.value || 0)) * 100))}%`;
+  }
+  if (metric.mode === 'granularity') {
+    const distance = Math.min(1, Math.abs(Number(metric.value || 1) - 1));
+    return `${Math.max(8, Math.min(100, (1 - distance) * 100))}%`;
+  }
+  return `${Math.max(8, Math.min(100, Number(metric.value || 0) * 100))}%`;
+}
+
+function buildPanMetricDiagnostics(row) {
+  if (!row) return [];
+
+  const scoreDiagnostics = row.scoreDiagnostics || {};
+  const hasLabelConflict = Boolean(scoreDiagnostics.label_conflict);
+  const metrics = [
+    {
+      key: 'plagdet',
+      label: 'PlagDet',
+      value: row.plagdet,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: row.plagdet < 0.75
+        ? 'The primary PAN score is low, so the detector is not yet balancing recall, precision, and detection granularity well enough for trustworthy benchmark progress.'
+        : row.plagdet < 0.9
+          ? 'The primary PAN score is usable but still leaves measurable room in either classification balance or evidence consolidation.'
+          : 'The primary PAN score is strong; protect this as the baseline while testing harder plagiarism transformations.',
+      action: row.plagdet < 0.9
+        ? 'Optimize threshold and fusion weights against PlagDet directly, then rerun synthetic_small and one harder dataset before accepting the change.'
+        : 'Freeze this configuration as the current benchmark baseline and compare every future engine change against it.',
+    },
+    {
+      key: 'precision',
+      label: 'Precision',
+      value: row.precision,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: hasLabelConflict
+        ? 'The score distribution suggests a benchmark-label conflict: some labeled negatives score as high as or higher than labeled positives, often caused by shared templates or starter-code pairs.'
+        : row.precision < 0.75
+        ? 'Many clean pairs are being marked as plagiarism, which will create noisy admin feedback and reduce trust in production findings.'
+        : row.precision < 0.9
+          ? 'False positives are still high enough to make reviewers spend time on avoidable cases.'
+          : 'False positives are under control on this dataset.',
+      action: hasLabelConflict
+        ? 'Inspect the top high-scoring negatives and add true unrelated negative files or explicit pair metadata before using this dataset for threshold tuning.'
+        : row.precision < 0.9
+        ? 'Raise the decision threshold, down-weight broad semantic-only matches, and require agreement between token/AST/winnowing before high-confidence flags.'
+        : 'Keep the current precision guardrails and watch whether recall improvements introduce new false positives.',
+    },
+    {
+      key: 'recall',
+      label: 'Recall',
+      value: row.recall,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: row.recall < 0.75
+        ? 'The engine is missing too many known plagiarism pairs, so the candidate generation or final threshold is too strict.'
+        : row.recall < 0.9
+          ? 'Some true plagiarism still falls below the decision boundary.'
+          : 'The engine is finding nearly all labeled plagiarism pairs in this run.',
+      action: row.recall < 0.9
+        ? 'Lower the candidate threshold, widen retrieval before reranking, and strengthen renamed/structural clone handling.'
+        : 'Preserve the candidate recall path while tuning precision.',
+    },
+    {
+      key: 'f1',
+      label: 'F1 Score',
+      value: row.f1Score,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: row.f1Score < 0.75
+        ? 'The precision/recall tradeoff is not calibrated; improving only one side will not be enough.'
+        : row.f1Score < 0.9
+          ? 'The detector is close, but the threshold is not at the best operating point yet.'
+          : 'Precision and recall are well balanced for this labeled set.',
+      action: row.f1Score < 0.9
+        ? 'Run a threshold sweep and keep the threshold that maximizes F1, then check whether PlagDet also improves.'
+        : 'Use this F1 as the acceptance baseline for source-code changes.',
+    },
+    {
+      key: 'granularity',
+      label: 'Granularity',
+      value: row.granularity,
+      mode: 'granularity',
+      format: 'plain',
+      target: 'Target close to 1.000',
+      why: row.granularity > 1.2
+        ? 'The detector is splitting a single plagiarism case into too many fragments, which PAN penalizes and makes feedback harder to interpret.'
+        : row.granularity > 1.05
+          ? 'Evidence is slightly fragmented; the score would benefit from cleaner span merging.'
+          : 'Detections are consolidated cleanly for pair-level PAN scoring.',
+      action: row.granularity > 1.05
+        ? 'Merge adjacent or overlapping evidence from the same pair before scoring and reporting.'
+        : 'Keep one coherent detection per true pair unless span-level PAN data requires finer evidence.',
+    },
+    {
+      key: 'auc_pr',
+      label: 'AUC-PR',
+      value: row.aucPr,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: row.aucPr < 0.75
+        ? 'True plagiarism is not consistently ranked above negatives, so reviewers may not see the right cases first.'
+        : row.aucPr < 0.9
+          ? 'Ranking quality is decent but still vulnerable when there are many negative pairs.'
+          : 'Ranking separates positives from negatives well.',
+      action: row.aucPr < 0.9
+        ? 'Tune fusion weights with PR-AUC as an objective and add harder negative examples that look superficially similar.'
+        : 'Keep this ranking profile and validate it on a larger negative corpus.',
+    },
+    {
+      key: 'fpr',
+      label: 'False Positive Rate',
+      value: row.falsePositiveRate,
+      mode: 'lower',
+      target: 'Target <= 5%',
+      why: row.falsePositiveRate > 0.15
+        ? 'Too many non-plagiarized pairs are being flagged, which points to weak negative filtering or an overly permissive threshold.'
+        : row.falsePositiveRate > 0.05
+          ? 'False positives are manageable but still worth reducing before shipping a stricter detector.'
+          : 'Negative pairs are being filtered cleanly.',
+      action: row.falsePositiveRate > 0.05
+        ? 'Add boilerplate/template suppression and require multi-engine agreement before high-risk classification.'
+        : 'Keep current negative filters while improving recall.',
+    },
+    {
+      key: 'top10',
+      label: 'Top-10 Retrieval',
+      value: row.top10Retrieval,
+      mode: 'higher',
+      target: 'Target >= 90%',
+      why: hasLabelConflict
+        ? 'True pairs are being pushed down because labeled negatives have equal or higher scores, so retrieval appears broken even when the input labels may be the weak point.'
+      : row.top10Retrieval < 0.75
+        ? 'The top-ranked results are not mostly true positives, so reviewers see noisy candidates first.'
+        : row.top10Retrieval < 0.9
+          ? 'Some true pairs appear too low in the candidate ranking.'
+          : 'The candidate stage is surfacing true positives early.',
+      action: hasLabelConflict
+        ? 'Separate benchmark-data cleanup from engine tuning: fix pair labels/templates first, then rerun retrieval metrics.'
+      : row.top10Retrieval < 0.9
+        ? 'Tune retrieval ranking with precision@10 and PR-AUC, then rerank top candidates with token/AST/winnowing evidence.'
+        : 'Use this retrieval setting as the baseline for speed optimizations.',
+    },
+    {
+      key: 'runtime',
+      label: 'Avg Runtime',
+      value: row.avgRuntimeSeconds,
+      mode: 'runtime',
+      format: 'seconds',
+      target: 'Target <= 0.5s / pair',
+      why: row.avgRuntimeSeconds > 2
+        ? 'The engine is too slow for iterative benchmark work and larger classroom datasets.'
+        : row.avgRuntimeSeconds > 0.5
+          ? 'Runtime is acceptable for small evaluations but may slow down larger PAN runs.'
+          : 'Runtime is healthy for rapid optimization loops.',
+      action: row.avgRuntimeSeconds > 0.5
+        ? 'Cache parsing/tokenization, run cheap retrieval first, and reserve embeddings or heavy AST comparison for shortlisted pairs.'
+        : 'Keep speed guardrails in place while improving accuracy metrics.',
+    },
+  ];
+
+  return metrics.map((metric) => ({
+    ...metric,
+    tone: metricTone(Number(metric.value || 0), metric.mode),
+  }));
 }
 // ── Step indicator ──────────────────────────────────────────────────────────
 function StepIndicator({ steps, currentStep, completedSteps, compact = false }) {
@@ -544,6 +799,119 @@ function StepIndicator({ steps, currentStep, completedSteps, compact = false }) 
   );
 }
 
+function BenchmarkWorkflowPanel({ presets, history, selectedPreset, onApplyPreset }) {
+  const recentRuns = history.slice(0, 5);
+
+  return (
+    <div className="mb-6 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Improvement Workflow</div>
+            <h2 className="mt-1 font-semibold text-slate-900">Repeatable benchmark presets</h2>
+          </div>
+          {selectedPreset && (
+            <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+              {selectedPreset.name}
+            </span>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {presets.map((preset) => {
+            const active = selectedPreset?.id === preset.id;
+            const runnableCount = preset.runnable_tools?.length || 0;
+            const requestedCount = preset.tools?.length || 0;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => onApplyPreset(preset)}
+                className={`rounded-xl border p-4 text-left transition ${active
+                  ? 'border-violet-500 bg-violet-50 shadow-sm'
+                  : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                  }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-900">{preset.name}</div>
+                    <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      {preset.mode === 'pan_optimization' ? 'Optimization' : 'Comparison'} · {preset.dataset}
+                    </div>
+                  </div>
+                  {active && <CheckCircle2 size={16} className="text-violet-600" />}
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{preset.goal}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {runnableCount}/{requestedCount} tools ready
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${preset.dataset_ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {preset.dataset_ready ? 'Dataset ready' : 'Dataset missing'}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Run History</div>
+          <h2 className="mt-1 font-semibold text-slate-900">Recent IntegrityDesk progress</h2>
+        </div>
+        {recentRuns.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            No benchmark history yet. Run a preset to create your first baseline.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {recentRuns.map((run) => {
+              const metrics = run.metrics || {};
+              const deltas = run.comparison?.metrics || {};
+              return (
+                <div key={run.job_id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900">{run.preset_name || run.dataset}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {new Date(run.run_at).toLocaleString()} · {run.pairs_tested} pairs
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-500">
+                      {run.dataset}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-400">Precision</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.precision || 0) * 100)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">F1</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.f1_score || 0) * 100)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">FPR</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.false_positive_rate || 0) * 100)}</div>
+                    </div>
+                  </div>
+                  {run.comparison?.has_previous && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-semibold">
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.precision)}`}>P {formatDelta(deltas.precision)}</span>
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.f1_score)}`}>F1 {formatDelta(deltas.f1_score)}</span>
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.false_positive_rate, true)}`}>FPR {formatDelta(deltas.false_positive_rate, true)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Step 1: Tool Selection ──────────────────────────────────────────────────
 function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error }) {
   const [activeEngines, setActiveEngines] = useState([]);
@@ -552,10 +920,14 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
   const visibleTools = activeEngines.length
     ? tools.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))
     : tools;
+  const runnableTools = tools.filter((tool) => tool.available !== false && tool.runnable !== false);
 
-  const toggleTool = (id) => setSelectedTools(prev =>
-    prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
-  );
+  const toggleTool = (tool) => {
+    if (tool.available === false || tool.runnable === false) return;
+    setSelectedTools(prev =>
+      prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]
+    );
+  };
 
   const toggleEngine = (engine) => setActiveEngines((prev) =>
     prev.includes(engine) ? prev.filter((item) => item !== engine) : [...prev, engine]
@@ -574,9 +946,9 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
-            }`}>{selectedTools.length} / {tools.length} selected</span>
+            }`}>{selectedTools.length} / {runnableTools.length} selected</span>
            <div className="flex gap-1">
-             <button onClick={() => setSelectedTools(tools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
+             <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
              <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
            </div>
         </div>
@@ -634,9 +1006,12 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
             {visibleTools.map(tool => {
               const isSelected = selectedTools.includes(tool.id);
+              const canRun = tool.available !== false && tool.runnable !== false;
               return (
-                <button key={tool.id} onClick={() => toggleTool(tool.id)}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${isSelected
+                <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun
+                    ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                    : isSelected
                     ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight}`
                     : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm'
                     }`}>
@@ -649,6 +1024,9 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
                     <Zap size={16} className="text-white" />
                   </div>
                   <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
+                  <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {tool.status || (canRun ? 'Ready to run' : 'Setup needed')}
+                  </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {tool.engines.slice(0, 3).map((engine) => (
                       <span
@@ -1155,7 +1533,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 }
 
 // ── Step 3: Run ─────────────────────────────────────────────────────────────
-function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, benchmarkMode, onBack, onComplete }) {
+function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, benchmarkMode, selectedPreset, onBack, onComplete }) {
   const { token } = useAuth();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
@@ -1210,6 +1588,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             formData.append('files', fileA);
             formData.append('files', fileB);
             formData.append('benchmark_type', benchmarkMode);
+            if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
             selectedTools.forEach(t => formData.append('tools', t));
 
             try {
@@ -1238,6 +1617,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           selectedTools.forEach(t => formData.append('tools', t));
           formData.append('dataset', activeDataset.id);
           formData.append('benchmark_type', benchmarkMode);
+          if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
 
           try {
             setProgress('Running benchmark analysis...');
@@ -1260,6 +1640,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
         formData.append('benchmark_type', benchmarkMode);
+        if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
 
         setProgress('Running analysis across all tools…');
@@ -1333,6 +1714,13 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               </>
             )}
           </div>
+          {selectedPreset && (
+            <div className="bg-violet-50 rounded-xl p-4 border border-violet-100 md:col-span-2">
+              <p className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-2">Workflow Preset</p>
+              <p className="font-semibold text-violet-900 text-sm">{selectedPreset.name}</p>
+              <p className="text-xs text-violet-700 mt-1">{selectedPreset.cadence}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1478,33 +1866,30 @@ function ReportStep({ results, onRestart }) {
         avgRuntimeSeconds: Number(metrics.avg_runtime_seconds ?? toolScoreMeta.avg_runtime_seconds ?? 0),
         engineContribution: metrics.engine_contribution || {},
         engineContributionText: formatEngineContribution(metrics.engine_contribution || {}),
+        scoreDiagnostics: metrics.score_diagnostics || metrics.pan_metrics?.score_diagnostics || {},
         aiGeneratedRecall: metrics.ai_generated_recall,
         threshold: metrics.best_threshold,
       };
     })
     .sort((a, b) => b.plagdet - a.plagdet);
   const topPanResult = panEvaluationRows[0] || null;
-  const panFeedback = buildPanFeedback(topPanResult);
+  const integrityDeskPanResult = panEvaluationRows.find((row) => row.toolId === 'integritydesk') || null;
+  const productPanResult = integrityDeskPanResult || topPanResult;
+  const panFeedback = buildPanFeedback(productPanResult);
+  const panMetricDiagnostics = buildPanMetricDiagnostics(productPanResult);
   const reportMode = results.benchmark_type || results.benchmarkMode || 'tool_comparison';
   const isPanOptimization = reportMode === 'pan_optimization';
   const benchmarkSummary = results.summary || {};
   const datasetLabel = `${benchmarkSummary.dataset_name || results.datasetName || 'Dataset'} · ${benchmarkSummary.dataset_size || 0} submissions · ${benchmarkSummary.positive_pairs || 0} plagiarized pairs`;
   const optimizationLabel = `${benchmarkSummary.optimization_method || 'Threshold sweep, maximizing F1 / PlagDet'} · ${benchmarkSummary.optimization_trials || 0} trials · ${benchmarkSummary.cross_validation_folds || 1} fold`;
+  const comparison = results.comparison || {};
+  const comparisonDeltas = comparison.metrics || {};
   const summaryCards = [
     { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
     { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
+    { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
+    { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Comparison', value: 'Tools' },
   ];
-  if (isPanOptimization) {
-    summaryCards.push(
-      { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top PlagDet', value: topPanResult ? formatChartPercent(topPanResult.plagdet * 100) : 'No labels' },
-      { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Top F1', value: topPanResult ? formatChartPercent(topPanResult.f1Score * 100) : 'No labels' },
-    );
-  } else {
-    summaryCards.push(
-      { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
-      { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Comparison', value: 'Tools' },
-    );
-  }
 
   const togglePair = (idx) => setExpandedPairs(prev => ({ ...prev, [idx]: !prev[idx] }));
 
@@ -1519,6 +1904,30 @@ function ReportStep({ results, onRestart }) {
   };
 
   const downloadCSV = () => {
+    if (isPanOptimization && productPanResult) {
+      const rows = [['Metric', 'Score', 'Status', 'Target', 'Why It Matters', 'Next Action']];
+      panMetricDiagnostics.forEach(metric => {
+        const tone = metricToneClasses(metric.tone);
+        rows.push([
+          metric.label,
+          formatPanMetricValue(metric),
+          tone.label,
+          metric.target,
+          metric.why,
+          metric.action,
+        ]);
+      });
+      const csv = rows.map(r => r.map(c => `"${String(c).replaceAll('"', '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pan-optimization-report-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const rows = [['Pair', 'File A', 'File B', ...activeTools.map(id => TOOLS.find(t => t.id === id)?.name || id), 'Max Score', 'Min Score']];
     (pair_results || []).forEach(pair => {
       const scores = activeTools.map(t => {
@@ -1606,20 +2015,52 @@ function ReportStep({ results, onRestart }) {
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {summaryCards.map(({ icon: Icon, bg, color, label, value }) => (
-          <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
-                <Icon size={18} className={color} />
+      {comparison.has_previous && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Compared With Previous Run</div>
+              <div className="mt-1 text-sm text-slate-600">
+                Previous job {comparison.previous_job_id} · {comparison.previous_run_at ? new Date(comparison.previous_run_at).toLocaleString() : 'earlier run'}
               </div>
-              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
             </div>
-            <div className={`text-2xl font-bold ${color}`}>{value}</div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              Same workflow/dataset
+            </span>
           </div>
-        ))}
-      </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ['Precision', 'precision', false],
+              ['F1 Score', 'f1_score', false],
+              ['PlagDet', 'plagdet', false],
+              ['False Positive Rate', 'false_positive_rate', true],
+            ].map(([label, key, lowerIsBetter]) => (
+              <div key={key} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+                <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-sm font-bold ${deltaTone(comparisonDeltas[key], lowerIsBetter)}`}>
+                  {formatDelta(comparisonDeltas[key], lowerIsBetter)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isPanOptimization && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {summaryCards.map(({ icon: Icon, bg, color, label, value }) => (
+            <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
+                  <Icon size={18} className={color} />
+                </div>
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
+              </div>
+              <div className={`text-2xl font-bold ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {isPanOptimization && panEvaluationRows.length === 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
@@ -1627,90 +2068,61 @@ function ReportStep({ results, onRestart }) {
         </div>
       )}
 
-      {isPanOptimization && panEvaluationRows.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <h2 className="font-semibold text-slate-900">PAN Evaluation</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Ranked by PlagDet, using precision, recall, F1, and granularity on labeled benchmark pairs.
-            </p>
-            <div className="mt-4 grid gap-3 text-xs text-slate-500 md:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="font-semibold text-slate-700">Dataset:</span> {datasetLabel}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="font-semibold text-slate-700">Optimization:</span> {optimizationLabel}
+      {isPanOptimization && productPanResult && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="font-semibold text-slate-900">PAN Evaluation Scorecard</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Focused on product optimization for {productPanResult.name}; raw pair details and tool ranking are intentionally hidden.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 lg:max-w-md">
+                  <div><span className="font-semibold text-slate-800">Dataset:</span> {datasetLabel}</div>
+                  <div><span className="font-semibold text-slate-800">Method:</span> {optimizationLabel}</div>
+                  <div><span className="font-semibold text-slate-800">Decision threshold:</span> {typeof productPanResult.threshold === 'number' ? productPanResult.threshold.toFixed(2) : 'N/A'}</div>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1400px] text-sm">
-              <thead className="bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400">
-                <tr>
-                  <th className="px-6 py-3 text-left font-semibold">Tool</th>
-                  <th className="px-4 py-3 text-right font-semibold">Precision</th>
-                  <th className="px-4 py-3 text-right font-semibold">Recall</th>
-                  <th className="px-4 py-3 text-right font-semibold">F1-score</th>
-                  <th className="px-4 py-3 text-right font-semibold">Granularity</th>
-                  <th className="px-4 py-3 text-right font-semibold">PlagDet</th>
-                  <th className="px-4 py-3 text-right font-semibold">AUC-PR</th>
-                  <th className="px-4 py-3 text-right font-semibold">FPR</th>
-                  <th className="px-4 py-3 text-right font-semibold">Top-10 Retrieval</th>
-                  <th className="px-4 py-3 text-right font-semibold">Top-20 Retrieval</th>
-                  <th className="px-4 py-3 text-right font-semibold">Avg. Runtime (s)</th>
-                  <th className="px-4 py-3 text-left font-semibold">Engine Contribution</th>
-                  <th className="px-4 py-3 text-right font-semibold">AI Rewrite Recall</th>
-                  <th className="px-6 py-3 text-right font-semibold">Threshold</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {panEvaluationRows.map((row, index) => (
-                  <tr key={row.toolId} className={`${row.toolId === 'integritydesk' ? 'bg-blue-50/70 font-semibold' : ''} hover:bg-slate-50/60`}>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
-                          {index + 1}
-                        </span>
-                        <div>
-                          <div className="font-semibold text-slate-900">{row.name}</div>
-                          <div className="mt-1">
-                            <ToolBadge toolId={row.toolId} compact />
-                          </div>
-                        </div>
+            <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
+              {panMetricDiagnostics.map((metric) => {
+                const tone = metricToneClasses(metric.tone);
+                return (
+                  <div key={metric.key} className={`rounded-2xl border ${tone.border} ${tone.bg} p-5`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{metric.label}</div>
+                        <div className={`mt-2 text-3xl font-bold ${tone.text}`}>{formatPanMetricValue(metric)}</div>
                       </div>
-                    </td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.precision)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.recall)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.f1Score)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.granularity)}</td>
-                    <td className="px-4 py-4 text-right font-bold text-amber-600">{formatMetric(row.plagdet)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.aucPr)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.falsePositiveRate)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.top10Retrieval)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.top20Retrieval)}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatRuntime(row.avgRuntimeSeconds)}</td>
-                    <td className="max-w-[260px] px-4 py-4 text-left text-xs leading-5 text-slate-600">{row.engineContributionText}</td>
-                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.aiGeneratedRecall)}</td>
-                    <td className="px-6 py-4 text-right font-semibold text-slate-500">
-                      {typeof row.threshold === 'number' ? row.threshold.toFixed(2) : 'N/A'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone.badge}`}>
+                        {tone.label}
+                      </span>
+                    </div>
+                    <div className="mt-4 h-2 rounded-full bg-white/70">
+                      <div className={`h-full rounded-full ${tone.bar}`} style={{ width: metricBarWidth(metric) }} />
+                    </div>
+                    <div className="mt-3 text-xs font-semibold text-slate-500">{metric.target}</div>
+                    <div className="mt-4">
+                      <div className="text-sm font-semibold text-slate-900">Why it matters</div>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{metric.why}</p>
+                    </div>
+                    <div className="mt-4">
+                      <div className="text-sm font-semibold text-slate-900">Next action</div>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{metric.action}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="border-t border-slate-100 bg-slate-50 px-6 py-3 text-xs leading-5 text-slate-500">
-            Higher Precision, Recall, F1-score, PlagDet, AUC-PR, and retrieval rates are better. Lower FPR is better. Granularity closer to 1.000 is better. Runtime is average seconds per compared pair.
-          </div>
-        </div>
-      )}
 
-      {isPanOptimization && topPanResult && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
             <p className="text-sm text-slate-500 mt-0.5">
-              Based on the leading PlagDet result: {topPanResult.name}.
+              Concrete optimization guidance for the next source-code iteration.
             </p>
           </div>
           <div className="grid gap-3 p-6 md:grid-cols-2">
@@ -1721,11 +2133,12 @@ function ReportStep({ results, onRestart }) {
               </div>
             ))}
           </div>
+          </div>
         </div>
       )}
 
       {/* Charts */}
-      {chartData.length > 0 && (
+      {!isPanOptimization && chartData.length > 0 && (
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
@@ -1872,7 +2285,7 @@ function ReportStep({ results, onRestart }) {
       )}
 
       {/* Detailed table */}
-      {(pair_results?.length || 0) > 0 && (
+      {!isPanOptimization && (pair_results?.length || 0) > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>
@@ -2028,13 +2441,16 @@ export default function BenchmarkPage() {
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
+  const [workflowPresets, setWorkflowPresets] = useState([]);
+  const [benchmarkHistory, setBenchmarkHistory] = useState([]);
+  const [selectedPreset, setSelectedPreset] = useState(null);
 
   useEffect(() => {
     if (authLoading || !user) {
       return;
     }
     setToolsLoading(true);
-    axios.get(`${API}/api/benchmark-tools`).then(res => {
+    axios.get(`${API}/api/benchmark-tools`, { withCredentials: true }).then(res => {
       if (res.data?.tools) {
         setAvailableTools(res.data.tools);
       }
@@ -2044,10 +2460,34 @@ export default function BenchmarkPage() {
     }).finally(() => {
       setToolsLoading(false);
     });
-    axios.get(`${API}/api/benchmark-datasets`).then(res => {
+    axios.get(`${API}/api/benchmark-datasets`, { withCredentials: true }).then(res => {
       if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets);
     }).catch(() => { });
+    axios.get(`${API}/api/benchmark-presets`, { withCredentials: true }).then(res => {
+      if (res.data?.presets) setWorkflowPresets(res.data.presets);
+    }).catch(() => { });
+    axios.get(`${API}/api/benchmark-history`, { withCredentials: true }).then(res => {
+      if (res.data?.runs) setBenchmarkHistory(res.data.runs);
+    }).catch(() => { });
   }, [authLoading, user]);
+
+  const applyPreset = (preset) => {
+    const runnableToolIds = new Set(
+      availableTools
+        .filter((tool) => tool.available !== false && tool.runnable !== false)
+        .map((tool) => tool.id)
+    );
+    const toolsForPreset = (preset.runnable_tools?.length ? preset.runnable_tools : preset.tools || [])
+      .filter((toolId) => runnableToolIds.has(toolId));
+    setSelectedPreset(preset);
+    setBenchmarkMode(preset.mode || 'pan_optimization');
+    setSelectedTools(toolsForPreset);
+    setUploadMode('builtin');
+    setSelectedDataset(preset.dataset);
+    setFiles([]);
+    setStep(0);
+    setCompletedSteps([]);
+  };
 
   const goToStep = (next, currentCompleted) => {
     setCompletedSteps(prev => {
@@ -2094,6 +2534,15 @@ export default function BenchmarkPage() {
             </div>
           </div>
         </div>
+
+        {step < 3 && (
+          <BenchmarkWorkflowPanel
+            presets={workflowPresets}
+            history={benchmarkHistory}
+            selectedPreset={selectedPreset}
+            onApplyPreset={applyPreset}
+          />
+        )}
 
         {step < 3 && (
           <div className="mb-6 grid gap-3 lg:grid-cols-2">
@@ -2160,9 +2609,16 @@ export default function BenchmarkPage() {
             files={files}
             benchmarkDatasets={benchmarkDatasets}
             benchmarkMode={benchmarkMode}
+            selectedPreset={selectedPreset}
             onBack={() => setStep(1)}
             onComplete={(data) => {
               setResults({ ...data, benchmarkMode });
+              if (data.history_summary) {
+                setBenchmarkHistory(prev => [
+                  data.history_summary,
+                  ...prev.filter(run => run.job_id !== data.history_summary.job_id),
+                ]);
+              }
               goToStep(3, 2);
             }}
           />

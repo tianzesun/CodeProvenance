@@ -67,35 +67,56 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         runtime_seconds=2.0,
     )
 
-    assert metrics["precision"] == 0.6667
-    assert metrics["recall"] == 1.0
-    assert metrics["f1_score"] == 0.8
+    assert metrics["precision"] == 1.0
+    assert metrics["recall"] == 0.5
+    assert metrics["f1_score"] == 0.6667
     assert metrics["granularity"] == 1.0
-    assert metrics["plagdet"] == 0.8
-    assert metrics["plagdet_percent"] == 80.0
-    assert metrics["top_10_retrieval"] == 1.0
-    assert metrics["top_20_retrieval"] == 1.0
-    assert metrics["false_positive_rate"] == 0.5
+    assert metrics["plagdet"] == 0.6667
+    assert metrics["plagdet_percent"] == 66.67
+    assert metrics["top_10_retrieval"] == 0.5
+    assert metrics["top_20_retrieval"] == 0.5
+    assert metrics["top_10_recall"] == 1.0
+    assert metrics["top_20_recall"] == 1.0
+    assert metrics["false_positive_rate"] == 0.0
     assert "auc_pr" in metrics
     assert metrics["engine_contribution"] == {}
     assert metrics["ai_generated_recall"] is None
     assert metrics["runtime_seconds"] == 2.0
     assert metrics["avg_runtime_seconds"] == 0.5
     assert metrics["pan_metrics"] == {
-        "precision": 0.6667,
-        "recall": 1.0,
-        "f1_score": 0.8,
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1_score": 0.6667,
         "granularity": 1.0,
-        "plagdet": 0.8,
-        "top_10_retrieval": 1.0,
-        "top_20_retrieval": 1.0,
-        "false_positive_rate": 0.5,
+        "plagdet": 0.6667,
+        "top_10_retrieval": 0.5,
+        "top_20_retrieval": 0.5,
+        "top_10_recall": 1.0,
+        "top_20_recall": 1.0,
+        "false_positive_rate": 0.0,
         "auc_pr": metrics["auc_pr"],
         "engine_contribution": {},
         "ai_generated_recall": None,
         "avg_runtime_seconds": 0.5,
+        "score_diagnostics": metrics["score_diagnostics"],
     }
+    assert metrics["score_diagnostics"]["label_conflict"] is False
     assert metrics["granularity_basis"] == "pair_level_single_detection"
+
+
+def test_compute_evaluation_metrics_flags_label_conflicts():
+    metrics = server._compute_evaluation_metrics(
+        scores=[0.8, 0.95, 0.9, 0.2],
+        labels=[3, 0, 0, 0],
+        tool_name="integritydesk",
+        dataset_name="synthetic_small",
+    )
+
+    diagnostics = metrics["score_diagnostics"]
+
+    assert diagnostics["label_conflict"] is True
+    assert diagnostics["negatives_above_best_positive"] == 2
+    assert "labeled negatives" in diagnostics["message"]
 
 
 def test_compute_top_k_retrieval_uses_ranked_scores():
@@ -104,7 +125,7 @@ def test_compute_top_k_retrieval_uses_ranked_scores():
 
     retrieval = server._compute_top_k_retrieval(scores, labels, k=2)
 
-    assert retrieval == 1 / 3
+    assert retrieval == 0.5
 
 
 def test_ground_truth_labels_infer_demo_original_plagiarized_pairs():
@@ -117,6 +138,79 @@ def test_ground_truth_labels_infer_demo_original_plagiarized_pairs():
     labels = server._get_ground_truth_labels("demo_sample", pair_results)
 
     assert labels == [3, 0, 3]
+
+
+def test_ground_truth_labels_use_explicit_pair_metadata():
+    pair_results = [
+        {"file_a": "pair_a.py", "file_b": "pair_b.py", "ground_truth_label": 3},
+        {"file_a": "pair_c.py", "file_b": "pair_d.py", "ground_truth_label": 0},
+    ]
+
+    labels = server._get_ground_truth_labels("synthetic", pair_results)
+
+    assert labels == [3, 0]
+
+
+def test_load_synthetic_pair_dataset_uses_explicit_pairs(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "synthetic"
+    dataset_dir.mkdir()
+    (dataset_dir / "generated_pairs.jsonl").write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "case_001",
+                        "code_a": "def add(a, b):\n    return a + b\n",
+                        "code_b": "def sum_numbers(x, y):\n    return x + y\n",
+                        "label": 1,
+                        "clone_type": 2,
+                    },
+                    {
+                        "id": "case_002",
+                        "code_a": "def first():\n    return 1\n",
+                        "code_b": "def second():\n    return 2\n",
+                        "label": 0,
+                        "clone_type": 0,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+
+    submissions, pairs = server._load_pair_labeled_benchmark_dataset(
+        "synthetic", tmp_path / "job"
+    )
+
+    assert sorted(submissions) == [
+        "case_001_a.py",
+        "case_001_b.py",
+        "case_002_a.py",
+        "case_002_b.py",
+    ]
+    assert pairs == [
+        {"file_a": "case_001_a.py", "file_b": "case_001_b.py", "label": 2},
+        {"file_a": "case_002_a.py", "file_b": "case_002_b.py", "label": 0},
+    ]
+
+
+def test_dataset_has_ground_truth_for_pair_labeled_sources(tmp_path):
+    synthetic_dir = tmp_path / "synthetic"
+    kaggle_dir = tmp_path / "kaggle_student_code"
+    codexglue_dir = tmp_path / "codexglue_clone" / "huggingface"
+    synthetic_dir.mkdir()
+    kaggle_dir.mkdir()
+    codexglue_dir.mkdir(parents=True)
+    (synthetic_dir / "generated_pairs.jsonl").write_text("{}", encoding="utf-8")
+    (kaggle_dir / "cheating_dataset.csv").write_text("", encoding="utf-8")
+    (codexglue_dir / "dataset_dict.json").write_text("{}", encoding="utf-8")
+
+    assert server._dataset_has_pair_ground_truth("synthetic", synthetic_dir)
+    assert server._dataset_has_pair_ground_truth("kaggle_student_code", kaggle_dir)
+    assert server._dataset_has_pair_ground_truth(
+        "codexglue_clone", tmp_path / "codexglue_clone"
+    )
 
 
 def test_extract_code_entries_from_row_supports_pair_fields():

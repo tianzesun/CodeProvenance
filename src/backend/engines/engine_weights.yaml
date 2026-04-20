@@ -1,18 +1,28 @@
 weights:
-  token: 0.03
-  ast: 0.7508
-  winnowing: 0.024
-  gst: 0.03
-  semantic: 0.1051
-  web: 0.03
-  ai_detection: 0.015
-  execution_cfg: 0.015
+  ast: 0.45
+  token: 0.35
+  winnowing: 0.15
+  gst: 0.05
+  semantic: 0.0
+  web: 0.0
+  ai_detection: 0.0
+  execution_cfg: 0.0
 baseline_correction:
   baselines:
     winnowing: 0.35
     ast: 0.25
-    token: 0.3
+    fingerprint: 0.3
+    ngram: 0.2
     embedding: 0.25
+precision_guard:
+  enabled: true
+  high_score_floor: 0.68
+  evidence_threshold: 0.4
+  lexical_threshold: 0.45
+  minimum_concrete_engines: 2
+  minimum_lexical_engines: 2
+  insufficient_evidence_cap: 0.55
+  semantic_only_cap: 0.45
 arbitration:
   enabled: true
   prior_precision_multiplier: 20.0
@@ -22,17 +32,18 @@ ast_boost:
   threshold: 0.9
   minimum_guaranteed_score: 0.75
 decision:
-  default_threshold: 0.65
+  default_threshold: 0.78
   minimum_confidence: 0.4
   minimum_engine_agreement: 2
   uncertainty_review_threshold: 0.75
-  false_positive_bias: 1.2
+  false_positive_bias: 1.5
+  precision_target: 0.95
 
 thresholds:
   identical: 0.85
-  high_similarity: 0.70
-  medium_similarity: 0.50
-  low_similarity: 0.30
+  high_similarity: 0.80
+  medium_similarity: 0.62
+  low_similarity: 0.35
   auto_refer: 0.90
   embedding_match: 0.85
   minimum_reportable: 0.20

@@ -1,31 +1,37 @@
-from dotenv import load_dotenv
-from pathlib import Path
-load_dotenv(Path(__file__).parent.parent / '.env.local')
 """Database configuration and session management."""
+
 import os
-from typing import Optional, ContextManager
-from sqlalchemy import create_engine, event, inspect, text
-from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 from contextvars import ContextVar
+from pathlib import Path
+from typing import ContextManager, Optional
 
-# Get database URL from environment or use SQLite as default
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./integritydesk.db")
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-# Create engine with appropriate settings
+load_dotenv(Path(__file__).parent.parent / ".env.local")
+
+# Get database URL from environment. Do not fall back to a local SQLite database.
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is required. Set it in src/backend/.env.local; local SQLite is not "
+        "supported for the backend runtime."
+    )
 if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        echo=False,
+    raise RuntimeError(
+        "SQLite DATABASE_URL values are not supported for the backend runtime. Use the "
+        "remote PostgreSQL/Neon DATABASE_URL from src/backend/.env.local."
     )
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-        echo=False,
-    )
+
+# Create engine with PostgreSQL/Neon settings.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    echo=False,
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -35,12 +41,13 @@ _tenant_context: ContextVar[Optional[str]] = ContextVar("_tenant_context", defau
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
+
     pass
 
 
 def get_db() -> ContextManager[Session]:
     """Get a database session context manager.
-    
+
     Usage:
         with get_db() as db:
             db.query(User).all()
@@ -54,7 +61,7 @@ def get_db() -> ContextManager[Session]:
 
 def set_tenant_context(db: Session, tenant_id: str) -> None:
     """Set tenant context for the current request.
-    
+
     This is used for multi-tenant isolation.
     """
     _tenant_context.set(tenant_id)
@@ -62,7 +69,7 @@ def set_tenant_context(db: Session, tenant_id: str) -> None:
 
 def get_tenant_context() -> Optional[str]:
     """Get the current tenant context.
-    
+
     Returns:
         The current tenant_id or None if not set.
     """
@@ -74,36 +81,9 @@ def clear_tenant_context() -> None:
     _tenant_context.set(None)
 
 
-def _apply_sqlite_compat_migrations() -> None:
-    """Patch older SQLite databases with columns added after initial table creation."""
-    if not DATABASE_URL.startswith("sqlite"):
-        return
-
-    inspector = inspect(engine)
-    table_names = set(inspector.get_table_names())
-    if "users" not in table_names:
-        return
-
-    user_columns = {column["name"] for column in inspector.get_columns("users")}
-    statements = []
-
-    if "reset_token" not in user_columns:
-        statements.append("ALTER TABLE users ADD COLUMN reset_token VARCHAR(255)")
-    if "reset_token_expires" not in user_columns:
-        statements.append("ALTER TABLE users ADD COLUMN reset_token_expires DATETIME")
-
-    if not statements:
-        return
-
-    with engine.begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
-
-
 def init_db() -> None:
     """Initialize the database, creating all tables."""
     Base.metadata.create_all(bind=engine)
-    _apply_sqlite_compat_migrations()
 
 
 def drop_db() -> None:

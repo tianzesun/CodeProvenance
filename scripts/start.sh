@@ -5,7 +5,7 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="$PROJECT_DIR/.env.local"
+ENV_FILE="$PROJECT_DIR/src/backend/.env.local"
 
 # ----------------------------
 # Load environment variables
@@ -23,7 +23,7 @@ fi
 # ----------------------------
 # Config
 # ----------------------------
-DASHBOARD_PORT="${1:-${PORT:-3000}}"
+DASHBOARD_PORT="${1:-${DASHBOARD_PORT:-3000}}"
 BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
 EMBEDDING_PORT="${EMBEDDING_PORT:-8001}"
 

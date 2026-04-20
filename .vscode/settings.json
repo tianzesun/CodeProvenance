@@ -21,5 +21,27 @@
     "*test.py"
   ],
   "python.testing.pytestEnabled": false,
-  "python.testing.unittestEnabled": true
+  "python.testing.unittestEnabled": true,
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/.next/**": true,
+    "**/node_modules/**": true,
+    "**/venv/**": true,
+    "data/big_datasets/**": true,
+    "data/datasets/bigclonebench/**": true,
+    "data/datasets/codexglue_clone/**": true,
+    "tools/JPlag/languages/**": true
+  },
+  "files.exclude": {
+    "data/big_datasets": true,
+    "data/datasets/bigclonebench": true,
+    "data/datasets/codexglue_clone": true,
+    "tools/JPlag/languages": true
+  },
+  "search.exclude": {
+    "data/big_datasets/**": true,
+    "data/datasets/bigclonebench/**": true,
+    "data/datasets/codexglue_clone/**": true,
+    "tools/JPlag/languages/**": true
+  }
 }
