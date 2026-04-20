@@ -107,6 +107,21 @@ const PRESET_DATASET_META = {
   },
 };
 
+const BENCHMARK_MODES = {
+  pan_optimization: {
+    label: 'PAN Optimization',
+    audience: 'Admin / Developer',
+    title: 'Build the strongest detector',
+    description: 'Use labeled benchmark data to optimize Precision, Recall, F1, Granularity, and PlagDet.',
+  },
+  tool_comparison: {
+    label: 'Tool Comparison',
+    audience: 'Professor',
+    title: 'Compare against external tools',
+    description: 'Run IntegrityDesk beside MOSS, Dolos, JPlag, NiCad, and other tools for competitive proof.',
+  },
+};
+
 function getPresetDatasetMeta(dataset) {
   if (!dataset || dataset.is_demo || dataset.cases) {
     return null;
@@ -276,6 +291,14 @@ function DatasetCard({ dataset, isActive, onSelect }) {
             {dataset.created_by}
           </span>
         )}
+        {dataset.has_ground_truth && (
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isActive ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700'
+              }`}
+          >
+            Labeled
+          </span>
+        )}
       </div>
     </button>
   );
@@ -283,6 +306,34 @@ function DatasetCard({ dataset, isActive, onSelect }) {
 
 function formatChartPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'N/A';
+  }
+  return Number(value).toFixed(3);
+}
+
+function formatRuntime(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'N/A';
+  }
+  return Number(value).toFixed(2);
+}
+
+function formatEngineContribution(contribution = {}) {
+  const entries = Object.entries(contribution || {})
+    .filter(([, value]) => typeof value === 'number' && value > 0)
+    .slice(0, 3);
+
+  if (!entries.length) {
+    return 'N/A';
+  }
+
+  return entries
+    .map(([name, value]) => `${name}: ${(Number(value) * 100).toFixed(0)}%`)
+    .join(', ');
 }
 
 function ToolBadge({ toolId, compact = false }) {
@@ -381,6 +432,79 @@ function LeaderboardTooltip({ active, payload }) {
       </div>
     </div>
   );
+}
+
+function buildPanFeedback(row) {
+  if (!row) return [];
+
+  const suggestions = [];
+  if (row.precision < 0.85) {
+    suggestions.push({
+      title: 'Precision is the main problem',
+      detail: 'False positives are too high. Raise the final decision threshold, increase weight on exact/token/AST agreement, and reduce broad semantic-only matches until negatives are cleaner.',
+    });
+  }
+  if (row.recall < 0.85) {
+    suggestions.push({
+      title: 'Recall is missing true plagiarism',
+      detail: 'Lower the candidate threshold, enable semantic or embedding retrieval for obfuscated clones, and make sure renamed/type-3/type-4 pairs enter the candidate pool before reranking.',
+    });
+  }
+  if (row.f1Score < 0.85) {
+    suggestions.push({
+      title: 'F1 needs threshold calibration',
+      detail: 'Sweep thresholds on the labeled PAN set and choose the point that maximizes F1 before tuning individual engine weights.',
+    });
+  }
+  if (row.granularity > 1.2) {
+    suggestions.push({
+      title: 'Granularity suggests over-splitting',
+      detail: 'Merge overlapping or adjacent detections from the same file pair and prefer one coherent evidence span over many tiny fragments.',
+    });
+  }
+  if (row.top10Retrieval < 0.9) {
+    suggestions.push({
+      title: 'Top-10 retrieval is weak',
+      detail: 'The retrieval stage is not surfacing enough true positives. Increase candidate pool size, improve LSH/vector indexing, then rerank top 50-100 candidates with heavier engines.',
+    });
+  }
+  if (row.top20Retrieval < 0.95) {
+    suggestions.push({
+      title: 'Top-20 retrieval still loses positives',
+      detail: 'Increase candidate pool breadth before heavy reranking. If Top-20 is low, final scoring cannot recover missed plagiarism pairs.',
+    });
+  }
+  if (row.falsePositiveRate > 0.1) {
+    suggestions.push({
+      title: 'False positive rate is too high',
+      detail: 'Add stricter negative filters for boilerplate, templates, and common starter code. Require agreement between at least two independent engines before high-risk classification.',
+    });
+  }
+  if (row.aucPr < 0.85) {
+    suggestions.push({
+      title: 'Ranking quality is weak',
+      detail: 'AUC-PR below target means true plagiarism is not consistently ranked above negatives. Tune fusion weights with PR-AUC/PlagDet as objectives, not average similarity.',
+    });
+  }
+  if (row.engineContributionText !== 'N/A') {
+    suggestions.push({
+      title: 'Use contribution balance to guide engine weights',
+      detail: `Current top contributors are ${row.engineContributionText}. If one engine dominates, run ablations and reduce its weight when it causes false positives.`,
+    });
+  }
+  if (row.avgRuntimeSeconds > 2) {
+    suggestions.push({
+      title: 'Runtime is expensive',
+      detail: 'Cache tokenization/AST parsing, use cheap lexical retrieval first, run embeddings only on shortlisted candidates, and avoid all-pairs heavy scoring for large classes.',
+    });
+  }
+  if (!suggestions.length) {
+    suggestions.push({
+      title: 'PAN metrics look balanced',
+      detail: 'Keep this engine mix as the baseline. Next improvements should be validated with harder obfuscation sets and a larger negative corpus.',
+    });
+  }
+  return suggestions;
 }
 // ── Step indicator ──────────────────────────────────────────────────────────
 function StepIndicator({ steps, currentStep, completedSteps, compact = false }) {
@@ -555,7 +679,7 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
 }
 
 // ── Step 2: Dataset Selection ───────────────────────────────────────────────
-function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, onBack, onNext }) {
+function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, benchmarkMode, onBack, onNext }) {
   const [libraryFilter, setLibraryFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -640,7 +764,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             Choose What To Benchmark
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Choose a reusable benchmark dataset from the library, or upload your own files.
+            {benchmarkMode === 'pan_optimization'
+              ? 'Choose labeled PAN-style data for detector optimization, or upload controlled test files.'
+              : 'Choose a reusable dataset for tool comparison, or upload professor-facing evidence files.'}
           </p>
         </div>
         <div className="flex border-b border-slate-100">
@@ -1019,16 +1145,17 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                    )}
                  </button>
                </div>
-             </form>
-           </div>
-         </div>
-       )}
+            </form>
+          </div>
+        </div>
+      )}
+
      </div>
    );
 }
 
 // ── Step 3: Run ─────────────────────────────────────────────────────────────
-function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, onBack, onComplete }) {
+function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, benchmarkMode, onBack, onComplete }) {
   const { token } = useAuth();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
@@ -1082,6 +1209,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             const formData = new FormData();
             formData.append('files', fileA);
             formData.append('files', fileB);
+            formData.append('benchmark_type', benchmarkMode);
             selectedTools.forEach(t => formData.append('tools', t));
 
             try {
@@ -1109,6 +1237,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           const formData = new FormData();
           selectedTools.forEach(t => formData.append('tools', t));
           formData.append('dataset', activeDataset.id);
+          formData.append('benchmark_type', benchmarkMode);
 
           try {
             setProgress('Running benchmark analysis...');
@@ -1130,6 +1259,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         setProgressPct(20);
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
+        formData.append('benchmark_type', benchmarkMode);
         selectedTools.forEach(t => formData.append('tools', t));
 
         setProgress('Running analysis across all tools…');
@@ -1276,9 +1406,16 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 // ── Step 4: Report ──────────────────────────────────────────────────────────
 function ReportStep({ results, onRestart }) {
   const [expandedPairs, setExpandedPairs] = useState({});
+  const [currentPage, setCurrentPage] = useState(1);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState('');
   const { tool_scores, pair_results, summary } = results;
+  const itemsPerPage = 50;
+  const totalPairs = (pair_results || []).length;
+  const totalPages = Math.max(1, Math.ceil(totalPairs / itemsPerPage));
+  const pageStart = (currentPage - 1) * itemsPerPage;
+  const pageEnd = Math.min(pageStart + itemsPerPage, totalPairs);
+  const visiblePairResults = (pair_results || []).slice(pageStart, pageEnd);
   const activeTools = Object.keys(tool_scores || {}).length
     ? Object.keys(tool_scores || {})
     : Array.from(new Set((pair_results || []).flatMap((pair) => (pair.tool_results || []).map((entry) => entry.tool))));
@@ -1319,6 +1456,55 @@ function ReportStep({ results, onRestart }) {
 
   const leadingTool = toolLeaderboard[0] || null;
   const leadingToolInfo = leadingTool ? TOOLS.find((tool) => tool.id === leadingTool.id) : null;
+  const panEvaluationRows = Object.entries(results.evaluation || {})
+    .filter(([, metrics]) => metrics && !metrics.error)
+    .map(([toolId, metrics]) => {
+      const toolInfo = TOOLS.find((tool) => tool.id === toolId);
+      const toolScoreMeta = results.tool_scores?.[toolId] || {};
+      const f1Score = metrics.f1_score ?? metrics.best_f1 ?? 0;
+      const plagdet = metrics.plagdet ?? f1Score;
+      return {
+        toolId,
+        name: toolInfo?.name || metrics.tool || toolId,
+        precision: Number(metrics.precision || 0),
+        recall: Number(metrics.recall || 0),
+        f1Score: Number(f1Score || 0),
+        granularity: Number(metrics.granularity || 1),
+        plagdet: Number(plagdet || 0),
+        aucPr: Number(metrics.auc_pr ?? metrics.pr_auc ?? 0),
+        falsePositiveRate: Number(metrics.false_positive_rate || 0),
+        top10Retrieval: Number(metrics.top_10_retrieval || 0),
+        top20Retrieval: Number(metrics.top_20_retrieval || 0),
+        avgRuntimeSeconds: Number(metrics.avg_runtime_seconds ?? toolScoreMeta.avg_runtime_seconds ?? 0),
+        engineContribution: metrics.engine_contribution || {},
+        engineContributionText: formatEngineContribution(metrics.engine_contribution || {}),
+        aiGeneratedRecall: metrics.ai_generated_recall,
+        threshold: metrics.best_threshold,
+      };
+    })
+    .sort((a, b) => b.plagdet - a.plagdet);
+  const topPanResult = panEvaluationRows[0] || null;
+  const panFeedback = buildPanFeedback(topPanResult);
+  const reportMode = results.benchmark_type || results.benchmarkMode || 'tool_comparison';
+  const isPanOptimization = reportMode === 'pan_optimization';
+  const benchmarkSummary = results.summary || {};
+  const datasetLabel = `${benchmarkSummary.dataset_name || results.datasetName || 'Dataset'} · ${benchmarkSummary.dataset_size || 0} submissions · ${benchmarkSummary.positive_pairs || 0} plagiarized pairs`;
+  const optimizationLabel = `${benchmarkSummary.optimization_method || 'Threshold sweep, maximizing F1 / PlagDet'} · ${benchmarkSummary.optimization_trials || 0} trials · ${benchmarkSummary.cross_validation_folds || 1} fold`;
+  const summaryCards = [
+    { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
+    { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
+  ];
+  if (isPanOptimization) {
+    summaryCards.push(
+      { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top PlagDet', value: topPanResult ? formatChartPercent(topPanResult.plagdet * 100) : 'No labels' },
+      { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Top F1', value: topPanResult ? formatChartPercent(topPanResult.f1Score * 100) : 'No labels' },
+    );
+  } else {
+    summaryCards.push(
+      { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
+      { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Comparison', value: 'Tools' },
+    );
+  }
 
   const togglePair = (idx) => setExpandedPairs(prev => ({ ...prev, [idx]: !prev[idx] }));
 
@@ -1387,7 +1573,7 @@ function ReportStep({ results, onRestart }) {
           <div>
             <p className="font-bold text-violet-900">{results.datasetName || 'Benchmark'} Report</p>
             <p className="text-sm text-violet-600 mt-0.5">
-              Generated {results.runAt ? new Date(results.runAt).toLocaleString() : 'just now'}
+              {isPanOptimization ? 'PAN optimization benchmark' : 'Professor tool comparison'} · Generated {results.runAt ? new Date(results.runAt).toLocaleString() : 'just now'}
             </p>
           </div>
         </div>
@@ -1422,10 +1608,7 @@ function ReportStep({ results, onRestart }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-         {[
-           { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
-           { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
-         ].map(({ icon: Icon, bg, color, label, value }) => (
+        {summaryCards.map(({ icon: Icon, bg, color, label, value }) => (
           <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
             <div className="flex items-center gap-3 mb-3">
               <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
@@ -1437,6 +1620,109 @@ function ReportStep({ results, onRestart }) {
           </div>
         ))}
       </div>
+
+      {isPanOptimization && panEvaluationRows.length === 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
+          PAN metrics need labeled ground truth. Use a demo/synthetic original-vs-plagiarized dataset or a PAN-style dataset with labels to compute Precision, Recall, F1, Granularity, and PlagDet.
+        </div>
+      )}
+
+      {isPanOptimization && panEvaluationRows.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-900">PAN Evaluation</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Ranked by PlagDet, using precision, recall, F1, and granularity on labeled benchmark pairs.
+            </p>
+            <div className="mt-4 grid gap-3 text-xs text-slate-500 md:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-700">Dataset:</span> {datasetLabel}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-700">Optimization:</span> {optimizationLabel}
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1400px] text-sm">
+              <thead className="bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="px-6 py-3 text-left font-semibold">Tool</th>
+                  <th className="px-4 py-3 text-right font-semibold">Precision</th>
+                  <th className="px-4 py-3 text-right font-semibold">Recall</th>
+                  <th className="px-4 py-3 text-right font-semibold">F1-score</th>
+                  <th className="px-4 py-3 text-right font-semibold">Granularity</th>
+                  <th className="px-4 py-3 text-right font-semibold">PlagDet</th>
+                  <th className="px-4 py-3 text-right font-semibold">AUC-PR</th>
+                  <th className="px-4 py-3 text-right font-semibold">FPR</th>
+                  <th className="px-4 py-3 text-right font-semibold">Top-10 Retrieval</th>
+                  <th className="px-4 py-3 text-right font-semibold">Top-20 Retrieval</th>
+                  <th className="px-4 py-3 text-right font-semibold">Avg. Runtime (s)</th>
+                  <th className="px-4 py-3 text-left font-semibold">Engine Contribution</th>
+                  <th className="px-4 py-3 text-right font-semibold">AI Rewrite Recall</th>
+                  <th className="px-6 py-3 text-right font-semibold">Threshold</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {panEvaluationRows.map((row, index) => (
+                  <tr key={row.toolId} className={`${row.toolId === 'integritydesk' ? 'bg-blue-50/70 font-semibold' : ''} hover:bg-slate-50/60`}>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                          {index + 1}
+                        </span>
+                        <div>
+                          <div className="font-semibold text-slate-900">{row.name}</div>
+                          <div className="mt-1">
+                            <ToolBadge toolId={row.toolId} compact />
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.precision)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.recall)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.f1Score)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.granularity)}</td>
+                    <td className="px-4 py-4 text-right font-bold text-amber-600">{formatMetric(row.plagdet)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.aucPr)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.falsePositiveRate)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.top10Retrieval)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.top20Retrieval)}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatRuntime(row.avgRuntimeSeconds)}</td>
+                    <td className="max-w-[260px] px-4 py-4 text-left text-xs leading-5 text-slate-600">{row.engineContributionText}</td>
+                    <td className="px-4 py-4 text-right text-slate-700">{formatMetric(row.aiGeneratedRecall)}</td>
+                    <td className="px-6 py-4 text-right font-semibold text-slate-500">
+                      {typeof row.threshold === 'number' ? row.threshold.toFixed(2) : 'N/A'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="border-t border-slate-100 bg-slate-50 px-6 py-3 text-xs leading-5 text-slate-500">
+            Higher Precision, Recall, F1-score, PlagDet, AUC-PR, and retrieval rates are better. Lower FPR is better. Granularity closer to 1.000 is better. Runtime is average seconds per compared pair.
+          </div>
+        </div>
+      )}
+
+      {isPanOptimization && topPanResult && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Based on the leading PlagDet result: {topPanResult.name}.
+            </p>
+          </div>
+          <div className="grid gap-3 p-6 md:grid-cols-2">
+            {panFeedback.map((item) => (
+              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="font-semibold text-slate-900">{item.title}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Charts */}
       {chartData.length > 0 && (
@@ -1606,7 +1892,8 @@ function ReportStep({ results, onRestart }) {
             <div className="text-center">Spread</div>
           </div>
           <div className="divide-y divide-slate-50">
-            {(pair_results || []).map((pair, pairIndex) => {
+            {visiblePairResults.map((pair, idx) => {
+              const pairIndex = pageStart + idx;
               const scores = activeTools.map(t => {
                 const tr = pair.tool_results?.find(r => r.tool === t);
                 return tr ? tr.score : null;
@@ -1694,6 +1981,32 @@ function ReportStep({ results, onRestart }) {
               );
             })}
           </div>
+          {totalPairs > itemsPerPage && (
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <div className="text-xs font-medium text-slate-500">
+                Showing {pageStart + 1}-{pageEnd} of {totalPairs} pairs
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={currentPage === 1}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <span className="min-w-[88px] text-center text-xs font-semibold text-slate-500">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={currentPage === totalPages}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1705,6 +2018,7 @@ export default function BenchmarkPage() {
   const { user, loading: authLoading } = useAuth();
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
+  const [benchmarkMode, setBenchmarkMode] = useState('tool_comparison');
   const [selectedTools, setSelectedTools] = useState([]);
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [uploadMode, setUploadMode] = useState('builtin');
@@ -1781,6 +2095,35 @@ export default function BenchmarkPage() {
           </div>
         </div>
 
+        {step < 3 && (
+          <div className="mb-6 grid gap-3 lg:grid-cols-2">
+            {Object.entries(BENCHMARK_MODES).map(([modeId, mode]) => {
+              const active = benchmarkMode === modeId;
+              return (
+                <button
+                  key={modeId}
+                  onClick={() => setBenchmarkMode(modeId)}
+                  className={`rounded-2xl border p-4 text-left transition ${active
+                    ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm'
+                    }`}
+                >
+                  <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${active ? 'text-slate-300' : 'text-slate-400'}`}>
+                    {mode.audience}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <div className="font-semibold">{mode.label}</div>
+                    {active && <CheckCircle2 size={16} className="text-emerald-300" />}
+                  </div>
+                  <div className={`mt-2 text-sm leading-6 ${active ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {mode.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Steps */}
         {step === 0 && (
           <ToolSelectionStep
@@ -1803,6 +2146,7 @@ export default function BenchmarkPage() {
             setFiles={setFiles}
             benchmarkDatasets={benchmarkDatasets}
             canManageDemoDatasets={user?.role === 'admin'}
+            benchmarkMode={benchmarkMode}
             onBack={() => setStep(0)}
             onNext={() => goToStep(2, 1)}
           />
@@ -1815,9 +2159,10 @@ export default function BenchmarkPage() {
             uploadMode={uploadMode}
             files={files}
             benchmarkDatasets={benchmarkDatasets}
+            benchmarkMode={benchmarkMode}
             onBack={() => setStep(1)}
             onComplete={(data) => {
-              setResults(data);
+              setResults({ ...data, benchmarkMode });
               goToStep(3, 2);
             }}
           />
