@@ -149,6 +149,12 @@ class CoreBenchmarkRunner:
     def _optimize_threshold(self, scores: List[Tuple[float, int]]) -> Tuple[float, float]:
         """Find optimal threshold by maximizing F1."""
         best_threshold, best_f1 = 0.5, 0.0
+        
+        # Early exit if there are no positive labels to optimize for
+        has_positives = any(label == 1 for (_, label) in scores)
+        if not has_positives or len(scores) == 0:
+            return 0.5, 0.0
+            
         for t_int in range(0, 101):
             t = t_int / 100.0
             tp = fp = tn = fn = 0

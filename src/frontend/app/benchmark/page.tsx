@@ -19,7 +19,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 
-let TOOLS = [];
+const TOOLS = [];
 
 const DATASET_CATEGORY_META = {
   guided: {
@@ -901,7 +901,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                    Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
                  </p>
                </div>
-               <button 
+               <button
                  onClick={() => {
                    setShowCreateModal(false);
                    setDatasetForm({
@@ -917,7 +917,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                  ✕
                </button>
              </div>
-             
+
              <form className="space-y-6 mt-6" onSubmit={createDemoDataset}>
                <div className="grid gap-4 sm:grid-cols-2">
                  <div>
@@ -986,7 +986,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                    </select>
                  </div>
                </div>
-             
+
                <div className="mt-8 flex justify-end gap-3">
                  <button
                    type="button"
@@ -1033,6 +1033,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [progressPct, setProgressPct] = useState(0);
+  const [currentFile, setCurrentFile] = useState(null);
+  const [totalFiles, setTotalFiles] = useState(null);
+  const [currentFilename, setCurrentFilename] = useState(null);
+  const [currentEngine, setCurrentEngine] = useState(null);
   const [error, setError] = useState('');
   const requestControllerRef = useRef(null);
 
@@ -1114,7 +1118,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 
             setProgressPct(100);
             setProgress('Complete!');
-            setTimeout(() => onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
+            onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
           } catch (err) {
             setError(err.response?.data?.error || 'Failed to run benchmark on the selected dataset');
             setProgress('Error occurred');
@@ -1211,23 +1215,37 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           </div>
         )}
 
-        {running && (
-          <div className="mb-5">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                <Loader2 size={15} className="text-violet-600 animate-spin" />
-                {progress}
-              </p>
-              <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
-            </div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
-          </div>
-        )}
+         {running && (
+           <div className="mb-5">
+             <div className="flex items-center justify-between mb-2">
+               <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                 <Loader2 size={15} className="text-violet-600 animate-spin" />
+                 {progress}
+               </p>
+               <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
+             </div>
+             <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+               <div
+                 className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500"
+                 style={{ width: `${progressPct}%` }}
+               />
+             </div>
+
+             {/* Detailed progress counter */}
+             {currentFile && totalFiles && (
+               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                 <div className="flex items-center justify-between">
+                   <div className="text-xs font-semibold text-slate-500">Processing</div>
+                   <div className="text-xs font-bold text-violet-600">{currentFile} / {totalFiles}</div>
+                 </div>
+                 <div className="mt-1 text-sm font-medium text-slate-700 truncate">{currentFilename || 'Preparing files...'}</div>
+                 {currentEngine && (
+                   <div className="mt-1 text-xs text-slate-400">Running with {currentEngine}</div>
+                 )}
+               </div>
+             )}
+           </div>
+         )}
 
         <div className="flex items-center gap-3">
           {!running ? (
@@ -1404,12 +1422,10 @@ function ReportStep({ results, onRestart }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: summary?.tools_compared || activeTools.length },
-          { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: summary?.pairs_tested || (pair_results?.length || 0) },
-          { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'IntegrityDesk Avg', value: summary?.accuracy?.integritydesk ? `${(summary.accuracy.integritydesk * 100).toFixed(1)}%` : '—' },
-          { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Best Competitor', value: summary?.accuracy?.best_competitor ? `${(summary.accuracy.best_competitor * 100).toFixed(1)}%` : '—' },
-        ].map(({ icon: Icon, bg, color, label, value }) => (
+         {[
+           { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
+           { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
+         ].map(({ icon: Icon, bg, color, label, value }) => (
           <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
             <div className="flex items-center gap-3 mb-3">
               <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
@@ -1590,7 +1606,7 @@ function ReportStep({ results, onRestart }) {
             <div className="text-center">Spread</div>
           </div>
           <div className="divide-y divide-slate-50">
-            {(pair_results || []).slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((pair, idx) => {
+            {(pair_results || []).map((pair, pairIndex) => {
               const scores = activeTools.map(t => {
                 const tr = pair.tool_results?.find(r => r.tool === t);
                 return tr ? tr.score : null;
@@ -1599,12 +1615,12 @@ function ReportStep({ results, onRestart }) {
               const maxScore = valid.length ? Math.max(...valid) : 0;
               const minScore = valid.length ? Math.min(...valid) : 0;
               const spread = maxScore - minScore;
-              const isExpanded = expandedPairs[idx];
-              const pairKey = `${pair.file_a || 'unknown-a'}::${pair.file_b || 'unknown-b'}::${pair.label || idx}`;
+              const isExpanded = expandedPairs[pairIndex];
+              const pairKey = `${pair.file_a || 'unknown-a'}::${pair.file_b || 'unknown-b'}::${pair.label || pairIndex}`;
 
               return (
                 <div key={pairKey}>
-                  <button onClick={() => togglePair(idx)}
+                  <button onClick={() => togglePair(pairIndex)}
                     className="w-full px-6 py-4 hover:bg-slate-50/50 transition-colors text-left hidden lg:grid items-center"
                     style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
                     <div className="flex items-center gap-3">
@@ -1632,7 +1648,7 @@ function ReportStep({ results, onRestart }) {
                     <div className={`text-center text-xs font-bold ${spread >= 0.3 ? 'text-red-600' : 'text-emerald-600'}`}>{(spread * 100).toFixed(0)}%</div>
                   </button>
                   {/* Mobile row */}
-                  <button onClick={() => togglePair(idx)} className="lg:hidden w-full px-4 py-3 hover:bg-slate-50/50 text-left flex items-center gap-3">
+                  <button onClick={() => togglePair(pairIndex)} className="lg:hidden w-full px-4 py-3 hover:bg-slate-50/50 text-left flex items-center gap-3">
                     <div className={`w-2 h-8 rounded-full shrink-0 ${maxScore >= 0.9 ? 'bg-red-500' : maxScore >= 0.75 ? 'bg-amber-500' : maxScore >= 0.5 ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
                     <div className="flex-1">
                       <div className="text-sm font-semibold text-slate-900">{pair.label}</div>
@@ -1698,10 +1714,6 @@ export default function BenchmarkPage() {
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
-
-  // Pagination for detailed results table
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   useEffect(() => {
     if (authLoading || !user) {
