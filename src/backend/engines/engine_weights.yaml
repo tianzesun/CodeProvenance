@@ -1,12 +1,14 @@
 weights:
   ast: 0.45
-  token: 0.35
-  winnowing: 0.15
+  token: 0.15
+  winnowing: 0.05
   gst: 0.05
-  semantic: 0.0
+  semantic: 0.15
   web: 0.0
   ai_detection: 0.0
-  execution_cfg: 0.0
+  execution_cfg: 0.15
+  tree_kernel: 0.15
+  cfg: 0.05
 baseline_correction:
   baselines:
     winnowing: 0.35
@@ -17,20 +19,36 @@ baseline_correction:
 precision_guard:
   enabled: true
   high_score_floor: 0.68
+  extreme_score_floor: 0.85
   evidence_threshold: 0.4
   lexical_threshold: 0.45
   minimum_concrete_engines: 2
-  minimum_lexical_engines: 2
-  insufficient_evidence_cap: 0.55
+  minimum_concrete_engines_high_score: 1
+  minimum_lexical_engines: 1
+  minimum_lexical_engines_high_score: 0
+  penalty_multiplier: 0.85
   semantic_only_cap: 0.45
+  cfg_high_score_bypass: true
+  ast_bypass_threshold: 0.85
 arbitration:
   enabled: true
   prior_precision_multiplier: 20.0
   minimum_agreement: 0.3
 ast_boost:
   enabled: true
-  threshold: 0.9
-  minimum_guaranteed_score: 0.75
+  threshold: 0.80
+  minimum_guaranteed_score: 0.65
+  bypass_precision_guards: true
+deep_verify:
+  tree_kernel_min: 0.60
+  ast_normalized_min: 0.45
+  cfg_similarity_min: 0.50
+  minimum_agreeing_engines: 3
+  minimum_agreeing_engines_high_score: 2
+  final_confidence_floor: 0.65
+  false_positive_safety_cap: 0.58
+  cfg_bypass_enabled: true
+  cfg_bypass_threshold: 0.80
 decision:
   default_threshold: 0.78
   minimum_confidence: 0.4

@@ -494,6 +494,11 @@ class FusionEngine:
         cap = float(guard.get("insufficient_evidence_cap", 0.58))
         semantic_only_cap = float(guard.get("semantic_only_cap", 0.45))
 
+        # AST >= 0.8 automatically bypasses all precision guard requirements
+        ast_score = corrected_scores.get("ast", 0.0)
+        if ast_score >= 0.85:
+            return final_score
+            
         concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
         lexical_engines = ("fingerprint", "winnowing", "ngram")
         concrete_evidence = sum(

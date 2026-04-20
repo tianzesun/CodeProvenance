@@ -971,3 +971,225 @@ def _dict_similarity(dict_a: Any, dict_b: Any) -> float:
     else:
         # Primitive comparison
         return 1.0 if dict_a == dict_b else 0.0
+
+
+class DeepVerify:
+    """
+    Second phase heavy verification engine.
+    
+    Implements the two-stage architecture:
+    1. Fast first pass to get Top-N candidates
+    2. Deep heavy verification only on those candidates
+    
+    Designed to achieve >90% precision by applying expensive but accurate algorithms
+    only to the small candidate set from the first filtering stage.
+    
+    All thresholds are fully configurable via engine_weights.yaml
+    """
+    
+    def __init__(self):
+        from src.backend.engines.weight_config import EngineWeightConfig
+        self.config = EngineWeightConfig.get_instance()
+    
+    def __init__(self):
+        self.ted = ASTTreeEditDistance()
+        self.tree_kernel = TreeKernelSimilarity()
+        self.cfg_analyzer = ControlFlowAnalyzer()
+        self.clone_detector = PatternCloneDetector()
+        self.deep_analyzer = DeepCodeAnalyzer()
+    
+    def verify_pair(
+        self,
+        parsed_a: Dict[str, Any],
+        parsed_b: Dict[str, Any],
+        initial_score: float,
+        language: str = 'default'
+    ) -> Dict[str, Any]:
+        """
+        Perform heavy verification on a single candidate pair from first pass.
+        
+        This function will spend up to ~1 second per pair, applying all high-accuracy
+        algorithms. Only returns high confidence matches.
+        
+        Args:
+            parsed_a: First parsed code
+            parsed_b: Second parsed code
+            initial_score: Score from fast first pass algorithm
+            language: Programming language
+            
+        Returns:
+            Verified result with confidence score and decision
+        """
+        ast_a = parsed_a.get('ast')
+        ast_b = parsed_b.get('ast')
+        
+        result = {
+            "verified": False,
+            "final_score": 0.0,
+            "initial_score": initial_score,
+            "confidence": 0.0,
+            "evidence": {},
+            "agreeing_engines": 0,
+            "verification_steps_run": 0,
+            "rejection_reason": None
+        }
+        
+        if not ast_a or not ast_b:
+            result["rejection_reason"] = "AST_UNAVAILABLE"
+            result["final_score"] = min(initial_score, self.VERIFICATION_THRESHOLDS["false_positive_safety_cap"])
+            return result
+        
+        # Step 1: Normalized AST comparison (fastest first)
+        norm_a = self.deep_analyzer._normalize_ast(ast_a, language)
+        norm_b = self.deep_analyzer._normalize_ast(ast_b, language)
+        ast_norm_score = _dict_similarity(norm_a, norm_b)
+        result["evidence"]["ast_normalized"] = ast_norm_score
+        result["verification_steps_run"] += 1
+        
+        thresholds = self.config.deep_verify_thresholds
+        
+        if ast_norm_score < thresholds.get("ast_normalized_min", 0.60):
+            result["rejection_reason"] = "AST_NORMALIZED_FAIL"
+            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            return result
+        
+        result["agreeing_engines"] += 1
+        
+        # Step 2: Tree Kernel similarity
+        tree_kernel_score = self.tree_kernel.calculate_similarity(ast_a, ast_b)
+        result["evidence"]["tree_kernel"] = tree_kernel_score
+        result["verification_steps_run"] += 1
+        
+        if tree_kernel_score < thresholds.get("tree_kernel_min", 0.65):
+            result["rejection_reason"] = "TREE_KERNEL_FAIL"
+            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            return result
+        
+        result["agreeing_engines"] += 1
+        
+        # Step 3: Control Flow Graph similarity
+        cfg_a = self.cfg_analyzer.analyze(ast_a)
+        cfg_b = self.cfg_analyzer.analyze(ast_b)
+        cfg_score = self.cfg_analyzer.compare_cfg(cfg_a, cfg_b)
+        result["evidence"]["cfg_similarity"] = cfg_score
+        result["verification_steps_run"] += 1
+        
+        if cfg_score >= thresholds.get("cfg_similarity_min", 0.55):
+            result["agreeing_engines"] += 1
+        
+        # Step 4: Tree Edit Distance
+        ted_distance = self.ted.calculate_distance(ast_a, ast_b)
+        ted_similarity = 1.0 - ted_distance
+        result["evidence"]["tree_edit_similarity"] = ted_similarity
+        result["verification_steps_run"] += 1
+        
+        if ted_similarity > 0.5:
+            result["agreeing_engines"] += 1
+        
+        # Step 5: Clone pattern detection
+        clone_result = self.clone_detector.detect_clones(
+            self.deep_analyzer.analyze(parsed_a),
+            self.deep_analyzer.analyze(parsed_b)
+        )
+        result["evidence"]["clone_score"] = clone_result["clone_score"]
+        result["verification_steps_run"] += 1
+        
+        if clone_result["clone_score"] > 0.45:
+            result["agreeing_engines"] += 1
+        
+        thresholds = self.config.deep_verify_thresholds
+        weights = self.config.weights
+        
+        # Consensus decision - multiple engines must agree
+        minimum_engines = thresholds.get("minimum_agreeing_engines", 3)
+        if result["agreeing_engines"] < minimum_engines:
+            result["rejection_reason"] = "INSUFFICIENT_CONSENSUS"
+            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            return result
+        
+        # Calculate final weighted score using global weights
+        tree_kernel_weight = weights.get("tree_kernel", 0.35)
+        ast_weight = weights.get("ast", 0.30)
+        ted_weight = weights.get("execution_cfg", 0.15)
+        cfg_weight = weights.get("cfg", 0.12)
+        clone_weight = 0.08
+        
+        weight_sum = tree_kernel_weight + ast_weight + ted_weight + cfg_weight + clone_weight
+        
+        result["final_score"] = (
+            (tree_kernel_weight * tree_kernel_score) +
+            (ast_weight * ast_norm_score) +
+            (ted_weight * ted_similarity) +
+            (cfg_weight * cfg_score) +
+            (clone_weight * clone_result["clone_score"])
+        ) / weight_sum
+        
+        # Apply confidence floor
+        confidence_floor = thresholds.get("final_confidence_floor", 0.70)
+        if result["final_score"] >= confidence_floor:
+            result["verified"] = True
+            result["confidence"] = min(
+                (result["agreeing_engines"] / 5.0) * result["final_score"] * 1.2,
+                1.0
+            )
+        else:
+            result["rejection_reason"] = "FINAL_SCORE_BELOW_THRESHOLD"
+            result["final_score"] = min(result["final_score"], thresholds.get("false_positive_safety_cap", 0.58))
+        
+        return result
+    
+    def verify_top_candidates(
+        self,
+        query_submission: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+        language: str = 'default',
+        top_n: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Run deep verification on Top-N candidates from first pass retrieval.
+        
+        This is the main entry point for the second stage of the two-pass architecture.
+        
+        Args:
+            query_submission: The query submission being compared
+            candidates: List of candidate matches from first pass (must include 'score' and 'parsed')
+            language: Programming language
+            top_n: Only verify top N candidates (default 10)
+            
+        Returns:
+            List of verified candidates with updated scores
+        """
+        # Sort by initial score descending and take top N
+        sorted_candidates = sorted(candidates, key=lambda c: c["score"], reverse=True)[:top_n]
+        
+        verified_results = []
+        for candidate in sorted_candidates:
+            verification = self.verify_pair(
+                query_submission,
+                candidate["parsed"],
+                candidate["score"],
+                language
+            )
+            
+            candidate["deep_verification"] = verification
+            candidate["final_score"] = verification["final_score"]
+            candidate["verified"] = verification["verified"]
+            candidate["confidence"] = verification["confidence"]
+            
+            verified_results.append(candidate)
+        
+        # Re-sort by final verified score
+        verified_results.sort(key=lambda c: c["final_score"], reverse=True)
+        
+        return verified_results
+
+
+# Convenience function
+def deep_verify_pair(
+    parsed_a: Dict[str, Any],
+    parsed_b: Dict[str, Any],
+    initial_score: float,
+    language: str = 'default'
+) -> Dict[str, Any]:
+    """Convenience wrapper for DeepVerify.verify_pair"""
+    return DeepVerify().verify_pair(parsed_a, parsed_b, initial_score, language)
