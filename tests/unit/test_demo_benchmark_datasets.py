@@ -58,6 +58,67 @@ def test_store_benchmark_uploads_accepts_zip_archives(tmp_path):
     }
 
 
+def test_compute_evaluation_metrics_includes_pan_scores():
+    metrics = server._compute_evaluation_metrics(
+        scores=[0.95, 0.72, 0.12, 0.82],
+        labels=[3, 2, 0, 0],
+        tool_name="integritydesk",
+        dataset_name="pan-smoke",
+        runtime_seconds=2.0,
+    )
+
+    assert metrics["precision"] == 0.6667
+    assert metrics["recall"] == 1.0
+    assert metrics["f1_score"] == 0.8
+    assert metrics["granularity"] == 1.0
+    assert metrics["plagdet"] == 0.8
+    assert metrics["plagdet_percent"] == 80.0
+    assert metrics["top_10_retrieval"] == 1.0
+    assert metrics["top_20_retrieval"] == 1.0
+    assert metrics["false_positive_rate"] == 0.5
+    assert "auc_pr" in metrics
+    assert metrics["engine_contribution"] == {}
+    assert metrics["ai_generated_recall"] is None
+    assert metrics["runtime_seconds"] == 2.0
+    assert metrics["avg_runtime_seconds"] == 0.5
+    assert metrics["pan_metrics"] == {
+        "precision": 0.6667,
+        "recall": 1.0,
+        "f1_score": 0.8,
+        "granularity": 1.0,
+        "plagdet": 0.8,
+        "top_10_retrieval": 1.0,
+        "top_20_retrieval": 1.0,
+        "false_positive_rate": 0.5,
+        "auc_pr": metrics["auc_pr"],
+        "engine_contribution": {},
+        "ai_generated_recall": None,
+        "avg_runtime_seconds": 0.5,
+    }
+    assert metrics["granularity_basis"] == "pair_level_single_detection"
+
+
+def test_compute_top_k_retrieval_uses_ranked_scores():
+    scores = [0.9, 0.8, 0.1, 0.7, 0.6]
+    labels = [0, 1, 1, 0, 1]
+
+    retrieval = server._compute_top_k_retrieval(scores, labels, k=2)
+
+    assert retrieval == 1 / 3
+
+
+def test_ground_truth_labels_infer_demo_original_plagiarized_pairs():
+    pair_results = [
+        {"file_a": "00.py", "file_b": "00_plagiarized.py"},
+        {"file_a": "00.py", "file_b": "01.py"},
+        {"file_a": "plagiarized_001.py", "file_b": "original_001.py"},
+    ]
+
+    labels = server._get_ground_truth_labels("demo_sample", pair_results)
+
+    assert labels == [3, 0, 3]
+
+
 def test_extract_code_entries_from_row_supports_pair_fields():
     row = {
         "func1": "public class A { public static void main(String[] args) {} }\n",
@@ -132,6 +193,7 @@ def test_benchmark_dataset_cards_derive_metadata_from_huggingface_layout(
             "created_by": "System",
             "created_at": "",
             "is_demo": False,
+            "has_ground_truth": False,
         }
     ]
 
@@ -174,6 +236,7 @@ def test_benchmark_dataset_cards_support_test_only_huggingface_layout(
             "created_by": "System",
             "created_at": "",
             "is_demo": False,
+            "has_ground_truth": False,
         }
     ]
 
@@ -224,5 +287,6 @@ def test_benchmark_dataset_cards_count_unique_nested_files(tmp_path, monkeypatch
             "created_by": "System",
             "created_at": "",
             "is_demo": False,
+            "has_ground_truth": False,
         }
     ]

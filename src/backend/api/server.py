@@ -1,7 +1,9 @@
 """IntegrityDesk Backend API Server"""
+
 # LOAD ENVIRONMENT FIRST BEFORE ANY OTHER IMPORTS
 from dotenv import load_dotenv
 from pathlib import Path
+
 load_dotenv(Path(__file__).parent.parent / ".env.local")
 
 
@@ -22,6 +24,7 @@ import logging
 import hashlib
 import secrets
 import time
+import math
 import subprocess
 import csv
 import xml.etree.ElementTree as ET
@@ -35,6 +38,8 @@ import numpy as np
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+
+from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import func, select
@@ -69,6 +74,8 @@ elif parsed_frontend_url.hostname == "127.0.0.1":
     frontend_origin_candidates.add(
         settings.FRONTEND_URL.replace("127.0.0.1", "localhost", 1).rstrip("/")
     )
+
+app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -3122,6 +3129,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 "created_by": metadata.get("created_by", "System"),
                 "created_at": metadata.get("created", metadata.get("created_at", "")),
                 "is_demo": is_demo,
+                "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, item),
             }
 
             # Add demo-specific fields if applicable
@@ -3136,22 +3144,54 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
     return JSONResponse(content={"datasets": datasets})
 
 
+def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bool:
+    """Return true when a dataset can support pair-level benchmark metrics."""
+    if dataset_id.startswith("demo_"):
+        return (dataset_root / "original").exists() and (
+            dataset_root / "plagiarized"
+        ).exists()
+    if dataset_id.startswith("synthetic"):
+        has_original = any(dataset_root.glob("original_*"))
+        has_plagiarized = any(dataset_root.glob("plagiarized_*"))
+        return has_original and has_plagiarized
+    return (dataset_root / "ground_truth.json").exists()
+
+
 @app.post("/api/benchmark")
 async def run_benchmark(
     files: List[UploadFile] = File(default=[]),
     tools: List[str] = Form(default=[]),
     dataset: str = Form(default=""),
+    benchmark_type: str = Form(default="tool_comparison"),
 ):
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info(f"[BENCHMARK {job_id}] Starting benchmark job")
+    logger.info(f"[BENCHMARK {job_id}] Requested tools: {', '.join(tools)}")
+    logger.info(
+        f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}"
+    )
+    benchmark_type = (
+        "pan_optimization"
+        if benchmark_type == "pan_optimization"
+        else "tool_comparison"
+    )
+
     submissions = {}
 
+    logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
+        logger.info(f"[BENCHMARK {job_id}] Loading dataset: {dataset}")
         submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
+        logger.info(f"[BENCHMARK {job_id}] Processing {len(files)} uploaded files")
         submissions = await _store_benchmark_uploads(files, job_dir)
+
+    logger.info(
+        f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully"
+    )
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -3165,9 +3205,14 @@ async def run_benchmark(
         for i in range(len(file_list))
         for j in range(i + 1, len(file_list))
     ]
+    logger.info(f"[BENCHMARK {job_id}] Generated {len(all_pairs)} comparison pairs")
+
     tool_results = {}
+    tool_timings: Dict[str, float] = {}
 
     if "integritydesk" in tools:
+        logger.info(f"[BENCHMARK {job_id}] Running IntegrityDesk engine")
+        tool_started = time.perf_counter()
         try:
             # Optimize for benchmarks: disable embedding on CPU, keep it on GPU
             import os
@@ -3203,7 +3248,13 @@ async def run_benchmark(
                     )
 
             service = BatchDetectionService(threshold=0.3)
+            logger.info(
+                f"[BENCHMARK {job_id}] Starting IntegrityDesk all-pairs comparison on {len(submissions)} files"
+            )
             results = service.compare_all_pairs(submissions)
+            logger.info(
+                f"[BENCHMARK {job_id}] IntegrityDesk completed successfully, got {len(results)} results"
+            )
             tool_results["integritydesk"] = {
                 "pairs": [
                     {
@@ -3225,10 +3276,19 @@ async def run_benchmark(
         except Exception as e:
             logger.exception("IntegrityDesk benchmark failed")
             tool_results["integritydesk"] = {"error": str(e)}
+        finally:
+            tool_timings["integritydesk"] = time.perf_counter() - tool_started
 
+    total_tools = len([t for t in tools if t != "integritydesk"])
+    current_tool_idx = 1
     for tool in tools:
         if tool == "integritydesk":
             continue
+        logger.info(
+            f"[BENCHMARK {job_id}] Running tool {current_tool_idx}/{total_tools}: {tool}"
+        )
+        current_tool_idx += 1
+        tool_started = time.perf_counter()
         try:
             score_data = _run_competitor_tool(tool, submissions, all_pairs)
             if score_data:
@@ -3238,6 +3298,8 @@ async def run_benchmark(
         except Exception as e:
             logger.exception(f"{tool} benchmark failed")
             tool_results[tool] = {"error": str(e)}
+        finally:
+            tool_timings[tool] = time.perf_counter() - tool_started
 
     pair_results = []
     for fa, fb in all_pairs:
@@ -3254,12 +3316,16 @@ async def run_benchmark(
                         p["file_a"] == fb and p["file_b"] == fa
                     ):
                         entry["tool_results"].append(
-                            {"tool": tool_name, "score": p["score"]}
+                            {
+                                "tool": tool_name,
+                                "score": p["score"],
+                                "features": p.get("features", {}),
+                            }
                         )
         pair_results.append(entry)
 
     # Build ground truth labels for built-in datasets
-    ground_truth_labels = _get_ground_truth_labels(dataset, len(pair_results))
+    ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
 
     # Compute evaluation metrics per tool
     evaluation_results = {}
@@ -3293,7 +3359,12 @@ async def run_benchmark(
             if scores and labels:
                 # Compute metrics
                 metrics = _compute_evaluation_metrics(
-                    scores, labels, tool_name, dataset or "custom"
+                    scores,
+                    labels,
+                    tool_name,
+                    dataset or "custom",
+                    tool_timings.get(tool_name, 0.0),
+                    _compute_engine_contribution(tool_data.get("pairs", [])),
                 )
                 evaluation_results[tool_name] = metrics
 
@@ -3314,7 +3385,14 @@ async def run_benchmark(
     response = {
         "job_id": job_id,
         "tool_scores": {
-            k: {"pairs": len(v.get("pairs", []))} for k, v in tool_results.items()
+            k: {
+                "pairs": len(v.get("pairs", [])),
+                "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
+                "avg_runtime_seconds": round(
+                    tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
+                ),
+            }
+            for k, v in tool_results.items()
         },
         "pair_results": pair_results,
         "summary": {
@@ -3326,23 +3404,48 @@ async def run_benchmark(
                 "integritydesk": round(id_avg, 4),
                 "best_competitor": round(comp_avg, 4),
             },
+            "dataset_name": dataset or "custom",
+            "dataset_size": len(submissions),
+            "positive_pairs": int(
+                sum(1 for label in ground_truth_labels if label >= 2)
+            ),
+            "negative_pairs": int(sum(1 for label in ground_truth_labels if label < 2)),
+            "optimization_trials": 17,
+            "cross_validation_folds": 1,
+            "optimization_method": "Threshold sweep over 17 cutoffs, maximizing F1; PlagDet reported as primary PAN score",
         },
+        "benchmark_type": benchmark_type,
+        "benchmark_goal": (
+            "admin_pan_optimization"
+            if benchmark_type == "pan_optimization"
+            else "professor_tool_comparison"
+        ),
+        "has_ground_truth": bool(ground_truth_labels),
     }
 
     # Add evaluation metrics if available
     if evaluation_results:
         response["evaluation"] = evaluation_results
-        response["has_ground_truth"] = True
+        response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
 
     return JSONResponse(content=response)
 
 
-def _get_ground_truth_labels(dataset: str, num_pairs: int) -> List[int]:
+def _get_ground_truth_labels(
+    dataset: str, pair_results: List[Dict[str, Any]]
+) -> List[int]:
     """Get ground truth labels for built-in datasets.
 
     Labels: 0=unrelated, 1=weak, 2=semantic clone, 3=exact clone
     For binary classification: clone if label >= 2
     """
+    if not pair_results:
+        return []
+
+    inferred = _infer_filename_ground_truth_labels(dataset, pair_results)
+    if inferred:
+        return inferred
+
     if dataset == "basic-clone":
         # 5 pairs: identical(3), renamed(3), reordered(2), similar(2), unrelated(0)
         return [3, 3, 2, 2, 0]
@@ -3363,15 +3466,88 @@ def _get_ground_truth_labels(dataset: str, num_pairs: int) -> List[int]:
     return []
 
 
+def _get_ground_truth_basis(dataset: str) -> str:
+    """Describe how benchmark ground truth was derived."""
+    if dataset and (
+        dataset.startswith("demo_")
+        or dataset.startswith("synthetic")
+        or dataset in {"synthetic_small", "synthetic_medium", "synthetic_java"}
+    ):
+        return "filename_original_plagiarized_pairs"
+    return "built_in_dataset_labels"
+
+
+def _infer_filename_ground_truth_labels(
+    dataset: str, pair_results: List[Dict[str, Any]]
+) -> List[int]:
+    """Infer pair labels from original/plagiarized filename conventions."""
+    if not dataset or not (
+        dataset.startswith("demo_")
+        or dataset.startswith("synthetic")
+        or dataset in {"synthetic_small", "synthetic_medium", "synthetic_java"}
+    ):
+        return []
+
+    labels = []
+    saw_positive = False
+    for pair in pair_results:
+        label = (
+            3
+            if _is_original_plagiarized_match(
+                pair.get("file_a", ""), pair.get("file_b", "")
+            )
+            else 0
+        )
+        saw_positive = saw_positive or label >= 2
+        labels.append(label)
+
+    return labels if saw_positive else []
+
+
+def _is_original_plagiarized_match(file_a: str, file_b: str) -> bool:
+    """Return true when filenames represent the same original/plagiarized item."""
+    base_a, role_a = _ground_truth_filename_parts(file_a)
+    base_b, role_b = _ground_truth_filename_parts(file_b)
+    return bool(
+        base_a and base_a == base_b and {role_a, role_b} == {"original", "plagiarized"}
+    )
+
+
+def _ground_truth_filename_parts(filename: str) -> tuple[str, str]:
+    """Extract a stable pair id and role from known benchmark filename patterns."""
+    stem = PathLib(filename).stem
+    stem = stem.split("__")[-1]
+
+    if stem.endswith("_plagiarized"):
+        return stem.removesuffix("_plagiarized"), "plagiarized"
+    if stem.startswith("plagiarized_"):
+        return stem.removeprefix("plagiarized_"), "plagiarized"
+    if stem.startswith("original_"):
+        return stem.removeprefix("original_"), "original"
+    return stem, "original"
+
+
 def _compute_evaluation_metrics(
-    scores: List[float], labels: List[int], tool_name: str, dataset_name: str
+    scores: List[float],
+    labels: List[int],
+    tool_name: str,
+    dataset_name: str,
+    runtime_seconds: float = 0.0,
+    engine_contribution: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
-    """Compute evaluation metrics: precision, recall, F1, ROC-AUC, PR-AUC."""
+    """Compute PAN-aligned evaluation metrics for labeled benchmark pairs.
+
+    The interactive benchmark endpoint currently receives pair-level labels
+    rather than PAN character-span annotations. Precision, recall, and F1 use
+    the same binary clone decision semantics; granularity is therefore fixed to
+    one detection per detected true pair. Full fragment-level granularity is
+    handled by src.backend.evaluation.pan_metrics when span annotations exist.
+    """
     if len(scores) != len(labels) or len(scores) == 0:
         return {"error": "Invalid scores/labels"}
 
     # Binary labels: >= 2 is a clone
-    binary_labels = [1 if l >= 2 else 0 for l in labels]
+    binary_labels = [1 if label >= 2 else 0 for label in labels]
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
@@ -3396,7 +3572,7 @@ def _compute_evaluation_metrics(
             else 0
         )
 
-        if f1 > best_f1:
+        if best_cm is None or f1 > best_f1:
             best_f1 = f1
             best_threshold = threshold
             best_cm = {"tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn)}
@@ -3416,6 +3592,30 @@ def _compute_evaluation_metrics(
         roc_auc = _compute_auc_fallback(scores_arr, labels_arr, "roc")
         pr_auc = _compute_auc_fallback(scores_arr, labels_arr, "pr")
 
+    precision = (
+        best_cm["tp"] / (best_cm["tp"] + best_cm["fp"])
+        if best_cm and (best_cm["tp"] + best_cm["fp"]) > 0
+        else 0
+    )
+    recall = (
+        best_cm["tp"] / (best_cm["tp"] + best_cm["fn"])
+        if best_cm and (best_cm["tp"] + best_cm["fn"]) > 0
+        else 0
+    )
+    f1_score = (
+        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    )
+    granularity = 1.0
+    plagdet = f1_score / math.log2(1 + granularity)
+    top_10_retrieval = _compute_top_k_retrieval(scores, binary_labels, k=10)
+    top_20_retrieval = _compute_top_k_retrieval(scores, binary_labels, k=20)
+    avg_runtime_seconds = runtime_seconds / max(1, len(scores))
+    false_positive_rate = (
+        best_cm["fp"] / (best_cm["fp"] + best_cm["tn"])
+        if best_cm and (best_cm["fp"] + best_cm["tn"]) > 0
+        else 0
+    )
+
     return {
         "tool": tool_name,
         "dataset": dataset_name,
@@ -3423,26 +3623,74 @@ def _compute_evaluation_metrics(
         "n_positives": int(sum(binary_labels)),
         "n_negatives": int(len(binary_labels) - sum(binary_labels)),
         "best_threshold": round(best_threshold, 2),
-        "best_f1": round(best_f1, 4),
-        "precision": round(
-            (
-                best_cm["tp"] / (best_cm["tp"] + best_cm["fp"])
-                if best_cm and (best_cm["tp"] + best_cm["fp"]) > 0
-                else 0
-            ),
-            4,
-        ),
-        "recall": round(
-            (
-                best_cm["tp"] / (best_cm["tp"] + best_cm["fn"])
-                if best_cm and (best_cm["tp"] + best_cm["fn"]) > 0
-                else 0
-            ),
-            4,
-        ),
+        "best_f1": round(f1_score, 4),
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1_score": round(f1_score, 4),
+        "granularity": round(granularity, 4),
+        "plagdet": round(plagdet, 4),
+        "plagdet_percent": round(plagdet * 100, 2),
+        "top_10_retrieval": round(top_10_retrieval, 4),
+        "top_20_retrieval": round(top_20_retrieval, 4),
+        "false_positive_rate": round(false_positive_rate, 4),
+        "auc_pr": round(pr_auc, 4),
+        "engine_contribution": engine_contribution or {},
+        "ai_generated_recall": None,
+        "runtime_seconds": round(runtime_seconds, 4),
+        "avg_runtime_seconds": round(avg_runtime_seconds, 6),
         "roc_auc": round(roc_auc, 4),
         "pr_auc": round(pr_auc, 4),
         "confusion_matrix": best_cm,
+        "pan_metrics": {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1_score": round(f1_score, 4),
+            "granularity": round(granularity, 4),
+            "plagdet": round(plagdet, 4),
+            "top_10_retrieval": round(top_10_retrieval, 4),
+            "top_20_retrieval": round(top_20_retrieval, 4),
+            "false_positive_rate": round(false_positive_rate, 4),
+            "auc_pr": round(pr_auc, 4),
+            "engine_contribution": engine_contribution or {},
+            "ai_generated_recall": None,
+            "avg_runtime_seconds": round(avg_runtime_seconds, 6),
+        },
+        "granularity_basis": "pair_level_single_detection",
+    }
+
+
+def _compute_top_k_retrieval(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
+    """Compute recall@k for retrieving true plagiarism pairs."""
+    total_positives = sum(binary_labels)
+    if total_positives <= 0:
+        return 0.0
+
+    ranked = sorted(zip(scores, binary_labels), key=lambda item: item[0], reverse=True)
+    retrieved_positives = sum(label for _, label in ranked[:k])
+    return retrieved_positives / total_positives
+
+
+def _compute_engine_contribution(pairs: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Estimate per-engine contribution from IntegrityDesk feature scores."""
+    totals: Dict[str, float] = {}
+    for pair in pairs:
+        features = pair.get("features") or {}
+        for name, value in features.items():
+            numeric_value = _coerce_float(value)
+            if numeric_value > 0:
+                totals[str(name)] = totals.get(str(name), 0.0) + numeric_value
+
+    total = sum(totals.values())
+    if total <= 0:
+        return {}
+
+    return {
+        name: round(value / total, 4)
+        for name, value in sorted(
+            totals.items(), key=lambda item: item[1], reverse=True
+        )
     }
 
 
