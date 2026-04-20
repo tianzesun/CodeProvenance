@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
+import { SunMedium, MoonStar } from 'lucide-react';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -64,6 +65,20 @@ export default function DashboardLayout({ children, requiredRole }: DashboardLay
           66% { transform: translate(-20px, 20px) scale(0.95); }
         }
       `}</style>
+    {/* Floating theme toggle button */}
+    <button
+      onClick={() => {
+        const event = new CustomEvent('toggleTheme');
+        window.dispatchEvent(event);
+      }}
+      className="fixed bottom-6 right-6 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl hover:scale-105 transition-all"
+      aria-label="Toggle theme"
+      title="Toggle dark/light mode"
+    >
+      <SunMedium size={20} className="dark:hidden text-slate-700" />
+      <MoonStar size={20} className="hidden dark:block text-slate-200" />
+    </button>
+
     </div>
     </SmoothScroll>
   );

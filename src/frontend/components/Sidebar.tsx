@@ -123,24 +123,14 @@ export default function Sidebar() {
                )}
              </div>
 
-             <div className="flex gap-2">
-               <button
-                 onClick={() => setCollapsed(!collapsed)}
-                 className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
-                 aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                 title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-               >
-                 {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-               </button>
-               <button
-                 onClick={toggleTheme}
-                 className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
-                 aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-                 title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-               >
-                 {theme === 'dark' ? <SunMedium size={17} /> : <MoonStar size={17} />}
-               </button>
-             </div>
+             <button
+               onClick={() => setCollapsed(!collapsed)}
+               className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
+               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+             >
+               {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+             </button>
            </div>
 
         </div>
