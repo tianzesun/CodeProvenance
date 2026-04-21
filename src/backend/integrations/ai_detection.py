@@ -3,23 +3,11 @@ AI Detection Integration Clients for CodeProvenance
 Provides typed clients for GPTZero and Grammarly APIs
 """
 
-from pathlib import Path
 from typing import Optional, Dict, Any, List
 import httpx
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-class AISettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=Path(__file__).parent.parent / ".env.local", extra="ignore"
-    )
-
-    GPTZERO_API_KEY: Optional[str] = None
-    GRAMMARLY_API_KEY: Optional[str] = None
-
-
-settings = AISettings()
+from src.backend.config.settings import settings
 
 
 class AIDetectionResult(BaseModel):

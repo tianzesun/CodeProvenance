@@ -5,10 +5,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  BarChart3,
   ChevronLeft,
   ChevronRight,
-  Database,
+  FlaskConical,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -34,48 +33,44 @@ export default function Sidebar() {
 
   const navSections = [
     {
+      label: 'Workspace',
       items: [
         {
           href: '/',
-          label: 'Dashboard',
+          label: 'Overview',
           icon: LayoutDashboard,
         },
         {
           href: '/upload',
-          label: 'New Check',
+          label: 'Run Check',
           icon: Upload,
         },
         {
-          href: '/results',
-          label: 'Reports',
-          icon: BarChart3,
+          href: '/benchmark',
+          label: 'Benchmark',
+          icon: FlaskConical,
         },
+      ],
+    },
+    ...(user?.role === 'admin'
+      ? [
         {
-          href: '/settings',
-          label: 'Settings',
-          icon: Settings,
-        },
-        ...(user?.role === 'admin'
-          ? [
+          label: 'Admin',
+          items: [
             {
-              href: '/benchmark',
-              label: 'Benchmark',
-              icon: BarChart3,
-            },
-            {
-              href: '/datasets',
-              label: 'Datasets',
-              icon: Database,
+              href: '/settings',
+              label: 'System Settings',
+              icon: Settings,
             },
             {
               href: '/admin',
-              label: 'Users',
+              label: 'User Access',
               icon: Shield,
             },
-          ]
-          : []),
-      ],
-    },
+          ],
+        },
+      ]
+      : []),
   ];
 
   const handleLogout = async () => {

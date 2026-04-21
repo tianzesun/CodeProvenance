@@ -16,7 +16,20 @@ from src.backend.engines.features.feature_extractor import (
     FeatureVector,
 )
 from src.backend.engines.scoring.fusion_engine import FusionEngine
+from src.backend.engines.scoring.fusion_engine import load_engine_config
 from src.backend.domain.decision.decision_engine import DecisionEngine
+
+
+EXPECTED_ENGINE_KEYS = {
+    "token",
+    "ast",
+    "winnowing",
+    "gst",
+    "semantic",
+    "web",
+    "ai_detection",
+    "execution_cfg",
+}
 
 
 # ─── FeatureExtractor ──────────────────────────────────────────────────
@@ -36,14 +49,20 @@ class TestFeatureExtractor:
         assert fv.embedding == 0.0
         assert fv.ngram == 0.0
         assert fv.winnowing == 0.0
+        assert fv.execution_cfg == 0.0
 
     def test_to_features_order(self) -> None:
         """to_features() returns features in FEATURE_ORDER."""
         fv = FeatureVector(
-            ast=0.1, fingerprint=0.2, embedding=0.3, ngram=0.4, winnowing=0.5
+            ast=0.1,
+            fingerprint=0.2,
+            embedding=0.3,
+            ngram=0.4,
+            winnowing=0.5,
+            execution_cfg=0.6,
         )
         result = self.extractor.to_features(fv)
-        assert result == [0.1, 0.2, 0.3, 0.4, 0.5]
+        assert result == [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
     def test_extract_identical_code_returns_max_scores(self) -> None:
         """Comparing identical code should produce non-zero similarity scores."""
@@ -116,6 +135,12 @@ class TestFeatureExtractor:
 class TestFusionEngine:
     """Tests for the FusionEngine class."""
 
+    def test_active_config_uses_product_engine_keys(self) -> None:
+        """Active engine config exposes the expected core and optional engines."""
+        config = load_engine_config()
+
+        assert set(config["weights"]) == EXPECTED_ENGINE_KEYS
+
     def test_default_weights_normalized(self) -> None:
         """Default weights must sum to 1.0."""
         engine = FusionEngine()
@@ -150,7 +175,7 @@ class TestFusionEngine:
     def test_config_baseline_aliases_map_to_feature_names(self) -> None:
         """Baseline correction must use the same feature names as extraction."""
         engine = FusionEngine(weights={"fingerprint": 1.0})
-        fv = FeatureVector(fingerprint=0.3)
+        fv = FeatureVector(fingerprint=0.15)
 
         result = engine.fuse(fv)
 
@@ -158,8 +183,8 @@ class TestFusionEngine:
 
     def test_precision_guard_caps_single_engine_high_scores(self) -> None:
         """High-risk scores require agreement from multiple concrete engines."""
-        engine = FusionEngine(weights={"ast": 1.0})
-        fv = FeatureVector(ast=1.0)
+        engine = FusionEngine(weights={"fingerprint": 1.0})
+        fv = FeatureVector(fingerprint=1.0)
 
         result = engine.fuse(fv)
 

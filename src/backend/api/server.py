@@ -798,9 +798,15 @@ def _unavailable_tool_reason(tool_id: str) -> str:
             missing.append("MOSS_USER_ID")
         return f"Needs {', '.join(missing)}" if missing else "Not ready"
     if tool_id == "jplag":
-        return "Needs a JPlag jar in tools/JPlag" if not _find_jplag_jar() else "Not ready"
+        return (
+            "Needs a JPlag jar in tools/JPlag" if not _find_jplag_jar() else "Not ready"
+        )
     if tool_id == "dolos":
-        return "Needs Dolos npm dependencies and CLI build" if not _find_dolos_cli() else "Not ready"
+        return (
+            "Needs Dolos npm dependencies and CLI build"
+            if not _find_dolos_cli()
+            else "Not ready"
+        )
     if tool_id == "ac":
         return "Needs the AC Java archive"
     if tool_id == "nicad":
@@ -955,6 +961,7 @@ async def _store_benchmark_uploads(
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
 BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
 PAIR_BENCHMARK_MAX_PAIRS = 400
+ALL_PAIRS_BENCHMARK_MAX_PAIRS = 5000
 
 
 def _label_to_clone_grade(label: Any, clone_type: Any = None) -> int:
@@ -1002,6 +1009,36 @@ def _load_pair_labeled_benchmark_dataset(
     if dataset_id == "poj104":
         return _load_poj104_pair_dataset(dataset_root, target_dir)
     return {}, []
+
+
+def _build_benchmark_pairs(
+    submissions: Dict[str, str], explicit_pairs: List[Dict[str, Any]]
+) -> tuple[List[tuple[str, str]], str]:
+    """Build comparison pairs and return an error message when the run is too large."""
+    if explicit_pairs:
+        pairs = [
+            (str(pair["file_a"]), str(pair["file_b"]))
+            for pair in explicit_pairs
+            if pair.get("file_a") in submissions and pair.get("file_b") in submissions
+        ]
+        return pairs, ""
+
+    file_list = list(submissions.keys())
+    total_pairs = len(file_list) * (len(file_list) - 1) // 2
+    if total_pairs > ALL_PAIRS_BENCHMARK_MAX_PAIRS:
+        return [], (
+            f"This benchmark would compare {total_pairs:,} file pairs from "
+            f"{len(file_list):,} files. The interactive benchmark limit is "
+            f"{ALL_PAIRS_BENCHMARK_MAX_PAIRS:,} pairs. Use a smaller dataset, "
+            "upload a reduced sample, or use a pair-labeled benchmark dataset."
+        )
+
+    pairs = [
+        (file_list[i], file_list[j])
+        for i in range(len(file_list))
+        for j in range(i + 1, len(file_list))
+    ]
+    return pairs, ""
 
 
 def _load_synthetic_pair_dataset(
@@ -1666,9 +1703,35 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _load_persisted_job(job_id)
 
 
+def _disabled_ai_detection_summary(
+    submissions: Dict[str, str], status_message: str
+) -> Dict[str, Any]:
+    """Build a consistent disabled AI Detection report block."""
+    return {
+        "enabled": False,
+        "configured": bool(
+            getattr(settings, "GPTZERO_API_KEY", None)
+            or getattr(settings, "GRAMMARLY_API_KEY", None)
+        ),
+        "status_message": status_message,
+        "flagged_count": 0,
+        "total_files": len(submissions),
+        "average_score": 0.0,
+        "highest_score": 0.0,
+        "distribution": {},
+        "signal_summary": {},
+        "submissions": [],
+    }
+
+
 def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     if not submissions:
         return {}
+
+    if not bool(getattr(settings, "AI_DETECTION_ENABLED", True)):
+        return _disabled_ai_detection_summary(
+            submissions, "AI Detection is disabled in Settings."
+        )
 
     from src.backend.engines.similarity.ai_detection import AIDetectionEngine
 
@@ -1732,8 +1795,19 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
 
     return {
         "enabled": True,
+        "configured": bool(
+            getattr(settings, "GPTZERO_API_KEY", None)
+            or getattr(settings, "GRAMMARLY_API_KEY", None)
+        ),
         "threshold": AI_MEDIUM_RISK_THRESHOLD,
-        "status_message": "Per-submission AI scoring is available for this assignment.",
+        "status_message": (
+            "Per-submission AI scoring is available for this assignment."
+            if not (
+                getattr(settings, "GPTZERO_API_KEY", None)
+                or getattr(settings, "GRAMMARLY_API_KEY", None)
+            )
+            else "Per-submission AI scoring is enabled; provider keys are configured for external integrations."
+        ),
         "flagged_count": sum(
             1
             for entry in entries
@@ -1797,28 +1871,46 @@ def _build_pair_ai_details(
     return pair_ai_details
 
 
+def _disabled_web_analysis_summary(status_message: str) -> Dict[str, Any]:
+    """Build a consistent disabled Web Analysis report block."""
+    github_token = (
+        getattr(settings, "GITHUB_API_TOKEN", None)
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GITHUB_API_TOKEN")
+    )
+    stackoverflow_api_key = getattr(
+        settings, "STACKEXCHANGE_API_KEY", None
+    ) or os.getenv("STACKEXCHANGE_API_KEY")
+    return {
+        "enabled": False,
+        "configured": bool(github_token or stackoverflow_api_key),
+        "status_message": status_message,
+        "matched_submissions": 0,
+        "highest_similarity": 0.0,
+        "average_similarity": 0.0,
+        "source_totals": {},
+        "submissions": [],
+    }
+
+
 def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     if not submissions:
         return {}
 
-    web_enabled = (
-        os.getenv("INTEGRITYDESK_ENABLE_WEB_ANALYSIS", "").strip().lower()
-        in TRUTHY_VALUES
+    web_enabled = bool(getattr(settings, "WEB_ANALYSIS_ENABLED", False))
+    github_token = (
+        getattr(settings, "GITHUB_API_TOKEN", None)
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GITHUB_API_TOKEN")
     )
-    github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
-    stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
+    stackoverflow_api_key = getattr(
+        settings, "STACKEXCHANGE_API_KEY", None
+    ) or os.getenv("STACKEXCHANGE_API_KEY")
 
     if not web_enabled:
-        return {
-            "enabled": False,
-            "configured": bool(github_token or stackoverflow_api_key),
-            "status_message": "Web analysis is available but disabled by default. Set INTEGRITYDESK_ENABLE_WEB_ANALYSIS=1 to query external sources during assignment checks.",
-            "matched_submissions": 0,
-            "highest_similarity": 0.0,
-            "average_similarity": 0.0,
-            "source_totals": {},
-            "submissions": [],
-        }
+        return _disabled_web_analysis_summary(
+            "Web analysis is available but disabled in Settings."
+        )
 
     from src.backend.infrastructure.indexing.web_search import WebSearchService
 
@@ -1877,8 +1969,12 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
 
     return {
         "enabled": True,
-        "configured": True,
-        "status_message": "External source checks are enabled for this assignment.",
+        "configured": bool(github_token or stackoverflow_api_key),
+        "status_message": (
+            "External source checks are enabled with configured provider keys."
+            if github_token or stackoverflow_api_key
+            else "External source checks are enabled with public-rate provider access."
+        ),
         "matched_submissions": sum(1 for entry in entries if entry["match_count"] > 0),
         "highest_similarity": round(
             max((entry["max_similarity"] for entry in entries), default=0.0), 3
@@ -3178,13 +3274,23 @@ async def _run_analysis(
         _jobs[job_id]["status"] = "analyzing"
         _persist_job(job_id)
 
-        service = BatchDetectionService(
-            threshold=threshold, weights=fusion_weights or None
-        )
+        service = BatchDetectionService(threshold=threshold, weights=fusion_weights)
         results = service.compare_all_pairs(submissions)
         report = service.generate_report(results)
-        ai_detection = _build_ai_detection_summary(submissions)
-        web_analysis = _build_web_analysis_summary(submissions)
+        ai_detection = (
+            _build_ai_detection_summary(submissions)
+            if "ai_detection" in selected_engine_keys
+            else _disabled_ai_detection_summary(
+                submissions, "AI Detection was not selected for this check."
+            )
+        )
+        web_analysis = (
+            _build_web_analysis_summary(submissions)
+            if "web" in selected_engine_keys
+            else _disabled_web_analysis_summary(
+                "Web analysis was not selected for this check."
+            )
+        )
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
 
         comparison_details = []
@@ -3548,14 +3654,18 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
     """Save a full benchmark response and update the compact run history."""
     summary = _benchmark_run_summary(response)
     history = _read_benchmark_history()
-    comparison = _build_benchmark_delta(summary, _find_previous_benchmark_run(history, summary))
+    comparison = _build_benchmark_delta(
+        summary, _find_previous_benchmark_run(history, summary)
+    )
     summary["comparison"] = comparison
 
     run_path = BENCHMARK_RUNS_DIR / f"{summary['job_id']}.json"
     response["history_summary"] = summary
     response["comparison"] = comparison
     response["runAt"] = summary["run_at"]
-    run_path.write_text(json.dumps(response, indent=2, sort_keys=True), encoding="utf-8")
+    run_path.write_text(
+        json.dumps(response, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     history = [item for item in history if item.get("job_id") != summary["job_id"]]
     history.insert(0, summary)
@@ -3567,9 +3677,15 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
 async def get_benchmark_presets() -> Dict[str, Any]:
     """Return repeatable benchmark workflows for product optimization."""
     available_tools = {
-        tool["id"]: tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS
+        tool["id"]: tool
+        for tool in _list_benchmark_tools()
+        if tool["id"] in REAL_BENCHMARK_TOOL_IDS
     }
-    datasets = {item.name for item in BENCHMARK_DATA_DIR.iterdir()} if BENCHMARK_DATA_DIR.exists() else set()
+    datasets = (
+        {item.name for item in BENCHMARK_DATA_DIR.iterdir()}
+        if BENCHMARK_DATA_DIR.exists()
+        else set()
+    )
     presets = []
     for preset in BENCHMARK_WORKFLOW_PRESETS:
         runnable_tools = [
@@ -3580,7 +3696,9 @@ async def get_benchmark_presets() -> Dict[str, Any]:
         blocked_tools = [
             {
                 "id": tool_id,
-                "status": available_tools.get(tool_id, {}).get("status", "Not installed"),
+                "status": available_tools.get(tool_id, {}).get(
+                    "status", "Not installed"
+                ),
             }
             for tool_id in preset["tools"]
             if tool_id not in runnable_tools
@@ -3765,19 +3883,11 @@ async def run_benchmark(
             status_code=400, content={"error": "At least 2 code files required"}
         )
 
-    if explicit_pairs:
-        all_pairs = [
-            (str(pair["file_a"]), str(pair["file_b"]))
-            for pair in explicit_pairs
-            if pair.get("file_a") in submissions and pair.get("file_b") in submissions
-        ]
-    else:
-        file_list = list(submissions.keys())
-        all_pairs = [
-            (file_list[i], file_list[j])
-            for i in range(len(file_list))
-            for j in range(i + 1, len(file_list))
-        ]
+    all_pairs, pair_error = _build_benchmark_pairs(submissions, explicit_pairs)
+    if pair_error:
+        logger.warning(f"[BENCHMARK {job_id}] Refusing oversized run: {pair_error}")
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(status_code=400, content={"error": pair_error})
     logger.info(f"[BENCHMARK {job_id}] Generated {len(all_pairs)} comparison pairs")
 
     tool_results = {}
@@ -5365,6 +5475,13 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "embedding_server_port": settings.EMBEDDING_SERVER_PORT,
     "embedding_device": settings.EMBEDDING_DEVICE,
     "embedding_batch_size": settings.EMBEDDING_BATCH_SIZE,
+    "ai_detection_enabled": settings.AI_DETECTION_ENABLED,
+    "gptzero_api_key": settings.GPTZERO_API_KEY or "",
+    "grammarly_api_key": settings.GRAMMARLY_API_KEY or "",
+    "web_analysis_enabled": settings.WEB_ANALYSIS_ENABLED,
+    "github_api_token": settings.GITHUB_API_TOKEN or "",
+    "stackexchange_api_key": settings.STACKEXCHANGE_API_KEY or "",
+    "execution_cfg_enabled": settings.EXECUTION_CFG_ENABLED,
     "engine_weights": settings.ENGINE_WEIGHTS,
     "batch_size": settings.BATCH_SIZE,
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
@@ -5385,13 +5502,27 @@ SETTINGS_ATTR_MAP = {
     "embedding_server_port": "EMBEDDING_SERVER_PORT",
     "embedding_device": "EMBEDDING_DEVICE",
     "embedding_batch_size": "EMBEDDING_BATCH_SIZE",
+    "ai_detection_enabled": "AI_DETECTION_ENABLED",
+    "gptzero_api_key": "GPTZERO_API_KEY",
+    "grammarly_api_key": "GRAMMARLY_API_KEY",
+    "web_analysis_enabled": "WEB_ANALYSIS_ENABLED",
+    "github_api_token": "GITHUB_API_TOKEN",
+    "stackexchange_api_key": "STACKEXCHANGE_API_KEY",
+    "execution_cfg_enabled": "EXECUTION_CFG_ENABLED",
     "engine_weights": "ENGINE_WEIGHTS",
     "batch_size": "BATCH_SIZE",
     "max_file_size_mb": "MAX_FILE_SIZE_MB",
     "max_files_per_job": "MAX_FILES_PER_JOB",
 }
 
-SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key"}
+SECRET_SETTING_KEYS = {
+    "openai_api_key",
+    "anthropic_api_key",
+    "gptzero_api_key",
+    "grammarly_api_key",
+    "github_api_token",
+    "stackexchange_api_key",
+}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -5402,7 +5533,16 @@ ENGINE_DISPLAY_LABELS = {
     "ai_detection": "AI Detection",
     "execution_cfg": "Execution/CFG",
 }
-UPLOAD_ENGINE_KEYS = ("token", "ast", "winnowing", "gst", "semantic")
+UPLOAD_ENGINE_KEYS = (
+    "token",
+    "ast",
+    "winnowing",
+    "gst",
+    "semantic",
+    "web",
+    "ai_detection",
+    "execution_cfg",
+)
 
 
 def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
@@ -5428,6 +5568,15 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     payload["openai_api_key_configured"] = bool(openai_key)
     payload["anthropic_api_key"] = ""
     payload["anthropic_api_key_configured"] = bool(anthropic_key)
+    for key in (
+        "gptzero_api_key",
+        "grammarly_api_key",
+        "github_api_token",
+        "stackexchange_api_key",
+    ):
+        configured_key = str(payload.get(key) or "")
+        payload[key] = ""
+        payload[f"{key}_configured"] = bool(configured_key)
     return payload
 
 
@@ -5444,6 +5593,13 @@ def _get_upload_engine_weights(
 ) -> Dict[str, float]:
     payload = _build_settings_payload(tenant_id)
     engine_weights = _normalize_engine_weights(payload.get("engine_weights"))
+
+    if not bool(payload.get("web_analysis_enabled", False)):
+        engine_weights["web"] = 0.0
+    if not bool(payload.get("ai_detection_enabled", True)):
+        engine_weights["ai_detection"] = 0.0
+    if not bool(payload.get("execution_cfg_enabled", False)):
+        engine_weights["execution_cfg"] = 0.0
 
     if selected_keys:
         selected = {key for key in selected_keys if key in UPLOAD_ENGINE_KEYS}
@@ -5462,6 +5618,7 @@ def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
         "winnowing": _coerce_float(engine_weights.get("winnowing")),
         "ngram": _coerce_float(engine_weights.get("gst")),
         "embedding": _coerce_float(engine_weights.get("semantic")),
+        "execution_cfg": _coerce_float(engine_weights.get("execution_cfg")),
     }
     if not any(value > 0 for value in fusion_weights.values()):
         return {}

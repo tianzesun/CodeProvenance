@@ -1,4 +1,5 @@
 """Feature Extractor - Extracts features from code pairs for similarity engines."""
+
 from __future__ import annotations
 
 import logging
@@ -23,6 +24,7 @@ class FeatureVector:
     embedding: float = 0.0
     ngram: float = 0.0
     winnowing: float = 0.0
+    execution_cfg: float = 0.0
 
     def as_dict(self) -> Dict[str, float]:
         """Convert FeatureVector to a dictionary."""
@@ -32,6 +34,7 @@ class FeatureVector:
             "embedding": self.embedding,
             "ngram": self.ngram,
             "winnowing": self.winnowing,
+            "execution_cfg": self.execution_cfg,
         }
 
 
@@ -43,7 +46,14 @@ class FeatureExtractor:
     affect the engines that need them.
     """
 
-    FEATURE_ORDER: List[str] = ["ast", "fingerprint", "embedding", "ngram", "winnowing"]
+    FEATURE_ORDER: List[str] = [
+        "ast",
+        "fingerprint",
+        "embedding",
+        "ngram",
+        "winnowing",
+        "execution_cfg",
+    ]
 
     def __init__(self) -> None:
         # Cached engine instances (lazy-loaded on first use)
@@ -53,6 +63,7 @@ class FeatureExtractor:
         self._fallback_embedding = None
         self._ngram_engine = None
         self._winnowing_engine = None
+        self._execution_cfg_engine = None
 
     def _resolve_embedding_base_url(self) -> Optional[str]:
         if settings.EMBEDDING_SERVER_URL:
@@ -81,6 +92,7 @@ class FeatureExtractor:
         embedding = self._run_embedding(code_a, code_b)
         ngram = self._run_ngram(code_a, code_b)
         winnowing = self._run_winnowing(code_a, code_b)
+        execution_cfg = self._run_execution_cfg(code_a, code_b)
 
         return FeatureVector(
             ast=ast if ast is not None else 0.0,
@@ -88,6 +100,7 @@ class FeatureExtractor:
             embedding=embedding if embedding is not None else 0.0,
             ngram=ngram if ngram is not None else 0.0,
             winnowing=winnowing if winnowing is not None else 0.0,
+            execution_cfg=execution_cfg if execution_cfg is not None else 0.0,
         )
 
     def to_features(self, fv: FeatureVector) -> List[float]:
@@ -96,7 +109,14 @@ class FeatureExtractor:
         Returns:
             List of floats in FEATURE_ORDER.
         """
-        return [fv.ast, fv.fingerprint, fv.embedding, fv.ngram, fv.winnowing]
+        return [
+            fv.ast,
+            fv.fingerprint,
+            fv.embedding,
+            fv.ngram,
+            fv.winnowing,
+            fv.execution_cfg,
+        ]
 
     def _coerce_score(self, result: Any, engine_name: str) -> Optional[float]:
         """Normalize engine outputs to a plain numeric score.
@@ -116,7 +136,11 @@ class FeatureExtractor:
         if isinstance(score, (int, float)):
             return float(score)
 
-        logger.debug("Engine %s returned non-numeric result of type %s", engine_name, type(result).__name__)
+        logger.debug(
+            "Engine %s returned non-numeric result of type %s",
+            engine_name,
+            type(result).__name__,
+        )
         return None
 
     # ── Private engine helpers ──────────────────────────────────
@@ -125,6 +149,7 @@ class FeatureExtractor:
         try:
             if self._ast_engine is None:
                 from src.backend.engines.similarity.ast_similarity import ASTSimilarity
+
                 self._ast_engine = ASTSimilarity()
             result = self._ast_engine.compare(
                 {"raw": a, "tokens": []},
@@ -138,7 +163,10 @@ class FeatureExtractor:
     def _run_fingerprint(self, a: str, b: str) -> Optional[float]:
         try:
             if self._token_engine is None:
-                from src.backend.engines.similarity.token_similarity import TokenSimilarity
+                from src.backend.engines.similarity.token_similarity import (
+                    TokenSimilarity,
+                )
+
                 self._token_engine = TokenSimilarity()
             result = self._token_engine.compare(
                 {"raw": a, "tokens": []},
@@ -155,7 +183,10 @@ class FeatureExtractor:
         if runtime in {"local", "local_unixcoder", "unixcoder"}:
             try:
                 if self._unixcoder_engine is None:
-                    from src.backend.engines.similarity.unixcoder_similarity import UniXcoderSimilarity
+                    from src.backend.engines.similarity.unixcoder_similarity import (
+                        UniXcoderSimilarity,
+                    )
+
                     self._unixcoder_engine = UniXcoderSimilarity(
                         model_name=settings.EMBEDDING_MODEL,
                         device=settings.EMBEDDING_DEVICE,
@@ -166,11 +197,17 @@ class FeatureExtractor:
                 if coerced is not None:
                     return coerced
             except Exception as exc:
-                logger.debug("UniXcoder engine unavailable, falling back to API embeddings: %s", exc)
+                logger.debug(
+                    "UniXcoder engine unavailable, falling back to API embeddings: %s",
+                    exc,
+                )
 
         try:
             if self._fallback_embedding is None:
-                from src.backend.engines.similarity.embedding_similarity import EmbeddingSimilarity
+                from src.backend.engines.similarity.embedding_similarity import (
+                    EmbeddingSimilarity,
+                )
+
                 self._fallback_embedding = EmbeddingSimilarity(
                     model_name=settings.EMBEDDING_MODEL,
                     base_url=self._resolve_embedding_base_url(),
@@ -185,7 +222,10 @@ class FeatureExtractor:
     def _run_ngram(self, a: str, b: str) -> Optional[float]:
         try:
             if self._ngram_engine is None:
-                from src.backend.engines.similarity.ngram_similarity import NgramSimilarity
+                from src.backend.engines.similarity.ngram_similarity import (
+                    NgramSimilarity,
+                )
+
                 self._ngram_engine = NgramSimilarity()
             result = self._ngram_engine.compare(
                 {"raw": a, "tokens": []},
@@ -199,7 +239,10 @@ class FeatureExtractor:
     def _run_winnowing(self, a: str, b: str) -> Optional[float]:
         try:
             if self._winnowing_engine is None:
-                from src.backend.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
+                from src.backend.engines.similarity.winnowing_similarity import (
+                    EnhancedWinnowingSimilarity,
+                )
+
                 self._winnowing_engine = EnhancedWinnowingSimilarity()
             result = self._winnowing_engine.compare(
                 {"raw": a, "tokens": []},
@@ -208,4 +251,27 @@ class FeatureExtractor:
             return self._coerce_score(result, "winnowing")
         except Exception as exc:
             logger.debug("Winnowing engine unavailable: %s", exc)
+            return None
+
+    def _run_execution_cfg(self, a: str, b: str) -> Optional[float]:
+        if not settings.EXECUTION_CFG_ENABLED:
+            return None
+
+        try:
+            if self._execution_cfg_engine is None:
+                from src.backend.engines.similarity.execution_similarity import (
+                    ExecutionSimilarity,
+                )
+
+                self._execution_cfg_engine = ExecutionSimilarity(
+                    timeout=3,
+                    max_test_cases=3,
+                )
+            result = self._execution_cfg_engine.compare(
+                {"raw": a, "language": "python"},
+                {"raw": b, "language": "python"},
+            )
+            return self._coerce_score(result, "execution_cfg")
+        except Exception as exc:
+            logger.debug("Execution/CFG engine unavailable: %s", exc)
             return None

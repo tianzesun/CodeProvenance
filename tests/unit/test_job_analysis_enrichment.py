@@ -35,7 +35,10 @@ def process_data(data):
     assert len(summary["submissions"]) == 2
     assert sum(summary["distribution"].values()) == 2
     assert summary["signal_summary"]
-    assert summary["submissions"][0]["ai_probability"] >= summary["submissions"][1]["ai_probability"]
+    assert (
+        summary["submissions"][0]["ai_probability"]
+        >= summary["submissions"][1]["ai_probability"]
+    )
 
 
 def test_build_web_analysis_summary_defaults_to_disabled(monkeypatch) -> None:
@@ -44,12 +47,12 @@ def test_build_web_analysis_summary_defaults_to_disabled(monkeypatch) -> None:
     monkeypatch.delenv("GITHUB_API_TOKEN", raising=False)
     monkeypatch.delenv("STACKEXCHANGE_API_KEY", raising=False)
 
-    summary = _build_web_analysis_summary({"example.py": "print('hello world')"}) 
+    summary = _build_web_analysis_summary({"example.py": "print('hello world')"})
 
     assert summary["enabled"] is False
     assert summary["matched_submissions"] == 0
     assert summary["submissions"] == []
-    assert "disabled by default" in summary["status_message"]
+    assert "disabled in Settings" in summary["status_message"]
 
 
 def test_normalize_job_preserves_analysis_sections() -> None:

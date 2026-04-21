@@ -322,6 +322,47 @@ function formatRuntime(value) {
   return Number(value).toFixed(2);
 }
 
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function estimatePairCount(fileCount) {
+  const count = Number(fileCount || 0);
+  return count > 1 ? Math.round((count * (count - 1)) / 2) : 0;
+}
+
+function parseDatasetFileCount(dataset) {
+  if (!dataset) {
+    return null;
+  }
+
+  if (dataset.cases?.length) {
+    return dataset.cases.length * 2;
+  }
+
+  const explicitCount = dataset.files_created || dataset.file_count || dataset.total_files;
+  if (Number(explicitCount) > 0) {
+    return Number(explicitCount);
+  }
+
+  const sizeMatch = String(dataset.size || '').match(/([\d,]+)\s*files?/i);
+  if (sizeMatch) {
+    return Number(sizeMatch[1].replaceAll(',', ''));
+  }
+
+  return null;
+}
+
+function buildFilePairs(fileNames) {
+  const pairs = [];
+  for (let i = 0; i < fileNames.length; i += 1) {
+    for (let j = i + 1; j < fileNames.length; j += 1) {
+      pairs.push(`${fileNames[i]} vs ${fileNames[j]}`);
+    }
+  }
+  return pairs;
+}
+
 function formatDelta(value, lowerIsBetter = false) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return 'N/A';
@@ -1544,6 +1585,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [currentEngine, setCurrentEngine] = useState(null);
   const [error, setError] = useState('');
   const requestControllerRef = useRef(null);
+  const progressTimerRef = useRef(null);
 
   const { allDatasets } = useMemo(
     () => buildDatasetLibrary(benchmarkDatasets),
@@ -1552,6 +1594,12 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const activeDataset = allDatasets.find((dataset) => dataset.id === selectedDataset);
   const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
   const hasZipUpload = files.some((file) => file.name?.toLowerCase().endsWith('.zip'));
+  const knownFileCount = uploadMode === 'builtin'
+    ? parseDatasetFileCount(activeDataset)
+    : (hasZipUpload ? null : files.length);
+  const estimatedPairCount = uploadMode === 'builtin' && activeDataset?.cases?.length
+    ? activeDataset.cases.length
+    : estimatePairCount(knownFileCount);
 
   const createRequestOptions = () => ({
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -1559,13 +1607,73 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     signal: requestControllerRef.current?.signal,
   });
 
+  useEffect(() => () => {
+    clearProgressTimer();
+    requestControllerRef.current?.abort();
+  }, []);
+
+  const clearProgressTimer = () => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  };
+
+  const setProgressDetails = ({ current, total, filename, engine }) => {
+    setCurrentFile(current || null);
+    setTotalFiles(total || null);
+    setCurrentFilename(filename || null);
+    setCurrentEngine(engine || null);
+  };
+
+  const startEstimatedProgress = ({ pairLabels = [], totalPairs, startPct = 35 }) => {
+    clearProgressTimer();
+
+    const toolsInRun = selectedTools.length ? selectedTools : ['integritydesk'];
+    const pairsInRun = Math.max(1, Number(totalPairs || pairLabels.length || 1));
+    const totalWork = Math.max(1, pairsInRun * toolsInRun.length);
+    let completedWork = 0;
+
+    setProgressPct(startPct);
+    setProgress('Running benchmark analysis...');
+    setProgressDetails({
+      current: 1,
+      total: pairsInRun,
+      filename: pairLabels[0] || `Pair 1 of ${pairsInRun}`,
+      engine: TOOLS.find((tool) => tool.id === toolsInRun[0])?.name || toolsInRun[0],
+    });
+
+    progressTimerRef.current = setInterval(() => {
+      completedWork = Math.min(completedWork + 1, totalWork - 1);
+      const pairIndex = completedWork % pairsInRun;
+      const toolIndex = Math.floor(completedWork / pairsInRun);
+      const percent = Math.min(94, startPct + (completedWork / totalWork) * (94 - startPct));
+      const toolId = toolsInRun[Math.min(toolIndex, toolsInRun.length - 1)];
+
+      setProgressPct(percent);
+      setProgressDetails({
+        current: pairIndex + 1,
+        total: pairsInRun,
+        filename: pairLabels[pairIndex] || `Pair ${pairIndex + 1} of ${pairsInRun}`,
+        engine: TOOLS.find((tool) => tool.id === toolId)?.name || toolId,
+      });
+    }, 900);
+  };
+
   const run = async () => {
     requestControllerRef.current?.abort();
+    clearProgressTimer();
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setError('');
     setRunning(true);
     setProgressPct(10);
+    setProgressDetails({
+      current: null,
+      total: null,
+      filename: null,
+      engine: null,
+    });
 
     try {
       if (uploadMode === 'builtin' && activeDataset) {
@@ -1578,6 +1686,12 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             const tc = cases[i];
             setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
             setProgressPct(10 + ((i / cases.length) * 80));
+            setProgressDetails({
+              current: i + 1,
+              total: cases.length,
+              filename: `${tc.id}_a.py vs ${tc.id}_b.py`,
+              engine: selectedTools.map((toolId) => TOOLS.find((tool) => tool.id === toolId)?.name || toolId).join(', '),
+            });
 
             const blobA = new Blob([tc.codeA], { type: 'text/plain' });
             const blobB = new Blob([tc.codeB], { type: 'text/plain' });
@@ -1605,6 +1719,12 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           if (allResults.length > 0) {
             setProgressPct(100);
             setProgress('Complete!');
+            setProgressDetails({
+              current: cases.length,
+              total: cases.length,
+              filename: 'All guided scenarios complete',
+              engine: null,
+            });
             // Merge results without mutating the original response
             const merged = { ...allResults[0], pair_results: allResults.flatMap(r => r.pair_results || []) };
             setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
@@ -1620,15 +1740,26 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
 
           try {
-            setProgress('Running benchmark analysis...');
-            setProgressPct(50);
+            startEstimatedProgress({
+              totalPairs: Math.max(1, estimatedPairCount || 1),
+              startPct: 35,
+            });
 
             const res = await axios.post(`${API}/api/benchmark`, formData, createRequestOptions());
 
+            clearProgressTimer();
             setProgressPct(100);
             setProgress('Complete!');
+            const completedPairs = res.data?.summary?.pairs_tested || estimatedPairCount || 1;
+            setProgressDetails({
+              current: completedPairs,
+              total: completedPairs,
+              filename: `${pluralize(completedPairs, 'file pair')} checked`,
+              engine: null,
+            });
             onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
           } catch (err) {
+            clearProgressTimer();
             setError(err.response?.data?.error || 'Failed to run benchmark on the selected dataset');
             setProgress('Error occurred');
           }
@@ -1637,20 +1768,39 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         // Upload mode
         setProgress('Uploading files…');
         setProgressPct(20);
+        setProgressDetails({
+          current: hasZipUpload ? null : files.length,
+          total: hasZipUpload ? null : files.length,
+          filename: hasZipUpload ? 'Reading uploaded archive' : `${pluralize(files.length, 'file')} ready`,
+          engine: null,
+        });
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
         formData.append('benchmark_type', benchmarkMode);
         if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
 
-        setProgress('Running analysis across all tools…');
-        setProgressPct(50);
+        const uploadPairLabels = hasZipUpload ? [] : buildFilePairs(files.map((file) => file.name || 'Unnamed file'));
+        startEstimatedProgress({
+          pairLabels: uploadPairLabels,
+          totalPairs: hasZipUpload ? 1 : uploadPairLabels.length,
+          startPct: 35,
+        });
         const res = await axios.post(`${API}/api/benchmark`, formData, createRequestOptions());
+        clearProgressTimer();
         setProgressPct(100);
         setProgress('Complete!');
+        const completedPairs = res.data?.summary?.pairs_tested || uploadPairLabels.length || 1;
+        setProgressDetails({
+          current: completedPairs,
+          total: completedPairs,
+          filename: `${pluralize(completedPairs, 'file pair')} checked`,
+          engine: null,
+        });
         setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
       }
     } catch (err) {
+      clearProgressTimer();
       if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
         setProgress('Run cancelled');
       } else {
@@ -1667,10 +1817,17 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   };
 
   const stop = () => {
+    clearProgressTimer();
     requestControllerRef.current?.abort();
     setRunning(false);
     setProgress('Cancelling run…');
     setProgressPct(0);
+    setProgressDetails({
+      current: null,
+      total: null,
+      filename: null,
+      engine: null,
+    });
   };
 
   return (
@@ -1750,11 +1907,17 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
              </div>
 
              {/* Detailed progress counter */}
-             {currentFile && totalFiles && (
+             {(currentFile || currentFilename) && (
                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
                  <div className="flex items-center justify-between">
-                   <div className="text-xs font-semibold text-slate-500">Processing</div>
-                   <div className="text-xs font-bold text-violet-600">{currentFile} / {totalFiles}</div>
+                   <div className="text-xs font-semibold text-slate-500">
+                     {knownFileCount
+                       ? `${pluralize(knownFileCount, 'file')} • ${pluralize(estimatedPairCount || totalFiles || 1, 'pair')}`
+                       : 'Preparing file list'}
+                   </div>
+                   {currentFile && totalFiles && (
+                     <div className="text-xs font-bold text-violet-600">{currentFile} / {totalFiles}</div>
+                   )}
                  </div>
                  <div className="mt-1 text-sm font-medium text-slate-700 truncate">{currentFilename || 'Preparing files...'}</div>
                  {currentEngine && (

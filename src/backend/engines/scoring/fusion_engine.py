@@ -33,18 +33,27 @@ class FusedScore:
 # a language's syntax, common patterns, and embedding vocabulary.
 # Scores at or below baseline are treated as zero similarity.
 LANGUAGE_BASELINE: Dict[str, float] = {
-    "embedding": 0.70,  # UniXcoder sees "this is Python code" for both
+    "semantic": 0.70,  # UniXcoder sees "this is Python code" for both
     "winnowing": 0.25,  # Common keywords/structures produce some overlap
-    "ngram": 0.15,  # Character n-grams share syntax tokens
+    "gst": 0.15,  # Character n-grams share syntax tokens
     "ast": 0.25,  # Similar AST node types (functions, returns, etc.)
-    "fingerprint": 0.15,  # Token-level overlap from language keywords
+    "token": 0.15,  # Token-level overlap from language keywords
 }
 
 WEIGHT_ALIASES: Dict[str, str] = {
     "token": "fingerprint",
+    "fingerprint": "fingerprint",
     "semantic": "embedding",
+    "embedding": "embedding",
+    "unixcoder": "embedding",
     "codebert": "embedding",
     "gst": "ngram",
+    "ngram": "ngram",
+    "structural": "ngram",
+    "graph": "execution_cfg",
+    "execution": "execution_cfg",
+    "cfg": "execution_cfg",
+    "tree_kernel": "execution_cfg",
 }
 
 
@@ -89,23 +98,23 @@ def save_engine_config(config: Dict) -> None:
 def _get_default_config() -> Dict:
     return {
         "weights": {
-            "ast": 0.65,
-            "token": 0.25,
-            "winnowing": 0.10,
-            "graph": 0.00,
-            "execution": 0.00,
-            "embedding": 0.00,
-            "ngram": 0.00,
-            "codebert": 0.00,
+            "token": 0.18,
+            "ast": 0.22,
+            "winnowing": 0.16,
+            "gst": 0.16,
+            "semantic": 0.18,
+            "web": 0.10,
+            "ai_detection": 0.00,
+            "execution_cfg": 0.00,
         },
         "baseline_correction": {
             "enabled": True,
             "baselines": {
-                "embedding": 0.70,
+                "semantic": 0.70,
                 "winnowing": 0.25,
-                "ngram": 0.15,
+                "gst": 0.15,
                 "ast": 0.25,
-                "fingerprint": 0.15,
+                "token": 0.15,
             },
         },
         "arbitration": {
@@ -204,15 +213,14 @@ class FusionEngine:
                     "winnowing": 2.0,
                     "token": 1.5,
                     "ast": 0.5,
-                    "graph": 0.5,
+                    "execution_cfg": 0.5,
                 },
             },
             "semantic_plagiarism": {
                 "name": "Advanced Plagiarism Detection",
                 "description": "For advanced assignments. Detects obfuscation and modification.",
                 "multipliers": {
-                    "graph": 2.0,
-                    "execution": 1.8,
+                    "execution_cfg": 2.0,
                     "ast": 1.2,
                     "winnowing": 0.5,
                 },
@@ -222,7 +230,7 @@ class FusionEngine:
                 "description": "Prioritize architecture and design similarity over exact code.",
                 "multipliers": {
                     "ast": 1.8,
-                    "graph": 1.5,
+                    "execution_cfg": 1.5,
                     "token": 0.5,
                     "winnowing": 0.5,
                 },
@@ -231,7 +239,7 @@ class FusionEngine:
                 "name": "AI Generated Code Detection",
                 "description": "Optimize for detecting AI generated code patterns.",
                 "multipliers": {
-                    "embedding": 3.0,
+                    "semantic": 3.0,
                     "ast": 1.2,
                 },
             },
@@ -498,7 +506,7 @@ class FusionEngine:
         ast_score = corrected_scores.get("ast", 0.0)
         if ast_score >= 0.85:
             return final_score
-            
+
         concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
         lexical_engines = ("fingerprint", "winnowing", "ngram")
         concrete_evidence = sum(

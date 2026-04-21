@@ -195,6 +195,89 @@ def test_load_synthetic_pair_dataset_uses_explicit_pairs(tmp_path, monkeypatch):
     ]
 
 
+def test_build_benchmark_pairs_refuses_oversized_all_pairs(monkeypatch):
+    monkeypatch.setattr(server, "ALL_PAIRS_BENCHMARK_MAX_PAIRS", 3)
+    submissions = {f"student_{idx}.py": "print('hello')\n" for idx in range(4)}
+
+    pairs, error = server._build_benchmark_pairs(submissions, [])
+
+    assert pairs == []
+    assert "6 file pairs" in error
+    assert "interactive benchmark limit is 3 pairs" in error
+
+
+def test_build_benchmark_pairs_allows_explicit_pairs_over_all_pairs_limit(monkeypatch):
+    monkeypatch.setattr(server, "ALL_PAIRS_BENCHMARK_MAX_PAIRS", 1)
+    submissions = {
+        "a.py": "print('a')\n",
+        "b.py": "print('b')\n",
+        "c.py": "print('c')\n",
+    }
+    explicit_pairs = [
+        {"file_a": "a.py", "file_b": "b.py", "label": 3},
+        {"file_a": "a.py", "file_b": "missing.py", "label": 0},
+    ]
+
+    pairs, error = server._build_benchmark_pairs(submissions, explicit_pairs)
+
+    assert error == ""
+    assert pairs == [("a.py", "b.py")]
+
+
+def test_upload_engine_weights_respect_optional_runtime_toggles(monkeypatch):
+    payload = {
+        "engine_weights": {
+            "token": 0.2,
+            "ast": 0.2,
+            "winnowing": 0.2,
+            "gst": 0.2,
+            "semantic": 0.1,
+            "web": 0.1,
+            "ai_detection": 0.1,
+            "execution_cfg": 0.1,
+        },
+        "web_analysis_enabled": False,
+        "ai_detection_enabled": False,
+        "execution_cfg_enabled": False,
+    }
+    monkeypatch.setattr(server, "_build_settings_payload", lambda _tenant_id: payload)
+
+    weights = server._get_upload_engine_weights("tenant-1")
+
+    assert weights["token"] == 0.2
+    assert weights["web"] == 0.0
+    assert weights["ai_detection"] == 0.0
+    assert weights["execution_cfg"] == 0.0
+
+
+def test_upload_engine_weights_keep_enabled_optional_engines(monkeypatch):
+    payload = {
+        "engine_weights": {
+            "token": 0.2,
+            "ast": 0.2,
+            "winnowing": 0.2,
+            "gst": 0.2,
+            "semantic": 0.1,
+            "web": 0.1,
+            "ai_detection": 0.1,
+            "execution_cfg": 0.1,
+        },
+        "web_analysis_enabled": True,
+        "ai_detection_enabled": True,
+        "execution_cfg_enabled": True,
+    }
+    monkeypatch.setattr(server, "_build_settings_payload", lambda _tenant_id: payload)
+
+    weights = server._get_upload_engine_weights(
+        "tenant-1", ["web", "ai_detection", "execution_cfg"]
+    )
+
+    assert weights["token"] == 0.0
+    assert weights["web"] == 0.1
+    assert weights["ai_detection"] == 0.1
+    assert weights["execution_cfg"] == 0.1
+
+
 def test_dataset_has_ground_truth_for_pair_labeled_sources(tmp_path):
     synthetic_dir = tmp_path / "synthetic"
     kaggle_dir = tmp_path / "kaggle_student_code"

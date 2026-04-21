@@ -1,21 +1,22 @@
 weights:
-  ast: 0.45
-  token: 0.15
-  winnowing: 0.05
-  gst: 0.05
-  semantic: 0.15
-  web: 0.0
+  token: 0.18
+  ast: 0.22
+  winnowing: 0.16
+  gst: 0.16
+  semantic: 0.18
+  web: 0.10
   ai_detection: 0.0
-  execution_cfg: 0.15
-  tree_kernel: 0.15
-  cfg: 0.05
+  execution_cfg: 0.0
 baseline_correction:
   baselines:
-    winnowing: 0.35
+    token: 0.15
     ast: 0.25
-    fingerprint: 0.3
-    ngram: 0.2
-    embedding: 0.25
+    winnowing: 0.35
+    gst: 0.20
+    semantic: 0.25
+    web: 0.0
+    ai_detection: 0.0
+    execution_cfg: 0.0
 precision_guard:
   enabled: true
   high_score_floor: 0.68

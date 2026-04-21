@@ -25,6 +25,9 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'winnowing', label: 'Winnowing' },
   { key: 'gst', label: 'GST' },
   { key: 'semantic', label: 'Semantic' },
+  { key: 'web', label: 'Web' },
+  { key: 'ai_detection', label: 'AI Detection' },
+  { key: 'execution_cfg', label: 'Execution/CFG' },
 ];
 
 function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
@@ -130,12 +133,10 @@ export default function UploadPage() {
         }
         const nextThreshold = Number(res.data?.default_threshold);
         setThreshold(Number.isFinite(nextThreshold) ? nextThreshold : 0.5);
-        const nextEngineKeys = Array.isArray(res.data?.active_engine_keys) ? res.data.active_engine_keys : [];
-        setActiveEngines(
-          nextEngineKeys.length > 0
-            ? nextEngineKeys
-            : UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key),
-        );
+        const nextEngineKeys = Array.isArray(res.data?.active_engine_keys)
+          ? res.data.active_engine_keys
+          : UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key);
+        setActiveEngines(nextEngineKeys);
       })
       .catch(() => {
         if (active) {
@@ -483,7 +484,7 @@ export default function UploadPage() {
                     {thresholdLoading
                       ? 'Loading current engines...'
                       : activeEngines.length > 0
-                        ? 'Choose which engines should contribute to the similarity score for this assignment check.'
+                        ? 'Choose which engines should run for this assignment check.'
                         : 'Select at least one engine for this assignment check.'}
                   </div>
                 </div>

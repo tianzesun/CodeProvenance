@@ -67,8 +67,17 @@ class AppSettings(BaseSettings):
     EMBEDDING_BATCH_SIZE: int = 32
 
     # AI Detection
+    AI_DETECTION_ENABLED: bool = True
     GPTZERO_API_KEY: Optional[str] = None
     GRAMMARLY_API_KEY: Optional[str] = None
+
+    # Web Analysis
+    WEB_ANALYSIS_ENABLED: bool = False
+    GITHUB_API_TOKEN: Optional[str] = None
+    STACKEXCHANGE_API_KEY: Optional[str] = None
+
+    # Execution / CFG
+    EXECUTION_CFG_ENABLED: bool = False
 
     # Engine Weights
     ENGINE_WEIGHTS: Dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()

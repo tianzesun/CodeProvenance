@@ -105,6 +105,7 @@ class BatchDetectionService:
                                 "embedding": features.embedding,
                                 "ngram": features.ngram,
                                 "winnowing": features.winnowing,
+                                "execution_cfg": features.execution_cfg,
                             }.items()
                             if v is not None
                         },
@@ -146,6 +147,7 @@ class BatchDetectionService:
                             "embedding": features.embedding,
                             "ngram": features.ngram,
                             "winnowing": features.winnowing,
+                            "execution_cfg": features.execution_cfg,
                         }.items()
                         if v is not None
                     },

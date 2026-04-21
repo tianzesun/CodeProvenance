@@ -146,6 +146,17 @@ interface Settings {
   anthropic_api_key: string;
   anthropic_api_key_configured: boolean;
   anthropic_model: string;
+  ai_detection_enabled: boolean;
+  gptzero_api_key: string;
+  gptzero_api_key_configured: boolean;
+  grammarly_api_key: string;
+  grammarly_api_key_configured: boolean;
+  web_analysis_enabled: boolean;
+  github_api_token: string;
+  github_api_token_configured: boolean;
+  stackexchange_api_key: string;
+  stackexchange_api_key_configured: boolean;
+  execution_cfg_enabled: boolean;
   embedding_runtime: string;
   embedding_model: string;
   embedding_server_url: string | null;
@@ -261,7 +272,7 @@ export default function SettingsPage() {
               winnowing: 0.25,
               ast: 0.25,
               token: 0.15,
-              embedding: 0.70,
+              semantic: 0.70,
             }
           },
           ...res.data,
@@ -291,13 +302,26 @@ export default function SettingsPage() {
           engine_weights: normalizeEngineWeights(current.engine_weights),
           openai_api_key: "",
           anthropic_api_key: "",
+          gptzero_api_key: "",
+          grammarly_api_key: "",
+          github_api_token: "",
+          stackexchange_api_key: "",
           openai_api_key_configured:
             current.openai_api_key_configured || current.openai_api_key.trim().length > 0,
           anthropic_api_key_configured:
             current.anthropic_api_key_configured || current.anthropic_api_key.trim().length > 0,
+          gptzero_api_key_configured:
+            current.gptzero_api_key_configured || current.gptzero_api_key.trim().length > 0,
+          grammarly_api_key_configured:
+            current.grammarly_api_key_configured || current.grammarly_api_key.trim().length > 0,
+          github_api_token_configured:
+            current.github_api_token_configured || current.github_api_token.trim().length > 0,
+          stackexchange_api_key_configured:
+            current.stackexchange_api_key_configured ||
+            current.stackexchange_api_key.trim().length > 0,
         };
       });
-      setSuccess("Legacy settings saved successfully");
+      setSuccess("Settings saved successfully");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }).catch((err) => {
@@ -370,11 +394,11 @@ export default function SettingsPage() {
 
   const tabs: Array<{ id: SettingsTab; label: string; adminOnly?: boolean }> = [
     { id: "general", label: "General" },
-    { id: "llm", label: "LLM & AI" },
-    { id: "engines", label: "Legacy Engines" },
-    { id: "engine-config", label: "Engine Configuration", adminOnly: true },
-    { id: "calibration", label: "Calibration", adminOnly: true },
-    { id: "advanced", label: "Advanced" },
+    { id: "llm", label: "AI & Keys" },
+    { id: "engines", label: "Engine Setup" },
+    { id: "engine-config", label: "Scoring Rules", adminOnly: true },
+    { id: "calibration", label: "Accuracy Tuning", adminOnly: true },
+    { id: "advanced", label: "Limits" },
   ];
   const engineWeights = normalizeEngineWeights(settings.engine_weights);
   const coreEngines = ENGINE_CATALOG.filter((engine) => engine.tier === "core");
@@ -465,7 +489,7 @@ export default function SettingsPage() {
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
                     <p className="text-xs text-slate-400 mt-2">
-                      Saved to <code>.env.local</code>. The current key is never returned to the browser.
+                      Saved as a workspace setting. The current key is never returned to the browser.
                     </p>
                   </div>
                   <div>
@@ -514,7 +538,7 @@ export default function SettingsPage() {
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
                     <p className="text-xs text-slate-400 mt-2">
-                      Saved to <code>.env.local</code>. The current key is never returned to the browser.
+                      Saved as a workspace setting. The current key is never returned to the browser.
                     </p>
                   </div>
                   <div>
@@ -527,6 +551,137 @@ export default function SettingsPage() {
                       }
                       className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Optional Analysis Engines
+                </label>
+                <div className="space-y-4 mt-3">
+                  {[
+                    {
+                      key: "web_analysis_enabled" as const,
+                      label: "Web",
+                      description: "Search public code and Q&A sources during assignment checks.",
+                    },
+                    {
+                      key: "ai_detection_enabled" as const,
+                      label: "AI Detection",
+                      description: "Add per-file authorship and AI-generation signals to reports.",
+                    },
+                    {
+                      key: "execution_cfg_enabled" as const,
+                      label: "Execution/CFG",
+                      description: "Allow behavioral and control-flow checks when this engine is selected.",
+                    },
+                  ].map((item) => (
+                    <div key={item.key} className="flex items-center gap-4 rounded-xl border border-slate-200 p-4">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                        <div className="text-xs text-slate-500 mt-1">{item.description}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting(item.key, !settings[item.key])}
+                        className={`w-12 h-6 rounded-full transition-colors ${settings[item.key] ? 'bg-blue-600' : 'bg-slate-300'}`}
+                      >
+                        <div className={`w-5 h-5 rounded-full bg-white shadow transform transition-transform ${settings[item.key] ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Web Provider Keys
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label className="text-sm text-slate-600">GitHub Token</label>
+                    <input
+                      type="password"
+                      value={settings.github_api_token}
+                      onChange={(e) =>
+                        updateSetting("github_api_token", e.target.value)
+                      }
+                      placeholder={
+                        settings.github_api_token_configured
+                          ? "Leave blank to keep current GitHub token"
+                          : "Enter GitHub token"
+                      }
+                      className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Used by the Web engine for GitHub source checks.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-600">Stack Exchange Key</label>
+                    <input
+                      type="password"
+                      value={settings.stackexchange_api_key}
+                      onChange={(e) =>
+                        updateSetting("stackexchange_api_key", e.target.value)
+                      }
+                      placeholder={
+                        settings.stackexchange_api_key_configured
+                          ? "Leave blank to keep current Stack Exchange key"
+                          : "Enter Stack Exchange key"
+                      }
+                      className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Used by the Web engine for Stack Overflow and Stack Exchange checks.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  AI Detection Provider Keys
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label className="text-sm text-slate-600">GPTZero API Key</label>
+                    <input
+                      type="password"
+                      value={settings.gptzero_api_key}
+                      onChange={(e) =>
+                        updateSetting("gptzero_api_key", e.target.value)
+                      }
+                      placeholder={
+                        settings.gptzero_api_key_configured
+                          ? "Leave blank to keep current GPTZero key"
+                          : "Enter GPTZero API key"
+                      }
+                      className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Stored for AI Detection provider integrations.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-600">Grammarly API Key</label>
+                    <input
+                      type="password"
+                      value={settings.grammarly_api_key}
+                      onChange={(e) =>
+                        updateSetting("grammarly_api_key", e.target.value)
+                      }
+                      placeholder={
+                        settings.grammarly_api_key_configured
+                          ? "Leave blank to keep current Grammarly key"
+                          : "Enter Grammarly API key"
+                      }
+                      className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-2">
+                      Stored for AI Detection provider integrations.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -750,7 +905,7 @@ export default function SettingsPage() {
             <>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
-                  Engine Presets
+                  Recommended Setups
                 </label>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
                   {enginePresets.map((preset, idx) => (
@@ -778,12 +933,11 @@ export default function SettingsPage() {
                 </div>
 
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
-                  Custom Engine Weights
+                  Engines Used for Checks
                 </label>
                 <p className="text-xs text-slate-400 mb-4">
-                  Adjust contribution weights for each dashboard engine. Core
-                  engines should usually sum to 1.0 unless you intentionally
-                  allocate weight to the optional layers.
+                  Turn engines on or off and choose how much each one should
+                  influence normal assignment checks.
                 </p>
                 <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div>
@@ -876,9 +1030,9 @@ export default function SettingsPage() {
             <>
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">Engine Configuration</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">Scoring Rules</h3>
                   <p className="text-sm text-slate-600 mt-1">
-                    Configure similarity detection engines, weights, and thresholds
+                    Fine-tune score weights, noise correction, thresholds, and performance behavior.
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -904,7 +1058,7 @@ export default function SettingsPage() {
                     ) : (
                       <Save className="h-4 w-4" />
                     )}
-                    Save Config
+                    Save Rules
                   </button>
                 </div>
               </div>
@@ -936,11 +1090,10 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Engine Weights */}
                   <div className="rounded-xl border border-slate-200 p-6">
-                    <h4 className="text-md font-semibold text-slate-900 mb-4">Engine Weights</h4>
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Score Weights</h4>
                     <p className="text-sm text-slate-600 mb-4">
-                      Configure how much each similarity engine contributes to the final score.
+                      Control how much each scoring signal contributes to the final result.
                     </p>
 
                     <div className="space-y-4">
@@ -979,11 +1132,10 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Baseline Correction */}
                   <div className="rounded-xl border border-slate-200 p-6">
-                    <h4 className="text-md font-semibold text-slate-900 mb-4">Baseline Correction Values</h4>
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Noise Correction</h4>
                     <p className="text-sm text-slate-600 mb-4">
-                      Expected similarity scores for unrelated files in the same language.
+                      Expected scores for unrelated files in the same language.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1013,11 +1165,10 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Thresholds */}
                   <div className="rounded-xl border border-slate-200 p-6">
-                    <h4 className="text-md font-semibold text-slate-900 mb-4">Similarity Thresholds</h4>
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Review Thresholds</h4>
                     <p className="text-sm text-slate-600 mb-4">
-                      Decision boundaries for different levels of similarity detection.
+                      Decide when results should be treated as low, medium, high, or critical.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1044,11 +1195,10 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Feature Toggles */}
                   <div className="rounded-xl border border-slate-200 p-6">
-                    <h4 className="text-md font-semibold text-slate-900 mb-4">Feature Toggles</h4>
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Scoring Options</h4>
                     <p className="text-sm text-slate-600 mb-4">
-                      Enable or disable various detection features.
+                      Enable or disable score calculation behaviors.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1081,11 +1231,10 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Performance Settings */}
                   <div className="rounded-xl border border-slate-200 p-6">
-                    <h4 className="text-md font-semibold text-slate-900 mb-4">Performance Settings</h4>
+                    <h4 className="text-md font-semibold text-slate-900 mb-4">Processing Behavior</h4>
                     <p className="text-sm text-slate-600 mb-4">
-                      Optimize system performance and resource usage.
+                      Control concurrency, timeouts, cache duration, and batch size.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1122,14 +1271,14 @@ export default function SettingsPage() {
             <>
               <div>
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                  <div className="font-semibold text-amber-900">⚠️ Admin Calibration Mode</div>
+                  <div className="font-semibold text-amber-900">Accuracy Tuning</div>
                   <p className="text-xs text-amber-700 mt-1">
-                    Changes here are system wide and affect all users. These values control base detection accuracy.
+                    Changes here are system wide and affect how the platform separates normal similarity from suspicious similarity.
                   </p>
                 </div>
                 
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
-                  Baseline Correction Values
+                  Normal Similarity Baselines
                 </label>
                 
                 <div className="space-y-4">
@@ -1137,10 +1286,10 @@ export default function SettingsPage() {
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-slate-900">
-                          Baseline Noise Floor
+                          Normal Similarity Floor
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
-                          Scores below this threshold are treated as zero similarity
+                          Scores below these values are treated as normal language overlap.
                         </div>
                       </div>
                     </div>
@@ -1148,10 +1297,10 @@ export default function SettingsPage() {
                     <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <div>
                         <div className="text-sm font-semibold text-slate-900">
-                          Baseline coverage total
+                          Baseline total
                         </div>
                         <div className="text-xs text-slate-500">
-                          Combined noise floor threshold
+                          Combined normal-similarity allowance
                         </div>
                       </div>
                       <div className={`text-lg font-bold ${Math.abs(Object.values(settings.baseline_correction?.baselines || {}).reduce((a, b) => a + (b as number), 0) - 1) < 0.01
@@ -1167,7 +1316,7 @@ export default function SettingsPage() {
                         { key: "winnowing", label: "Winnowing" },
                         { key: "ast", label: "AST" },
                         { key: "token", label: "Token" },
-                        { key: "embedding", label: "Embedding" },
+                        { key: "semantic", label: "Semantic" },
                       ].map((item) => {
                         const value = settings.baseline_correction?.baselines?.[item.key] || 0
                         
@@ -1227,10 +1376,10 @@ export default function SettingsPage() {
                 
                 <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <button className="px-4 py-3 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors">
-                    Run Benchmark Test
+                    Test Against Benchmark
                   </button>
                   <button className="px-4 py-3 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors">
-                    Auto Calibrate Weights
+                    Tune Automatically
                   </button>
                 </div>
               </div>
@@ -1242,7 +1391,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Batch Size
+                    Batch Size Per Run
                   </label>
                   <input
                     type="number"
@@ -1257,7 +1406,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Max File Size (MB)
+                    Maximum File Size (MB)
                   </label>
                   <input
                     type="number"
@@ -1275,7 +1424,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Max Files Per Job
+                    Maximum Files Per Check
                   </label>
                   <input
                     type="number"
@@ -1303,7 +1452,7 @@ export default function SettingsPage() {
                 className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {saving ? "Saving..." : "Save Engine Configuration"}
+                {saving ? "Saving..." : "Save Scoring Rules"}
               </button>
             ) : (
               <button
