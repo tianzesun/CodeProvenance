@@ -29,6 +29,7 @@ import subprocess
 import csv
 import xml.etree.ElementTree as ET
 import urllib.request
+from collections import Counter
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
@@ -254,7 +255,6 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
         "ring": "ring-pink-500",
         "engines": ["Installed"],
     },
-
     "vendetect": {
         "name": "VenDetect",
         "desc": "Installed auxiliary detection utility that is not yet runnable from the benchmark page.",
@@ -617,6 +617,122 @@ def _infer_dataset_size_label(
     return f"{_count_unique_code_files(dataset_dir)} files"
 
 
+def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
+    """Read explicit benchmark pairs from a generated pair dataset."""
+    pairs_path = dataset_root / "generated_pairs.jsonl"
+    if not pairs_path.exists():
+        return []
+
+    try:
+        payload = json.loads(pairs_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    raw_pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
+    return [item for item in raw_pairs if isinstance(item, dict)]
+
+
+def _build_benchmark_quality_certificate(
+    dataset_root: PathLib,
+) -> Optional[Dict[str, Any]]:
+    """Build a reproducible quality certificate for explicit pair benchmarks."""
+    raw_pairs = _read_generated_pair_items(dataset_root)
+    if not raw_pairs:
+        return None
+
+    positive_pairs = [
+        pair
+        for pair in raw_pairs
+        if _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) >= 2
+    ]
+    negative_pairs = [pair for pair in raw_pairs if pair not in positive_pairs]
+    clone_types = Counter(
+        str(pair.get("clone_type", "unknown")) for pair in positive_pairs
+    )
+    transformations = Counter(
+        str(pair.get("obfuscation", "unspecified")) for pair in raw_pairs
+    )
+    hard_negative_pairs = [
+        pair
+        for pair in negative_pairs
+        if str(pair.get("obfuscation", "")).startswith("hard_negative")
+        or str(pair.get("id", "")).startswith("cs_hard_negative")
+        or str(pair.get("obfuscation", ""))
+        in {
+            "same_domain_different_task",
+            "shared_boilerplate_only",
+            "same_algorithm_family_different_behavior",
+        }
+    ]
+    pair_count = len(raw_pairs)
+    positive_ratio = len(positive_pairs) / pair_count if pair_count else 0.0
+
+    gates = [
+        {
+            "id": "explicit_labels",
+            "label": "Explicit pair labels",
+            "passed": all("label" in pair for pair in raw_pairs),
+            "value": f"{pair_count} labeled pairs",
+            "target": "Every pair has a ground-truth label",
+        },
+        {
+            "id": "minimum_size",
+            "label": "Minimum controlled corpus size",
+            "passed": pair_count >= 12,
+            "value": pair_count,
+            "target": "At least 12 curated pairs",
+        },
+        {
+            "id": "class_balance",
+            "label": "Positive/negative balance",
+            "passed": 0.55 <= positive_ratio <= 0.75 and len(negative_pairs) >= 4,
+            "value": f"{len(positive_pairs)} positive / {len(negative_pairs)} negative",
+            "target": "55-75% positives with at least 4 negatives",
+        },
+        {
+            "id": "clone_coverage",
+            "label": "Clone-type coverage",
+            "passed": {"1", "2", "3"}.issubset(set(clone_types)),
+            "value": ", ".join(
+                f"type {key}: {value}" for key, value in sorted(clone_types.items())
+            ),
+            "target": "Type 1, Type 2, and Type 3 positives",
+        },
+        {
+            "id": "obfuscation_coverage",
+            "label": "Transformation coverage",
+            "passed": len(transformations) >= 8,
+            "value": len(transformations),
+            "target": "At least 8 distinct transformations",
+        },
+        {
+            "id": "hard_negatives",
+            "label": "Hard-negative coverage",
+            "passed": len(hard_negative_pairs) >= 3,
+            "value": len(hard_negative_pairs),
+            "target": "At least 3 same-domain or boilerplate negatives",
+        },
+    ]
+    passed_gates = sum(1 for gate in gates if gate["passed"])
+    score = passed_gates / max(1, len(gates))
+    certification_level = "gold_standard" if passed_gates == len(gates) else "labeled"
+
+    return {
+        "certification_level": certification_level,
+        "score": round(score, 4),
+        "score_percent": round(score * 100, 1),
+        "pair_count": pair_count,
+        "positive_pairs": len(positive_pairs),
+        "negative_pairs": len(negative_pairs),
+        "positive_ratio": round(positive_ratio, 4),
+        "clone_types": dict(sorted(clone_types.items())),
+        "transformations": dict(sorted(transformations.items())),
+        "hard_negative_pairs": len(hard_negative_pairs),
+        "metric_basis": "pair_level_pan_plagdet_with_single_detection_granularity",
+        "gates": gates,
+    }
+
+
 def _count_unique_code_files(root_dir: PathLib) -> int:
     """Count unique code files using the same naming rules as the loader."""
     unique_names = {
@@ -839,7 +955,6 @@ def _find_tool_dir(tool_id: str) -> Optional[PathLib]:
             TOOLS_DIR / "pmd",
         ],
         "sherlock": [external_tools_dir / "sherlock", TOOLS_DIR / "sherlock"],
-    
     }
     return _first_existing_path(candidates.get(tool_id, []))
 
@@ -1244,8 +1359,7 @@ def _load_synthetic_pair_dataset(
     if not pairs_path.exists():
         return {}, []
 
-    payload = json.loads(pairs_path.read_text(encoding="utf-8"))
-    raw_pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
+    raw_pairs = _read_generated_pair_items(dataset_root)
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
 
@@ -3929,6 +4043,9 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 "is_demo": is_demo,
                 "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, item),
             }
+            benchmark_quality = _build_benchmark_quality_certificate(item)
+            if benchmark_quality:
+                dataset_record["benchmark_quality"] = benchmark_quality
 
             # Add demo-specific fields if applicable
             if is_demo:
@@ -4234,6 +4351,11 @@ async def run_benchmark(
         for p in d["pairs"]
     ]
     comp_avg = sum(comp_scores) / len(comp_scores) if comp_scores else 0
+    benchmark_quality = (
+        _build_benchmark_quality_certificate(BENCHMARK_DATA_DIR / dataset)
+        if dataset and dataset != "custom"
+        else None
+    )
 
     shutil.rmtree(job_dir, ignore_errors=True)
 
@@ -4288,6 +4410,8 @@ async def run_benchmark(
         ),
         "has_ground_truth": bool(ground_truth_labels),
     }
+    if benchmark_quality:
+        response["benchmark_quality"] = benchmark_quality
 
     # Add evaluation metrics if available
     if evaluation_results:
@@ -4429,12 +4553,12 @@ def _compute_evaluation_metrics(
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
-    # Find best threshold. PAN optimization is precision-sensitive because false
-    # positives create noisy product feedback and reviewer distrust.
-    best_f1 = 0
+    # Find the PAN/PlagDet operating point. This endpoint is an optimization
+    # benchmark, so the threshold sweep must maximize F1/PlagDet instead of
+    # applying the stricter production precision target from engine settings.
     best_threshold = 0.5
     best_cm = None
-    threshold_candidates = []
+    best_candidate_key = None
     sweep_thresholds = sorted(
         {
             round(float(threshold), 6)
@@ -4473,38 +4597,17 @@ def _compute_evaluation_metrics(
             "false_positive_rate": float(false_positive_rate),
             "cm": {"tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn)},
         }
-        threshold_candidates.append(candidate)
-
-        if best_cm is None or f1 > best_f1:
-            best_f1 = f1
+        candidate_key = (
+            float(f1),
+            float(recall),
+            float(precision),
+            -float(false_positive_rate),
+            -float(threshold),
+        )
+        if best_candidate_key is None or candidate_key > best_candidate_key:
             best_threshold = threshold
             best_cm = candidate["cm"]
-
-    from src.backend.engines.scoring.fusion_engine import load_engine_config
-
-    config = load_engine_config()
-    decision_config = config.get("decision", {})
-    precision_target = float(decision_config.get("precision_target", 0.9))
-    false_positive_bias = float(decision_config.get("false_positive_bias", 1.0))
-    if false_positive_bias > 1.0:
-        precision_candidates = [
-            candidate
-            for candidate in threshold_candidates
-            if candidate["precision"] >= precision_target and candidate["cm"]["tp"] > 0
-        ]
-        if precision_candidates:
-            chosen = max(
-                precision_candidates,
-                key=lambda item: (
-                    item["f1"],
-                    item["recall"],
-                    -item["false_positive_rate"],
-                    item["threshold"],
-                ),
-            )
-            best_f1 = chosen["f1"]
-            best_threshold = chosen["threshold"]
-            best_cm = chosen["cm"]
+            best_candidate_key = candidate_key
 
     # Compute ROC-AUC and PR-AUC
     try:

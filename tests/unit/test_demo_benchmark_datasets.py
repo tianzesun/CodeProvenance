@@ -6,6 +6,7 @@ import types
 import zipfile
 
 from starlette.datastructures import UploadFile
+from fastapi.testclient import TestClient
 
 from src.backend.api import server
 
@@ -67,33 +68,33 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         runtime_seconds=2.0,
     )
 
-    assert metrics["precision"] == 1.0
-    assert metrics["recall"] == 0.5
-    assert metrics["f1_score"] == 0.6667
+    assert metrics["precision"] == 0.6667
+    assert metrics["recall"] == 1.0
+    assert metrics["f1_score"] == 0.8
     assert metrics["granularity"] == 1.0
-    assert metrics["plagdet"] == 0.6667
-    assert metrics["plagdet_percent"] == 66.67
+    assert metrics["plagdet"] == 0.8
+    assert metrics["plagdet_percent"] == 80.0
     assert metrics["top_10_retrieval"] == 0.5
     assert metrics["top_20_retrieval"] == 0.5
     assert metrics["top_10_recall"] == 1.0
     assert metrics["top_20_recall"] == 1.0
-    assert metrics["false_positive_rate"] == 0.0
+    assert metrics["false_positive_rate"] == 0.5
     assert "auc_pr" in metrics
     assert metrics["engine_contribution"] == {}
     assert metrics["ai_generated_recall"] is None
     assert metrics["runtime_seconds"] == 2.0
     assert metrics["avg_runtime_seconds"] == 0.5
     assert metrics["pan_metrics"] == {
-        "precision": 1.0,
-        "recall": 0.5,
-        "f1_score": 0.6667,
+        "precision": 0.6667,
+        "recall": 1.0,
+        "f1_score": 0.8,
         "granularity": 1.0,
-        "plagdet": 0.6667,
+        "plagdet": 0.8,
         "top_10_retrieval": 0.5,
         "top_20_retrieval": 0.5,
         "top_10_recall": 1.0,
         "top_20_recall": 1.0,
-        "false_positive_rate": 0.0,
+        "false_positive_rate": 0.5,
         "auc_pr": metrics["auc_pr"],
         "engine_contribution": {},
         "ai_generated_recall": None,
@@ -195,22 +196,187 @@ def test_load_synthetic_pair_dataset_uses_explicit_pairs(tmp_path, monkeypatch):
     ]
 
 
+def test_load_generated_pair_dataset_supports_controlled_corpus(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "clough_stevenson_style"
+    dataset_dir.mkdir()
+    (dataset_dir / "generated_pairs.jsonl").write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "controlled_001",
+                        "code_a": "def median(values):\n    return sorted(values)[0]\n",
+                        "code_b": "def midpoint(items):\n    return sorted(items)[0]\n",
+                        "label": 1,
+                        "clone_type": 3,
+                    },
+                    {
+                        "id": "controlled_002",
+                        "code_a": "def first():\n    return 1\n",
+                        "code_b": "def second():\n    return 2\n",
+                        "label": 0,
+                        "clone_type": 0,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+
+    submissions, pairs = server._load_pair_labeled_benchmark_dataset(
+        "clough_stevenson_style", tmp_path / "job"
+    )
+
+    assert sorted(submissions) == [
+        "controlled_001_a.py",
+        "controlled_001_b.py",
+        "controlled_002_a.py",
+        "controlled_002_b.py",
+    ]
+    assert pairs == [
+        {"file_a": "controlled_001_a.py", "file_b": "controlled_001_b.py", "label": 3},
+        {"file_a": "controlled_002_a.py", "file_b": "controlled_002_b.py", "label": 0},
+    ]
+
+
+def test_generated_pair_dataset_exposes_quality_certificate(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "clough_stevenson_style"
+    dataset_dir.mkdir()
+    pairs = [
+        ("exact", 1, 1, "verbatim_copy"),
+        ("rename", 1, 2, "identifier_renaming"),
+        ("comments", 1, 2, "comments_and_formatting"),
+        ("reorder", 1, 3, "statement_reordering"),
+        ("control", 1, 3, "control_flow_rewrite"),
+        ("semantic", 1, 3, "semantic_rewrite"),
+        ("library", 1, 3, "library_substitution"),
+        ("split", 1, 3, "helper_extraction"),
+        ("negative_1", 0, 0, "same_domain_different_task"),
+        ("negative_2", 0, 0, "shared_boilerplate_only"),
+        ("negative_3", 0, 0, "same_algorithm_family_different_behavior"),
+        ("negative_4", 0, 0, "unrelated"),
+    ]
+    (dataset_dir / "generated_pairs.jsonl").write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": f"cs_{pair_id}",
+                        "code_a": "def a():\n    return 1\n",
+                        "code_b": "def b():\n    return 1\n",
+                        "label": label,
+                        "clone_type": clone_type,
+                        "obfuscation": obfuscation,
+                    }
+                    for pair_id, label, clone_type, obfuscation in pairs
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+
+    response = asyncio.run(server.get_benchmark_datasets())
+    payload = json.loads(response.body)
+    quality = payload["datasets"][0]["benchmark_quality"]
+
+    assert quality["certification_level"] == "gold_standard"
+    assert quality["score_percent"] == 100.0
+    assert quality["pair_count"] == 12
+    assert quality["positive_pairs"] == 8
+    assert quality["negative_pairs"] == 4
+    assert quality["hard_negative_pairs"] == 3
+    assert all(gate["passed"] for gate in quality["gates"])
+
+
 def test_dataset_has_ground_truth_for_pair_labeled_sources(tmp_path):
     synthetic_dir = tmp_path / "synthetic"
+    controlled_dir = tmp_path / "clough_stevenson_style"
     kaggle_dir = tmp_path / "kaggle_student_code"
     codexglue_dir = tmp_path / "codexglue_clone" / "huggingface"
     synthetic_dir.mkdir()
+    controlled_dir.mkdir()
     kaggle_dir.mkdir()
     codexglue_dir.mkdir(parents=True)
     (synthetic_dir / "generated_pairs.jsonl").write_text("{}", encoding="utf-8")
+    (controlled_dir / "generated_pairs.jsonl").write_text("{}", encoding="utf-8")
     (kaggle_dir / "cheating_dataset.csv").write_text("", encoding="utf-8")
     (codexglue_dir / "dataset_dict.json").write_text("{}", encoding="utf-8")
 
     assert server._dataset_has_pair_ground_truth("synthetic", synthetic_dir)
+    assert server._dataset_has_pair_ground_truth(
+        "clough_stevenson_style", controlled_dir
+    )
     assert server._dataset_has_pair_ground_truth("kaggle_student_code", kaggle_dir)
     assert server._dataset_has_pair_ground_truth(
         "codexglue_clone", tmp_path / "codexglue_clone"
     )
+
+
+def test_pan_benchmark_rejects_unlabeled_dataset(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "unlabeled"
+    dataset_dir.mkdir()
+    (dataset_dir / "a.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    (dataset_dir / "b.py").write_text("def b():\n    return 2\n", encoding="utf-8")
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+
+    client = TestClient(server.app)
+    response = client.post(
+        "/api/benchmark",
+        data={
+            "benchmark_type": "pan_optimization",
+            "dataset": "unlabeled",
+            "tools": ["integritydesk"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "PAN metrics require labeled ground truth" in response.json()["error"]
+
+
+def test_pan_benchmark_reports_tool_errors_with_ground_truth(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "synthetic"
+    dataset_dir.mkdir()
+    (dataset_dir / "generated_pairs.jsonl").write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "case_001",
+                        "code_a": "def add(a, b):\n    return a + b\n",
+                        "code_b": "def sum_numbers(x, y):\n    return x + y\n",
+                        "label": 1,
+                        "clone_type": 2,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def failing_tool(tool, submissions, pairs):
+        raise RuntimeError(f"{tool} failed before scoring")
+
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+    monkeypatch.setattr(server, "_run_competitor_tool", failing_tool)
+
+    client = TestClient(server.app)
+    response = client.post(
+        "/api/benchmark",
+        data={
+            "benchmark_type": "pan_optimization",
+            "dataset": "synthetic",
+            "tools": ["moss"],
+        },
+    )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["has_ground_truth"] is True
+    assert payload["tool_scores"]["moss"]["pairs"] == 0
+    assert payload["tool_scores"]["moss"]["error"] == "moss failed before scoring"
+    assert "evaluation" not in payload
 
 
 def test_extract_code_entries_from_row_supports_pair_fields():

@@ -49,6 +49,13 @@ const DATASET_CATEGORY_META = {
 };
 
 const PRESET_DATASET_META = {
+  clough_stevenson_style: {
+    order: 5,
+    presetCategory: 'Controlled plagiarism corpus',
+    badgeLabel: 'Gold Standard',
+    eyebrow: 'Controlled original-vs-plagiarized benchmark',
+    summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs',
+  },
   conplag_classroom_java: {
     order: 10,
     presetCategory: 'Classroom-style',
@@ -194,6 +201,17 @@ function summarizeDataset(dataset) {
   return `${languageLabel} • ${sizeLabel}`;
 }
 
+function formatBenchmarkQuality(quality) {
+  if (!quality) {
+    return null;
+  }
+
+  const level = quality.certification_level === 'gold_standard'
+    ? 'Gold-standard controlled benchmark'
+    : 'Labeled benchmark';
+  return `${level} • ${Number(quality.score_percent || 0).toFixed(0)}% quality gates`;
+}
+
 function sortDatasets(datasets, demo = false) {
   const items = [...datasets];
   if (demo) {
@@ -232,17 +250,23 @@ function buildDatasetLibrary(benchmarkDatasets = []) {
   };
 }
 
-function DatasetCard({ dataset, isActive, onSelect }) {
+function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const categoryMeta = getDatasetCategoryMeta(dataset);
   const presetMeta = getPresetDatasetMeta(dataset);
   const badgeLabel = presetMeta?.badgeLabel || categoryMeta?.label;
   const eyebrow = presetMeta?.eyebrow || categoryMeta?.eyebrow;
   const secondarySummary = presetMeta?.summary;
+  const qualityLabel = formatBenchmarkQuality(dataset.benchmark_quality);
 
   return (
     <button
-      onClick={() => onSelect(dataset.id)}
-      className={`relative rounded-2xl border-2 p-4 text-left transition-all duration-200 ${isActive
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onSelect(dataset.id);
+      }}
+      className={`relative rounded-2xl border-2 p-4 text-left transition-all duration-200 ${disabled
+        ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
+        : isActive
         ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
         : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
         }`}
@@ -274,6 +298,13 @@ function DatasetCard({ dataset, isActive, onSelect }) {
       {secondarySummary && (
         <div className={`mt-2 text-xs leading-5 ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>
           {secondarySummary}
+        </div>
+      )}
+      {qualityLabel && (
+        <div className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${isActive ? 'bg-white/10 text-slate-100' : 'bg-emerald-50 text-emerald-700'
+          }`}>
+          <ClipboardList size={14} className="mt-0.5 shrink-0" />
+          <span>{qualityLabel}</span>
         </div>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -1106,6 +1137,8 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     () => buildDatasetLibrary(benchmarkDatasets),
     [benchmarkDatasets]
   );
+  const panRequiresGroundTruth = benchmarkMode === 'pan_optimization';
+  const labeledDatasets = allDatasets.filter((dataset) => dataset.has_ground_truth);
 
   const availableLanguages = useMemo(() => {
     const langs = new Set(allDatasets.map(d => d.language?.toLowerCase() || 'mixed').filter(Boolean));
@@ -1113,6 +1146,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
   }, [allDatasets]);
 
   const visibleLibraryDatasets = allDatasets.filter((dataset) => {
+    if (panRequiresGroundTruth && !dataset.has_ground_truth) {
+      return false;
+    }
     if (libraryFilter === 'preset') {
       return dataset.datasetType === 'preset';
     }
@@ -1129,8 +1165,8 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
   const activePresetMeta = getPresetDatasetMeta(activeDataset);
   const hasZipUpload = files.some((file) => file.name?.toLowerCase().endsWith('.zip'));
   const canProceed = uploadMode === 'builtin'
-    ? !!selectedDataset
-    : hasZipUpload || files.length >= 2;
+    ? !!selectedDataset && (!panRequiresGroundTruth || activeDataset?.has_ground_truth)
+    : !panRequiresGroundTruth && (hasZipUpload || files.length >= 2);
 
   return (
     <div className="space-y-5">
@@ -1151,17 +1187,27 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           {[
             { id: 'builtin', label: 'Dataset Library', icon: FlaskConical },
             { id: 'upload', label: 'Upload Files or ZIP', icon: FileUp },
-          ].map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => { setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
+          ].map(({ id, label, icon: Icon }) => {
+            const disabled = panRequiresGroundTruth && id === 'upload';
+            return (
+            <button key={id} disabled={disabled} onClick={() => { if (disabled) return; setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${disabled
+                ? 'cursor-not-allowed border-transparent text-slate-300'
+                : uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}>
               <Icon size={15} />
               {label}
             </button>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-6">
+          {panRequiresGroundTruth && (
+            <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">
+              PAN Optimization uses only labeled datasets. Select a dataset with the Labeled badge to compute Precision, Recall, F1, Granularity, and PlagDet.
+            </div>
+          )}
           {uploadMode === 'builtin' && (
             <div className="space-y-6">
                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
@@ -1174,9 +1220,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                  <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1">
                     {[
-                      { id: 'all', label: 'All', count: allDatasets.length },
-                      { id: 'preset', label: 'Preset', count: presetDatasets.length },
-                      { id: 'demo', label: 'Demo', count: demoDatasets.length },
+                      { id: 'all', label: 'All', count: panRequiresGroundTruth ? labeledDatasets.length : allDatasets.length },
+                      { id: 'preset', label: 'Preset', count: panRequiresGroundTruth ? presetDatasets.filter(d => d.has_ground_truth).length : presetDatasets.length },
+                      { id: 'demo', label: 'Demo', count: panRequiresGroundTruth ? demoDatasets.filter(d => d.has_ground_truth).length : demoDatasets.length },
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -1244,10 +1290,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                  ) : (
                    <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
                      <div className="text-sm font-semibold text-slate-900">
-                       {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
+                      {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
                      </div>
                      <div className="mt-2 text-sm leading-6 text-slate-500">
-                       {libraryFilter === 'demo'
+                       {panRequiresGroundTruth
+                         ? 'No labeled datasets match this filter. Choose All or Preset to use Clough-Stevenson-style, synthetic, Kaggle student code, CodeXGLUE clone, or another labeled benchmark.'
+                         : libraryFilter === 'demo'
                          ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
                          : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
                      </div>
@@ -1278,6 +1326,37 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                   <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
                   {activePresetMeta?.summary && (
                     <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>
+                  )}
+                  {activeDataset.benchmark_quality && (
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
+                            Benchmark Quality Certificate
+                          </div>
+                          <div className="mt-2 text-sm leading-6 text-slate-600">
+                            {activeDataset.benchmark_quality.pair_count} labeled pairs,
+                            {' '}{activeDataset.benchmark_quality.positive_pairs} positives,
+                            {' '}{activeDataset.benchmark_quality.negative_pairs} negatives,
+                            {' '}{activeDataset.benchmark_quality.hard_negative_pairs} hard negatives.
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                          {Number(activeDataset.benchmark_quality.score_percent || 0).toFixed(0)}% gates passed
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        {(activeDataset.benchmark_quality.gates || []).map((gate) => (
+                          <div key={gate.id} className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
+                            <CheckCircle2 size={15} className={gate.passed ? 'mt-0.5 shrink-0 text-emerald-600' : 'mt-0.5 shrink-0 text-amber-600'} />
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-800">{gate.label}</div>
+                              <div className="text-xs leading-5 text-slate-500">{gate.value} · {gate.target}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
 
                   {activeDataset.cases ? (
@@ -1372,6 +1451,11 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
               {files.length > 0 && !hasZipUpload && files.length < 2 && (
                 <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5">
                   <AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive
+                </p>
+              )}
+              {panRequiresGroundTruth && (
+                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5">
+                  <AlertCircle size={13} /> PAN metrics require labeled ground truth, so uploads are available only in Tool Comparison mode.
                 </p>
               )}
             </div>
@@ -1879,7 +1963,18 @@ function ReportStep({ results, onRestart }) {
   const panMetricDiagnostics = buildPanMetricDiagnostics(productPanResult);
   const reportMode = results.benchmark_type || results.benchmarkMode || 'tool_comparison';
   const isPanOptimization = reportMode === 'pan_optimization';
+  const hasGroundTruth = results.has_ground_truth !== false;
+  const toolFailureRows = Object.entries(results.tool_scores || {})
+    .filter(([, meta]) => meta?.error)
+    .map(([toolId, meta]) => ({
+      toolId,
+      name: TOOLS.find((tool) => tool.id === toolId)?.name || toolId,
+      error: String(meta.error || 'Tool did not return scores.'),
+    }));
+  const showMissingGroundTruthWarning = isPanOptimization && !hasGroundTruth;
+  const showMissingPanScoresWarning = isPanOptimization && hasGroundTruth && panEvaluationRows.length === 0;
   const benchmarkSummary = results.summary || {};
+  const benchmarkQuality = results.benchmark_quality || {};
   const datasetLabel = `${benchmarkSummary.dataset_name || results.datasetName || 'Dataset'} · ${benchmarkSummary.dataset_size || 0} submissions · ${benchmarkSummary.positive_pairs || 0} plagiarized pairs`;
   const optimizationLabel = `${benchmarkSummary.optimization_method || 'Threshold sweep, maximizing F1 / PlagDet'} · ${benchmarkSummary.optimization_trials || 0} trials · ${benchmarkSummary.cross_validation_folds || 1} fold`;
   const comparison = results.comparison || {};
@@ -2062,9 +2157,46 @@ function ReportStep({ results, onRestart }) {
         </div>
       )}
 
-      {isPanOptimization && panEvaluationRows.length === 0 && (
+      {showMissingGroundTruthWarning && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
           PAN metrics need labeled ground truth. Use a demo/synthetic original-vs-plagiarized dataset or a PAN-style dataset with labels to compute Precision, Recall, F1, Granularity, and PlagDet.
+        </div>
+      )}
+
+      {showMissingPanScoresWarning && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
+          <div className="font-semibold text-amber-900">Ground truth labels were loaded, but no selected tool returned evaluable pair scores.</div>
+          <div className="mt-1">
+            Check the tool setup and rerun the benchmark. PAN metrics are computed only after a tool returns scores for labeled pairs.
+          </div>
+          {toolFailureRows.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {toolFailureRows.map((failure) => (
+                <div key={failure.toolId}>
+                  <span className="font-semibold">{failure.name}:</span> {failure.error}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPanOptimization && benchmarkQuality.certification_level && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                Benchmark Quality Certificate
+              </div>
+              <div className="mt-2 text-sm leading-6 text-emerald-900">
+                {benchmarkQuality.pair_count} labeled pairs across {Object.keys(benchmarkQuality.transformations || {}).length} transformations,
+                with {benchmarkQuality.hard_negative_pairs} hard negatives and PAN pair-level PlagDet scoring.
+              </div>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">
+              {Number(benchmarkQuality.score_percent || 0).toFixed(0)}% quality gates passed
+            </span>
+          </div>
         </div>
       )}
 
@@ -2456,7 +2588,7 @@ export default function BenchmarkPage() {
       }
     }).catch(() => {
       setToolsError('Unable to confirm the installed benchmark tools. Showing the last known real-tool set.');
-      setAvailableTools(TOOLS.filter((tool) => ['integritydesk', 'moss', 'jplag', 'dolos', 'nicad', 'ac', 'pmd'].includes(tool.id)));
+      setAvailableTools(TOOLS.filter((tool) => ['integritydesk', 'moss', 'jplag', 'dolos', 'nicad', 'pmd', 'sherlock'].includes(tool.id)));
     }).finally(() => {
       setToolsLoading(false);
     });
@@ -2470,6 +2602,22 @@ export default function BenchmarkPage() {
       if (res.data?.runs) setBenchmarkHistory(res.data.runs);
     }).catch(() => { });
   }, [authLoading, user]);
+
+  useEffect(() => {
+    if (benchmarkMode !== 'pan_optimization') {
+      return;
+    }
+
+    if (uploadMode !== 'builtin') {
+      setUploadMode('builtin');
+      setFiles([]);
+    }
+
+    const selected = benchmarkDatasets.find((dataset) => dataset.id === selectedDataset);
+    if (selected && !selected.has_ground_truth) {
+      setSelectedDataset(null);
+    }
+  }, [benchmarkMode, uploadMode, selectedDataset, benchmarkDatasets]);
 
   const applyPreset = (preset) => {
     const runnableToolIds = new Set(

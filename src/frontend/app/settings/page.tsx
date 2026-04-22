@@ -146,6 +146,8 @@ interface Settings {
   anthropic_api_key: string;
   anthropic_api_key_configured: boolean;
   anthropic_model: string;
+  moss_user_id: string;
+  moss_user_id_configured: boolean;
   embedding_runtime: string;
   embedding_model: string;
   embedding_server_url: string | null;
@@ -295,6 +297,9 @@ export default function SettingsPage() {
             current.openai_api_key_configured || current.openai_api_key.trim().length > 0,
           anthropic_api_key_configured:
             current.anthropic_api_key_configured || current.anthropic_api_key.trim().length > 0,
+          moss_user_id: "",
+          moss_user_id_configured:
+            current.moss_user_id_configured || current.moss_user_id.trim().length > 0,
         };
       });
       setSuccess("Legacy settings saved successfully");
@@ -1290,6 +1295,32 @@ export default function SettingsPage() {
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   />
+                </div>
+              </div>
+              <div className="pt-4 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  External Benchmark Tools
+                </label>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    MOSS User ID
+                  </label>
+                  <input
+                    type="password"
+                    value={settings.moss_user_id}
+                    onChange={(e) =>
+                      updateSetting("moss_user_id", e.target.value)
+                    }
+                    placeholder={
+                      settings.moss_user_id_configured
+                        ? "Leave blank to keep current MOSS user ID"
+                        : "Enter MOSS user ID"
+                    }
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-400 mt-2">
+                    Saved to <code>.env.local</code>. The current user ID is never returned to the browser.
+                  </p>
                 </div>
               </div>
             </>

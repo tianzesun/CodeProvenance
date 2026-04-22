@@ -45,11 +45,7 @@ async def export_evidence_pdf(
     - Tool comparison with statistical significance
     - Digital signature (SHA-256)
     """
-    if PDF_BACKEND is None and format == "pdf":
-        raise HTTPException(
-            status_code=503,
-            detail="No PDF backend available. Install weasyprint or pdfkit.",
-        )
+
 
     # Fetch case data from database (placeholder — replace with actual query)
     case_data = _fetch_case_data(case_id)

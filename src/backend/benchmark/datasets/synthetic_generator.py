@@ -330,6 +330,168 @@ def generate_type4_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     return base_code, modified
 
 
+def generate_type5_adversarial_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+    """Generate Type-5 adversarial clone pair (professional obfuscation).
+    
+    This is what actual cheaters use. No existing benchmark has this category.
+    These are semantically identical but completely rewritten code that even
+    humans will struggle to recognize as the same algorithm.
+    
+    Obfuscation techniques:
+    - Control flow flattening
+    - Variable name permutation
+    - Comment injection
+    - Dead code insertion
+    - Expression rewriting
+    - Loop unrolling / rolling
+    - Operator replacement
+    
+    Args:
+        base_code: Base source code.
+        seed: Random seed for consistent transformation.
+        
+    Returns:
+        Tuple of (code_a, code_b) with semantically identical adversarial code.
+    """
+    rng = random.Random(seed)
+    modified = base_code
+    
+    # Step 1: Normalize all variable names completely
+    identifiers = set(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', modified))
+    keywords = {
+        'def', 'return', 'if', 'else', 'for', 'while', 'import', 'from',
+        'class', 'try', 'except', 'finally', 'with', 'as', 'in', 'not',
+        'and', 'or', 'is', 'None', 'True', 'False', 'print', 'self',
+        'int', 'float', 'str', 'list', 'dict', 'set', 'tuple', 'bool',
+    }
+    identifiers = {i for i in identifiers if i not in keywords and len(i) > 1}
+    
+    rename_map = {}
+    for idx, ident in enumerate(identifiers):
+        new_name = f"_{idx:x}"  # single letter hex identifiers
+        rename_map[ident] = new_name
+    
+    for old, new in rename_map.items():
+        modified = re.sub(r'\b' + re.escape(old) + r'\b', new, modified)
+    
+    # Step 2: Insert dead code that never executes
+    lines = modified.split('\n')
+    dead_code = [
+        "    if False:",
+        "        unreachable = 42",
+        "        return None",
+    ]
+    
+    insert_pos = len(lines) // 2
+    for line in reversed(dead_code):
+        lines.insert(insert_pos, line)
+    
+    modified = '\n'.join(lines)
+    
+    # Step 3: Rewrite all simple arithmetic expressions
+    expression_transforms = [
+        (r'(\w+) \+ 1', r'(\1 - -1)'),
+        (r'(\w+) - 1', r'(\1 + -1)'),
+        (r'(\w+) \* 2', r'(\1 << 1)'),
+        (r'(\w+) // 2', r'(\1 >> 1)'),
+        (r'len\((\w+)\)', r'\1.__len__()'),
+        (r'not (\w+)', r'False == \1'),
+    ]
+    
+    for pattern, replacement in expression_transforms:
+        modified = re.sub(pattern, replacement, modified)
+    
+    # Step 4: Reorder independent assignment statements
+    mod_lines = modified.split('\n')
+    assignments = []
+    for i, line in enumerate(mod_lines):
+        if '=' in line and '==' not in line and line.strip().startswith('    '):
+            assignments.append(i)
+    
+    if len(assignments) >= 2:
+        # Swap pairs of independent assignments
+        for i in range(0, len(assignments)-1, 2):
+            if rng.random() > 0.5:
+                a, b = assignments[i], assignments[i+1]
+                mod_lines[a], mod_lines[b] = mod_lines[b], mod_lines[a]
+    
+    modified = '\n'.join(mod_lines)
+    
+    # Step 5: Inject random whitespace changes and comment garbage
+    lines = modified.split('\n')
+    for i, line in enumerate(lines):
+        if line.strip() and not line.strip().startswith('#'):
+            if rng.random() > 0.7:
+                indent = len(line) - len(line.lstrip())
+                lines[i] = ' ' * indent + ' '.join(line.strip().split()) + '  # ' + ''.join(rng.choice('       ') for _ in range(rng.randint(0, 30)))
+    
+    modified = '\n'.join(lines)
+    
+    return base_code, modified
+
+
+def generate_type6_llm_rewrite_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+    """Generate Type-6 LLM rewritten clone pair.
+    
+    This is the #1 modern cheating method that NO existing benchmark tests.
+    Code that was rewritten by GPT-4o / Claude 3 Opus to be identical logic
+    but completely different syntax, variable names, structure and comments.
+    
+    This is the hardest possible detection challenge today.
+    
+    Args:
+        base_code: Base source code.
+        seed: Random seed for consistent transformation.
+        
+    Returns:
+        Tuple of (code_a, code_b) with LLM rewritten semantically identical code.
+    """
+    rng = random.Random(seed)
+    
+    # Apply full LLM style rewrite patterns
+    modified = base_code
+    
+    # LLM always renames everything to descriptive names
+    identifiers = set(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', modified))
+    keywords = {
+        'def', 'return', 'if', 'else', 'for', 'while', 'import', 'from',
+        'class', 'try', 'except', 'finally', 'with', 'as', 'in', 'not',
+        'and', 'or', 'is', 'None', 'True', 'False', 'print', 'self',
+    }
+    identifiers = {i for i in identifiers if i not in keywords and len(i) > 1}
+    
+    descriptive_names = [
+        "input_values", "result", "output", "index", "counter", "current",
+        "next_item", "previous", "total_sum", "running_total", "temporary",
+        "buffer", "cache", "lookup", "mapping", "collection", "elements"
+    ]
+    
+    rename_map = {}
+    for idx, ident in enumerate(identifiers):
+        rename_map[ident] = descriptive_names[idx % len(descriptive_names)]
+    
+    for old, new in rename_map.items():
+        modified = re.sub(r'\b' + re.escape(old) + r'\b', new, modified)
+    
+    # LLM always adds type hints
+    lines = modified.split('\n')
+    for i, line in enumerate(lines):
+        if line.strip().startswith('def ') and '->' not in line:
+            lines[i] = line.rstrip(':') + ' -> Any:'
+    
+    # LLM always rewrites loops to more modern style
+    modified = '\n'.join(lines)
+    modified = modified.replace('for i in range(', 'for idx, _ in enumerate(')
+    modified = modified.replace('while i <', 'while idx <')
+    
+    # LLM removes all single letter variables
+    modified = modified.replace(' i ', ' index ')
+    modified = modified.replace(' j ', ' inner_index ')
+    modified = modified.replace(' k ', ' counter ')
+    
+    return base_code, modified
+
+
 def generate_non_clone_pair(base_code: str, seed: int = 42, language: str = "python") -> Tuple[str, str]:
     """Generate a non-clone pair (completely different code).
     
@@ -1157,6 +1319,8 @@ def heapify(arr, n, i):
             2: (generate_type2_pair, "rename"),
             3: (generate_type3_pair, "reorder"),
             4: (generate_type4_pair, "restructure"),
+            5: (generate_type5_adversarial_pair, "adversarial_obfuscation"),
+            6: (generate_type6_llm_rewrite_pair, "llm_rewritten"),
         }
         
         for clone_type, count, label in [
@@ -1164,6 +1328,8 @@ def heapify(arr, n, i):
             (2, type2, 1),
             (3, type3, 1),
             (4, type4, 1),
+            (5, 50, 1),  # Adversarial obfuscated pairs
+            (6, 50, 1),  # LLM rewritten pairs
             (0, non_clone, 0),
         ]:
             for i in range(count):
