@@ -112,12 +112,12 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 REAL_BENCHMARK_TOOL_IDS = {
     "integritydesk",
-    "ac",
     "dolos",
     "jplag",
     "moss",
     "nicad",
     "pmd",
+    "sherlock",
 }
 
 TOOL_DIRECTORY_ALIASES = {
@@ -126,7 +126,6 @@ TOOL_DIRECTORY_ALIASES = {
     "nicad": "nicad",
     "strange": "strange",
     "sherlock": "sherlock",
-    "ac": "ac",
     "dolos": "dolos",
     "evalforge": "evalforge",
     "gptzero": "gptzero",
@@ -148,7 +147,6 @@ TOOL_DISPLAY_ORDER = [
     "sim",
     "bplag",
     "strange",
-    "ac",
     "vendetect",
     "gptzero",
     "grammarly",
@@ -256,15 +254,7 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
         "ring": "ring-pink-500",
         "engines": ["Installed"],
     },
-    "ac": {
-        "name": "AC",
-        "desc": "Academic plagiarism comparison tool executed from the bundled CLI JAR.",
-        "color": "#ea580c",
-        "gradient": "from-orange-500 to-orange-600",
-        "bgLight": "bg-orange-50",
-        "ring": "ring-orange-500",
-        "engines": ["Token", "Distance"],
-    },
+
     "vendetect": {
         "name": "VenDetect",
         "desc": "Installed auxiliary detection utility that is not yet runnable from the benchmark page.",
@@ -518,6 +508,7 @@ def _dataset_default_language(dataset_id: str) -> str:
         "mbpp": "python",
         "kaggle_student_code": "python",
         "synthetic": "python",
+        "clough_stevenson_style": "python",
     }.get(dataset_id, "mixed")
 
 
@@ -768,10 +759,116 @@ def _canonical_tool_id(directory_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
 
 
+def _external_tools_dir() -> PathLib:
+    """Return the canonical directory for standalone external tools."""
+    return TOOLS_DIR / "external"
+
+
+def _relative_tool_path(path: PathLib) -> str:
+    """Return a stable repository-relative path for a tool directory."""
+    try:
+        return str(Path("tools") / path.relative_to(TOOLS_DIR))
+    except ValueError:
+        pass
+    try:
+        return str(path.relative_to(project_root.parent))
+    except ValueError:
+        return str(path)
+
+
+def _iter_tool_inventory_dirs() -> List[PathLib]:
+    """List installed tool directories from the canonical and legacy locations."""
+    ignored_top_level = {
+        "__pycache__",
+        "configs",
+        "external",
+        "libs",
+        "outputs",
+        "registry",
+        "runs",
+        "sandbox",
+    }
+    dirs: List[PathLib] = []
+
+    for root in (_external_tools_dir(), TOOLS_DIR):
+        if not root.exists():
+            continue
+        for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+            if not entry.is_dir():
+                continue
+            if root == TOOLS_DIR and entry.name in ignored_top_level:
+                continue
+            dirs.append(entry)
+
+    return dirs
+
+
+def _first_existing_path(candidates: List[PathLib]) -> Optional[PathLib]:
+    """Return the first path that exists."""
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _find_tool_dir(tool_id: str) -> Optional[PathLib]:
+    """Resolve a benchmark tool directory from tools/external with legacy fallback."""
+    external_tools_dir = _external_tools_dir()
+    candidates: Dict[str, List[PathLib]] = {
+        "moss": [external_tools_dir / "moss", TOOLS_DIR / "moss"],
+        "jplag": [
+            external_tools_dir / "JPlag",
+            external_tools_dir / "jplag",
+            TOOLS_DIR / "JPlag",
+        ],
+        "dolos": [
+            external_tools_dir / "dolos-cli",
+            external_tools_dir / "dolos",
+            TOOLS_DIR / "dolos",
+            TOOLS_DIR / "dolos-cli",
+        ],
+        "nicad": [
+            external_tools_dir / "nicad",
+            external_tools_dir / "NiCad-6.2",
+            TOOLS_DIR / "NiCad-6.2",
+            TOOLS_DIR / "nicad",
+        ],
+        "pmd": [
+            external_tools_dir / "pmd",
+            *sorted(external_tools_dir.glob("pmd-bin-*")),
+            TOOLS_DIR / "pmd",
+        ],
+        "sherlock": [external_tools_dir / "sherlock", TOOLS_DIR / "sherlock"],
+    
+    }
+    return _first_existing_path(candidates.get(tool_id, []))
+
+
+def _is_tool_dir_available(tool_id: str) -> bool:
+    """Return true when a tool directory is present in the inventory."""
+    if tool_id == "integritydesk":
+        return True
+    return _find_tool_dir(tool_id) is not None
+
+
+def _get_setting_secret(key: str) -> str:
+    """Read a secret-like setting from runtime settings or the process env."""
+    attr = SETTINGS_ATTR_MAP.get(key)
+    if attr:
+        value = getattr(settings, attr, None)
+        if value:
+            return str(value)
+        return os.environ.get(attr, "")
+    return ""
+
+
 def _find_jplag_jar() -> Optional[PathLib]:
-    candidates = [TOOLS_DIR / "JPlag" / "jplag.jar"]
-    candidates.extend(sorted((TOOLS_DIR / "JPlag").glob("*jar-with-dependencies.jar")))
-    candidates.extend(sorted((TOOLS_DIR / "JPlag").glob("*.jar")))
+    jplag_dir = _find_tool_dir("jplag")
+    if not jplag_dir:
+        return None
+    candidates = [jplag_dir / "jplag.jar"]
+    candidates.extend(sorted(jplag_dir.glob("*jar-with-dependencies.jar")))
+    candidates.extend(sorted(jplag_dir.glob("*.jar")))
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -779,12 +876,140 @@ def _find_jplag_jar() -> Optional[PathLib]:
 
 
 def _find_dolos_cli() -> Optional[PathLib]:
-    candidates = [
-        TOOLS_DIR / "dolos" / "node_modules" / ".bin" / "dolos",
-        TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos",
-    ]
+    dolos_dir = _find_tool_dir("dolos")
+    candidates = []
+    if dolos_dir:
+        candidates.extend(
+            [
+                dolos_dir / "node_modules" / ".bin" / "dolos",
+                dolos_dir / "cli" / "node_modules" / ".bin" / "dolos",
+                dolos_dir / "cli" / "dist" / "cli.js",
+                dolos_dir / "dolos",
+            ]
+        )
+    candidates.append(TOOLS_DIR / "dolos-cli" / "node_modules" / ".bin" / "dolos")
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.exists() and _is_dolos_plagiarism_cli(candidate):
+            return candidate
+    return None
+
+
+def _is_dolos_plagiarism_cli(candidate: PathLib) -> bool:
+    """Return true when a dolos binary is the code-similarity CLI."""
+    command = (
+        ["node", str(candidate)] if candidate.suffix == ".js" else [str(candidate)]
+    )
+    try:
+        result = subprocess.run(
+            [*command, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    help_text = f"{result.stdout}\n{result.stderr}".lower()
+    return (
+        "code similarity" in help_text
+        or "plagiarism" in help_text
+        or "--output-format" in help_text
+    )
+
+
+def _find_moss_script() -> Optional[PathLib]:
+    """Find the MOSS Perl script in the configured tool location."""
+    moss_dir = _find_tool_dir("moss")
+    if not moss_dir:
+        return None
+    return _first_existing_path([moss_dir / "moss.pl"])
+
+
+def _prepare_moss_script(
+    script_path: PathLib, run_dir: PathLib, moss_user_id: str
+) -> PathLib:
+    """Create a job-local MOSS script that uses app settings and writable logs."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    patched_script = run_dir / script_path.name
+    log_path = run_dir / "moss.log"
+    script_text = script_path.read_text(encoding="utf-8")
+    log_literal = repr(str(log_path))
+    safe_user_id = re.sub(r"[^0-9]", "", moss_user_id) or "0"
+
+    script_text = re.sub(
+        r"my\s+\$logfile\s*=\s*[^;]+;",
+        f"my $logfile = $ENV{{'MOSS_LOGFILE'}} || {log_literal};",
+        script_text,
+        count=1,
+    )
+    script_text = re.sub(
+        r"\$userid\s*=\s*[^;]+;",
+        "$userid = $ENV{'MOSS_USER_ID'} || " f"{safe_user_id};",
+        script_text,
+        count=1,
+    )
+    script_text = script_text.replace(
+        'system("bash", "save_moss_report.sh","$logfile");',
+        'system("bash", "save_moss_report.sh", "$logfile") '
+        'if -e "save_moss_report.sh";',
+    )
+
+    patched_script.write_text(script_text, encoding="utf-8")
+    patched_script.chmod(0o700)
+    return patched_script
+
+
+def _find_nicad_executable() -> Optional[PathLib]:
+    """Find a NiCad executable in the configured tool location."""
+    nicad_dir = _find_tool_dir("nicad")
+    if not nicad_dir:
+        return None
+    return _first_existing_path(
+        [
+            nicad_dir / "nicad6",
+            nicad_dir / "bin" / "nicad",
+        ]
+    )
+
+
+def _find_txl_executable() -> Optional[PathLib]:
+    """Find a TXL executable if the local NiCad install provides one."""
+    nicad_dir = _find_tool_dir("nicad")
+    candidates = []
+    if nicad_dir:
+        candidates.extend(
+            [
+                nicad_dir / "txl",
+                nicad_dir / "bin" / "txl",
+                nicad_dir / "lib" / "nicad" / "txl",
+                nicad_dir / "tools" / "txl",
+            ]
+        )
+    candidates.extend(
+        [
+            TOOLS_DIR / "freetxl" / "current" / "bin" / "txl",
+            _external_tools_dir() / "freetxl" / "current" / "bin" / "txl",
+        ]
+    )
+    return _first_existing_path(candidates)
+
+
+def _find_pmd_executable() -> Optional[PathLib]:
+    """Find the PMD CLI executable in the configured tool location."""
+    pmd_dir = _find_tool_dir("pmd")
+    if not pmd_dir:
+        return None
+    return _first_existing_path([pmd_dir / "bin" / "pmd", pmd_dir / "pmd"])
+
+
+def _find_sherlock_executable() -> Optional[PathLib]:
+    """Find an executable Sherlock binary in the configured tool location."""
+    sherlock_dir = _find_tool_dir("sherlock")
+    if not sherlock_dir:
+        return None
+
+    for candidate in [sherlock_dir / "sherlock"]:
+        if candidate.exists() and os.access(candidate, os.X_OK):
             return candidate
     return None
 
@@ -792,21 +1017,30 @@ def _find_dolos_cli() -> Optional[PathLib]:
 def _unavailable_tool_reason(tool_id: str) -> str:
     if tool_id == "moss":
         missing = []
-        if not (TOOLS_DIR / "moss" / "moss.pl").exists():
-            missing.append("tools/moss/moss.pl")
-        if not os.environ.get("MOSS_USER_ID"):
+        if not _find_moss_script():
+            missing.append("tools/external/moss/moss.pl")
+        if not _get_setting_secret("moss_user_id"):
             missing.append("MOSS_USER_ID")
         return f"Needs {', '.join(missing)}" if missing else "Not ready"
     if tool_id == "jplag":
-        return "Needs a JPlag jar in tools/JPlag" if not _find_jplag_jar() else "Not ready"
+        return (
+            "Needs a JPlag jar in tools/external/JPlag"
+            if not _find_jplag_jar()
+            else "Not ready"
+        )
     if tool_id == "dolos":
-        return "Needs Dolos npm dependencies and CLI build" if not _find_dolos_cli() else "Not ready"
-    if tool_id == "ac":
-        return "Needs the AC Java archive"
+        return (
+            "Needs Dolos npm dependencies and CLI build"
+            if not _find_dolos_cli()
+            else "Not ready"
+        )
+
     if tool_id == "nicad":
         return "Needs NiCad and TXL binaries"
     if tool_id == "pmd":
         return "Needs the PMD CLI"
+    if tool_id == "sherlock":
+        return "Needs an executable Sherlock binary at tools/external/sherlock/sherlock"
     return "Not ready"
 
 
@@ -839,21 +1073,22 @@ def _is_real_benchmark_tool_available(tool_id: str) -> bool:
         return True
     if tool_id == "moss":
         return (
-            bool(os.environ.get("MOSS_USER_ID"))
-            and (TOOLS_DIR / "moss" / "moss.pl").exists()
+            bool(_get_setting_secret("moss_user_id"))
+            and _find_moss_script() is not None
         )
-    if tool_id == "ac":
-        return (TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar").exists()
+
     if tool_id == "dolos":
         return _find_dolos_cli() is not None
     if tool_id == "jplag":
         return _find_jplag_jar() is not None
     if tool_id == "nicad":
-        return (TOOLS_DIR / "NiCad-6.2" / "nicad6").exists() and (
-            TOOLS_DIR / "freetxl" / "current" / "bin" / "txl"
-        ).exists()
+        return (
+            _find_nicad_executable() is not None and _find_txl_executable() is not None
+        )
     if tool_id == "pmd":
-        return (TOOLS_DIR / "pmd" / "bin" / "pmd").exists()
+        return _find_pmd_executable() is not None
+    if tool_id == "sherlock":
+        return _find_sherlock_executable() is not None
     return False
 
 
@@ -874,16 +1109,13 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
         for tool_id in REAL_BENCHMARK_TOOL_IDS
     }
 
-    if TOOLS_DIR.exists():
-        for entry in sorted(TOOLS_DIR.iterdir(), key=lambda item: item.name.lower()):
-            if not entry.is_dir():
-                continue
-            tool_id = _canonical_tool_id(entry.name)
-            if tool_id not in BENCHMARK_TOOL_METADATA:
-                continue
-            record = tools.setdefault(tool_id, _build_tool_record(tool_id))
-            record["installed"] = True
-            record["paths"].append(str(Path("tools") / entry.name))
+    for entry in _iter_tool_inventory_dirs():
+        tool_id = _canonical_tool_id(entry.name)
+        if tool_id not in BENCHMARK_TOOL_METADATA:
+            continue
+        record = tools.setdefault(tool_id, _build_tool_record(tool_id))
+        record["installed"] = True
+        record["paths"].append(_relative_tool_path(entry))
 
     for record in tools.values():
         record["paths"].sort()
@@ -993,7 +1225,7 @@ def _load_pair_labeled_benchmark_dataset(
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
     """Load datasets that already define explicit labeled comparison pairs."""
     dataset_root = BENCHMARK_DATA_DIR / dataset_id
-    if dataset_id == "synthetic":
+    if (dataset_root / "generated_pairs.jsonl").exists():
         return _load_synthetic_pair_dataset(dataset_root, target_dir)
     if dataset_id == "kaggle_student_code":
         return _load_kaggle_pair_dataset(dataset_root, target_dir)
@@ -3548,14 +3780,18 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
     """Save a full benchmark response and update the compact run history."""
     summary = _benchmark_run_summary(response)
     history = _read_benchmark_history()
-    comparison = _build_benchmark_delta(summary, _find_previous_benchmark_run(history, summary))
+    comparison = _build_benchmark_delta(
+        summary, _find_previous_benchmark_run(history, summary)
+    )
     summary["comparison"] = comparison
 
     run_path = BENCHMARK_RUNS_DIR / f"{summary['job_id']}.json"
     response["history_summary"] = summary
     response["comparison"] = comparison
     response["runAt"] = summary["run_at"]
-    run_path.write_text(json.dumps(response, indent=2, sort_keys=True), encoding="utf-8")
+    run_path.write_text(
+        json.dumps(response, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     history = [item for item in history if item.get("job_id") != summary["job_id"]]
     history.insert(0, summary)
@@ -3567,9 +3803,15 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
 async def get_benchmark_presets() -> Dict[str, Any]:
     """Return repeatable benchmark workflows for product optimization."""
     available_tools = {
-        tool["id"]: tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS
+        tool["id"]: tool
+        for tool in _list_benchmark_tools()
+        if tool["id"] in REAL_BENCHMARK_TOOL_IDS
     }
-    datasets = {item.name for item in BENCHMARK_DATA_DIR.iterdir()} if BENCHMARK_DATA_DIR.exists() else set()
+    datasets = (
+        {item.name for item in BENCHMARK_DATA_DIR.iterdir()}
+        if BENCHMARK_DATA_DIR.exists()
+        else set()
+    )
     presets = []
     for preset in BENCHMARK_WORKFLOW_PRESETS:
         runnable_tools = [
@@ -3580,7 +3822,9 @@ async def get_benchmark_presets() -> Dict[str, Any]:
         blocked_tools = [
             {
                 "id": tool_id,
-                "status": available_tools.get(tool_id, {}).get("status", "Not installed"),
+                "status": available_tools.get(tool_id, {}).get(
+                    "status", "Not installed"
+                ),
             }
             for tool_id in preset["tools"]
             if tool_id not in runnable_tools
@@ -3704,7 +3948,7 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
         return (dataset_root / "original").exists() and (
             dataset_root / "plagiarized"
         ).exists()
-    if dataset_id == "synthetic":
+    if (dataset_root / "generated_pairs.jsonl").exists():
         return (dataset_root / "generated_pairs.jsonl").exists()
     if dataset_id == "kaggle_student_code":
         return (dataset_root / "cheating_dataset.csv").exists()
@@ -3739,6 +3983,28 @@ async def run_benchmark(
         if benchmark_type == "pan_optimization"
         else "tool_comparison"
     )
+
+    if benchmark_type == "pan_optimization":
+        dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
+        has_labeled_ground_truth = bool(
+            dataset
+            and dataset != "custom"
+            and dataset_root
+            and dataset_root.exists()
+            and _dataset_has_pair_ground_truth(dataset, dataset_root)
+        )
+        if not has_labeled_ground_truth:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        "PAN metrics require labeled ground truth. Select a labeled "
+                        "demo/synthetic original-vs-plagiarized dataset or a PAN-style "
+                        "dataset with labels."
+                    )
+                },
+            )
 
     submissions = {}
     explicit_pairs: List[Dict[str, Any]] = []
@@ -3986,6 +4252,7 @@ async def run_benchmark(
         "tool_scores": {
             k: {
                 "pairs": len(v.get("pairs", [])),
+                "error": v.get("error"),
                 "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
                 "avg_runtime_seconds": round(
                     tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
@@ -4079,8 +4346,11 @@ def _get_ground_truth_basis(dataset: str) -> str:
     if dataset and (
         dataset.startswith("demo_")
         or dataset.startswith("synthetic")
+        or dataset == "clough_stevenson_style"
         or dataset in {"synthetic_small", "synthetic_medium", "synthetic_java"}
     ):
+        if dataset == "clough_stevenson_style":
+            return "controlled_original_plagiarized_and_hard_negative_pairs"
         return "filename_original_plagiarized_pairs"
     return "built_in_dataset_labels"
 
@@ -4474,8 +4744,9 @@ def _run_competitor_tool(tool, submissions, pairs):
         return _run_nicad_cli(submissions, pairs)
     elif tool == "pmd":
         return _run_pmd_cli(submissions, pairs)
-    elif tool == "ac":
-        return _run_ac_cli(submissions, pairs)
+
+    elif tool == "sherlock":
+        return _run_sherlock_cli(submissions, pairs)
     return None
 
 
@@ -4638,9 +4909,9 @@ def _nicad_score(code_a: str, code_b: str) -> float:
 
 
 def _run_moss_cli(submissions, pairs):
-    moss_user_id = os.environ.get("MOSS_USER_ID")
-    script_path = TOOLS_DIR / "moss" / "moss.pl"
-    if not moss_user_id or not script_path.exists():
+    moss_user_id = _get_setting_secret("moss_user_id")
+    script_path = _find_moss_script()
+    if not moss_user_id or not script_path:
         return None
 
     groups: Dict[str, Dict[str, str]] = {}
@@ -4668,18 +4939,21 @@ def _run_moss_cli(submissions, pairs):
             continue
 
         with tempfile.TemporaryDirectory(prefix=f"moss-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
+            run_dir = PathLib(temp_dir)
+            source_root = run_dir / "subs"
             source_root.mkdir(parents=True, exist_ok=True)
             written_paths = _write_submissions_to_directory(
                 source_root, language_submissions
             )
+            run_script_path = _prepare_moss_script(script_path, run_dir, moss_user_id)
 
             env = os.environ.copy()
             env["MOSS_USER_ID"] = moss_user_id
+            env["MOSS_LOGFILE"] = str(run_dir / "moss.log")
             result = subprocess.run(
                 [
                     "perl",
-                    str(script_path),
+                    str(run_script_path),
                     "-l",
                     moss_language,
                     *written_paths.values(),
@@ -4688,7 +4962,7 @@ def _run_moss_cli(submissions, pairs):
                 text=True,
                 check=False,
                 timeout=300,
-                cwd=str(TOOLS_DIR / "moss"),
+                cwd=str(script_path.parent),
                 env=env,
             )
 
@@ -4842,7 +5116,8 @@ def _run_jplag_cli(submissions, pairs):
 
 def _run_dolos_cli(submissions, pairs):
     cli_path = _find_dolos_cli()
-    node_bin_dir = TOOLS_DIR / "dolos-cli" / "node20" / "bin"
+    dolos_dir = _find_tool_dir("dolos")
+    node_bin_dir = (dolos_dir / "node20" / "bin") if dolos_dir else None
     if not cli_path:
         return None
 
@@ -4855,12 +5130,15 @@ def _run_dolos_cli(submissions, pairs):
         written_paths = _write_submissions_to_directory(source_root, submissions)
 
         env = os.environ.copy()
-        if node_bin_dir.exists():
+        if node_bin_dir and node_bin_dir.exists():
             env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
 
+        command_prefix = (
+            ["node", str(cli_path)] if cli_path.suffix == ".js" else [str(cli_path)]
+        )
         result = subprocess.run(
             [
-                str(cli_path),
+                *command_prefix,
                 "run",
                 "--output-format",
                 "csv",
@@ -4909,9 +5187,9 @@ def _run_dolos_cli(submissions, pairs):
 
 
 def _run_nicad_cli(submissions, pairs):
-    nicad_path = TOOLS_DIR / "NiCad-6.2" / "nicad6"
-    txl_bin_dir = TOOLS_DIR / "freetxl" / "current" / "bin"
-    if not nicad_path.exists() or not txl_bin_dir.exists():
+    nicad_path = _find_nicad_executable()
+    txl_path = _find_txl_executable()
+    if not nicad_path or not txl_path:
         return None
 
     groups: Dict[str, Dict[str, str]] = {}
@@ -4947,7 +5225,7 @@ def _run_nicad_cli(submissions, pairs):
             )
 
             env = os.environ.copy()
-            env["PATH"] = f"{txl_bin_dir}:{env.get('PATH', '')}"
+            env["PATH"] = f"{txl_path.parent}:{env.get('PATH', '')}"
 
             result = subprocess.run(
                 [
@@ -4961,7 +5239,11 @@ def _run_nicad_cli(submissions, pairs):
                 text=True,
                 check=False,
                 timeout=240,
-                cwd=str(TOOLS_DIR / "NiCad-6.2"),
+                cwd=str(
+                    nicad_path.parent.parent
+                    if nicad_path.parent.name == "bin"
+                    else nicad_path.parent
+                ),
                 env=env,
             )
 
@@ -5021,8 +5303,8 @@ def _run_nicad_cli(submissions, pairs):
 
 
 def _run_pmd_cli(submissions, pairs):
-    pmd_path = TOOLS_DIR / "pmd" / "bin" / "pmd"
-    if not pmd_path.exists():
+    pmd_path = _find_pmd_executable()
+    if not pmd_path:
         return None
 
     token_counts = {
@@ -5120,7 +5402,12 @@ def _run_pmd_cli(submissions, pairs):
 
 
 def _run_ac_cli(submissions, pairs):
-    jar_path = TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar"
+    ac_dir = _find_tool_dir("ac")
+    jar_path = (
+        ac_dir / "ac-2.2.1-SNAPSHOT-92c42.jar"
+        if ac_dir
+        else TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar"
+    )
     if not jar_path.exists():
         return None
 
@@ -5194,6 +5481,102 @@ def _run_ac_cli(submissions, pairs):
         results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
 
     return {"pairs": results}
+
+
+def _run_sherlock_cli(
+    submissions: Dict[str, str], pairs: List[tuple]
+) -> Optional[Dict[str, Any]]:
+    """Run the local Sherlock binary and convert percentage output to pair scores."""
+    sherlock_path = _find_sherlock_executable()
+    if not sherlock_path:
+        return None
+
+    score_by_pair: Dict[str, float] = {}
+    groups: Dict[str, Dict[str, str]] = {}
+
+    for filename, content in submissions.items():
+        suffix = PathLib(filename).suffix.lower()
+        if not suffix:
+            continue
+        groups.setdefault(suffix, {})[filename] = content
+
+    with tempfile.TemporaryDirectory(prefix="sherlock-benchmark-") as temp_dir:
+        source_root = PathLib(temp_dir) / "subs"
+        source_root.mkdir(parents=True, exist_ok=True)
+        written_paths = _write_submissions_to_directory(source_root, submissions)
+        path_to_filename = {
+            str(PathLib(path).resolve()): filename
+            for filename, path in written_paths.items()
+        }
+        name_to_filename = {
+            PathLib(path).name: filename for filename, path in written_paths.items()
+        }
+
+        for suffix, suffix_submissions in groups.items():
+            if len(suffix_submissions) < 2:
+                continue
+
+            result = subprocess.run(
+                [
+                    str(sherlock_path),
+                    "-t",
+                    "0",
+                    "-e",
+                    suffix,
+                    str(source_root),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or "Sherlock execution failed"
+                )
+
+            for raw_line in result.stdout.splitlines():
+                parts = [part.strip() for part in raw_line.split(";")]
+                if len(parts) != 3 or not parts[2].endswith("%"):
+                    continue
+
+                left_name = _resolve_sherlock_output_file(
+                    parts[0], path_to_filename, name_to_filename
+                )
+                right_name = _resolve_sherlock_output_file(
+                    parts[1], path_to_filename, name_to_filename
+                )
+                if not left_name or not right_name:
+                    continue
+
+                try:
+                    similarity = float(parts[2].rstrip("%")) / 100.0
+                except ValueError:
+                    continue
+
+                pair_key = _pair_key(left_name, right_name)
+                score_by_pair[pair_key] = max(
+                    score_by_pair.get(pair_key, 0.0), max(0.0, min(1.0, similarity))
+                )
+
+    results = []
+    for fa, fb in pairs:
+        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
+        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+    return {"pairs": results}
+
+
+def _resolve_sherlock_output_file(
+    raw_path: str, path_to_filename: Dict[str, str], name_to_filename: Dict[str, str]
+) -> Optional[str]:
+    """Map a Sherlock output path or basename back to the original submission name."""
+    resolved = str(PathLib(raw_path).resolve())
+    if resolved in path_to_filename:
+        return path_to_filename[resolved]
+    return name_to_filename.get(PathLib(raw_path).name)
 
 
 def _run_sherlock_approx(submissions, pairs):
@@ -5358,6 +5741,7 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "openai_model": settings.OPENAI_MODEL,
     "anthropic_api_key": settings.ANTHROPIC_API_KEY or "",
     "anthropic_model": settings.ANTHROPIC_MODEL,
+    "moss_user_id": settings.MOSS_USER_ID or "",
     "embedding_runtime": settings.EMBEDDING_RUNTIME,
     "embedding_model": settings.EMBEDDING_MODEL,
     "embedding_server_url": settings.EMBEDDING_SERVER_URL,
@@ -5378,6 +5762,7 @@ SETTINGS_ATTR_MAP = {
     "openai_model": "OPENAI_MODEL",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "anthropic_model": "ANTHROPIC_MODEL",
+    "moss_user_id": "MOSS_USER_ID",
     "embedding_runtime": "EMBEDDING_RUNTIME",
     "embedding_model": "EMBEDDING_MODEL",
     "embedding_server_url": "EMBEDDING_SERVER_URL",
@@ -5391,7 +5776,7 @@ SETTINGS_ATTR_MAP = {
     "max_files_per_job": "MAX_FILES_PER_JOB",
 }
 
-SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key"}
+SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key", "moss_user_id"}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -5423,11 +5808,14 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
 
     openai_key = str(payload.get("openai_api_key") or "")
     anthropic_key = str(payload.get("anthropic_api_key") or "")
+    moss_user_id = str(payload.get("moss_user_id") or "")
 
     payload["openai_api_key"] = ""
     payload["openai_api_key_configured"] = bool(openai_key)
     payload["anthropic_api_key"] = ""
     payload["anthropic_api_key_configured"] = bool(anthropic_key)
+    payload["moss_user_id"] = ""
+    payload["moss_user_id_configured"] = bool(moss_user_id)
     return payload
 
 
@@ -5437,6 +5825,8 @@ def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
     for key, attr in SETTINGS_ATTR_MAP.items():
         if key in merged:
             setattr(settings, attr, merged[key])
+            if key in SECRET_SETTING_KEYS and merged[key]:
+                os.environ[attr] = str(merged[key])
 
 
 def _get_upload_engine_weights(
@@ -6474,6 +6864,7 @@ async def update_settings(request: Request):
 
         stored_settings = dict(tenant.settings or {})
         applied = {}
+        env_updates: Dict[str, Any] = {}
 
         for key, value in data.items():
             if key not in SETTINGS_ATTR_MAP:
@@ -6484,10 +6875,15 @@ async def update_settings(request: Request):
                 value = _normalize_engine_weights(value)
             stored_settings[key] = value
             applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
+            if key in SECRET_SETTING_KEYS and value:
+                env_updates[SETTINGS_ATTR_MAP[key]] = value
 
         tenant.settings = stored_settings
         db.add(tenant)
         db.commit()
+
+    if env_updates:
+        _persist_env_settings(env_updates)
 
     _apply_runtime_settings_from_record(stored_settings)
 
