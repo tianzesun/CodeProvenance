@@ -7,23 +7,49 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
-    "token": 0.18,
+    "token": 0.10,
+    "ngram": 0.08,
+    "winnowing": 0.12,
     "ast": 0.22,
-    "winnowing": 0.16,
-    "gst": 0.16,
-    "semantic": 0.18,
-    "web": 0.10,
-    "ai_detection": 0.0,
-    "execution_cfg": 0.0,
+    "graph": 0.10,
+    "execution": 0.14,
+    "embedding": 0.16,
+    "llm": 0.08,
+}
+
+ENGINE_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
+    "standard": DEFAULT_ENGINE_WEIGHTS.copy(),
+    "conservative": {
+        "token": 0.15,
+        "ngram": 0.12,
+        "winnowing": 0.18,
+        "ast": 0.20,
+        "graph": 0.12,
+        "execution": 0.10,
+        "embedding": 0.10,
+        "llm": 0.03,
+    },
+    "rewrite-sensitive": {
+        "token": 0.05,
+        "ngram": 0.04,
+        "winnowing": 0.06,
+        "ast": 0.25,
+        "graph": 0.18,
+        "execution": 0.20,
+        "embedding": 0.17,
+        "llm": 0.05,
+    }
 }
 
 DEFAULT_DETECTION_MODES = [
     "token",
-    "ast",
+    "ngram",
     "winnowing",
-    "gst",
-    "semantic",
-    "web",
+    "ast",
+    "graph",
+    "execution",
+    "embedding",
+    "llm",
 ]
 
 

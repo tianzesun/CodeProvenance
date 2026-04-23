@@ -185,17 +185,45 @@ class FusionEngine:
         save_engine_config(config)
 
     @classmethod
-    def get_standard_presets(cls) -> Dict[str, Dict[str, float]]:
+    def get_standard_presets(cls) -> Dict[str, Dict[str, Any]]:
         """Get standard faculty presets.
 
         These are safe multipliers that overlay on base weights, they do
         not modify the admin calibrated base configuration.
         """
         return {
-            "default": {
-                "name": "Balanced",
-                "description": "Default balanced detection profile. Good for most assignments.",
+            "standard": {
+                "name": "Standard (Recommended)",
+                "description": "Production optimized default profile. Best overall accuracy.",
                 "multipliers": {},
+            },
+            "conservative": {
+                "name": "Conservative",
+                "description": "Minimize false positives. For high-stakes assessments.",
+                "multipliers": {
+                    "token": 1.5,
+                    "ngram": 1.5,
+                    "winnowing": 1.5,
+                    "ast": 0.9,
+                    "graph": 1.2,
+                    "execution": 0.7,
+                    "embedding": 0.6,
+                    "llm": 0.4,
+                },
+            },
+            "rewrite-sensitive": {
+                "name": "Rewrite Sensitive",
+                "description": "Detect heavily obfuscated and rewritten code.",
+                "multipliers": {
+                    "token": 0.5,
+                    "ngram": 0.5,
+                    "winnowing": 0.5,
+                    "ast": 1.1,
+                    "graph": 1.8,
+                    "execution": 1.4,
+                    "embedding": 1.1,
+                    "llm": 0.6,
+                },
             },
             "strict_copy": {
                 "name": "Strict Copy Detection",

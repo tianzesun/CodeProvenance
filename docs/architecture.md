@@ -56,3 +56,128 @@ tests/                # Unit and integration tests
    `similarity_ast.py`, `benchmark_metrics.py`, or `report_generation_service.py`
    once call sites are updated.
 
+---
+
+# Unified Detection Platform Architecture
+
+## Product Objective
+
+IntegrityDesk should become the single professor-facing platform for selecting,
+running, comparing, and explaining multiple code-integrity detectors. The native
+IntegrityDesk engine remains central, but MOSS, JPlag, Dolos, NiCad, and future
+tools should be exposed through the same catalog, job, and report workflow.
+
+## Target Module Plan
+
+```text
+src/backend/
+  api/
+    routes/
+      detection_tools.py      # Catalog and recommendation endpoints
+  application/
+    detection_tools/
+      catalog_service.py      # Product-facing tool metadata and availability
+      recommendation_service.py
+      schemas.py              # Assignment profile and recommendation DTOs
+  engines/
+    execution/                # Existing external tool runners and adapters
+    similarity/               # Native IntegrityDesk presets
+  infrastructure/
+    reporting/                # Unified reports and evidence formatting
+```
+
+The first implementation slice should add `application/detection_tools/` and an
+API route without moving benchmark code. Once stable, benchmark registry metadata
+can be consolidated with the product catalog behind a compatibility layer.
+
+## Data Flow
+
+```text
+Professor assignment setup
+  -> AssignmentFeatureProfile
+  -> RecommendationService
+  -> Suggested tool bundle with explanations
+  -> Professor overrides or accepts
+  -> Multi-tool analysis job
+  -> Tool runners and native engines
+  -> ToolFinding/Finding normalization
+  -> Unified report with per-tool evidence and failures
+```
+
+## Catalog Boundary
+
+The catalog owns product-facing metadata:
+
+- tool id and display name
+- category: native preset, external detector, benchmark-only, disabled
+- supported languages
+- strengths and cautions
+- configuration requirements
+- availability status
+- selectable state
+
+The catalog should not execute tools. It may call lightweight availability
+checks, but it must not start expensive analysis jobs.
+
+## Recommendation Boundary
+
+The recommendation engine accepts an assignment profile:
+
+- language
+- assignment size
+- starter-code amount
+- expected transformations
+- AI-assistance concern
+- need for professor-trusted legacy tools
+- desired speed versus depth
+
+It returns a ranked list of recommended tools or presets with reasons. The
+professor can override the list before running analysis.
+
+## Orchestration Boundary
+
+The orchestration layer should run selected tools as one analysis request while
+preserving independent tool status:
+
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+- `unavailable`
+- `timed_out`
+
+Reports should show partial success clearly. One unavailable external tool must
+not erase successful IntegrityDesk findings.
+
+## First Implementation Slice
+
+1. Add a read-only catalog service that reuses current tool metadata where safe
+   and corrects real local paths for installed tools.
+2. Add a deterministic recommendation service with simple rules and explanatory
+   reasons.
+3. Add unit tests for catalog filtering, availability flags, and
+   recommendation reasons.
+4. Defer real multi-tool execution UI and background job orchestration until the
+   catalog/recommendation contract is stable.
+
+## Diagram
+
+```mermaid
+flowchart LR
+    A[Assignment Features] --> B[Recommendation Service]
+    C[Detection Tool Catalog] --> B
+    B --> D[Suggested Tool Bundle]
+    D --> E[Professor Override]
+    E --> F[Analysis Job]
+    F --> G[IntegrityDesk Presets]
+    F --> H[External Tool Runners]
+    G --> I[Normalized Findings]
+    H --> I
+    I --> J[Unified Report]
+```
+
+## Developer Handoff
+
+Implement catalog and recommendation as the first slice. Do not run external
+tools yet. Keep the API read-only, deterministic, and testable. The Developer
+should inspect existing route/schema patterns before choosing exact filenames.

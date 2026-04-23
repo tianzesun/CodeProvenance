@@ -385,6 +385,14 @@ export default function ResultsPage() {
   const webHighestSimilarity = Number(webAnalysis.highest_similarity || 0);
   const webAverageSimilarity = Number(webAnalysis.average_similarity || 0);
   const webSourceTotals = webAnalysis.source_totals || {};
+  const selectedTools = Array.isArray(job?.selected_tools) ? job.selected_tools : ['IntegrityDesk'];
+  const externalToolResults = job?.external_tool_results || {};
+  const externalToolSummaries = Object.entries(externalToolResults).map(([toolId, data]) => ({
+    toolId,
+    error: data?.error || '',
+    pairCount: Array.isArray(data?.pairs) ? data.pairs.length : 0,
+    runtime: Number(data?.runtime_seconds || 0),
+  }));
   const threshold = getThreshold(job);
   const assignmentTitle = getAssignmentTitle(job);
   const referenceLabel = getReferenceLabel(job);
@@ -631,6 +639,34 @@ export default function ResultsPage() {
                     Committee Report
                   </a>
                 </div>
+              </div>
+            </div>
+
+            <div className="border-b border-[var(--border-subtle)] px-6 py-4 lg:px-7">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  <FileSearch size={14} />
+                  Tools used
+                </span>
+                {selectedTools.map((tool) => (
+                  <span
+                    key={tool}
+                    className="rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-xs font-semibold text-[var(--accent-blue)]"
+                  >
+                    {tool}
+                  </span>
+                ))}
+                {externalToolSummaries.map((tool) => (
+                  <span
+                    key={tool.toolId}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${tool.error
+                      ? 'border-amber-500/20 bg-amber-500/[0.08] text-amber-700'
+                      : 'border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-700'
+                      }`}
+                  >
+                    {tool.toolId}: {tool.error ? 'setup needed' : `${tool.pairCount} pairs`}
+                  </span>
+                ))}
               </div>
             </div>
 

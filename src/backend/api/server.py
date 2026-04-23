@@ -48,6 +48,8 @@ from sqlalchemy import func, select
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.backend.application.services.batch_detection_service import (
     BatchDetectionService,
+    ComparisonResult,
+    _risk_level,
 )
 
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
@@ -1246,6 +1248,139 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
             record["status"] = _unavailable_tool_reason(record["id"])
 
     return sorted(tools.values(), key=_tool_sort_key)
+
+
+def _parse_selected_tool_ids(raw: str = "") -> List[str]:
+    """Parse upload-selected detector tools, defaulting to IntegrityDesk."""
+    if not raw:
+        return ["integritydesk"]
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = []
+
+    if isinstance(parsed, str):
+        candidates = [parsed]
+    elif isinstance(parsed, list):
+        candidates = parsed
+    else:
+        candidates = []
+
+    selected: List[str] = []
+    for candidate in candidates:
+        tool_id = str(candidate).strip().lower()
+        if tool_id not in REAL_BENCHMARK_TOOL_IDS or tool_id in selected:
+            continue
+        selected.append(tool_id)
+
+    return selected or ["integritydesk"]
+
+
+def _build_all_submission_pairs(submissions: Dict[str, str]) -> List[tuple]:
+    """Build stable all-pairs comparison tuples for uploaded submissions."""
+    file_list = list(submissions.keys())
+    return [
+        (file_list[i], file_list[j])
+        for i in range(len(file_list))
+        for j in range(i + 1, len(file_list))
+    ]
+
+
+def _external_tool_pair_lookup(tool_data: Dict[str, Any]) -> Dict[str, float]:
+    """Map external tool pair output to pair-keyed similarity scores."""
+    lookup: Dict[str, float] = {}
+    for pair in tool_data.get("pairs", []):
+        file_a = str(pair.get("file_a", ""))
+        file_b = str(pair.get("file_b", ""))
+        if not file_a or not file_b:
+            continue
+        lookup[_pair_key(file_a, file_b)] = max(
+            0.0, min(1.0, _coerce_float(pair.get("score")))
+        )
+    return lookup
+
+
+def _build_external_comparison_results(
+    tool_results: Dict[str, Dict[str, Any]], pairs: List[tuple]
+) -> List[ComparisonResult]:
+    """Create report-ready comparison results from selected external tools."""
+    successful_tools = [
+        tool_id for tool_id, data in tool_results.items() if "pairs" in data
+    ]
+    lookups = {
+        tool_id: _external_tool_pair_lookup(tool_results[tool_id])
+        for tool_id in successful_tools
+    }
+    results: List[ComparisonResult] = []
+
+    for file_a, file_b in pairs:
+        pair_key = _pair_key(file_a, file_b)
+        features = {
+            tool_id: lookup.get(pair_key, 0.0) for tool_id, lookup in lookups.items()
+        }
+        score = sum(features.values()) / len(features) if features else 0.0
+        results.append(
+            ComparisonResult(
+                file_a=file_a,
+                file_b=file_b,
+                score=score,
+                risk_level=_risk_level(score),
+                features=features,
+                contributions=features,
+            )
+        )
+
+    return results
+
+
+def _merge_external_features_into_results(
+    results: List[ComparisonResult],
+    tool_results: Dict[str, Dict[str, Any]],
+) -> None:
+    """Attach successful external tool scores to existing comparison features."""
+    lookups = {
+        tool_id: _external_tool_pair_lookup(data)
+        for tool_id, data in tool_results.items()
+        if "pairs" in data
+    }
+    if not lookups:
+        return
+
+    for result in results:
+        pair_key = _pair_key(result.file_a, result.file_b)
+        for tool_id, lookup in lookups.items():
+            result.features[tool_id] = lookup.get(pair_key, 0.0)
+
+
+def _run_selected_external_tools(
+    selected_tool_ids: List[str],
+    submissions: Dict[str, str],
+    pairs: List[tuple],
+) -> Dict[str, Dict[str, Any]]:
+    """Run selected non-IntegrityDesk tools and preserve per-tool failures."""
+    tool_results: Dict[str, Dict[str, Any]] = {}
+    for tool_id in selected_tool_ids:
+        if tool_id == "integritydesk":
+            continue
+
+        started = time.perf_counter()
+        try:
+            score_data = _run_competitor_tool(tool_id, submissions, pairs)
+            if score_data:
+                tool_results[tool_id] = score_data
+            else:
+                tool_results[tool_id] = {"error": _unavailable_tool_reason(tool_id)}
+        except Exception as exc:
+            logger.exception("External tool %s failed during upload analysis", tool_id)
+            tool_results[tool_id] = {"error": str(exc)}
+        finally:
+            tool_results.setdefault(tool_id, {})
+            tool_results[tool_id]["runtime_seconds"] = round(
+                time.perf_counter() - started, 4
+            )
+
+    return tool_results
 
 
 def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
@@ -3393,6 +3528,7 @@ async def upload_files(
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
+    tool_ids: str = Form(default=""),
 ):
     current_user = _require_current_user(request)
     job_id = str(uuid.uuid4())[:8]
@@ -3420,6 +3556,7 @@ async def upload_files(
         threshold,
         current_user,
         engine_keys,
+        tool_ids,
     )
 
 
@@ -3431,6 +3568,7 @@ async def upload_zip(
     assignment_name: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
+    tool_ids: str = Form(default=""),
 ):
     current_user = _require_current_user(request)
     if not file.filename or not file.filename.lower().endswith(".zip"):
@@ -3461,6 +3599,7 @@ async def upload_zip(
         threshold,
         current_user,
         engine_keys,
+        tool_ids,
     )
 
 
@@ -3472,7 +3611,9 @@ async def _run_analysis(
     threshold,
     current_user: Dict[str, Any],
     engine_keys_raw: str = "",
+    tool_ids_raw: str = "",
 ):
+    selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
         requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
         if not isinstance(requested_engine_keys, list):
@@ -3505,9 +3646,17 @@ async def _run_analysis(
         "tenant_id": current_user.get("tenant_id"),
         "owner_user_id": current_user.get("id"),
         "owner_user_email": current_user.get("email"),
+        "selected_tool_ids": selected_tool_ids,
+        "selected_tools": [
+            BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
+                "name", tool_id.replace("-", " ").title()
+            )
+            for tool_id in selected_tool_ids
+        ],
+        "external_tool_results": {},
         "active_engines": [
             ENGINE_DISPLAY_LABELS.get(key, key.title()) for key in selected_engine_keys
-        ],
+        ] if "integritydesk" in selected_tool_ids else [],
     }
     _persist_job(job_id)
 
@@ -3524,11 +3673,27 @@ async def _run_analysis(
         _jobs[job_id]["status"] = "analyzing"
         _persist_job(job_id)
 
-        service = BatchDetectionService(
-            threshold=threshold, weights=fusion_weights or None
+        all_pairs = _build_all_submission_pairs(submissions)
+        external_tool_results = _run_selected_external_tools(
+            selected_tool_ids, submissions, all_pairs
         )
-        results = service.compare_all_pairs(submissions)
-        report = service.generate_report(results)
+
+        if "integritydesk" in selected_tool_ids:
+            service = BatchDetectionService(
+                threshold=threshold, weights=fusion_weights or None
+            )
+            results = service.compare_all_pairs(submissions)
+            _merge_external_features_into_results(results, external_tool_results)
+            report = service.generate_report(results)
+        else:
+            service = BatchDetectionService(threshold=threshold)
+            results = _build_external_comparison_results(
+                external_tool_results, all_pairs
+            )
+            report = service.generate_report(results)
+
+        _jobs[job_id]["external_tool_results"] = external_tool_results
+        _persist_job(job_id)
         ai_detection = _build_ai_detection_summary(submissions)
         web_analysis = _build_web_analysis_summary(submissions)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
@@ -3583,6 +3748,8 @@ async def _run_analysis(
             "report_id": job_id,
             "summary": report_summary,
             "pairs": report_pairs,
+            "selected_tools": _jobs[job_id].get("selected_tools", []),
+            "external_tool_results": external_tool_results,
             "ai_detection": ai_detection,
             "web_analysis": web_analysis,
         }
@@ -3618,6 +3785,9 @@ async def _run_analysis(
                     for r in results
                 ],
                 "summary": report["summary"],
+                "selected_tool_ids": selected_tool_ids,
+                "selected_tools": _jobs[job_id].get("selected_tools", []),
+                "external_tool_results": external_tool_results,
                 "ai_detection": ai_detection,
                 "web_analysis": web_analysis,
                 "report_path": str(html_report_path),

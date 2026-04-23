@@ -26,6 +26,26 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'gst', label: 'GST' },
   { key: 'semantic', label: 'Semantic' },
 ];
+const FALLBACK_TOOL_OPTIONS = [
+  {
+    id: 'integritydesk',
+    name: 'IntegrityDesk',
+    desc: 'Built-in multi-engine similarity analysis.',
+    available: true,
+    status: 'Built in',
+    engines: ['Token', 'AST', 'Winnowing', 'GST', 'Semantic'],
+  },
+];
+
+type DetectionTool = {
+  id: string;
+  name: string;
+  desc?: string;
+  available?: boolean;
+  runnable?: boolean;
+  status?: string;
+  engines?: string[];
+};
 
 function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
   if (axios.isAxiosError(error)) {
@@ -50,7 +70,10 @@ export default function UploadPage() {
   const [assignmentName, setAssignmentName] = useState('');
   const [threshold, setThreshold] = useState(0.5);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [thresholdLoading, setThresholdLoading] = useState(true);
+  const [toolsLoading, setToolsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
 
@@ -105,14 +128,17 @@ export default function UploadPage() {
     if (uploading || hasMixedZipSelection) {
       return false;
     }
-    if (activeEngines.length === 0) {
+    if (selectedToolIds.length === 0) {
+      return false;
+    }
+    if (selectedToolIds.includes('integritydesk') && activeEngines.length === 0) {
       return false;
     }
     if (zipFile) {
       return true;
     }
     return files.length >= 2;
-  }, [activeEngines.length, files.length, hasMixedZipSelection, uploading, zipFile]);
+  }, [activeEngines.length, files.length, hasMixedZipSelection, selectedToolIds, uploading, zipFile]);
 
   const uploadFormStorageKey = useMemo(
     () => `${UPLOAD_FORM_STORAGE_KEY}:${user?.tenant_id || 'no-tenant'}:${user?.id || 'guest'}`,
@@ -146,6 +172,39 @@ export default function UploadPage() {
       .finally(() => {
         if (active) {
           setThresholdLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    axios
+      .get(`${API}/api/benchmark-tools`)
+      .then((res) => {
+        if (!active) {
+          return;
+        }
+        const nextTools = Array.isArray(res.data?.tools) ? res.data.tools : [];
+        const runnableTools = nextTools.length > 0 ? nextTools : FALLBACK_TOOL_OPTIONS;
+        setToolOptions(runnableTools);
+        if (!runnableTools.some((tool: DetectionTool) => tool.id === 'integritydesk')) {
+          setSelectedToolIds(['integritydesk']);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setToolOptions(FALLBACK_TOOL_OPTIONS);
+          setSelectedToolIds(['integritydesk']);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setToolsLoading(false);
         }
       });
 
@@ -205,8 +264,12 @@ export default function UploadPage() {
       setError('Upload either one ZIP archive or multiple submission files, not both together.');
       return;
     }
-    if (activeEngines.length === 0) {
-      setError('Select at least one engine for this assignment check.');
+    if (selectedToolIds.length === 0) {
+      setError('Select at least one tool for this assignment check.');
+      return;
+    }
+    if (selectedToolIds.includes('integritydesk') && activeEngines.length === 0) {
+      setError('Select at least one IntegrityDesk engine, or remove IntegrityDesk from this check.');
       return;
     }
     if (!zipFile && files.length < 2) {
@@ -226,6 +289,7 @@ export default function UploadPage() {
     formData.append('assignment_name', assignmentName || courseName || 'Assignment Check');
     formData.append('threshold', String(threshold));
     formData.append('engine_keys', JSON.stringify(activeEngines));
+    formData.append('tool_ids', JSON.stringify(selectedToolIds));
 
     try {
       const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
@@ -260,6 +324,14 @@ export default function UploadPage() {
       current.includes(engineKey)
         ? current.filter((key) => key !== engineKey)
         : [...current, engineKey],
+    );
+  }, []);
+
+  const toggleTool = useCallback((toolId: string) => {
+    setSelectedToolIds((current) =>
+      current.includes(toolId)
+        ? current.filter((id) => id !== toolId)
+        : [...current, toolId],
     );
   }, []);
 
@@ -452,11 +524,66 @@ export default function UploadPage() {
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <Settings2 size={14} />
+                    Tools for This Check
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {toolsLoading ? (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                        Loading tools...
+                      </span>
+                    ) : (
+                      toolOptions.map((tool) => {
+                        const active = selectedToolIds.includes(tool.id);
+                        const available = Boolean(tool.available ?? tool.runnable);
+                        return (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => toggleTool(tool.id)}
+                            className={`min-h-[92px] rounded-xl border px-3 py-2 text-left transition ${active
+                              ? 'border-blue-300 bg-blue-50 text-blue-900'
+                              : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                              }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-sm font-semibold">{tool.name}</span>
+                              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${available
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : 'bg-amber-50 text-amber-700'
+                                }`}>
+                                {available ? 'Ready' : 'Needs setup'}
+                              </span>
+                            </div>
+                            <div className="mt-1 line-clamp-2 text-xs text-slate-500">
+                              {tool.desc || tool.status || 'Detection tool'}
+                            </div>
+                            {tool.status ? (
+                              <div className="mt-1 text-[11px] font-medium text-slate-400">
+                                {tool.status}
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="mt-2 text-sm text-slate-600">
+                    Select IntegrityDesk, a trusted external detector, or multiple tools for corroborating evidence.
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Engines for This Check
+                    IntegrityDesk Engines
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {thresholdLoading ? (
+                    {!selectedToolIds.includes('integritydesk') ? (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                        IntegrityDesk is not selected
+                      </span>
+                    ) : thresholdLoading ? (
                       <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
                         Loading...
                       </span>
@@ -480,7 +607,9 @@ export default function UploadPage() {
                     )}
                   </div>
                   <div className="mt-2 text-sm text-slate-600">
-                    {thresholdLoading
+                    {!selectedToolIds.includes('integritydesk')
+                      ? 'These internal engine weights apply only when IntegrityDesk is selected as one of the tools.'
+                      : thresholdLoading
                       ? 'Loading current engines...'
                       : activeEngines.length > 0
                         ? 'Choose which engines should contribute to the similarity score for this assignment check.'

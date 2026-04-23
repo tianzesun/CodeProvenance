@@ -96,6 +96,56 @@ def test_prepare_moss_script_uses_settings_and_writable_log(tmp_path):
     assert 'if -e "save_moss_report.sh"' in script_text
 
 
+def test_parse_selected_tool_ids_defaults_and_filters_invalid_values():
+    assert server._parse_selected_tool_ids("") == ["integritydesk"]
+    assert server._parse_selected_tool_ids('"jplag"') == ["jplag"]
+    assert server._parse_selected_tool_ids('["jplag", "bad", "jplag", "moss"]') == [
+        "jplag",
+        "moss",
+    ]
+    assert server._parse_selected_tool_ids('{"tool": "jplag"}') == ["integritydesk"]
+
+
+def test_build_external_comparison_results_averages_successful_tools():
+    tool_results = {
+        "jplag": {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.8}]},
+        "moss": {"error": "Needs MOSS setup"},
+        "dolos": {"pairs": [{"file_a": "b.py", "file_b": "a.py", "score": 0.4}]},
+    }
+
+    results = server._build_external_comparison_results(
+        tool_results, [("a.py", "b.py")]
+    )
+
+    assert len(results) == 1
+    assert results[0].file_a == "a.py"
+    assert results[0].file_b == "b.py"
+    assert round(results[0].score, 3) == 0.6
+    assert results[0].risk_level == "MEDIUM"
+    assert results[0].features == {"jplag": 0.8, "dolos": 0.4}
+
+
+def test_merge_external_features_into_integritydesk_results():
+    result = server.ComparisonResult(
+        file_a="a.py",
+        file_b="b.py",
+        score=0.7,
+        risk_level="MEDIUM",
+        features={"token": 0.7},
+    )
+
+    server._merge_external_features_into_results(
+        [result],
+        {
+            "jplag": {"pairs": [{"file_a": "b.py", "file_b": "a.py", "score": 0.9}]},
+            "moss": {"error": "Needs MOSS setup"},
+        },
+    )
+
+    assert result.score == 0.7
+    assert result.features == {"token": 0.7, "jplag": 0.9}
+
+
 def test_run_sherlock_cli_parses_real_binary_output(tmp_path, monkeypatch):
     external = tmp_path / "external" / "sherlock"
     external.mkdir(parents=True)
