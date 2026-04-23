@@ -125,6 +125,20 @@ def test_build_external_comparison_results_averages_successful_tools():
     assert results[0].features == {"jplag": 0.8, "dolos": 0.4}
 
 
+def test_external_comparison_normalizes_tool_percentage_scores():
+    tool_results = {
+        "jplag": {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 80}]},
+        "dolos": {"pairs": [{"file_a": "b.py", "file_b": "a.py", "score": 40}]},
+    }
+
+    results = server._build_external_comparison_results(
+        tool_results, [("a.py", "b.py")]
+    )
+
+    assert round(results[0].score, 3) == 0.6
+    assert results[0].features == {"jplag": 0.8, "dolos": 0.4}
+
+
 def test_merge_external_features_into_integritydesk_results():
     result = server.ComparisonResult(
         file_a="a.py",

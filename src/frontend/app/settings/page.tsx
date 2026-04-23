@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import axios from "axios";
-import { Settings, Cpu, Zap, Shield, Database, Save, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Settings, Cpu, Zap, Shield, Database, AlertTriangle } from 'lucide-react';
 
 const ENGINE_CATALOG = [
   { key: "token", label: "Token", tier: "core", description: "Token-level overlap and lexical similarity." },
@@ -52,10 +52,8 @@ type SettingsTab = "general" | "engines" | "integrations" | "performance" | "adv
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -65,22 +63,7 @@ export default function SettingsPage() {
       .catch(() => setError("Failed to load settings"));
   }, [authLoading, user]);
 
-  const handleSave = async () => {
-    if (!settings) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
 
-    try {
-      await axios.patch("/api/settings", settings);
-      setSuccess("Settings saved successfully");
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to save settings");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     if (!settings) return;
@@ -128,12 +111,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {success && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
-            <CheckCircle size={16} className="mt-0.5 shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
+
 
         <div className="flex gap-1 mb-6 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
           {tabs.map((tab) => (
@@ -462,25 +440,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        <div className="mt-6 flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-          >
-            {saving ? (
-              <>
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save size={16} />
-                Save Settings
-              </>
-            )}
-          </button>
-        </div>
+
       </div>
     </DashboardLayout>
   );

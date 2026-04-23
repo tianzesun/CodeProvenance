@@ -206,8 +206,10 @@ function formatBenchmarkQuality(quality) {
     return null;
   }
 
-  const level = quality.certification_level === 'gold_standard'
+  const level = ['gold_standard', 'controlled_gold_standard', 'gold_standard_external'].includes(quality.certification_level)
     ? 'Gold-standard controlled benchmark'
+    : quality.certification_level === 'controlled_internal_ready'
+      ? 'Controlled internal benchmark'
     : 'Labeled benchmark';
   return `${level} • ${Number(quality.score_percent || 0).toFixed(0)}% quality gates`;
 }
@@ -829,6 +831,120 @@ function StepIndicator({ steps, currentStep, completedSteps, compact = false }) 
     </div>
   );
 }
+
+function BenchmarkWorkflowPanel({ presets, history, selectedPreset, onApplyPreset }) {
+  const recentRuns = history.slice(0, 5);
+
+  return (
+    <div className="mb-6 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Improvement Workflow</div>
+            <h2 className="mt-1 font-semibold text-slate-900">Repeatable benchmark presets</h2>
+          </div>
+          {selectedPreset && (
+            <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+              {selectedPreset.name}
+            </span>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {presets.map((preset) => {
+            const active = selectedPreset?.id === preset.id;
+            const runnableCount = preset.runnable_tools?.length || 0;
+            const requestedCount = preset.tools?.length || 0;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => onApplyPreset(preset)}
+                className={`rounded-xl border p-4 text-left transition ${active
+                  ? 'border-violet-500 bg-violet-50 shadow-sm'
+                  : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                  }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-900">{preset.name}</div>
+                    <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      {preset.mode === 'pan_optimization' ? 'Optimization' : 'Comparison'} · {preset.dataset}
+                    </div>
+                  </div>
+                  {active && <CheckCircle2 size={16} className="text-violet-600" />}
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{preset.goal}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {runnableCount}/{requestedCount} tools ready
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${preset.dataset_ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {preset.dataset_ready ? 'Dataset ready' : 'Dataset missing'}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Run History</div>
+          <h2 className="mt-1 font-semibold text-slate-900">Recent IntegrityDesk progress</h2>
+        </div>
+        {recentRuns.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            No benchmark history yet. Run a preset to create your first baseline.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {recentRuns.map((run) => {
+              const metrics = run.metrics || {};
+              const deltas = run.comparison?.metrics || {};
+              return (
+                <div key={run.job_id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900">{run.preset_name || run.dataset}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {new Date(run.run_at).toLocaleString()} · {run.pairs_tested} pairs
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-500">
+                      {run.dataset}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-400">Precision</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.precision || 0) * 100)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">F1</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.f1_score || 0) * 100)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">FPR</div>
+                      <div className="font-semibold text-slate-900">{formatChartPercent((metrics.false_positive_rate || 0) * 100)}</div>
+                    </div>
+                  </div>
+                  {run.comparison?.has_previous && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-semibold">
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.precision)}`}>P {formatDelta(deltas.precision)}</span>
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.f1_score)}`}>F1 {formatDelta(deltas.f1_score)}</span>
+                      <span className={`rounded-full px-2 py-0.5 ${deltaTone(deltas.false_positive_rate, true)}`}>FPR {formatDelta(deltas.false_positive_rate, true)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error }) {
   const [activeEngines, setActiveEngines] = useState([]);
   const engineFilters = Array.from(new Set(tools.flatMap((tool) => tool.engines ?? []))).sort();
@@ -1225,6 +1341,9 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                             {' '}{activeDataset.benchmark_quality.negative_pairs} negatives,
                             {' '}{activeDataset.benchmark_quality.hard_negative_pairs} hard negatives.
                           </div>
+                          <div className="mt-1 text-xs leading-5 text-slate-500">
+                            {Object.keys(activeDataset.benchmark_quality.case_categories || {}).length} case categories · {Object.keys(activeDataset.benchmark_quality.splits || {}).length} data splits
+                          </div>
                         </div>
                         <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
                           {Number(activeDataset.benchmark_quality.score_percent || 0).toFixed(0)}% gates passed
@@ -1241,6 +1360,11 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                           </div>
                         ))}
                       </div>
+                      {(activeDataset.benchmark_quality.validation_warnings || []).length > 0 && (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                          {activeDataset.benchmark_quality.validation_warnings[0]}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2077,6 +2201,14 @@ function ReportStep({ results, onRestart }) {
                 {benchmarkQuality.pair_count} labeled pairs across {Object.keys(benchmarkQuality.transformations || {}).length} transformations,
                 with {benchmarkQuality.hard_negative_pairs} hard negatives and PAN pair-level PlagDet scoring.
               </div>
+              <div className="mt-1 text-xs leading-5 text-emerald-800">
+                {Object.keys(benchmarkQuality.case_categories || {}).length} case categories · {Object.keys(benchmarkQuality.splits || {}).length} train/validation/test splits
+              </div>
+              {(benchmarkQuality.validation_warnings || []).length > 0 && (
+                <div className="mt-2 text-xs leading-5 text-emerald-800">
+                  {benchmarkQuality.validation_warnings[0]}
+                </div>
+              )}
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">
               {Number(benchmarkQuality.score_percent || 0).toFixed(0)}% quality gates passed

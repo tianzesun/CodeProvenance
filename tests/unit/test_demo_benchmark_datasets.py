@@ -103,6 +103,20 @@ def test_compute_evaluation_metrics_includes_pan_scores():
     }
     assert metrics["score_diagnostics"]["label_conflict"] is False
     assert metrics["granularity_basis"] == "pair_level_single_detection"
+    assert metrics["metric_assumptions"]["span_level_scoring"] is False
+    assert metrics["metric_assumptions"]["character_offsets"] is False
+    calibration_thresholds = {
+        point["threshold"] for point in metrics["calibration_curve"]
+    }
+    assert calibration_thresholds.issuperset(
+        {
+            0.5,
+            0.75,
+            0.9,
+        }
+    )
+    assert metrics["calibration_report"]["confidence_zones"][0]["label"] == "clean"
+    assert metrics["calibration_report"]["confidence_zones"][2]["label"] == "flag"
 
 
 def test_compute_evaluation_metrics_flags_label_conflicts():
@@ -191,13 +205,25 @@ def test_load_synthetic_pair_dataset_uses_explicit_pairs(tmp_path, monkeypatch):
         "case_002_b.py",
     ]
     assert pairs == [
-        {"file_a": "case_001_a.py", "file_b": "case_001_b.py", "label": 2},
-        {"file_a": "case_002_a.py", "file_b": "case_002_b.py", "label": 0},
+        {
+            "file_a": "case_001_a.py",
+            "file_b": "case_001_b.py",
+            "label": 2,
+            "case_category": "true_positive",
+            "split": "unspecified",
+        },
+        {
+            "file_a": "case_002_a.py",
+            "file_b": "case_002_b.py",
+            "label": 0,
+            "case_category": "true_negative",
+            "split": "unspecified",
+        },
     ]
 
 
 def test_load_generated_pair_dataset_supports_controlled_corpus(tmp_path, monkeypatch):
-    dataset_dir = tmp_path / "clough_stevenson_style"
+    dataset_dir = tmp_path / "controlled_custom"
     dataset_dir.mkdir()
     (dataset_dir / "generated_pairs.jsonl").write_text(
         json.dumps(
@@ -225,7 +251,7 @@ def test_load_generated_pair_dataset_supports_controlled_corpus(tmp_path, monkey
     monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
 
     submissions, pairs = server._load_pair_labeled_benchmark_dataset(
-        "clough_stevenson_style", tmp_path / "job"
+        "controlled_custom", tmp_path / "job"
     )
 
     assert sorted(submissions) == [
@@ -235,27 +261,92 @@ def test_load_generated_pair_dataset_supports_controlled_corpus(tmp_path, monkey
         "controlled_002_b.py",
     ]
     assert pairs == [
-        {"file_a": "controlled_001_a.py", "file_b": "controlled_001_b.py", "label": 3},
-        {"file_a": "controlled_002_a.py", "file_b": "controlled_002_b.py", "label": 0},
+        {
+            "file_a": "controlled_001_a.py",
+            "file_b": "controlled_001_b.py",
+            "label": 3,
+            "case_category": "true_positive",
+            "split": "unspecified",
+        },
+        {
+            "file_a": "controlled_002_a.py",
+            "file_b": "controlled_002_b.py",
+            "label": 0,
+            "case_category": "true_negative",
+            "split": "unspecified",
+        },
     ]
 
 
-def test_generated_pair_dataset_exposes_quality_certificate(tmp_path, monkeypatch):
-    dataset_dir = tmp_path / "clough_stevenson_style"
+def test_generated_pair_dataset_exposes_quality_certificate(tmp_path):
+    dataset_dir = tmp_path / "controlled_quality"
     dataset_dir.mkdir()
+    (dataset_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "generated_by_tools": [],
+                "labeling_process": {
+                    "required_reviewers_per_pair": 2,
+                    "adjudicator_required": True,
+                    "minimum_cohens_kappa": 0.7,
+                    "status": "completed",
+                },
+                "inter_rater_agreement": {"cohens_kappa": 0.82},
+                "split_protocol": {
+                    "sets": ["train", "validation", "test"],
+                    "rule": "locked test",
+                },
+                "external_validation": {
+                    "pan_source_code_corpora": "included",
+                    "results": {"plagdet": 0.8},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     pairs = [
-        ("exact", 1, 1, "verbatim_copy"),
-        ("rename", 1, 2, "identifier_renaming"),
-        ("comments", 1, 2, "comments_and_formatting"),
-        ("reorder", 1, 3, "statement_reordering"),
-        ("control", 1, 3, "control_flow_rewrite"),
-        ("semantic", 1, 3, "semantic_rewrite"),
-        ("library", 1, 3, "library_substitution"),
-        ("split", 1, 3, "helper_extraction"),
-        ("negative_1", 0, 0, "same_domain_different_task"),
-        ("negative_2", 0, 0, "shared_boilerplate_only"),
-        ("negative_3", 0, 0, "same_algorithm_family_different_behavior"),
-        ("negative_4", 0, 0, "unrelated"),
+        ("exact", 1, 1, "verbatim_copy", "true_positive", "train"),
+        ("rename", 1, 2, "identifier_renaming", "true_positive", "train"),
+        ("comments", 1, 2, "comments_and_formatting", "edge_case", "validation"),
+        ("reorder", 1, 3, "statement_reordering", "edge_case", "train"),
+        ("control", 1, 3, "control_flow_rewrite", "edge_case", "validation"),
+        ("semantic", 1, 3, "semantic_rewrite", "edge_case", "test"),
+        ("library", 1, 3, "library_substitution", "edge_case", "train"),
+        ("split", 1, 3, "helper_extraction", "edge_case", "test"),
+        (
+            "cross_language",
+            1,
+            4,
+            "cross_language_translation",
+            "edge_case",
+            "validation",
+        ),
+        (
+            "obfuscated",
+            1,
+            3,
+            "dead_code_and_identifier_obfuscation",
+            "edge_case",
+            "test",
+        ),
+        ("negative_1", 0, 0, "same_domain_different_task", "hard_negative", "train"),
+        (
+            "negative_2",
+            0,
+            0,
+            "shared_boilerplate_only",
+            "hard_negative",
+            "validation",
+        ),
+        (
+            "negative_3",
+            0,
+            0,
+            "same_algorithm_family_different_behavior",
+            "hard_negative",
+            "test",
+        ),
+        ("negative_4", 0, 0, "unrelated", "true_negative", "train"),
     ]
     (dataset_dir / "generated_pairs.jsonl").write_text(
         json.dumps(
@@ -268,26 +359,125 @@ def test_generated_pair_dataset_exposes_quality_certificate(tmp_path, monkeypatc
                         "label": label,
                         "clone_type": clone_type,
                         "obfuscation": obfuscation,
+                        "language_a": (
+                            "python"
+                            if obfuscation == "cross_language_translation"
+                            else None
+                        ),
+                        "language_b": (
+                            "java"
+                            if obfuscation == "cross_language_translation"
+                            else None
+                        ),
+                        "case_category": case_category,
+                        "split": split,
                     }
-                    for pair_id, label, clone_type, obfuscation in pairs
+                    for (
+                        pair_id,
+                        label,
+                        clone_type,
+                        obfuscation,
+                        case_category,
+                        split,
+                    ) in pairs
                 ]
             }
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
+    quality = server._build_benchmark_quality_certificate(dataset_dir)
+
+    assert quality["certification_level"] == "gold_standard_external"
+    assert quality["score_percent"] == 100.0
+    assert quality["pair_count"] == 14
+    assert quality["positive_pairs"] == 10
+    assert quality["negative_pairs"] == 4
+    assert quality["hard_negative_pairs"] == 3
+    assert quality["leaked_tools"] == []
+    assert set(quality["case_categories"]) == {
+        "edge_case",
+        "hard_negative",
+        "true_negative",
+        "true_positive",
+    }
+    assert set(quality["splits"]) == {"test", "train", "validation"}
+    assert all(gate["passed"] for gate in quality["gates"])
+
+
+def test_quality_certificate_flags_tool_derived_ground_truth(tmp_path):
+    dataset_dir = tmp_path / "tool_leakage"
+    dataset_dir.mkdir()
+    (dataset_dir / "metadata.json").write_text(
+        json.dumps({"generated_by_tools": ["moss"]}), encoding="utf-8"
+    )
+    (dataset_dir / "generated_pairs.jsonl").write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "case_001",
+                        "code_a": "def a():\n    return 1\n",
+                        "code_b": "def b():\n    return 1\n",
+                        "label": 1,
+                        "clone_type": 1,
+                        "obfuscation": "verbatim_copy",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    quality = server._build_benchmark_quality_certificate(dataset_dir)
+    label_leakage_gate = next(
+        gate for gate in quality["gates"] if gate["id"] == "label_leakage"
+    )
+
+    assert quality["leaked_tools"] == ["moss"]
+    assert label_leakage_gate["passed"] is False
+
+
+def test_builtin_controlled_corpus_available_without_data_directory(
+    tmp_path, monkeypatch
+):
+    missing_data_dir = tmp_path / "missing_datasets"
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", missing_data_dir)
 
     response = asyncio.run(server.get_benchmark_datasets())
     payload = json.loads(response.body)
-    quality = payload["datasets"][0]["benchmark_quality"]
+    datasets = {dataset["id"]: dataset for dataset in payload["datasets"]}
 
-    assert quality["certification_level"] == "gold_standard"
-    assert quality["score_percent"] == 100.0
-    assert quality["pair_count"] == 12
-    assert quality["positive_pairs"] == 8
-    assert quality["negative_pairs"] == 4
-    assert quality["hard_negative_pairs"] == 3
-    assert all(gate["passed"] for gate in quality["gates"])
+    controlled = datasets["clough_stevenson_style"]
+    assert controlled["has_ground_truth"] is True
+    assert controlled["size"] == "14 labeled pairs"
+    assert (
+        controlled["benchmark_quality"]["certification_level"]
+        == "controlled_internal_ready"
+    )
+    assert controlled["benchmark_quality"]["score_percent"] < 100.0
+    assert set(controlled["benchmark_quality"]["case_categories"]) == {
+        "edge_case",
+        "hard_negative",
+        "true_negative",
+        "true_positive",
+    }
+
+
+def test_load_pair_labeled_dataset_uses_builtin_controlled_corpus(
+    tmp_path, monkeypatch
+):
+    missing_data_dir = tmp_path / "missing_datasets"
+    monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", missing_data_dir)
+
+    submissions, pairs = server._load_pair_labeled_benchmark_dataset(
+        "clough_stevenson_style", tmp_path / "job"
+    )
+
+    assert len(submissions) == 28
+    assert len(pairs) == 14
+    assert any(name.endswith(".java") for name in submissions)
+    assert sum(1 for pair in pairs if pair["label"] >= 2) == 10
+    assert sum(1 for pair in pairs if pair["label"] == 0) == 4
 
 
 def test_dataset_has_ground_truth_for_pair_labeled_sources(tmp_path):
@@ -440,22 +630,21 @@ def test_benchmark_dataset_cards_derive_metadata_from_huggingface_layout(
 
     response = asyncio.run(server.get_benchmark_datasets())
     payload = json.loads(response.body)
+    datasets = {dataset["id"]: dataset for dataset in payload["datasets"]}
 
-    assert payload["datasets"] == [
-        {
-            "id": "poj104",
-            "name": "Poj104",
-            "desc": "Dataset: poj104",
-            "icon": "📚",
-            "color": "blue",
-            "language": "mixed",
-            "size": "24 files",
-            "created_by": "System",
-            "created_at": "",
-            "is_demo": False,
-            "has_ground_truth": False,
-        }
-    ]
+    assert datasets["poj104"] == {
+        "id": "poj104",
+        "name": "Poj104",
+        "desc": "Dataset: poj104",
+        "icon": "📚",
+        "color": "blue",
+        "language": "mixed",
+        "size": "24 files",
+        "created_by": "System",
+        "created_at": "",
+        "is_demo": False,
+        "has_ground_truth": False,
+    }
 
 
 def test_benchmark_dataset_cards_support_test_only_huggingface_layout(
@@ -483,22 +672,21 @@ def test_benchmark_dataset_cards_support_test_only_huggingface_layout(
 
     response = asyncio.run(server.get_benchmark_datasets())
     payload = json.loads(response.body)
+    datasets = {dataset["id"]: dataset for dataset in payload["datasets"]}
 
-    assert payload["datasets"] == [
-        {
-            "id": "human_eval",
-            "name": "Human Eval",
-            "desc": "Dataset: human_eval",
-            "icon": "⚙️",
-            "color": "slate",
-            "language": "python",
-            "size": "164 files",
-            "created_by": "System",
-            "created_at": "",
-            "is_demo": False,
-            "has_ground_truth": False,
-        }
-    ]
+    assert datasets["human_eval"] == {
+        "id": "human_eval",
+        "name": "Human Eval",
+        "desc": "Dataset: human_eval",
+        "icon": "⚙️",
+        "color": "slate",
+        "language": "python",
+        "size": "164 files",
+        "created_by": "System",
+        "created_at": "",
+        "is_demo": False,
+        "has_ground_truth": False,
+    }
 
 
 def test_read_files_from_dir_preserves_nested_duplicate_filenames(tmp_path):
@@ -534,19 +722,18 @@ def test_benchmark_dataset_cards_count_unique_nested_files(tmp_path, monkeypatch
 
     response = asyncio.run(server.get_benchmark_datasets())
     payload = json.loads(response.body)
+    datasets = {dataset["id"]: dataset for dataset in payload["datasets"]}
 
-    assert payload["datasets"] == [
-        {
-            "id": "IR-Plag-Dataset",
-            "name": "Ir-Plag-Dataset",
-            "desc": "Dataset: IR-Plag-Dataset",
-            "icon": "⚙️",
-            "color": "slate",
-            "language": "java",
-            "size": "2 files",
-            "created_by": "System",
-            "created_at": "",
-            "is_demo": False,
-            "has_ground_truth": False,
-        }
-    ]
+    assert datasets["IR-Plag-Dataset"] == {
+        "id": "IR-Plag-Dataset",
+        "name": "Ir-Plag-Dataset",
+        "desc": "Dataset: IR-Plag-Dataset",
+        "icon": "⚙️",
+        "color": "slate",
+        "language": "java",
+        "size": "2 files",
+        "created_by": "System",
+        "created_at": "",
+        "is_demo": False,
+        "has_ground_truth": False,
+    }

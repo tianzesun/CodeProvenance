@@ -15,6 +15,7 @@ import {
   X,
   AlertCircle,
   Settings2,
+  Layers3,
 } from 'lucide-react';
 
 const API = '';
@@ -47,6 +48,25 @@ type DetectionTool = {
   engines?: string[];
 };
 
+type AssignmentMode = {
+  id: string;
+  name: string;
+  category?: string;
+  access?: string;
+  context?: string;
+  version?: string;
+  overlay?: boolean;
+  warnings?: string[];
+  pipelines?: string[];
+};
+
+type ModeSuggestion = {
+  recommended_mode_id: string;
+  recommended_mode_name: string;
+  confidence?: number;
+  reasons?: string[];
+};
+
 function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
   if (axios.isAxiosError(error)) {
     return (
@@ -70,9 +90,14 @@ export default function UploadPage() {
   const [assignmentName, setAssignmentName] = useState('');
   const [threshold, setThreshold] = useState(0.5);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
+  const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
+  const [modeSuggestion, setModeSuggestion] = useState<ModeSuggestion | null>(null);
+  const [modeSuggesting, setModeSuggesting] = useState(false);
   const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [thresholdLoading, setThresholdLoading] = useState(true);
+  const [modesLoading, setModesLoading] = useState(true);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -118,6 +143,10 @@ export default function UploadPage() {
   }, [files]);
 
   const selectedFiles = useMemo(() => (zipFile ? [] : files), [files, zipFile]);
+  const selectedAssignmentMode = useMemo(
+    () => assignmentModes.find((mode) => mode.id === selectedAssignmentModeId),
+    [assignmentModes, selectedAssignmentModeId],
+  );
 
   const hasMixedZipSelection = useMemo(
     () => files.length > 1 && files.some((file) => file.name.toLowerCase().endsWith('.zip')),
@@ -157,21 +186,29 @@ export default function UploadPage() {
         const nextThreshold = Number(res.data?.default_threshold);
         setThreshold(Number.isFinite(nextThreshold) ? nextThreshold : 0.5);
         const nextEngineKeys = Array.isArray(res.data?.active_engine_keys) ? res.data.active_engine_keys : [];
+        const modePayload = res.data?.assignment_modes;
+        const nextModes = Array.isArray(modePayload?.modes) ? modePayload.modes : [];
         setActiveEngines(
           nextEngineKeys.length > 0
             ? nextEngineKeys
             : UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key),
         );
+        setAssignmentModes(nextModes);
+        if (typeof modePayload?.default_mode_id === 'string') {
+          setSelectedAssignmentModeId((current) => current || modePayload.default_mode_id);
+        }
       })
       .catch(() => {
         if (active) {
           setThreshold(0.5);
           setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((engine) => engine.key));
+          setAssignmentModes([]);
         }
       })
       .finally(() => {
         if (active) {
           setThresholdLoading(false);
+          setModesLoading(false);
         }
       });
 
@@ -230,6 +267,9 @@ export default function UploadPage() {
       if (typeof parsed.assignment_name === 'string') {
         setAssignmentName(parsed.assignment_name);
       }
+      if (typeof parsed.assignment_mode === 'string') {
+        setSelectedAssignmentModeId(parsed.assignment_mode);
+      }
     } catch {
       // Ignore malformed saved form data.
     }
@@ -245,9 +285,39 @@ export default function UploadPage() {
       JSON.stringify({
         course_name: courseName,
         assignment_name: assignmentName,
+        assignment_mode: selectedAssignmentModeId,
       }),
     );
-  }, [assignmentName, authLoading, courseName, uploadFormStorageKey]);
+  }, [assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
+
+  useEffect(() => {
+    if (modesLoading || assignmentModes.length === 0) {
+      return;
+    }
+    const hasSignal = Boolean(courseName.trim() || assignmentName.trim() || files.length > 0);
+    if (!hasSignal) {
+      setModeSuggestion(null);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setModeSuggesting(true);
+      try {
+        const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
+          course_name: courseName,
+          assignment_name: assignmentName,
+          filenames: files.map((file) => file.name),
+        });
+        setModeSuggestion(res.data);
+      } catch {
+        setModeSuggestion(null);
+      } finally {
+        setModeSuggesting(false);
+      }
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [assignmentModes.length, assignmentName, courseName, files, modesLoading]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -287,6 +357,7 @@ export default function UploadPage() {
     }
     formData.append('course_name', courseName || assignmentName || 'Assignment Check');
     formData.append('assignment_name', assignmentName || courseName || 'Assignment Check');
+    formData.append('assignment_mode', selectedAssignmentModeId);
     formData.append('threshold', String(threshold));
     formData.append('engine_keys', JSON.stringify(activeEngines));
     formData.append('tool_ids', JSON.stringify(selectedToolIds));
@@ -509,6 +580,105 @@ export default function UploadPage() {
               </div>
 
               <div className="mb-6 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 lg:col-span-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      <Layers3 size={14} />
+                      Assignment Mode
+                    </div>
+                    {selectedAssignmentMode?.version ? (
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                        v{selectedAssignmentMode.version}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
+                    {modesLoading ? (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                        Loading modes...
+                      </span>
+                    ) : assignmentModes.length > 0 ? (
+                      assignmentModes.map((mode) => {
+                        const active = selectedAssignmentModeId === mode.id;
+                        const advanced = mode.access === 'advanced';
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => setSelectedAssignmentModeId(mode.id)}
+                            className={`min-h-[118px] rounded-xl border px-3 py-2 text-left transition ${active
+                              ? 'border-blue-300 bg-blue-50 text-blue-900'
+                              : advanced
+                                ? 'border-amber-200 bg-amber-50/40 text-slate-700 hover:border-amber-300'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                              }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-sm font-semibold">{mode.name}</span>
+                              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${mode.overlay
+                                ? 'bg-violet-50 text-violet-700'
+                                : advanced
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-emerald-50 text-emerald-700'
+                                }`}>
+                                {mode.overlay ? 'Overlay' : advanced ? 'Advanced' : mode.category || 'Mode'}
+                              </span>
+                            </div>
+                            <div className="mt-1 line-clamp-3 text-xs leading-5 text-slate-500">
+                              {mode.context || 'Assignment-specific calibration and evidence policy.'}
+                            </div>
+                            {mode.pipelines?.length ? (
+                              <div className="mt-2 text-[11px] font-medium text-slate-400">
+                                {mode.pipelines.join(' + ')}
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                        Standard mode catalog unavailable
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedAssignmentMode?.warnings?.length ? (
+                    <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      {selectedAssignmentMode.warnings[0]}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                    {modeSuggesting ? (
+                      'Checking assignment details for a mode suggestion...'
+                    ) : modeSuggestion ? (
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          Suggested mode: <strong>{modeSuggestion.recommended_mode_name}</strong>
+                          {typeof modeSuggestion.confidence === 'number'
+                            ? ` (${Math.round(modeSuggestion.confidence * 100)}% confidence)`
+                            : ''}
+                          {modeSuggestion.reasons?.length ? (
+                            <span className="block text-xs text-blue-700">
+                              {modeSuggestion.reasons[0]}
+                            </span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAssignmentModeId(modeSuggestion.recommended_mode_id)}
+                          className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                        >
+                          Use suggestion
+                        </button>
+                      </div>
+                    ) : (
+                      'Add an assignment name or files and IntegrityDesk will suggest the closest mode.'
+                    )}
+                  </div>
+                </div>
+
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Current Similarity Threshold

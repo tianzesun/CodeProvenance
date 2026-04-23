@@ -146,6 +146,24 @@ function getRiskBucket(score) {
   return 'low';
 }
 
+function getConfidenceZone(score, calibrationReport) {
+  const zones = Array.isArray(calibrationReport?.confidence_zones)
+    ? calibrationReport.confidence_zones
+    : [];
+  const numericScore = Number(score) || 0;
+  const matched = zones.find((zone) => numericScore >= Number(zone.min_score) && numericScore < Number(zone.max_score));
+  if (matched) {
+    return matched;
+  }
+  if (numericScore >= 0.78) {
+    return { label: 'flag', description: 'High-certainty review zone.' };
+  }
+  if (numericScore >= 0.5) {
+    return { label: 'uncertain', description: 'Manual review zone.' };
+  }
+  return { label: 'clean', description: 'Low-signal region.' };
+}
+
 function getRiskTone(score) {
   const bucket = getRiskBucket(score);
   const map = {
@@ -386,6 +404,13 @@ export default function ResultsPage() {
   const webAverageSimilarity = Number(webAnalysis.average_similarity || 0);
   const webSourceTotals = webAnalysis.source_totals || {};
   const selectedTools = Array.isArray(job?.selected_tools) ? job.selected_tools : ['IntegrityDesk'];
+  const assignmentModeName = job?.assignment_mode_name || 'Introductory Programming';
+  const assignmentModeVersion = job?.assignment_mode_version || '1.0.0';
+  const assignmentModePolicy = job?.assignment_mode_policy || {};
+  const calibrationReport = job?.calibration_report || {};
+  const aiTextTrust = job?.ai_text_trust || {};
+  const reproducibility = job?.reproducibility || {};
+  const highestMatchZone = getConfidenceZone(highestMatch?.score || 0, calibrationReport);
   const externalToolResults = job?.external_tool_results || {};
   const externalToolSummaries = Object.entries(externalToolResults).map(([toolId, data]) => ({
     toolId,
@@ -656,6 +681,9 @@ export default function ResultsPage() {
                     {tool}
                   </span>
                 ))}
+                <span className="rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-xs font-semibold text-emerald-700">
+                  {assignmentModeName} v{assignmentModeVersion}
+                </span>
                 {externalToolSummaries.map((tool) => (
                   <span
                     key={tool.toolId}
@@ -668,6 +696,11 @@ export default function ResultsPage() {
                   </span>
                 ))}
               </div>
+              {Array.isArray(assignmentModePolicy?.calibration) && assignmentModePolicy.calibration.length > 0 ? (
+                <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
+                  Mode calibration: {assignmentModePolicy.calibration[0]}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-4 px-6 pb-6 pt-5 sm:grid-cols-2 xl:grid-cols-4 lg:px-7">
@@ -675,8 +708,8 @@ export default function ResultsPage() {
               <MetricCard label="Pairs Compared" value={summary.total_pairs || results.length} icon={Target} />
               <MetricCard label="Flagged Pairs" value={summary.suspicious_pairs || flaggedResults.length} icon={AlertTriangle} />
               <MetricCard
-                label="Highest Match"
-                value={highestMatch ? formatPercent(highestMatch.score) : '0%'}
+                label="Confidence Zone"
+                value={highestMatch ? highestMatchZone.label.toUpperCase() : 'CLEAN'}
                 icon={Shield}
               />
             </div>
@@ -724,11 +757,11 @@ export default function ResultsPage() {
                                 : 'No pair crossed the current review threshold'}
                             </div>
                             <div className="text-4xl font-semibold tracking-tight text-[var(--text-primary)]">
-                              {formatPercentPrecise(overallReviewScore)}
+                              {highestMatch ? highestMatchZone.label.toUpperCase() : 'CLEAN'}
                             </div>
                             <p className="max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
                               {highestMatch
-                                ? `The strongest peer similarity is ${formatPercentPrecise(highestMatch.score)} between ${highestMatch.file_a} and ${highestMatch.file_b}.`
+                                ? `The strongest peer similarity falls in the ${highestMatchZone.label} zone at ${formatPercentPrecise(highestMatch.score)} between ${highestMatch.file_a} and ${highestMatch.file_b}.`
                                 : 'No pairwise similarity result is available for this assignment yet.'}
                             </p>
                           </div>
@@ -798,6 +831,39 @@ export default function ResultsPage() {
                             : (webAnalysis.status_message || 'Web source checks are not enabled for this assignment')}
                           tone={webEnabled ? 'ready' : 'pending'}
                         />
+                      </div>
+
+                      <div className="mt-5 rounded-[22px] border border-[color:var(--border)] bg-[var(--surface)] px-4 py-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                          Trust calibration
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <MiniStat
+                            label="Estimated FPR"
+                            value={typeof calibrationReport.estimated_false_positive_rate === 'number'
+                              ? formatPercentPrecise(calibrationReport.estimated_false_positive_rate)
+                              : 'Pending'}
+                            note="At current threshold"
+                            compact
+                          />
+                          <MiniStat
+                            label="Mode"
+                            value={calibrationReport.confidence_mode || 'Not set'}
+                            note="Threshold posture"
+                            compact
+                          />
+                          <MiniStat
+                            label="Run hash"
+                            value={reproducibility.submission_set_hash
+                              ? String(reproducibility.submission_set_hash).slice(0, 8)
+                              : 'Pending'}
+                            note="Reproducibility"
+                            compact
+                          />
+                        </div>
+                        <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">
+                          {calibrationReport.methodology || 'Calibration reporting appears here after benchmark validation is available.'}
+                        </p>
                       </div>
 
                       <div className="mt-5 border-t border-[color:var(--border)] pt-5">
@@ -1606,7 +1672,7 @@ export default function ResultsPage() {
 
                             <div className="flex flex-wrap gap-3">
                               <span className={`inline-flex rounded-full border px-3 py-2 text-sm font-semibold ${getRiskTone(selectedMatch.score).badge}`}>
-                                {getRiskBucket(selectedMatch.score).toUpperCase()} {formatPercentPrecise(selectedMatch.score)}
+                                {getConfidenceZone(selectedMatch.score, calibrationReport).label.toUpperCase()} {formatPercentPrecise(selectedMatch.score)}
                               </span>
                               <button
                                 type="button"
@@ -1633,6 +1699,27 @@ export default function ResultsPage() {
                                 />
                               ))}
                           </div>
+                          {selectedMatch.fusion_debug?.active_evidence?.length ? (
+                            <div className="mt-5 rounded-[20px] border border-[color:var(--border)] bg-[var(--surface)] px-4 py-4">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                Engine contribution debug
+                              </div>
+                              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                                {selectedMatch.fusion_debug.active_evidence.slice(0, 6).map((item) => (
+                                  <div
+                                    key={item.engine}
+                                    className="flex items-center justify-between gap-3 rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-sm"
+                                  >
+                                    <span className="font-semibold text-[var(--text-primary)]">{item.engine}</span>
+                                    <span className="text-[var(--text-secondary)]">
+                                      {formatPercentPrecise(item.score)} · contribution {formatPercentPrecise(item.contribution || 0)}
+                                      {item.fired ? ' · fired' : ''}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="grid gap-4 xl:grid-cols-2">
@@ -1692,6 +1779,19 @@ export default function ResultsPage() {
                       note={aiEnabled ? 'Submissions at or above the AI review threshold' : 'No AI flags recorded'}
                       tone={aiEnabled && aiFlaggedCount > 0 ? 'warning' : 'safe'}
                     />
+                  </div>
+
+                  <div className="rounded-[24px] border border-amber-500/20 bg-amber-500/[0.07] px-5 py-4">
+                    <div className="text-sm font-semibold text-[var(--text-primary)]">
+                      AI-text trust policy
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+                      {aiTextTrust.false_positive_policy || 'AI detection is probabilistic and should be reviewed manually before formal action.'}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                      High-certainty threshold: {formatPercentPrecise(aiTextTrust.high_certainty_threshold || 0.7)}.
+                      Humanizer benchmark: {(aiTextTrust.humanizer_tools || []).join(', ') || 'pending'}.
+                    </p>
                   </div>
 
                   <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">

@@ -11,6 +11,12 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 import yaml
 
 from src.backend.evaluation.arbitration import BayesianArbitrator
+from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
+from src.backend.engines.scoring.fusion_policy import (
+    default_normalization_config,
+    default_weight_governance_policy,
+    fusion_presets_payload,
+)
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -59,17 +65,19 @@ def load_engine_config() -> Dict:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
-        return config
+        return _with_policy_defaults(config or {})
     except Exception:
         return _get_default_config()
 
 
 def save_engine_config(config: Dict) -> None:
     """Save engine configuration to YAML config file with validation."""
+    config = _with_policy_defaults(config)
+
     # Validate weights sum correctly
     if "weights" in config:
         total = sum(config["weights"].values())
-        if abs(total - 1.0) > 0.001:
+        if total > 0 and abs(total - 1.0) > 0.001:
             # Normalize weights automatically
             config["weights"] = {
                 k: round(v / total, 4) for k, v in config["weights"].items()
@@ -87,38 +95,49 @@ def save_engine_config(config: Dict) -> None:
 
 
 def _get_default_config() -> Dict:
-    return {
-        "weights": {
-            "ast": 0.65,
-            "token": 0.25,
-            "winnowing": 0.10,
-            "graph": 0.00,
-            "execution": 0.00,
-            "embedding": 0.00,
-            "ngram": 0.00,
-            "codebert": 0.00,
-        },
-        "baseline_correction": {
-            "enabled": True,
-            "baselines": {
-                "embedding": 0.70,
-                "winnowing": 0.25,
-                "ngram": 0.15,
-                "ast": 0.25,
-                "fingerprint": 0.15,
+    return _with_policy_defaults(
+        {
+            "weights": {
+                "ast": 0.65,
+                "token": 0.25,
+                "winnowing": 0.10,
+                "graph": 0.00,
+                "execution": 0.00,
+                "embedding": 0.00,
+                "ngram": 0.00,
+                "codebert": 0.00,
             },
-        },
-        "arbitration": {
-            "enabled": True,
-            "prior_precision_multiplier": 20.0,
-            "minimum_agreement": 0.30,
-        },
-        "ast_boost": {
-            "enabled": True,
-            "threshold": 0.90,
-            "minimum_guaranteed_score": 0.75,
-        },
-    }
+            "baseline_correction": {
+                "enabled": True,
+                "baselines": {
+                    "embedding": 0.70,
+                    "winnowing": 0.25,
+                    "ngram": 0.15,
+                    "ast": 0.25,
+                    "fingerprint": 0.15,
+                },
+            },
+            "arbitration": {
+                "enabled": True,
+                "prior_precision_multiplier": 20.0,
+                "minimum_agreement": 0.30,
+            },
+            "ast_boost": {
+                "enabled": True,
+                "threshold": 0.90,
+                "minimum_guaranteed_score": 0.75,
+            },
+        }
+    )
+
+
+def _with_policy_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure fusion policy sections are present in loaded configuration."""
+    config.setdefault("score_normalization", default_normalization_config())
+    config.setdefault("fusion_presets", fusion_presets_payload())
+    config.setdefault("weight_governance", default_weight_governance_policy())
+    config.setdefault("assignment_modes", assignment_modes_payload())
+    return config
 
 
 # Default fallback values
@@ -264,6 +283,11 @@ class FusionEngine:
                 },
             },
         }
+
+    @classmethod
+    def get_assignment_presets(cls) -> Dict[str, Dict[str, Any]]:
+        """Get assignment-aware presets with weights and evidence policy."""
+        return fusion_presets_payload()
 
     @classmethod
     def run_calibration_benchmark(cls) -> Dict[str, Any]:
@@ -522,11 +546,6 @@ class FusionEngine:
         cap = float(guard.get("insufficient_evidence_cap", 0.58))
         semantic_only_cap = float(guard.get("semantic_only_cap", 0.45))
 
-        # AST >= 0.8 automatically bypasses all precision guard requirements
-        ast_score = corrected_scores.get("ast", 0.0)
-        if ast_score >= 0.85:
-            return final_score
-            
         concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
         lexical_engines = ("fingerprint", "winnowing", "ngram")
         concrete_evidence = sum(
@@ -539,6 +558,16 @@ class FusionEngine:
             for name in lexical_engines
             if corrected_scores.get(name, 0.0) >= lexical_threshold
         )
+        supporting_concrete_evidence = sum(
+            1
+            for name in concrete_engines
+            if name != "ast" and corrected_scores.get(name, 0.0) >= evidence_threshold
+        )
+
+        ast_score = corrected_scores.get("ast", 0.0)
+        ast_bypass_threshold = float(guard.get("ast_bypass_threshold", 0.85))
+        if ast_score >= ast_bypass_threshold and supporting_concrete_evidence >= 1:
+            return final_score
 
         if concrete_evidence < minimum_concrete_engines:
             return min(final_score, cap)

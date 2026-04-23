@@ -1,0 +1,184 @@
+{
+  "metadata": {
+    "name": "Clough-Stevenson-Style Controlled Corpus",
+    "description": "Controlled original-vs-plagiarized code pairs with exact copies, identifier renaming, statement reordering, semantic rewrites, cross-language translation, obfuscation, and hard negatives for PAN-style benchmark scoring.",
+    "language": "mixed",
+    "created_by": "System",
+    "created": "2026-04-22",
+    "size": "14 labeled pairs",
+    "similarity_type": "controlled_plagiarism_and_hard_negatives",
+    "benchmark_role": "controlled_gold_standard_smoke",
+    "ground_truth_source": "human_authored_controlled_fixture",
+    "generated_by_tools": [],
+    "independent_of_tools": ["moss", "jplag", "dolos", "sherlock", "nicad", "pmd"],
+    "labeling_process": {
+      "required_reviewers_per_pair": 2,
+      "adjudicator_required": true,
+      "minimum_cohens_kappa": 0.7,
+      "status": "protocol_defined_pending_human_review"
+    },
+    "split_protocol": {
+      "sets": ["train", "validation", "test"],
+      "rule": "Engine weights tune on train, design choices compare on validation, final reported metrics use locked test only."
+    },
+    "inter_rater_agreement": {
+      "status": "pending_human_review",
+      "cohens_kappa": null,
+      "note": "Two independent reviewers plus third-person adjudication are required before this fixture is used for final published claims."
+    },
+    "external_validation": {
+      "pan_source_code_corpora": "mandatory_secondary_lane_pending",
+      "required_corpora": ["PAN 2011 source code", "PAN 2012 source code", "PAN 2013 source code", "PAN 2014 source code"],
+      "pan_text_corpora": "not_applicable_code_fixture",
+      "note": "Use PAN published corpora for external validity and published-baseline comparison before procurement or publication claims."
+    }
+  },
+  "name": "clough_stevenson_style",
+  "version": "1.0",
+  "pair_count": 14,
+  "description": "Controlled plagiarism benchmark inspired by Clough & Stevenson corpus design: originals, disguised variants, semantic rewrites, cross-language translation, obfuscation, and hard negatives with explicit labels.",
+  "pairs": [
+    {
+      "id": "cs_exact_001",
+      "label": 1,
+      "clone_type": 1,
+      "case_category": "true_positive",
+      "split": "train",
+      "obfuscation": "verbatim_copy",
+      "code_a": "def normalize_scores(scores):\n    if not scores:\n        return []\n    highest = max(scores)\n    if highest == 0:\n        return [0 for _ in scores]\n    return [round(score / highest, 3) for score in scores]\n",
+      "code_b": "def normalize_scores(scores):\n    if not scores:\n        return []\n    highest = max(scores)\n    if highest == 0:\n        return [0 for _ in scores]\n    return [round(score / highest, 3) for score in scores]\n"
+    },
+    {
+      "id": "cs_rename_002",
+      "label": 1,
+      "clone_type": 2,
+      "case_category": "true_positive",
+      "split": "train",
+      "obfuscation": "identifier_renaming",
+      "code_a": "def count_late_submissions(records):\n    late = 0\n    for record in records:\n        if record.get('submitted_at') > record.get('deadline'):\n            late += 1\n    return late\n",
+      "code_b": "def total_overdue(items):\n    missed = 0\n    for item in items:\n        if item.get('submitted_at') > item.get('deadline'):\n            missed += 1\n    return missed\n"
+    },
+    {
+      "id": "cs_reorder_003",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "train",
+      "obfuscation": "statement_reordering",
+      "code_a": "def build_histogram(values):\n    histogram = {}\n    for value in values:\n        if value not in histogram:\n            histogram[value] = 0\n        histogram[value] += 1\n    return histogram\n",
+      "code_b": "def build_histogram(values):\n    histogram = {}\n    for value in values:\n        histogram[value] = histogram.get(value, 0) + 1\n    return histogram\n"
+    },
+    {
+      "id": "cs_comment_004",
+      "label": 1,
+      "clone_type": 2,
+      "case_category": "edge_case",
+      "split": "validation",
+      "obfuscation": "comments_and_formatting",
+      "code_a": "def remove_blank_lines(text):\n    lines = text.splitlines()\n    cleaned = []\n    for line in lines:\n        if line.strip():\n            cleaned.append(line)\n    return '\\n'.join(cleaned)\n",
+      "code_b": "def strip_empty_rows(document):\n    # Split the document and keep only meaningful rows.\n    rows = document.splitlines()\n    output = []\n    for row in rows:\n        if row.strip(): output.append(row)\n    return '\\n'.join(output)\n"
+    },
+    {
+      "id": "cs_control_005",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "validation",
+      "obfuscation": "control_flow_rewrite",
+      "code_a": "def first_duplicate(values):\n    seen = set()\n    for value in values:\n        if value in seen:\n            return value\n        seen.add(value)\n    return None\n",
+      "code_b": "def first_duplicate(values):\n    seen = set()\n    index = 0\n    while index < len(values):\n        value = values[index]\n        if value in seen:\n            return value\n        seen.add(value)\n        index += 1\n    return None\n"
+    },
+    {
+      "id": "cs_semantic_006",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "test",
+      "obfuscation": "semantic_rewrite",
+      "code_a": "def median(numbers):\n    ordered = sorted(numbers)\n    count = len(ordered)\n    if count == 0:\n        return None\n    middle = count // 2\n    if count % 2 == 1:\n        return ordered[middle]\n    return (ordered[middle - 1] + ordered[middle]) / 2\n",
+      "code_b": "def median(values):\n    if len(values) == 0:\n        return None\n    values = sorted(values)\n    midpoint = len(values) // 2\n    if len(values) % 2 == 0:\n        left = values[midpoint - 1]\n        right = values[midpoint]\n        return (left + right) / 2\n    return values[midpoint]\n"
+    },
+    {
+      "id": "cs_library_007",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "train",
+      "obfuscation": "library_substitution",
+      "code_a": "def unique_preserve_order(values):\n    result = []\n    for value in values:\n        if value not in result:\n            result.append(value)\n    return result\n",
+      "code_b": "def unique_preserve_order(values):\n    seen = set()\n    result = []\n    for value in values:\n        if value in seen:\n            continue\n        seen.add(value)\n        result.append(value)\n    return result\n"
+    },
+    {
+      "id": "cs_split_008",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "test",
+      "obfuscation": "helper_extraction",
+      "code_a": "def grade_average(grades):\n    total = 0\n    count = 0\n    for grade in grades:\n        if grade is not None:\n            total += grade\n            count += 1\n    return 0 if count == 0 else total / count\n",
+      "code_b": "def valid_grades(grades):\n    return [grade for grade in grades if grade is not None]\n\ndef grade_average(grades):\n    filtered = valid_grades(grades)\n    if not filtered:\n        return 0\n    return sum(filtered) / len(filtered)\n"
+    },
+    {
+      "id": "cs_cross_language_009",
+      "label": 1,
+      "clone_type": 4,
+      "case_category": "edge_case",
+      "split": "validation",
+      "obfuscation": "cross_language_translation",
+      "language_a": "python",
+      "language_b": "java",
+      "code_a": "def count_even(values):\n    total = 0\n    for value in values:\n        if value % 2 == 0:\n            total += 1\n    return total\n",
+      "code_b": "public class CountEven {\n    public static int countEven(int[] values) {\n        int total = 0;\n        for (int value : values) {\n            if (value % 2 == 0) {\n                total += 1;\n            }\n        }\n        return total;\n    }\n}\n"
+    },
+    {
+      "id": "cs_obfuscated_010",
+      "label": 1,
+      "clone_type": 3,
+      "case_category": "edge_case",
+      "split": "test",
+      "obfuscation": "dead_code_and_identifier_obfuscation",
+      "code_a": "def checksum(values):\n    total = 0\n    for value in values:\n        total = (total + value) % 256\n    return total\n",
+      "code_b": "def c(v):\n    z = 0\n    unused = 17\n    for q in v:\n        if unused < 0:\n            z += unused\n        z = (z + q) % 256\n    return z\n"
+    },
+    {
+      "id": "cs_hard_negative_011",
+      "label": 0,
+      "clone_type": 0,
+      "case_category": "hard_negative",
+      "split": "train",
+      "obfuscation": "same_domain_different_task",
+      "code_a": "def normalize_scores(scores):\n    if not scores:\n        return []\n    highest = max(scores)\n    if highest == 0:\n        return [0 for _ in scores]\n    return [round(score / highest, 3) for score in scores]\n",
+      "code_b": "def curve_scores(scores, bonus):\n    adjusted = []\n    for score in scores:\n        adjusted.append(min(100, score + bonus))\n    return adjusted\n"
+    },
+    {
+      "id": "cs_hard_negative_012",
+      "label": 0,
+      "clone_type": 0,
+      "case_category": "hard_negative",
+      "split": "validation",
+      "obfuscation": "shared_boilerplate_only",
+      "code_a": "def load_rows(path):\n    rows = []\n    with open(path, 'r', encoding='utf-8') as handle:\n        for line in handle:\n            rows.append(line.strip().split(','))\n    return rows\n",
+      "code_b": "def write_lines(path, values):\n    with open(path, 'w', encoding='utf-8') as handle:\n        for value in values:\n            handle.write(str(value) + '\\n')\n    return len(values)\n"
+    },
+    {
+      "id": "cs_hard_negative_013",
+      "label": 0,
+      "clone_type": 0,
+      "case_category": "hard_negative",
+      "split": "test",
+      "obfuscation": "same_algorithm_family_different_behavior",
+      "code_a": "def find_maximum(values):\n    best = None\n    for value in values:\n        if best is None or value > best:\n            best = value\n    return best\n",
+      "code_b": "def find_minimum(values):\n    best = None\n    for value in values:\n        if best is None or value < best:\n            best = value\n    return best\n"
+    },
+    {
+      "id": "cs_hard_negative_014",
+      "label": 0,
+      "clone_type": 0,
+      "case_category": "true_negative",
+      "split": "train",
+      "obfuscation": "unrelated",
+      "code_a": "def count_vowels(text):\n    total = 0\n    for char in text.lower():\n        if char in 'aeiou':\n            total += 1\n    return total\n",
+      "code_b": "def compound_interest(principal, rate, years):\n    amount = principal\n    for _ in range(years):\n        amount *= 1 + rate\n    return round(amount, 2)\n"
+    }
+  ]
+}

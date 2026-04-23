@@ -82,3 +82,144 @@ advanced:
   reload_interval: 10
   benchmark_dataset: ir_plag
   auto_optimize_thresholds: true
+  weights_need_validation: false
+score_normalization:
+  common_scale: similarity_probability_0_to_1
+  external_tools:
+    moss:
+      method: percent
+      range:
+      - 0
+      - 100
+    jplag:
+      method: percent
+      range:
+      - 0
+      - 100
+    dolos:
+      method: percent
+      range:
+      - 0
+      - 100
+    nicad:
+      method: percent
+      range:
+      - 0
+      - 100
+    sherlock:
+      method: percent
+      range:
+      - 0
+      - 100
+    pmd:
+      method: percent
+      range:
+      - 0
+      - 100
+  internal_engines:
+    method: unit
+    range:
+    - 0
+    - 1
+  calibration_note: Normalization only aligns score scales. Probability calibration still requires labeled train/validation data per engine.
+fusion_presets:
+  algorithm_data_structure:
+    id: algorithm_data_structure
+    name: Algorithm/Data Structure
+    description: Emphasizes structural evidence for assignments with shared boilerplate and common textbook patterns.
+    weights:
+      ast: 0.28
+      tree_kernel: 0.20
+      cfg: 0.16
+      execution_cfg: 0.16
+      token: 0.08
+      winnowing: 0.06
+      gst: 0.04
+      semantic: 0.02
+    evidence_surfaces:
+    - ast_structure
+    - control_flow
+    - execution_behavior
+    - token_overlap
+    - hard_negative_context
+    pipelines:
+    - code
+    present_results_separately: false
+  open_ended_coding:
+    id: open_ended_coding
+    name: Open-ended Coding
+    description: Balances lexical, structural, and semantic evidence for projects where implementations can legitimately differ.
+    weights:
+      ast: 0.22
+      token: 0.14
+      winnowing: 0.10
+      gst: 0.10
+      semantic: 0.20
+      execution_cfg: 0.14
+      tree_kernel: 0.06
+      cfg: 0.04
+    evidence_surfaces:
+    - semantic_similarity
+    - ast_structure
+    - token_overlap
+    - execution_behavior
+    - side_by_side_diff
+    pipelines:
+    - code
+    present_results_separately: false
+  essay_report:
+    id: essay_report
+    name: Essay/Report
+    description: Prioritizes text similarity and AI-writing evidence while suppressing code-only evidence surfaces.
+    weights:
+      semantic: 0.34
+      web: 0.22
+      ai_detection: 0.28
+      token: 0.10
+      winnowing: 0.06
+    evidence_surfaces:
+    - text_similarity
+    - source_overlap
+    - ai_detection
+    - citation_context
+    - false_positive_risk
+    pipelines:
+    - text
+    present_results_separately: false
+  mixed_submission:
+    id: mixed_submission
+    name: Mixed Submission
+    description: Runs code and write-up pipelines independently and reports the evidence separately so one modality does not hide the other.
+    weights:
+      ast: 0.18
+      token: 0.10
+      winnowing: 0.08
+      gst: 0.07
+      semantic: 0.20
+      web: 0.12
+      ai_detection: 0.12
+      execution_cfg: 0.08
+      tree_kernel: 0.03
+      cfg: 0.02
+    evidence_surfaces:
+    - code_similarity
+    - text_similarity
+    - ai_detection
+    - side_by_side_diff
+    - separate_pipeline_summary
+    pipelines:
+    - code
+    - text
+    present_results_separately: true
+weight_governance:
+  default_weight_changes_require_validation: true
+  required_split: validation
+  locked_test_set_policy: test split is used only for final published results
+  required_evidence:
+  - validation_run_id
+  - benchmark_dataset_id
+  - metric_snapshot
+  allowed_roles:
+  - admin
+  - developer
+  audit_log_required: true

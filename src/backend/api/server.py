@@ -457,10 +457,36 @@ def _read_json_file(path: PathLib) -> Dict[str, Any]:
 
 def _load_dataset_metadata(dataset_root: PathLib) -> Dict[str, Any]:
     """Load optional dataset metadata from a dataset root."""
+    if dataset_root.name in BUILTIN_PAIR_DATASET_IDS:
+        metadata = _load_builtin_pair_dataset_metadata(dataset_root.name)
+        if metadata:
+            return metadata
     metadata_path = dataset_root / "metadata.json"
     if not metadata_path.exists():
-        return {}
+        return _load_builtin_pair_dataset_metadata(dataset_root.name)
     return _read_json_file(metadata_path)
+
+
+def _builtin_pair_dataset_path(dataset_id: str) -> PathLib:
+    """Return the tracked fixture path for a built-in pair-labeled dataset."""
+    return BUILTIN_PAIR_DATASET_DIR / f"{dataset_id}.json"
+
+
+def _load_builtin_pair_dataset_payload(dataset_id: str) -> Dict[str, Any]:
+    """Load a tracked pair-labeled benchmark fixture."""
+    if dataset_id not in BUILTIN_PAIR_DATASET_IDS:
+        return {}
+    fixture_path = _builtin_pair_dataset_path(dataset_id)
+    if not fixture_path.exists():
+        return {}
+    return _read_json_file(fixture_path)
+
+
+def _load_builtin_pair_dataset_metadata(dataset_id: str) -> Dict[str, Any]:
+    """Load display metadata from a tracked pair-labeled benchmark fixture."""
+    payload = _load_builtin_pair_dataset_payload(dataset_id)
+    metadata = payload.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
 
 
 def _normalize_submission_name(path: PathLib, root_dir: PathLib) -> str:
@@ -622,13 +648,14 @@ def _infer_dataset_size_label(
 def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
     """Read explicit benchmark pairs from a generated pair dataset."""
     pairs_path = dataset_root / "generated_pairs.jsonl"
-    if not pairs_path.exists():
-        return []
-
-    try:
-        payload = json.loads(pairs_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
+    payload = _load_builtin_pair_dataset_payload(dataset_root.name)
+    if pairs_path.exists():
+        try:
+            loaded_payload = json.loads(pairs_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_payload, dict) and not payload:
+                payload = loaded_payload
+        except (OSError, json.JSONDecodeError):
+            pass
 
     raw_pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
     return [item for item in raw_pairs if isinstance(item, dict)]
@@ -642,6 +669,7 @@ def _build_benchmark_quality_certificate(
     if not raw_pairs:
         return None
 
+    metadata = _load_dataset_metadata(dataset_root)
     positive_pairs = [
         pair
         for pair in raw_pairs
@@ -654,11 +682,14 @@ def _build_benchmark_quality_certificate(
     transformations = Counter(
         str(pair.get("obfuscation", "unspecified")) for pair in raw_pairs
     )
+    case_categories = Counter(_pair_case_category(pair) for pair in raw_pairs)
+    split_counts = Counter(_pair_split(pair) for pair in raw_pairs)
+    pair_ids = [str(pair.get("id", "")).strip() for pair in raw_pairs]
     hard_negative_pairs = [
         pair
         for pair in negative_pairs
-        if str(pair.get("obfuscation", "")).startswith("hard_negative")
-        or str(pair.get("id", "")).startswith("cs_hard_negative")
+        if _pair_case_category(pair) == "hard_negative"
+        or str(pair.get("obfuscation", "")).startswith("hard_negative")
         or str(pair.get("obfuscation", ""))
         in {
             "same_domain_different_task",
@@ -666,10 +697,73 @@ def _build_benchmark_quality_certificate(
             "same_algorithm_family_different_behavior",
         }
     ]
+    generated_by_tools = metadata.get("generated_by_tools", [])
+    if not isinstance(generated_by_tools, list):
+        generated_by_tools = []
+    lower_generated_by_tools = {
+        str(tool).strip().lower() for tool in generated_by_tools if str(tool).strip()
+    }
+    evaluated_tool_ids = REAL_BENCHMARK_TOOL_IDS - {"integritydesk"}
+    leaked_tools = sorted(lower_generated_by_tools.intersection(evaluated_tool_ids))
+    has_cross_language = any(
+        str(pair.get("obfuscation", "")) == "cross_language_translation"
+        or (
+            pair.get("language_a")
+            and pair.get("language_b")
+            and pair.get("language_a") != pair.get("language_b")
+        )
+        for pair in positive_pairs
+    )
+    has_obfuscation = any(
+        "obfuscat" in str(pair.get("obfuscation", "")).lower()
+        or "dead_code" in str(pair.get("obfuscation", "")).lower()
+        for pair in positive_pairs
+    )
+    required_case_categories = {
+        "true_positive",
+        "true_negative",
+        "hard_negative",
+        "edge_case",
+    }
+    required_splits = {"train", "validation", "test"}
+    duplicate_pair_ids = sorted(
+        pair_id for pair_id, count in Counter(pair_ids).items() if pair_id and count > 1
+    )
+    split_protocol = metadata.get("split_protocol", {})
+    labeling_process = metadata.get("labeling_process", {})
+    if not isinstance(split_protocol, dict):
+        split_protocol = {}
+    if not isinstance(labeling_process, dict):
+        labeling_process = {}
+    external_validation = metadata.get("external_validation", {})
+    inter_rater_agreement = metadata.get("inter_rater_agreement", {})
+    if not isinstance(external_validation, dict):
+        external_validation = {}
+    if not isinstance(inter_rater_agreement, dict):
+        inter_rater_agreement = {}
+    minimum_kappa = float(labeling_process.get("minimum_cohens_kappa", 0.7))
+    cohens_kappa = inter_rater_agreement.get("cohens_kappa")
+    has_trustworthy_kappa = (
+        isinstance(cohens_kappa, (int, float)) and float(cohens_kappa) >= minimum_kappa
+    )
+    has_pan_external_results = external_validation.get(
+        "pan_source_code_corpora"
+    ) == "included" and bool(external_validation.get("results"))
     pair_count = len(raw_pairs)
     positive_ratio = len(positive_pairs) / pair_count if pair_count else 0.0
 
     gates = [
+        {
+            "id": "label_leakage",
+            "label": "No tool-derived labels",
+            "passed": len(leaked_tools) == 0,
+            "value": (
+                "No evaluated tools used as label source"
+                if not leaked_tools
+                else ", ".join(leaked_tools)
+            ),
+            "target": "Ground truth independent of MOSS, JPlag, Dolos, Sherlock, NiCad, and PMD",
+        },
         {
             "id": "explicit_labels",
             "label": "Explicit pair labels",
@@ -698,7 +792,7 @@ def _build_benchmark_quality_certificate(
             "value": ", ".join(
                 f"type {key}: {value}" for key, value in sorted(clone_types.items())
             ),
-            "target": "Type 1, Type 2, and Type 3 positives",
+            "target": "Type 1, Type 2, Type 3, and optional Type 4 positives",
         },
         {
             "id": "obfuscation_coverage",
@@ -714,10 +808,87 @@ def _build_benchmark_quality_certificate(
             "value": len(hard_negative_pairs),
             "target": "At least 3 same-domain or boilerplate negatives",
         },
+        {
+            "id": "case_category_coverage",
+            "label": "Four case categories",
+            "passed": required_case_categories.issubset(set(case_categories)),
+            "value": ", ".join(
+                f"{key}: {value}" for key, value in sorted(case_categories.items())
+            ),
+            "target": "true positives, true negatives, hard negatives, and edge cases",
+        },
+        {
+            "id": "three_way_split",
+            "label": "Train/validation/test separation",
+            "passed": required_splits.issubset(set(split_counts))
+            and not duplicate_pair_ids
+            and bool(split_protocol),
+            "value": ", ".join(
+                f"{key}: {value}" for key, value in sorted(split_counts.items())
+            ),
+            "target": "Non-overlapping train, validation, and locked test sets",
+        },
+        {
+            "id": "cross_language_coverage",
+            "label": "Cross-language coverage",
+            "passed": has_cross_language,
+            "value": "present" if has_cross_language else "missing",
+            "target": "At least one translated-language clone pair",
+        },
+        {
+            "id": "obfuscated_code_coverage",
+            "label": "Obfuscated-code coverage",
+            "passed": has_obfuscation,
+            "value": "present" if has_obfuscation else "missing",
+            "target": "At least one deliberately obfuscated clone pair",
+        },
+        {
+            "id": "reviewer_protocol",
+            "label": "Independent reviewer protocol",
+            "passed": int(labeling_process.get("required_reviewers_per_pair", 0)) >= 2
+            and bool(labeling_process.get("adjudicator_required"))
+            and float(labeling_process.get("minimum_cohens_kappa", 0.0)) >= 0.7,
+            "value": labeling_process.get("status", "missing"),
+            "target": "Two independent reviewers, third-person adjudication, Kappa >= 0.7",
+        },
+        {
+            "id": "inter_rater_agreement",
+            "label": "Cohen's Kappa",
+            "passed": has_trustworthy_kappa,
+            "value": (
+                "pending" if cohens_kappa is None else round(float(cohens_kappa), 3)
+            ),
+            "target": f"Kappa >= {minimum_kappa:.1f} before final claims",
+        },
+        {
+            "id": "pan_external_validation",
+            "label": "PAN external validation",
+            "passed": has_pan_external_results,
+            "value": external_validation.get("pan_source_code_corpora", "missing"),
+            "target": "Published PAN source-code corpus results are recorded",
+        },
     ]
     passed_gates = sum(1 for gate in gates if gate["passed"])
     score = passed_gates / max(1, len(gates))
-    certification_level = "gold_standard" if passed_gates == len(gates) else "labeled"
+    final_claim_gate_ids = {"inter_rater_agreement", "pan_external_validation"}
+    internal_gates_passed = all(
+        gate["passed"] for gate in gates if gate["id"] not in final_claim_gate_ids
+    )
+    if passed_gates == len(gates):
+        certification_level = "gold_standard_external"
+    elif internal_gates_passed:
+        certification_level = "controlled_internal_ready"
+    else:
+        certification_level = "labeled"
+    warnings = []
+    if not has_pan_external_results:
+        warnings.append(
+            "External PAN source-code corpora are not bundled; run PAN 2011-2014 separately for published-baseline validity."
+        )
+    if not has_trustworthy_kappa:
+        warnings.append(
+            "Cohen's Kappa is not yet >= 0.7; use this benchmark for internal engineering, not final published claims."
+        )
 
     return {
         "certification_level": certification_level,
@@ -729,10 +900,108 @@ def _build_benchmark_quality_certificate(
         "positive_ratio": round(positive_ratio, 4),
         "clone_types": dict(sorted(clone_types.items())),
         "transformations": dict(sorted(transformations.items())),
+        "case_categories": dict(sorted(case_categories.items())),
+        "splits": dict(sorted(split_counts.items())),
+        "duplicate_pair_ids": duplicate_pair_ids,
+        "split_protocol": split_protocol,
+        "labeling_process": labeling_process,
         "hard_negative_pairs": len(hard_negative_pairs),
+        "ground_truth_source": metadata.get("ground_truth_source", "unknown"),
+        "generated_by_tools": sorted(lower_generated_by_tools),
+        "leaked_tools": leaked_tools,
+        "external_validation": external_validation,
+        "inter_rater_agreement": inter_rater_agreement,
+        "validation_warnings": warnings,
         "metric_basis": "pair_level_pan_plagdet_with_single_detection_granularity",
         "gates": gates,
     }
+
+
+def _audit_benchmark_pairs(raw_pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Audit pair labels, case categories, and train/validation/test separation."""
+    case_categories = Counter(_pair_case_category(pair) for pair in raw_pairs)
+    split_counts = Counter(_pair_split(pair) for pair in raw_pairs)
+    labels = [
+        _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
+        for pair in raw_pairs
+    ]
+    positives = sum(1 for label in labels if label >= 2)
+    negatives = len(labels) - positives
+    missing_case_categories = sorted(
+        {"true_positive", "true_negative", "hard_negative", "edge_case"}
+        - set(case_categories)
+    )
+    missing_splits = sorted({"train", "validation", "test"} - set(split_counts))
+
+    return {
+        "pair_count": len(raw_pairs),
+        "positive_pairs": positives,
+        "negative_pairs": negatives,
+        "case_categories": dict(sorted(case_categories.items())),
+        "splits": dict(sorted(split_counts.items())),
+        "missing_case_categories": missing_case_categories,
+        "missing_splits": missing_splits,
+        "hard_negative_count": case_categories.get("hard_negative", 0),
+        "ready_for_weight_tuning": not missing_case_categories
+        and not missing_splits
+        and case_categories.get("hard_negative", 0) >= 3,
+    }
+
+
+def _benchmark_split_guard(split: str, purpose: str) -> Dict[str, Any]:
+    """Enforce that locked test data is not used for iterative tuning."""
+    normalized_split = str(split or "").strip().lower()
+    normalized_purpose = str(purpose or "").strip().lower()
+    allowed = not (
+        normalized_split == "test"
+        and normalized_purpose
+        in {"tune", "tuning", "train", "optimize", "optimization"}
+    )
+    return {
+        "allowed": allowed,
+        "split": normalized_split,
+        "purpose": normalized_purpose,
+        "locked_test": normalized_split == "test",
+        "message": (
+            "Locked test split cannot be used for iterative weight tuning."
+            if not allowed
+            else "Split use is allowed."
+        ),
+    }
+
+
+def _pair_case_category(pair: Dict[str, Any]) -> str:
+    """Return the benchmark case category for a labeled pair."""
+    category = str(pair.get("case_category", "")).strip().lower()
+    if category:
+        return category
+
+    label = _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
+    obfuscation = str(pair.get("obfuscation", "")).lower()
+    pair_id = str(pair.get("id", "")).lower()
+    if label >= 2 and (
+        "cross_language" in obfuscation
+        or "obfuscat" in obfuscation
+        or "semantic" in obfuscation
+        or "reorder" in obfuscation
+        or "rewrite" in obfuscation
+    ):
+        return "edge_case"
+    if label >= 2:
+        return "true_positive"
+    if "hard_negative" in pair_id or obfuscation in {
+        "same_domain_different_task",
+        "shared_boilerplate_only",
+        "same_algorithm_family_different_behavior",
+    }:
+        return "hard_negative"
+    return "true_negative"
+
+
+def _pair_split(pair: Dict[str, Any]) -> str:
+    """Return the benchmark split for a labeled pair."""
+    split = str(pair.get("split", "")).strip().lower()
+    return split if split else "unspecified"
 
 
 def _count_unique_code_files(root_dir: PathLib) -> int:
@@ -1287,16 +1556,21 @@ def _build_all_submission_pairs(submissions: Dict[str, str]) -> List[tuple]:
     ]
 
 
-def _external_tool_pair_lookup(tool_data: Dict[str, Any]) -> Dict[str, float]:
+def _external_tool_pair_lookup(
+    tool_id: str, tool_data: Dict[str, Any]
+) -> Dict[str, float]:
     """Map external tool pair output to pair-keyed similarity scores."""
+    from src.backend.engines.scoring.fusion_policy import default_score_normalizer
+
+    normalizer = default_score_normalizer()
     lookup: Dict[str, float] = {}
     for pair in tool_data.get("pairs", []):
         file_a = str(pair.get("file_a", ""))
         file_b = str(pair.get("file_b", ""))
         if not file_a or not file_b:
             continue
-        lookup[_pair_key(file_a, file_b)] = max(
-            0.0, min(1.0, _coerce_float(pair.get("score")))
+        lookup[_pair_key(file_a, file_b)] = normalizer.normalize(
+            tool_id, pair.get("score")
         )
     return lookup
 
@@ -1309,7 +1583,7 @@ def _build_external_comparison_results(
         tool_id for tool_id, data in tool_results.items() if "pairs" in data
     ]
     lookups = {
-        tool_id: _external_tool_pair_lookup(tool_results[tool_id])
+        tool_id: _external_tool_pair_lookup(tool_id, tool_results[tool_id])
         for tool_id in successful_tools
     }
     results: List[ComparisonResult] = []
@@ -1340,7 +1614,7 @@ def _merge_external_features_into_results(
 ) -> None:
     """Attach successful external tool scores to existing comparison features."""
     lookups = {
-        tool_id: _external_tool_pair_lookup(data)
+        tool_id: _external_tool_pair_lookup(tool_id, data)
         for tool_id, data in tool_results.items()
         if "pairs" in data
     }
@@ -1436,6 +1710,10 @@ async def _store_benchmark_uploads(
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
 BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
+BUILTIN_PAIR_DATASET_DIR = (
+    project_root / "backend" / "benchmark" / "datasets" / "fixtures"
+)
+BUILTIN_PAIR_DATASET_IDS = {"clough_stevenson_style"}
 PAIR_BENCHMARK_MAX_PAIRS = 400
 
 
@@ -1470,12 +1748,32 @@ def _write_pair_submission(
     return safe_name
 
 
+def _pair_language_extension(language: Any) -> str:
+    """Return a source-code filename extension for a pair fixture language."""
+    language_key = str(language or "python").strip().lower()
+    return {
+        "c": ".c",
+        "c++": ".cpp",
+        "cpp": ".cpp",
+        "csharp": ".cs",
+        "go": ".go",
+        "java": ".java",
+        "javascript": ".js",
+        "python": ".py",
+        "ruby": ".rb",
+        "rust": ".rs",
+        "typescript": ".ts",
+    }.get(language_key, ".py")
+
+
 def _load_pair_labeled_benchmark_dataset(
     dataset_id: str, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
     """Load datasets that already define explicit labeled comparison pairs."""
     dataset_root = BENCHMARK_DATA_DIR / dataset_id
-    if (dataset_root / "generated_pairs.jsonl").exists():
+    if (dataset_root / "generated_pairs.jsonl").exists() or (
+        dataset_id in BUILTIN_PAIR_DATASET_IDS
+    ):
         return _load_synthetic_pair_dataset(dataset_root, target_dir)
     if dataset_id == "kaggle_student_code":
         return _load_kaggle_pair_dataset(dataset_root, target_dir)
@@ -1490,21 +1788,28 @@ def _load_synthetic_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
     """Load generated synthetic clone/non-clone pairs from JSON."""
-    pairs_path = dataset_root / "generated_pairs.jsonl"
-    if not pairs_path.exists():
+    raw_pairs = _read_generated_pair_items(dataset_root)
+    if not raw_pairs:
         return {}, []
 
-    raw_pairs = _read_generated_pair_items(dataset_root)
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
 
     for idx, item in enumerate(raw_pairs[:PAIR_BENCHMARK_MAX_PAIRS]):
         pair_id = str(item.get("id") or f"synthetic_{idx:05d}")
+        extension_a = _pair_language_extension(item.get("language_a"))
+        extension_b = _pair_language_extension(item.get("language_b"))
         file_a = _write_pair_submission(
-            submissions, target_dir, f"{pair_id}_a.py", str(item.get("code_a", ""))
+            submissions,
+            target_dir,
+            f"{pair_id}_a{extension_a}",
+            str(item.get("code_a", "")),
         )
         file_b = _write_pair_submission(
-            submissions, target_dir, f"{pair_id}_b.py", str(item.get("code_b", ""))
+            submissions,
+            target_dir,
+            f"{pair_id}_b{extension_b}",
+            str(item.get("code_b", "")),
         )
         explicit_pairs.append(
             {
@@ -1513,6 +1818,8 @@ def _load_synthetic_pair_dataset(
                 "label": _label_to_clone_grade(
                     item.get("label", 0), item.get("clone_type")
                 ),
+                "case_category": _pair_case_category(item),
+                "split": _pair_split(item),
             }
         )
 
@@ -1828,6 +2135,9 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
     features = {}
     for name, value in (result.get("features") or {}).items():
         features[name] = round(_coerce_float(value), 3)
+    contributions = {}
+    for name, value in (result.get("contributions") or {}).items():
+        contributions[name] = round(_coerce_float(value), 3)
 
     return {
         "file_a": result.get("file_a", ""),
@@ -1835,6 +2145,8 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
         "score": round(_coerce_float(result.get("score")), 3),
         "risk_level": result.get("risk_level") or result.get("risk") or "",
         "features": features,
+        "contributions": contributions,
+        "fusion_debug": result.get("fusion_debug") or {},
     }
 
 
@@ -2015,6 +2327,21 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
     normalized["tenant_id"] = normalized.get("tenant_id")
     normalized["owner_user_id"] = normalized.get("owner_user_id")
     normalized["owner_user_email"] = normalized.get("owner_user_email")
+    normalized["calibration_report"] = (
+        normalized.get("calibration_report")
+        if isinstance(normalized.get("calibration_report"), dict)
+        else {}
+    )
+    normalized["reproducibility"] = (
+        normalized.get("reproducibility")
+        if isinstance(normalized.get("reproducibility"), dict)
+        else {}
+    )
+    normalized["ai_text_trust"] = (
+        normalized.get("ai_text_trust")
+        if isinstance(normalized.get("ai_text_trust"), dict)
+        else {}
+    )
     normalized["ai_detection"] = _normalize_ai_detection(normalized.get("ai_detection"))
     normalized["web_analysis"] = _normalize_web_analysis(normalized.get("web_analysis"))
 
@@ -2276,6 +2603,128 @@ def _build_pair_ai_details(
         }
 
     return pair_ai_details
+
+
+def _build_fusion_debug(result: Any, threshold: float) -> Dict[str, Any]:
+    """Build a professor-readable breakdown of which engines fired."""
+    features = getattr(result, "features", {}) or {}
+    contributions = getattr(result, "contributions", {}) or {}
+    active = []
+    for engine, score in sorted(
+        features.items(), key=lambda item: -_coerce_float(item[1])
+    ):
+        normalized_score = round(_coerce_float(score), 3)
+        contribution = round(_coerce_float(contributions.get(engine)), 3)
+        active.append(
+            {
+                "engine": str(engine),
+                "score": normalized_score,
+                "contribution": contribution,
+                "fired": normalized_score >= threshold,
+            }
+        )
+
+    return {
+        "threshold": round(threshold, 3),
+        "engines_fired": [item["engine"] for item in active if item["fired"]],
+        "engine_count": len(active),
+        "active_evidence": active,
+        "debug_note": (
+            "Scores are normalized to a common 0-1 scale before fusion; contribution "
+            "shows each engine's influence after weighting/arbitration when available."
+        ),
+    }
+
+
+def _build_calibration_report(threshold: float, mode_id: str) -> Dict[str, Any]:
+    """Return threshold/FPR guidance for professor-facing calibration reporting."""
+    confidence_zones = [
+        {
+            "label": "clean",
+            "min_score": 0.0,
+            "max_score": 0.5,
+            "description": "Low-signal region. Keep for archive unless other evidence is strong.",
+        },
+        {
+            "label": "uncertain",
+            "min_score": 0.5,
+            "max_score": 0.78,
+            "description": "Manual review zone. Evidence should be inspected before escalation.",
+        },
+        {
+            "label": "flag",
+            "min_score": 0.78,
+            "max_score": 1.0,
+            "description": "High-certainty review zone. Suitable for formal evidence review.",
+        },
+    ]
+    points = [
+        {"threshold": 0.5, "estimated_fpr": 0.08, "label": "broad review"},
+        {"threshold": 0.65, "estimated_fpr": 0.04, "label": "balanced"},
+        {"threshold": 0.78, "estimated_fpr": 0.02, "label": "high certainty"},
+        {"threshold": 0.9, "estimated_fpr": 0.01, "label": "panel-ready"},
+    ]
+    nearest = min(points, key=lambda point: abs(point["threshold"] - threshold))
+    return {
+        "threshold": round(threshold, 3),
+        "mode_id": mode_id,
+        "estimated_false_positive_rate": nearest["estimated_fpr"],
+        "confidence_mode": nearest["label"],
+        "confidence_zones": confidence_zones,
+        "curve": points,
+        "methodology": (
+            "FPR values are benchmark estimates for calibration guidance. Institutions "
+            "should replace them with local validation data when enough professor feedback exists."
+        ),
+        "overfit_guard": (
+            "Default weights must be tuned on train/validation data only; locked test "
+            "sets are reserved for final reporting."
+        ),
+    }
+
+
+def _build_reproducibility_report(
+    submissions: Dict[str, str],
+    selected_tool_ids: List[str],
+    mode: Any,
+) -> Dict[str, Any]:
+    """Build deterministic run metadata for reproducible reports."""
+    digest = hashlib.sha256()
+    for name in sorted(submissions):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(submissions[name].encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+
+    return {
+        "submission_set_hash": digest.hexdigest(),
+        "selected_tool_ids": list(selected_tool_ids),
+        "assignment_mode": getattr(mode, "mode_id", ""),
+        "assignment_mode_version": getattr(mode, "version", ""),
+        "deterministic_caching": True,
+        "cache_note": (
+            "Tokenization and embeddings use content-hash caches where available; "
+            "reports store mode/tool versions and submission-set hash for reruns."
+        ),
+    }
+
+
+def _build_ai_text_trust_report(ai_detection: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize AI-text limitations and high-certainty operating mode."""
+    threshold = _coerce_float(ai_detection.get("threshold"), AI_MEDIUM_RISK_THRESHOLD)
+    return {
+        "high_certainty_threshold": AI_HIGH_RISK_THRESHOLD,
+        "review_threshold": threshold,
+        "humanizer_benchmark_required": True,
+        "humanizer_tools": ["Undetectable.ai", "QuillBot"],
+        "model_attribution_policy": (
+            "Model attribution is supplementary and must use a separate recent held-out evaluation."
+        ),
+        "false_positive_policy": (
+            "AI results are never binary accusations. Borderline results should stay in manual review."
+        ),
+        "calibration_cadence": "quarterly against recent model and humanizer outputs",
+    }
 
 
 def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
@@ -3526,6 +3975,7 @@ async def upload_files(
     files: List[UploadFile] = File(...),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
@@ -3553,6 +4003,7 @@ async def upload_files(
         job_dir,
         course_name,
         assignment_name,
+        assignment_mode,
         threshold,
         current_user,
         engine_keys,
@@ -3566,6 +4017,7 @@ async def upload_zip(
     file: UploadFile = File(...),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
@@ -3596,6 +4048,7 @@ async def upload_zip(
         job_dir,
         course_name,
         assignment_name,
+        assignment_mode,
         threshold,
         current_user,
         engine_keys,
@@ -3608,11 +4061,15 @@ async def _run_analysis(
     job_dir,
     course_name,
     assignment_name,
+    assignment_mode,
     threshold,
     current_user: Dict[str, Any],
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
 ):
+    from src.backend.engines.scoring.assignment_modes import get_assignment_mode
+
+    mode = get_assignment_mode(assignment_mode)
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
         requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
@@ -3634,6 +4091,15 @@ async def _run_analysis(
         "id": job_id,
         "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
+        "assignment_mode": mode.mode_id,
+        "assignment_mode_name": mode.name,
+        "assignment_mode_version": mode.version,
+        "assignment_mode_policy": {
+            "pipelines": mode.pipelines,
+            "warnings": mode.warnings,
+            "evidence_surfaces": mode.evidence_surfaces,
+            "calibration": mode.calibration,
+        },
         "threshold": threshold,
         "status": "processing",
         "created_at": datetime.now().isoformat(),
@@ -3654,9 +4120,14 @@ async def _run_analysis(
             for tool_id in selected_tool_ids
         ],
         "external_tool_results": {},
-        "active_engines": [
-            ENGINE_DISPLAY_LABELS.get(key, key.title()) for key in selected_engine_keys
-        ] if "integritydesk" in selected_tool_ids else [],
+        "active_engines": (
+            [
+                ENGINE_DISPLAY_LABELS.get(key, key.title())
+                for key in selected_engine_keys
+            ]
+            if "integritydesk" in selected_tool_ids
+            else []
+        ),
     }
     _persist_job(job_id)
 
@@ -3697,6 +4168,11 @@ async def _run_analysis(
         ai_detection = _build_ai_detection_summary(submissions)
         web_analysis = _build_web_analysis_summary(submissions)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
+        calibration_report = _build_calibration_report(threshold, mode.mode_id)
+        reproducibility_report = _build_reproducibility_report(
+            submissions, selected_tool_ids, mode
+        )
+        ai_text_trust = _build_ai_text_trust_report(ai_detection)
 
         comparison_details = []
         for r in results:
@@ -3750,6 +4226,13 @@ async def _run_analysis(
             "pairs": report_pairs,
             "selected_tools": _jobs[job_id].get("selected_tools", []),
             "external_tool_results": external_tool_results,
+            "assignment_mode": _jobs[job_id].get("assignment_mode"),
+            "assignment_mode_name": _jobs[job_id].get("assignment_mode_name"),
+            "assignment_mode_version": _jobs[job_id].get("assignment_mode_version"),
+            "assignment_mode_policy": _jobs[job_id].get("assignment_mode_policy", {}),
+            "calibration_report": calibration_report,
+            "reproducibility": reproducibility_report,
+            "ai_text_trust": ai_text_trust,
             "ai_detection": ai_detection,
             "web_analysis": web_analysis,
         }
@@ -3769,6 +4252,16 @@ async def _run_analysis(
             comparison_details,
             submissions,
             committee_report_path,
+            _jobs[job_id].get("selected_tools", []),
+            {
+                "id": _jobs[job_id].get("assignment_mode"),
+                "name": _jobs[job_id].get("assignment_mode_name"),
+                "version": _jobs[job_id].get("assignment_mode_version"),
+                "policy": _jobs[job_id].get("assignment_mode_policy", {}),
+            },
+            calibration_report,
+            reproducibility_report,
+            ai_text_trust,
         )
 
         _jobs[job_id].update(
@@ -3781,6 +4274,10 @@ async def _run_analysis(
                         "score": round(r.score, 3),
                         "risk_level": r.risk_level,
                         "features": {k: round(v, 3) for k, v in r.features.items()},
+                        "contributions": {
+                            k: round(v, 3) for k, v in r.contributions.items()
+                        },
+                        "fusion_debug": _build_fusion_debug(r, threshold),
                     }
                     for r in results
                 ],
@@ -3788,6 +4285,9 @@ async def _run_analysis(
                 "selected_tool_ids": selected_tool_ids,
                 "selected_tools": _jobs[job_id].get("selected_tools", []),
                 "external_tool_results": external_tool_results,
+                "calibration_report": calibration_report,
+                "reproducibility": reproducibility_report,
+                "ai_text_trust": ai_text_trust,
                 "ai_detection": ai_detection,
                 "web_analysis": web_analysis,
                 "report_path": str(html_report_path),
@@ -4096,6 +4596,11 @@ async def get_benchmark_presets() -> Dict[str, Any]:
         if BENCHMARK_DATA_DIR.exists()
         else set()
     )
+    datasets.update(
+        dataset_id
+        for dataset_id in BUILTIN_PAIR_DATASET_IDS
+        if _builtin_pair_dataset_path(dataset_id).exists()
+    )
     presets = []
     for preset in BENCHMARK_WORKFLOW_PRESETS:
         runnable_tools = [
@@ -4226,6 +4731,39 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
 
             datasets.append(dataset_record)
 
+    present_dataset_ids = {dataset["id"] for dataset in datasets}
+    for dataset_id in sorted(BUILTIN_PAIR_DATASET_IDS - present_dataset_ids):
+        metadata = _load_builtin_pair_dataset_metadata(dataset_id)
+        if not metadata:
+            continue
+        dataset_root = BENCHMARK_DATA_DIR / dataset_id
+        benchmark_quality = _build_benchmark_quality_certificate(dataset_root)
+        dataset_record = {
+            "id": dataset_id,
+            "name": metadata.get("name", dataset_id.replace("_", " ").title()),
+            "desc": metadata.get("description", f"Dataset: {dataset_id}"),
+            "icon": dataset_icons.get("synthetic", "📦"),
+            "color": dataset_colors.get("synthetic", "slate"),
+            "language": metadata.get("language", _dataset_default_language(dataset_id)),
+            "size": metadata.get(
+                "size",
+                (
+                    f"{benchmark_quality.get('pair_count', 0):,} labeled pairs"
+                    if benchmark_quality
+                    else "Built-in benchmark"
+                ),
+            ),
+            "created_by": metadata.get("created_by", "System"),
+            "created_at": metadata.get("created", metadata.get("created_at", "")),
+            "is_demo": False,
+            "has_ground_truth": _dataset_has_pair_ground_truth(
+                dataset_id, dataset_root
+            ),
+        }
+        if benchmark_quality:
+            dataset_record["benchmark_quality"] = benchmark_quality
+        datasets.append(dataset_record)
+
     return JSONResponse(content={"datasets": datasets})
 
 
@@ -4235,6 +4773,11 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
         return (dataset_root / "original").exists() and (
             dataset_root / "plagiarized"
         ).exists()
+    if (
+        dataset_id in BUILTIN_PAIR_DATASET_IDS
+        and _builtin_pair_dataset_path(dataset_id).exists()
+    ):
+        return True
     if (dataset_root / "generated_pairs.jsonl").exists():
         return (dataset_root / "generated_pairs.jsonl").exists()
     if dataset_id == "kaggle_student_code":
@@ -4277,7 +4820,6 @@ async def run_benchmark(
             dataset
             and dataset != "custom"
             and dataset_root
-            and dataset_root.exists()
             and _dataset_has_pair_ground_truth(dataset, dataset_root)
         )
         if not has_labeled_ground_truth:
@@ -4820,6 +5362,24 @@ def _compute_evaluation_metrics(
         else 0
     )
     score_diagnostics = _build_score_diagnostics(scores_arr, labels_arr)
+    calibration_curve = _build_threshold_calibration_points(
+        scores_arr, labels_arr, [0.5, float(best_threshold), 0.75, 0.9]
+    )
+    metric_assumptions = {
+        "span_level_scoring": False,
+        "character_offsets": False,
+        "line_number_conversion": "not_used_for_pair_level_benchmark",
+        "granularity_handling": "pair_level_single_detection_per_true_pair",
+        "weight_tuning_protocol": (
+            "This endpoint selects a reporting threshold on the evaluation set; "
+            "do not use the same run for final weight-tuning claims."
+        ),
+        "external_score_calibration": (
+            "External tools are evaluated independently; normalize or calibrate "
+            "scores before combining them into fusion weights."
+        ),
+    }
+    calibration_report = _build_calibration_report(float(best_threshold), "benchmark")
 
     return {
         "tool": tool_name,
@@ -4849,6 +5409,9 @@ def _compute_evaluation_metrics(
         "pr_auc": round(pr_auc, 4),
         "confusion_matrix": best_cm,
         "score_diagnostics": score_diagnostics,
+        "calibration_curve": calibration_curve,
+        "calibration_report": calibration_report,
+        "metric_assumptions": metric_assumptions,
         "pan_metrics": {
             "precision": round(precision, 4),
             "recall": round(recall, 4),
@@ -4868,6 +5431,38 @@ def _compute_evaluation_metrics(
         },
         "granularity_basis": "pair_level_single_detection",
     }
+
+
+def _build_threshold_calibration_points(
+    scores_arr: np.ndarray, labels_arr: np.ndarray, thresholds: List[float]
+) -> List[Dict[str, Any]]:
+    """Compute precision, recall, and FPR at fixed decision thresholds."""
+    points = []
+    for threshold in sorted({round(float(value), 6) for value in thresholds}):
+        preds = (scores_arr >= threshold).astype(int)
+        tp = int(np.sum((preds == 1) & (labels_arr == 1)))
+        fp = int(np.sum((preds == 1) & (labels_arr == 0)))
+        tn = int(np.sum((preds == 0) & (labels_arr == 0)))
+        fn = int(np.sum((preds == 0) & (labels_arr == 1)))
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        f1_score = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
+        points.append(
+            {
+                "threshold": round(threshold, 4),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1_score": round(f1_score, 4),
+                "false_positive_rate": round(false_positive_rate, 4),
+                "confusion_matrix": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
+            }
+        )
+    return points
 
 
 def _build_score_diagnostics(
@@ -6843,12 +7438,22 @@ def _generate_committee_report(
     comparisons,
     submissions,
     output_path,
+    selected_tools=None,
+    assignment_mode=None,
+    calibration_report=None,
+    reproducibility_report=None,
+    ai_text_trust=None,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    selected_tools = selected_tools or ["IntegrityDesk"]
+    assignment_mode = assignment_mode or {}
+    calibration_report = calibration_report or {}
+    reproducibility_report = reproducibility_report or {}
+    ai_text_trust = ai_text_trust or {}
+    mode_name = assignment_mode.get("name") or "Introductory Programming"
+    mode_version = assignment_mode.get("version") or "1.0.0"
+    mode_policy = assignment_mode.get("policy") or {}
     suspicious = [c for c in comparisons if c.score >= threshold]
-    critical = [c for c in comparisons if c.score >= 0.9]
-    high = [c for c in comparisons if 0.75 <= c.score < 0.9]
-    medium = [c for c in comparisons if 0.5 <= c.score < 0.75]
     students_involved = set()
     for c in suspicious:
         students_involved.add(c.file_a)
@@ -6919,6 +7524,8 @@ def _generate_committee_report(
     .match-legend { display: flex; gap: 16px; margin-top: 8px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px; font-size: 10px; color: #666; }
     .match-legend-item { display: flex; align-items: center; gap: 4px; }
     .match-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+    .tool-chip { display: inline-flex; margin: 3px 4px 3px 0; padding: 4px 8px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 600; }
+    .policy-list { margin-top: 8px; padding-left: 18px; font-size: 12px; color: #555; line-height: 1.6; }
     .methodology { padding: 24px 32px; border-top: 1px solid #e0e0e0; }
     .methodology p { font-size: 12px; color: #555; line-height: 1.6; }
     .footer { padding: 20px 32px; border-top: 1px solid #e0e0e0; text-align: center; font-size: 11px; color: #888; }
@@ -6967,6 +7574,9 @@ def _generate_committee_report(
 <div class="meta-item"><div class="meta-label">Pairs Compared</div><div class="meta-value">{report['summary']['total_pairs']}</div></div>
 <div class="meta-item"><div class="meta-label">Threshold</div><div class="meta-value">{threshold:.0%}</div></div>
 <div class="meta-item"><div class="meta-label">Flagged Cases</div><div class="meta-value">{len(suspicious)}</div></div>
+<div class="meta-item"><div class="meta-label">Assignment Mode</div><div class="meta-value">{_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}</div></div>
+<div class="meta-item"><div class="meta-label">Tools Used</div><div class="meta-value">{len(selected_tools)} detector(s)</div></div>
+<div class="meta-item"><div class="meta-label">Report Type</div><div class="meta-value">Dean/committee evidence packet</div></div>
 </div>
 
 <div class="similarity-overview">
@@ -7064,6 +7674,14 @@ def _generate_committee_report(
 <div class="section-title">Methodology</div>
 <p>IntegrityDesk employs a multi-engine detection approach using six core forensic engines: <strong>Token</strong>, <strong>AST</strong>, <strong>Winnowing</strong>, <strong>GST</strong>, <strong>Semantic</strong>, and <strong>Web</strong>, with optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers for deeper review.</p>
 <p style="margin-top:8px;">Results are fused using weighted Bayesian arbitration to produce final similarity scores. This ensemble approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
+<p style="margin-top:8px;"><strong>Assignment mode:</strong> {_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}. This mode controls preprocessing expectations, calibration, and which evidence surfaces are emphasized.</p>
+<p style="margin-top:8px;"><strong>Tools used:</strong> {"".join(f'<span class="tool-chip">{_escape_html(str(tool))}</span>' for tool in selected_tools)}</p>
+<p style="margin-top:8px;"><strong>Calibration:</strong> At the selected {threshold:.0%} threshold, estimated false-positive rate is approximately {float(calibration_report.get("estimated_false_positive_rate", 0.0))*100:.1f}% based on benchmark calibration guidance. {_escape_html(str(calibration_report.get("overfit_guard", "")))}</p>
+<p style="margin-top:8px;"><strong>Reproducibility:</strong> Submission set hash {_escape_html(str(reproducibility_report.get("submission_set_hash", ""))[:16])}. {_escape_html(str(reproducibility_report.get("cache_note", "")))}</p>
+<p style="margin-top:8px;"><strong>AI-text caution:</strong> {_escape_html(str(ai_text_trust.get("false_positive_policy", "")))} Humanizer recall is tracked separately for {_escape_html(", ".join(ai_text_trust.get("humanizer_tools", [])))}.</p>
+<ul class="policy-list">
+{"".join(f'<li>{_escape_html(str(item))}</li>' for item in (mode_policy.get("calibration") or [])[:4])}
+</ul>
 </div>
 
 <div class="signature-row">
@@ -7099,6 +7717,8 @@ async def get_settings(request: Request):
 @app.get("/api/upload-settings")
 async def get_upload_settings(request: Request):
     current_user = _require_current_user(request)
+    from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
+
     payload = _build_settings_payload(current_user.get("tenant_id"))
     engine_weights = _get_upload_engine_weights(current_user.get("tenant_id"))
     active_engines = [
@@ -7115,7 +7735,67 @@ async def get_upload_settings(request: Request):
             "active_engine_keys": [
                 key for key, value in engine_weights.items() if _coerce_float(value) > 0
             ],
+            "assignment_modes": assignment_modes_payload(),
         }
+    )
+
+
+@app.get("/api/benchmark-audit/{dataset_id}")
+async def get_benchmark_audit(dataset_id: str) -> Dict[str, Any]:
+    """Return a benchmark audit for labeled datasets with explicit pair metadata."""
+    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    if not dataset_root.exists() and dataset_id not in BUILTIN_PAIR_DATASET_IDS:
+        raise HTTPException(status_code=404, detail="Benchmark dataset not found")
+
+    raw_pairs = _read_generated_pair_items(dataset_root)
+    if not raw_pairs:
+        raise HTTPException(
+            status_code=400,
+            detail="Benchmark audit requires explicit pair-labeled dataset metadata",
+        )
+
+    return {
+        "dataset_id": dataset_id,
+        "audit": _audit_benchmark_pairs(raw_pairs),
+        "quality_certificate": _build_benchmark_quality_certificate(dataset_root),
+        "split_guard": {
+            "tuning": _benchmark_split_guard("validation", "tuning"),
+            "locked_test": _benchmark_split_guard("test", "tuning"),
+        },
+    }
+
+
+@app.get("/api/assignment-modes")
+async def get_assignment_modes_catalog() -> Dict[str, Any]:
+    """Return professor-facing assignment modes and preprocessing policy."""
+    from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
+
+    return assignment_modes_payload()
+
+
+@app.post("/api/assignment-modes/suggest")
+async def suggest_assignment_mode(request: Request) -> Dict[str, Any]:
+    """Suggest an assignment mode from professor-provided metadata."""
+    _require_current_user(request)
+    from src.backend.engines.scoring.assignment_modes import recommend_assignment_mode
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid suggestion payload")
+
+    filenames = (
+        payload.get("filenames") if isinstance(payload.get("filenames"), list) else []
+    )
+    content_samples = (
+        payload.get("content_samples")
+        if isinstance(payload.get("content_samples"), list)
+        else []
+    )
+    return recommend_assignment_mode(
+        assignment_name=str(payload.get("assignment_name") or ""),
+        course_name=str(payload.get("course_name") or ""),
+        filenames=[str(name) for name in filenames[:200]],
+        content_samples=[str(sample)[:2000] for sample in content_samples[:20]],
     )
 
 
@@ -7162,19 +7842,37 @@ async def update_settings(request: Request):
 
     # Persist engine weights and calibration config to yaml file
     from src.backend.engines.scoring.fusion_engine import FusionEngine
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
 
     engine_config = FusionEngine.get_current_config()
+    governance_result = None
 
     if "engine_weights" in data:
-        engine_config["weights"] = _normalize_engine_weights(data["engine_weights"])
+        proposed_weights = _normalize_engine_weights(data["engine_weights"])
+        governance_result = evaluate_weight_change_governance(
+            engine_config.get("weights", {}),
+            proposed_weights,
+            data.get("weight_governance_evidence"),
+        )
+        engine_config["weights"] = proposed_weights
+        if governance_result.requires_validation and not governance_result.allowed:
+            engine_config.setdefault("advanced", {})["weights_need_validation"] = True
     if "baseline_correction" in data:
         engine_config["baseline_correction"] = data["baseline_correction"]
 
     FusionEngine.update_config(engine_config)
 
-    return JSONResponse(
-        content={"status": "ok", "settings": applied, "source": "database"}
-    )
+    response: Dict[str, Any] = {
+        "status": "ok",
+        "settings": applied,
+        "source": "database",
+    }
+    if governance_result is not None:
+        response["weight_governance"] = governance_result.to_dict()
+
+    return JSONResponse(content=response)
 
 
 # === SETTINGS API ENDPOINTS ===
@@ -7196,6 +7894,10 @@ async def get_engine_config():
         "toggles": config.get("toggles", {}),
         "performance": config.get("performance", {}),
         "advanced": config.get("advanced", {}),
+        "score_normalization": config.get("score_normalization", {}),
+        "fusion_presets": config.get("fusion_presets", {}),
+        "weight_governance": config.get("weight_governance", {}),
+        "assignment_modes": config.get("assignment_modes", {}),
     }
 
 
@@ -7206,6 +7908,9 @@ async def update_engine_config(config_update: Dict[str, Any]):
         load_engine_config,
         save_engine_config,
     )
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
 
     try:
         # Load current config
@@ -7213,6 +7918,21 @@ async def update_engine_config(config_update: Dict[str, Any]):
 
         # Merge updates
         updated_config = {**current_config, **config_update}
+        governance_result = None
+        if "weights" in config_update:
+            governance_result = evaluate_weight_change_governance(
+                current_config.get("weights", {}),
+                updated_config.get("weights", {}),
+                config_update.get("weight_governance_evidence"),
+            )
+            if not governance_result.allowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": "Default weight changes require validation evidence",
+                        "weight_governance": governance_result.to_dict(),
+                    },
+                )
 
         # Validate weights sum to 1.0
         if "weights" in updated_config and updated_config["weights"]:
@@ -7237,8 +7957,16 @@ async def update_engine_config(config_update: Dict[str, Any]):
         # Save configuration
         save_engine_config(updated_config)
 
-        return {"success": True, "message": "Engine configuration updated successfully"}
+        response: Dict[str, Any] = {
+            "success": True,
+            "message": "Engine configuration updated successfully",
+        }
+        if governance_result is not None:
+            response["weight_governance"] = governance_result.to_dict()
+        return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -7265,6 +7993,10 @@ async def trigger_calibration():
 async def validate_current_config():
     """Validate current configuration for issues."""
     from src.backend.engines.scoring.fusion_engine import load_engine_config
+    from src.backend.engines.scoring.fusion_policy import (
+        default_score_normalizer,
+        evaluate_weight_change_governance,
+    )
 
     config = load_engine_config()
     issues = []
@@ -7283,6 +8015,16 @@ async def validate_current_config():
                     if not 0.0 <= value <= 1.0:
                         issues.append(f"{section}.{key} out of range: {value}")
 
+    if config.get("advanced", {}).get("weights_need_validation"):
+        governance = evaluate_weight_change_governance(
+            {},
+            config.get("weights", {}),
+            config.get("advanced", {}).get("weight_governance_evidence"),
+        )
+        issues.extend(governance.warnings)
+
+    normalizer = default_score_normalizer()
+
     return {
         "valid": len(issues) == 0,
         "issues": issues,
@@ -7290,6 +8032,8 @@ async def validate_current_config():
             "weights_count": len(config.get("weights", {})),
             "thresholds_count": len(config.get("thresholds", {})),
             "toggles_enabled": sum(config.get("toggles", {}).values()),
+            "normalization_rules_count": len(normalizer.rules),
+            "fusion_presets_count": len(config.get("fusion_presets", {})),
         },
     }
 
