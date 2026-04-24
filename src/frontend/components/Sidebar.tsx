@@ -44,11 +44,6 @@ export default function Sidebar() {
       icon: Upload,
     },
     {
-      href: '/results',
-      label: 'Reports',
-      icon: BarChart3,
-    },
-    {
       href: '/settings',
       label: 'Settings',
       icon: Settings,

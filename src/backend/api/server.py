@@ -1560,32 +1560,43 @@ def _external_tool_pair_lookup(
     tool_id: str, tool_data: Dict[str, Any]
 ) -> Dict[str, float]:
     """Map external tool pair output to pair-keyed similarity scores."""
-    from src.backend.engines.scoring.fusion_policy import default_score_normalizer
-
-    normalizer = default_score_normalizer()
     lookup: Dict[str, float] = {}
     for pair in tool_data.get("pairs", []):
         file_a = str(pair.get("file_a", ""))
         file_b = str(pair.get("file_b", ""))
         if not file_a or not file_b:
             continue
-        lookup[_pair_key(file_a, file_b)] = normalizer.normalize(
-            tool_id, pair.get("score")
-        )
+        try:
+            lookup[_pair_key(file_a, file_b)] = float(pair.get("score"))
+        except (TypeError, ValueError):
+            continue
     return lookup
 
 
 def _build_external_comparison_results(
     tool_results: Dict[str, Dict[str, Any]], pairs: List[tuple]
 ) -> List[ComparisonResult]:
-    """Create report-ready comparison results from selected external tools."""
+    """Create report-ready comparison results from selected external tools.
+
+    For strict behavioral parity, external tools are treated as independent engines.
+    When multiple tools are selected, the first successful tool provides the primary
+    score, while others are included as additional features for comparison.
+    """
     successful_tools = [
         tool_id for tool_id, data in tool_results.items() if "pairs" in data
     ]
+    if not successful_tools:
+        return []
+
     lookups = {
         tool_id: _external_tool_pair_lookup(tool_id, tool_results[tool_id])
         for tool_id in successful_tools
     }
+
+    # Use the first successful tool as the primary score provider
+    # This ensures behavioral parity - one tool = one result
+    primary_tool = successful_tools[0]
+
     results: List[ComparisonResult] = []
 
     for file_a, file_b in pairs:
@@ -1593,7 +1604,10 @@ def _build_external_comparison_results(
         features = {
             tool_id: lookup.get(pair_key, 0.0) for tool_id, lookup in lookups.items()
         }
-        score = sum(features.values()) / len(features) if features else 0.0
+
+        # Use primary tool's score directly (no averaging/aggregation)
+        score = features.get(primary_tool, 0.0)
+
         results.append(
             ComparisonResult(
                 file_a=file_a,
@@ -1601,7 +1615,9 @@ def _build_external_comparison_results(
                 score=score,
                 risk_level=_risk_level(score),
                 features=features,
-                contributions=features,
+                contributions={
+                    primary_tool: score
+                },  # Only primary tool contributes to score
             )
         )
 
@@ -4271,12 +4287,10 @@ async def _run_analysis(
                     {
                         "file_a": r.file_a,
                         "file_b": r.file_b,
-                        "score": round(r.score, 3),
+                        "score": r.score,
                         "risk_level": r.risk_level,
-                        "features": {k: round(v, 3) for k, v in r.features.items()},
-                        "contributions": {
-                            k: round(v, 3) for k, v in r.contributions.items()
-                        },
+                        "features": dict(r.features),
+                        "contributions": dict(r.contributions),
                         "fusion_debug": _build_fusion_debug(r, threshold),
                     }
                     for r in results
@@ -5634,17 +5648,11 @@ def _run_pairwise_tool(submissions, pairs, scorer, tolerate_pair_errors: bool = 
     for fa, fb in pairs:
         try:
             score = _coerce_similarity_score(scorer(submissions[fa], submissions[fb]))
-
-            # GLOBAL JPlag FIX: OVERRIDE ANY PERFECT 1.0 SCORE
-            # No real plagiarism detector ever returns exactly 100%
-            if score >= 0.999:
-                score = 0.87
-
         except Exception:
             if not tolerate_pair_errors:
                 raise
             score = 0.0
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -5875,7 +5883,7 @@ def _run_moss_cli(submissions, pairs):
     results = []
     for fa, fb in pairs:
         score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -5978,7 +5986,7 @@ def _run_jplag_cli(submissions, pairs):
     results = []
     for fa, fb in pairs:
         score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -6050,7 +6058,7 @@ def _run_dolos_cli(submissions, pairs):
     results = []
     for fa, fb in pairs:
         score = similarity_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -6166,7 +6174,7 @@ def _run_nicad_cli(submissions, pairs):
     results = []
     for fa, fb in pairs:
         score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -6265,7 +6273,7 @@ def _run_pmd_cli(submissions, pairs):
     results = []
     for fa, fb in pairs:
         score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 
@@ -6346,7 +6354,7 @@ def _run_ac_cli(submissions, pairs):
             score = 0.0
         else:
             score = 1.0 - distance
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
 
     return {"pairs": results}
 
@@ -6433,7 +6441,7 @@ def _run_sherlock_cli(
     results = []
     for fa, fb in pairs:
         score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": round(score, 3)})
+        results.append({"file_a": fa, "file_b": fb, "score": score})
     return {"pairs": results}
 
 

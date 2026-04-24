@@ -2627,7 +2627,8 @@ export default function BenchmarkPage() {
 
   return (
     <DashboardLayout>
-      <div className="px-4 py-4 lg:px-6 lg:py-6">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="space-y-8 lg:space-y-10">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="flex items-start gap-3">
@@ -2774,6 +2775,7 @@ export default function BenchmarkPage() {
         {step === 3 && results && (
           <ReportStep results={results} onRestart={restart} />
         )}
+        </div>
       </div>
     </DashboardLayout>
   );

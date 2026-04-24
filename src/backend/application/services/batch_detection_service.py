@@ -171,14 +171,14 @@ class BatchDetectionService:
                 {
                     "file_a": r.file_a,
                     "file_b": r.file_b,
-                    "score": round(r.score, 3),
+                    "score": r.score,
                     "risk": r.risk_level,
-                    "features": {k: round(v, 3) for k, v in r.features.items()},
+                    "features": dict(r.features),
                 }
                 for r in suspicious
             ],
             "all_results": [
-                {"file_a": r.file_a, "file_b": r.file_b, "score": round(r.score, 3)}
+                {"file_a": r.file_a, "file_b": r.file_b, "score": r.score}
                 for r in results
             ],
         }

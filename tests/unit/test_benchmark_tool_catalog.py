@@ -106,7 +106,7 @@ def test_parse_selected_tool_ids_defaults_and_filters_invalid_values():
     assert server._parse_selected_tool_ids('{"tool": "jplag"}') == ["integritydesk"]
 
 
-def test_build_external_comparison_results_averages_successful_tools():
+def test_build_external_comparison_results_uses_first_successful_tool_raw_score():
     tool_results = {
         "jplag": {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.8}]},
         "moss": {"error": "Needs MOSS setup"},
@@ -120,12 +120,13 @@ def test_build_external_comparison_results_averages_successful_tools():
     assert len(results) == 1
     assert results[0].file_a == "a.py"
     assert results[0].file_b == "b.py"
-    assert round(results[0].score, 3) == 0.6
-    assert results[0].risk_level == "MEDIUM"
+    assert results[0].score == 0.8
+    assert results[0].risk_level == "HIGH"
     assert results[0].features == {"jplag": 0.8, "dolos": 0.4}
+    assert results[0].contributions == {"jplag": 0.8}
 
 
-def test_external_comparison_normalizes_tool_percentage_scores():
+def test_external_comparison_preserves_tool_score_values_without_normalization():
     tool_results = {
         "jplag": {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 80}]},
         "dolos": {"pairs": [{"file_a": "b.py", "file_b": "a.py", "score": 40}]},
@@ -135,8 +136,9 @@ def test_external_comparison_normalizes_tool_percentage_scores():
         tool_results, [("a.py", "b.py")]
     )
 
-    assert round(results[0].score, 3) == 0.6
-    assert results[0].features == {"jplag": 0.8, "dolos": 0.4}
+    assert results[0].score == 80
+    assert results[0].features == {"jplag": 80, "dolos": 40}
+    assert results[0].contributions == {"jplag": 80}
 
 
 def test_merge_external_features_into_integritydesk_results():
@@ -158,6 +160,16 @@ def test_merge_external_features_into_integritydesk_results():
 
     assert result.score == 0.7
     assert result.features == {"token": 0.7, "jplag": 0.9}
+
+
+def test_run_pairwise_tool_preserves_exact_scores():
+    result = server._run_pairwise_tool(
+        {"a.py": "a", "b.py": "b"},
+        [("a.py", "b.py")],
+        lambda _code_a, _code_b: 0.9999,
+    )
+
+    assert result == {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.9999}]}
 
 
 def test_run_sherlock_cli_parses_real_binary_output(tmp_path, monkeypatch):

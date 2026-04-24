@@ -410,7 +410,6 @@ export default function ResultsPage() {
   const calibrationReport = job?.calibration_report || {};
   const aiTextTrust = job?.ai_text_trust || {};
   const reproducibility = job?.reproducibility || {};
-  const highestMatchZone = getConfidenceZone(highestMatch?.score || 0, calibrationReport);
   const externalToolResults = job?.external_tool_results || {};
   const externalToolSummaries = Object.entries(externalToolResults).map(([toolId, data]) => ({
     toolId,
@@ -434,6 +433,7 @@ export default function ResultsPage() {
   const cleanSubmissions = submissionStats.filter((entry) => entry.flaggedCount === 0).length;
   const flaggedSubmissions = submissionStats.filter((entry) => entry.maxScore >= threshold).length;
   const highestMatch = results[0] || null;
+  const highestMatchZone = getConfidenceZone(highestMatch?.score || 0, calibrationReport);
   const matrixSubmissions = submissionStats.slice(0, Math.min(submissionStats.length, 8));
   const totalLinesAnalyzed = submissionStats.reduce((sum, entry) => sum + entry.lines, 0);
   const possibleComparisons = calculatePossibleComparisons(submissionStats.length);
@@ -588,28 +588,21 @@ export default function ResultsPage() {
   }
 
   const tabs = [
-    { key: 'overview', label: 'Overview', icon: Shield, count: flaggedResults.length },
-    { key: 'files', label: 'Files', icon: FileCode, count: submissionStats.length },
-    { key: 'ai_detection', label: 'AI Detection', icon: Brain, count: aiFlaggedCount },
-    { key: 'insights', label: 'Insights', icon: BarChart3, count: flaggedResults.length },
-    { key: 'peer_similarity', label: 'Peer Similarity', icon: Users, count: summary.total_pairs || results.length },
-    { key: 'web_analysis', label: 'Web Analysis', icon: Globe2, count: webMatchedSubmissions },
-    { key: 'matches', label: 'Matches', icon: Search, count: results.length },
-    { key: 'result_driller', label: 'Result Driller', icon: Code2, count: visibleDrillerMatches.length },
+    { key: 'overview', label: 'Overview', icon: Shield, count: flaggedResults.length, priority: 'overview' },
+    { key: 'matches', label: 'Matches', icon: Search, count: results.length, priority: 'critical' },
+    { key: 'peer_similarity', label: 'Peer Similarity', icon: Users, count: summary.total_pairs || results.length, priority: 'high' },
+    { key: 'web_analysis', label: 'Web Analysis', icon: Globe2, count: webMatchedSubmissions, priority: 'medium' },
+    { key: 'ai_detection', label: 'AI Detection', icon: Brain, count: aiFlaggedCount, priority: 'medium' },
+    { key: 'files', label: 'Files', icon: FileCode, count: submissionStats.length, priority: 'info' },
+    { key: 'insights', label: 'Insights', icon: BarChart3, count: flaggedResults.length, priority: 'info' },
+    { key: 'result_driller', label: 'Deep Dive', icon: Code2, count: visibleDrillerMatches.length, priority: 'specialist' },
   ];
 
   return (
     <DashboardLayout>
       <div className="px-4 py-4 lg:px-6 lg:py-6">
         <div className="space-y-6">
-          <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-            <Link href="/" className="theme-link inline-flex items-center gap-1">
-              <ArrowLeft size={14} />
-              Home
-            </Link>
-            <span>/</span>
-            <span className="text-[var(--text-primary)] font-medium">{assignmentTitle}</span>
-          </div>
+
 
           <section className="theme-card-strong rounded-[30px] overflow-hidden">
             <div className="theme-section-line px-6 py-5 lg:px-7">
@@ -725,6 +718,7 @@ export default function ResultsPage() {
                     label={tab.label}
                     count={tab.count}
                     icon={tab.icon}
+                    priority={tab.priority}
                     onClick={() => setActiveTab(tab.key)}
                   />
                 ))}
@@ -921,11 +915,10 @@ export default function ResultsPage() {
                             key={option.key}
                             type="button"
                             onClick={() => setReviewStatus(option.key)}
-                            className={`rounded-[20px] border px-4 py-4 text-left transition ${
-                              reviewStatus === option.key
-                                ? `${getReviewTone(option.key).panel} border-current`
-                                : 'border-[color:var(--border)] bg-[var(--surface)] hover:-translate-y-0.5'
-                            }`}
+                            className={`rounded-[20px] border px-4 py-4 text-left transition ${reviewStatus === option.key
+                              ? `${getReviewTone(option.key).panel} border-current`
+                              : 'border-[color:var(--border)] bg-[var(--surface)] hover:-translate-y-0.5'
+                              }`}
                           >
                             <div className="text-sm font-semibold text-[var(--text-primary)]">{option.label}</div>
                             <div className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{option.description}</div>
@@ -1262,11 +1255,10 @@ export default function ResultsPage() {
                               key={entry.key}
                               type="button"
                               onClick={() => setInsightSubmissionFilter(entry.key)}
-                              className={`rounded-full px-3 py-2 text-sm font-semibold transition ${
-                                insightSubmissionFilter === entry.key
-                                  ? 'bg-[var(--accent-blue)] text-white'
-                                  : 'theme-card text-[var(--text-secondary)]'
-                              }`}
+                              className={`rounded-full px-3 py-2 text-sm font-semibold transition ${insightSubmissionFilter === entry.key
+                                ? 'bg-[var(--accent-blue)] text-white'
+                                : 'theme-card text-[var(--text-secondary)]'
+                                }`}
                             >
                               {entry.label}
                             </button>
@@ -1489,11 +1481,10 @@ export default function ResultsPage() {
                           key={entry.key}
                           type="button"
                           onClick={() => setMatchFilter(entry.key)}
-                          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${
-                            matchFilter === entry.key
-                              ? 'bg-[var(--accent-blue)] text-white'
-                              : 'theme-card-muted text-[var(--text-secondary)]'
-                          }`}
+                          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${matchFilter === entry.key
+                            ? 'bg-[var(--accent-blue)] text-white'
+                            : 'theme-card-muted text-[var(--text-secondary)]'
+                            }`}
                         >
                           {entry.label}
                         </button>
@@ -1584,22 +1575,20 @@ export default function ResultsPage() {
                           <button
                             type="button"
                             onClick={() => setDrillerMode('flagged')}
-                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
-                              drillerMode === 'flagged'
-                                ? 'bg-[var(--accent-blue)] text-white'
-                                : 'theme-card text-[var(--text-secondary)]'
-                            }`}
+                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${drillerMode === 'flagged'
+                              ? 'bg-[var(--accent-blue)] text-white'
+                              : 'theme-card text-[var(--text-secondary)]'
+                              }`}
                           >
                             Flagged
                           </button>
                           <button
                             type="button"
                             onClick={() => setDrillerMode('all')}
-                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
-                              drillerMode === 'all'
-                                ? 'bg-[var(--accent-blue)] text-white'
-                                : 'theme-card text-[var(--text-secondary)]'
-                            }`}
+                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${drillerMode === 'all'
+                              ? 'bg-[var(--accent-blue)] text-white'
+                              : 'theme-card text-[var(--text-secondary)]'
+                              }`}
                           >
                             All
                           </button>
@@ -1620,11 +1609,10 @@ export default function ResultsPage() {
                                 key={key}
                                 type="button"
                                 onClick={() => setSelectedMatchKey(key)}
-                                className={`block w-full rounded-[20px] border px-4 py-4 text-left transition ${
-                                  selectedMatchKey === key
-                                    ? 'border-[color:var(--accent-blue)] bg-blue-600/[0.08]'
-                                    : 'border-[color:var(--border)] bg-[var(--surface)] hover:-translate-y-0.5'
-                                }`}
+                                className={`block w-full rounded-[20px] border px-4 py-4 text-left transition ${selectedMatchKey === key
+                                  ? 'border-[color:var(--accent-blue)] bg-blue-600/[0.08]'
+                                  : 'border-[color:var(--border)] bg-[var(--surface)] hover:-translate-y-0.5'
+                                  }`}
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
@@ -1993,20 +1981,33 @@ export default function ResultsPage() {
   );
 }
 
-function ResultTabButton({ active, label, count, icon: Icon, onClick }) {
+function ResultTabButton({ active, label, count, icon: Icon, onClick, priority }) {
+  const getPriorityColor = (priority, active) => {
+    if (active) return 'bg-white/15 text-white';
+
+    switch (priority) {
+      case 'critical': return 'bg-red-500/10 text-red-600 border-red-500/20';
+      case 'high': return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
+      case 'medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20';
+      case 'specialist': return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
+      default: return 'bg-[var(--surface)] text-[var(--text-muted)] border-transparent';
+    }
+  };
+
+  const badgeClasses = `rounded-full px-2 py-0.5 text-[11px] font-semibold border ${getPriorityColor(priority, active)}`;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
-        active
-          ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
-          : 'theme-card-muted text-[var(--text-secondary)]'
-      }`}
+      className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${active
+        ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
+        : 'theme-card-muted text-[var(--text-secondary)]'
+        }`}
     >
       <Icon size={15} />
       {label}
-      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? 'bg-white/15 text-white' : 'bg-[var(--surface)] text-[var(--text-muted)]'}`}>
+      <span className={badgeClasses}>
         {count}
       </span>
     </button>

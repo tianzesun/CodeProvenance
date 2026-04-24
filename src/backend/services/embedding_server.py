@@ -57,6 +57,7 @@ class EmbeddingResponse(BaseModel):
 
 # Global model variable
 embedding_model = None
+_model_load_lock = asyncio.Lock()
 
 # Batching queue system
 BATCH_QUEUE = deque()
@@ -66,8 +67,8 @@ BATCH_LOCK = asyncio.Lock()
 BATCH_SIZE = 32
 BATCH_TIMEOUT = 0.05  # 50ms window for batching
 
-def load_model():
-    """Load and warmup the sentence transformer model safely."""
+def _load_model_sync():
+    """Synchronous model load (runs in thread pool)."""
     global embedding_model
 
     if embedding_model is not None:
@@ -79,7 +80,7 @@ def load_model():
     from sentence_transformers import SentenceTransformer
     embedding_model = SentenceTransformer(DEFAULT_MODEL, device="cpu")
 
-    # 🔥 Warmup run to eliminate first request latency
+    # Warmup run to eliminate first request latency
     embedding_model.encode("warmup")
 
     load_time = time.time() - start
@@ -87,12 +88,25 @@ def load_model():
 
     return embedding_model
 
+async def ensure_model_loaded():
+    """Thread-safe lazy model loader."""
+    global embedding_model
+    if embedding_model is not None:
+        return embedding_model
+    async with _model_load_lock:
+        if embedding_model is not None:
+            return embedding_model
+        return await asyncio.to_thread(_load_model_sync)
+
 async def batch_worker():
     """Background batch processing worker."""
     global embedding_model
 
     while True:
         await asyncio.sleep(BATCH_TIMEOUT)
+
+        if embedding_model is None:
+            continue
 
         async with BATCH_LOCK:
             if not BATCH_QUEUE:
@@ -120,14 +134,7 @@ async def batch_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan manager with controlled model preload."""
-    # Preload model immediately before accepting any requests
-    try:
-        load_model()
-    except Exception as e:
-        logger.critical(f"Failed to load embedding model: {e}")
-        raise SystemExit(1)
-
+    """FastAPI lifespan manager - server starts immediately, model loads on demand."""
     # Start background batch worker
     asyncio.create_task(batch_worker())
 

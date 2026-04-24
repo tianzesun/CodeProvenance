@@ -98,15 +98,15 @@ else
         --port "$EMBEDDING_PORT" \
         --log-level info > "$EMBEDDING_LOG" 2>&1 &
 
-    echo "Waiting for embedding model to be ready..."
+    echo "Waiting for embedding server to start..."
 
     for i in {1..30}; do
-        if curl -s "http://$BACKEND_HOST:$EMBEDDING_PORT/health" | grep -q "healthy" && [ "$(lsof -i :$EMBEDDING_PORT >/dev/null 2>&1 && echo 1 || echo 0)" = "1" ]; then
-            echo "✔ Embedding API ready"
+        if curl -s "http://$BACKEND_HOST:$EMBEDDING_PORT/health" >/dev/null 2>&1; then
+            echo "✔ Embedding API ready (model loads on first request)"
             break
         fi
         if [ $i -eq 30 ]; then
-            echo "❌ Embedding API timed out during model load"
+            echo "❌ Embedding API failed to start"
             echo "---- Last logs ----"
             tail -n 30 "$EMBEDDING_LOG"
             exit 1

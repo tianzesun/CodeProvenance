@@ -299,8 +299,8 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen" style={{ background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)' }}>
-        <div className="px-4 py-4 lg:px-6 lg:py-6">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="space-y-8 lg:space-y-10">
 
           {/* Header */}
           <section className="theme-card-strong rounded-[30px] overflow-hidden mb-8">

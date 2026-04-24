@@ -39,6 +39,15 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     }
   }, [theme, hasHydrated]);
 
+  useEffect(() => {
+    // Listen for custom toggle event from floating button
+    const handleToggle = () => {
+      setTheme(current => current === 'dark' ? 'light' : 'dark');
+    };
+    window.addEventListener('toggleTheme', handleToggle);
+    return () => window.removeEventListener('toggleTheme', handleToggle);
+  }, []);
+
   const value = useMemo(
     () => ({
       theme,
