@@ -47,7 +47,7 @@ interface Settings {
   max_files_per_job: number;
 }
 
-type SettingsTab = "general" | "engines" | "integrations" | "performance" | "advanced";
+type SettingsTab = "general" | "detection_engines" | "ai_models" | "matching_rules" | "sensitivity_scoring" | "review_evidence" | "external_sources" | "performance" | "integrations" | "audit_trail" | "expert_settings";
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
@@ -98,10 +98,16 @@ export default function SettingsPage() {
 
   const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: "general", label: "General" },
-    { id: "engines", label: "Detection Engines" },
-    { id: "integrations", label: "Integrations" },
+    { id: "detection_engines", label: "Detection engines" },
+    { id: "ai_models", label: "AI models" },
+    { id: "matching_rules", label: "Matching rules" },
+    { id: "sensitivity_scoring", label: "Sensitivity and scoring" },
+    { id: "review_evidence", label: "Review and evidence" },
+    { id: "external_sources", label: "External sources" },
     { id: "performance", label: "Performance" },
-    { id: "advanced", label: "Advanced" },
+    { id: "integrations", label: "Integrations" },
+    { id: "audit_trail", label: "Audit trail" },
+    { id: "expert_settings", label: "Expert settings" },
   ];
 
   const coreEngines = ENGINE_CATALOG.filter((engine) => engine.tier === "core");
@@ -141,11 +147,10 @@ export default function SettingsPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400"
-                  : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
-              }`}
+              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${activeTab === tab.id
+                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400"
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+                }`}
             >
               {tab.label}
             </button>
@@ -187,7 +192,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {activeTab === "engines" && (
+          {activeTab === "detection_engines" && (
             <div className="space-y-6">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
@@ -206,11 +211,10 @@ export default function SettingsPage() {
                       Current combined weight across all engines
                     </div>
                   </div>
-                  <div className={`text-lg font-bold ${
-                    Math.abs(engineWeightTotal - 1) < 0.01
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-amber-600 dark:text-amber-400"
-                  }`}>
+                  <div className={`text-lg font-bold ${Math.abs(engineWeightTotal - 1) < 0.01
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400"
+                    }`}>
                     {(engineWeightTotal * 100).toFixed(0)}%
                   </div>
                 </div>
@@ -444,7 +448,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {activeTab === "advanced" && (
+          {activeTab === "expert_settings" && (
             <div className="space-y-6">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">

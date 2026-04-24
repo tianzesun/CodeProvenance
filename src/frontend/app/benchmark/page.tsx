@@ -210,7 +210,7 @@ function formatBenchmarkQuality(quality) {
     ? 'Gold-standard controlled benchmark'
     : quality.certification_level === 'controlled_internal_ready'
       ? 'Controlled internal benchmark'
-    : 'Labeled benchmark';
+      : 'Labeled benchmark';
   return `${level} • ${Number(quality.score_percent || 0).toFixed(0)}% quality gates`;
 }
 
@@ -269,8 +269,8 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
       className={`relative rounded-2xl border-2 p-4 text-left transition-all duration-200 ${disabled
         ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
         : isActive
-        ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
-        : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
+          ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
+          : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
         }`}
     >
       {isActive && (
@@ -666,15 +666,15 @@ function buildPanMetricDiagnostics(row) {
       why: hasLabelConflict
         ? 'The score distribution suggests a benchmark-label conflict: some labeled negatives score as high as or higher than labeled positives, often caused by shared templates or starter-code pairs.'
         : row.precision < 0.75
-        ? 'Many clean pairs are being marked as plagiarism, which will create noisy admin feedback and reduce trust in production findings.'
-        : row.precision < 0.9
-          ? 'False positives are still high enough to make reviewers spend time on avoidable cases.'
-          : 'False positives are under control on this dataset.',
+          ? 'Many clean pairs are being marked as plagiarism, which will create noisy admin feedback and reduce trust in production findings.'
+          : row.precision < 0.9
+            ? 'False positives are still high enough to make reviewers spend time on avoidable cases.'
+            : 'False positives are under control on this dataset.',
       action: hasLabelConflict
         ? 'Inspect the top high-scoring negatives and add true unrelated negative files or explicit pair metadata before using this dataset for threshold tuning.'
         : row.precision < 0.9
-        ? 'Raise the decision threshold, down-weight broad semantic-only matches, and require agreement between token/AST/winnowing before high-confidence flags.'
-        : 'Keep the current precision guardrails and watch whether recall improvements introduce new false positives.',
+          ? 'Raise the decision threshold, down-weight broad semantic-only matches, and require agreement between token/AST/winnowing before high-confidence flags.'
+          : 'Keep the current precision guardrails and watch whether recall improvements introduce new false positives.',
     },
     {
       key: 'recall',
@@ -760,16 +760,16 @@ function buildPanMetricDiagnostics(row) {
       target: 'Target >= 90%',
       why: hasLabelConflict
         ? 'True pairs are being pushed down because labeled negatives have equal or higher scores, so retrieval appears broken even when the input labels may be the weak point.'
-      : row.top10Retrieval < 0.75
-        ? 'The top-ranked results are not mostly true positives, so reviewers see noisy candidates first.'
-        : row.top10Retrieval < 0.9
-          ? 'Some true pairs appear too low in the candidate ranking.'
-          : 'The candidate stage is surfacing true positives early.',
+        : row.top10Retrieval < 0.75
+          ? 'The top-ranked results are not mostly true positives, so reviewers see noisy candidates first.'
+          : row.top10Retrieval < 0.9
+            ? 'Some true pairs appear too low in the candidate ranking.'
+            : 'The candidate stage is surfacing true positives early.',
       action: hasLabelConflict
         ? 'Separate benchmark-data cleanup from engine tuning: fix pair labels/templates first, then rerun retrieval metrics.'
-      : row.top10Retrieval < 0.9
-        ? 'Tune retrieval ranking with precision@10 and PR-AUC, then rerank top candidates with token/AST/winnowing evidence.'
-        : 'Use this retrieval setting as the baseline for speed optimizations.',
+        : row.top10Retrieval < 0.9
+          ? 'Tune retrieval ranking with precision@10 and PR-AUC, then rerank top candidates with token/AST/winnowing evidence.'
+          : 'Use this retrieval setting as the baseline for speed optimizations.',
     },
     {
       key: 'runtime',
@@ -946,26 +946,14 @@ function BenchmarkWorkflowPanel({ presets, history, selectedPreset, onApplyPrese
 }
 
 function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error }) {
-  const [activeEngines, setActiveEngines] = useState([]);
-  const engineFilters = Array.from(new Set(tools.flatMap((tool) => tool.engines ?? []))).sort();
-
-  const visibleTools = activeEngines.length
-    ? tools.filter((tool) => activeEngines.some((engine) => tool.engines.includes(engine)))
-    : tools;
   const runnableTools = tools.filter((tool) => tool.available !== false && tool.runnable !== false);
 
   const toggleTool = (tool) => {
     if (tool.available === false || tool.runnable === false) return;
     setSelectedTools(prev =>
-      prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]
+      prev.includes(tool.id) ? prev.filter(t => t.id !== tool.id) : [...prev, tool.id]
     );
   };
-
-  const toggleEngine = (engine) => setActiveEngines((prev) =>
-    prev.includes(engine) ? prev.filter((item) => item !== engine) : [...prev, engine]
-  );
-
-
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -979,10 +967,10 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
         <div className="flex items-center gap-3">
           <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'
             }`}>{selectedTools.length} / {runnableTools.length} selected</span>
-           <div className="flex gap-1">
-             <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
-             <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-           </div>
+          <div className="flex gap-1">
+            <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
+            <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
+          </div>
         </div>
       </div>
       <div className="p-6">
@@ -997,85 +985,46 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
           </div>
         )}
 
-        <div className="mb-5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 p-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Filter By Engine</div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {engineFilters.map((engine) => {
-                  const active = activeEngines.includes(engine);
-                  return (
-                    <button
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {tools.map(tool => {
+            const isSelected = selectedTools.includes(tool.id);
+            const canRun = tool.available !== false && tool.runnable !== false;
+            return (
+              <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
+                className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun
+                  ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                  : isSelected
+                    ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight}`
+                    : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm'
+                  }`}>
+                {isSelected && (
+                  <div className="absolute top-2 right-2">
+                    <CheckCircle2 size={16} className={tool.textColor} />
+                  </div>
+                )}
+                <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm`}>
+                  <Zap size={16} className="text-white" />
+                </div>
+                <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
+                <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {tool.status || (canRun ? 'Ready to run' : 'Setup needed')}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {tool.engines.slice(0, 3).map((engine) => (
+                    <span
                       key={engine}
-                      onClick={() => toggleEngine(engine)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${active
-                        ? 'border-violet-500 bg-violet-600 text-white shadow-lg shadow-violet-500/20'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'
                         }`}
                     >
                       {engine}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {activeEngines.length > 0 && (
-                <button onClick={() => setActiveEngines([])} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300">
-                  Show All Engines
-                </button>
-              )}
-            </div>
-          </div>
+                    </span>
+                  ))}
+                </div>
+                <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
+              </button>
+            );
+          })}
         </div>
-
-        {visibleTools.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 px-6 py-10 text-center">
-            <div className="text-sm font-semibold text-slate-700">No tools match the selected engines.</div>
-            <div className="mt-2 text-sm text-slate-500">Try clearing one or more engine filters to widen the comparison set.</div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-            {visibleTools.map(tool => {
-              const isSelected = selectedTools.includes(tool.id);
-              const canRun = tool.available !== false && tool.runnable !== false;
-              return (
-                <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun
-                    ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
-                    : isSelected
-                    ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight}`
-                    : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm'
-                    }`}>
-                  {isSelected && (
-                    <div className="absolute top-2 right-2">
-                      <CheckCircle2 size={16} className={tool.textColor} />
-                    </div>
-                  )}
-                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm`}>
-                    <Zap size={16} className="text-white" />
-                  </div>
-                  <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                  <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {tool.status || (canRun ? 'Ready to run' : 'Setup needed')}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {tool.engines.slice(0, 3).map((engine) => (
-                      <span
-                        key={engine}
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'
-                          }`}
-                      >
-                        {engine}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
       <div className="px-6 pb-6 flex justify-end">
         <button onClick={onNext} disabled={selectedTools.length === 0}
@@ -1191,14 +1140,14 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           ].map(({ id, label, icon: Icon }) => {
             const disabled = panRequiresGroundTruth && id === 'upload';
             return (
-            <button key={id} disabled={disabled} onClick={() => { if (disabled) return; setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${disabled
-                ? 'cursor-not-allowed border-transparent text-slate-300'
-                : uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
-                }`}>
-              <Icon size={15} />
-              {label}
-            </button>
+              <button key={id} disabled={disabled} onClick={() => { if (disabled) return; setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
+                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${disabled
+                  ? 'cursor-not-allowed border-transparent text-slate-300'
+                  : uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}>
+                <Icon size={15} />
+                {label}
+              </button>
             );
           })}
         </div>
@@ -1211,14 +1160,14 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           )}
           {uploadMode === 'builtin' && (
             <div className="space-y-6">
-               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
-                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
-                   <div>
-                     <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dataset Library</p>
-                   </div>
-                 </div>
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dataset Library</p>
+                  </div>
+                </div>
 
-                 <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1">
                     {[
                       { id: 'all', label: 'All', count: panRequiresGroundTruth ? labeledDatasets.length : allDatasets.length },
@@ -1269,39 +1218,39 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                   )}
                 </div>
 
-                 {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
-                   <div className={`mt-5 grid gap-4 ${libraryFilter === 'demo' && visibleLibraryDatasets.length === 0 && canManageDemoDatasets ? 'grid-cols-1 md:grid-cols-1 xl:grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
-                     {visibleLibraryDatasets.map((dataset) => {
-                       const isActive = selectedDataset === dataset.id;
-                       return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
-                     })}
-                     {canManageDemoDatasets && libraryFilter !== 'preset' && (
-                       <button
-                         onClick={() => setShowCreateModal(true)}
-                         className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]"
-                       >
-                         <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
-                           <Plus size={24} className="text-blue-600" />
-                         </div>
-                         <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
-                         <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
-                       </button>
-                     )}
-                   </div>
-                 ) : (
-                   <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
-                     <div className="text-sm font-semibold text-slate-900">
+                {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
+                  <div className={`mt-5 grid gap-4 ${libraryFilter === 'demo' && visibleLibraryDatasets.length === 0 && canManageDemoDatasets ? 'grid-cols-1 md:grid-cols-1 xl:grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
+                    {visibleLibraryDatasets.map((dataset) => {
+                      const isActive = selectedDataset === dataset.id;
+                      return <DatasetCard key={dataset.id} dataset={dataset} isActive={isActive} onSelect={setSelectedDataset} />;
+                    })}
+                    {canManageDemoDatasets && libraryFilter !== 'preset' && (
+                      <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+                          <Plus size={24} className="text-blue-600" />
+                        </div>
+                        <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
+                        <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                    <div className="text-sm font-semibold text-slate-900">
                       {libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}
-                     </div>
-                     <div className="mt-2 text-sm leading-6 text-slate-500">
-                       {panRequiresGroundTruth
-                         ? 'No labeled datasets match this filter. Choose All or Preset to use Clough-Stevenson-style, synthetic, Kaggle student code, CodeXGLUE clone, or another labeled benchmark.'
-                         : libraryFilter === 'demo'
-                         ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
-                         : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
-                     </div>
-                   </div>
-                 )}
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-slate-500">
+                      {panRequiresGroundTruth
+                        ? 'No labeled datasets match this filter. Choose All or Preset to use Clough-Stevenson-style, synthetic, Kaggle student code, CodeXGLUE clone, or another labeled benchmark.'
+                        : libraryFilter === 'demo'
+                          ? 'Preset datasets are ready to use now. When you want course-specific examples, create a demo dataset and it will appear here automatically.'
+                          : 'Try another filter or switch to Upload Your Own for a one-off comparison.'}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {activeDataset && (
@@ -1472,157 +1421,157 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         </div>
       </div>
 
-       <div className="flex items-center justify-between">
-         <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">
-           ← Back
-         </button>
-         <button onClick={onNext} disabled={!canProceed}
-           className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl disabled:shadow-none">
-           Ready to Run
-           <ChevronRight size={18} />
-         </button>
-       </div>
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">
+          ← Back
+        </button>
+        <button onClick={onNext} disabled={!canProceed}
+          className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl disabled:shadow-none">
+          Ready to Run
+          <ChevronRight size={18} />
+        </button>
+      </div>
 
-       {/* Create Demo Dataset Modal */}
-       {showCreateModal && (
-         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-           <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8">
-             <div className="flex items-start justify-between mb-6">
-               <div>
-                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">
-                   <Database size={14} />
-                   Dataset Tools
-                 </div>
-                 <h3 className="text-2xl font-semibold text-slate-900">Demo dataset creation</h3>
-                 <p className="mt-2 text-sm text-slate-600 max-w-xl">
-                   Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
-                 </p>
-               </div>
-               <button
-                 onClick={() => {
-                   setShowCreateModal(false);
-                   setDatasetForm({
-                     name: '',
-                     description: '',
-                     language: 'python',
-                     numFiles: 10,
-                     similarityType: 'type1_exact',
-                   });
-                 }}
-                 className="p-2 hover:bg-slate-100 rounded-xl transition text-slate-500"
-               >
-                 ✕
-               </button>
-             </div>
+      {/* Create Demo Dataset Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8">
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">
+                  <Database size={14} />
+                  Dataset Tools
+                </div>
+                <h3 className="text-2xl font-semibold text-slate-900">Demo dataset creation</h3>
+                <p className="mt-2 text-sm text-slate-600 max-w-xl">
+                  Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setDatasetForm({
+                    name: '',
+                    description: '',
+                    language: 'python',
+                    numFiles: 10,
+                    similarityType: 'type1_exact',
+                  });
+                }}
+                className="p-2 hover:bg-slate-100 rounded-xl transition text-slate-500"
+              >
+                ✕
+              </button>
+            </div>
 
-             <form className="space-y-6 mt-6" onSubmit={createDemoDataset}>
-               <div className="grid gap-4 sm:grid-cols-2">
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">Dataset Name</label>
-                   <input
-                     type="text"
-                     value={datasetForm.name}
-                     onChange={(event) => handleDatasetFormChange('name', event.target.value)}
-                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                     placeholder="my_test_dataset"
-                     required
-                   />
-                 </div>
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">Programming Language</label>
-                   <select
-                     value={datasetForm.language}
-                     onChange={(event) => handleDatasetFormChange('language', event.target.value)}
-                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                   >
-                     <option value="python">Python</option>
-                     <option value="java">Java</option>
-                     <option value="javascript">JavaScript</option>
-                     <option value="cpp">C++</option>
-                   </select>
-                 </div>
-               </div>
+            <form className="space-y-6 mt-6" onSubmit={createDemoDataset}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Dataset Name</label>
+                  <input
+                    type="text"
+                    value={datasetForm.name}
+                    onChange={(event) => handleDatasetFormChange('name', event.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    placeholder="my_test_dataset"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Programming Language</label>
+                  <select
+                    value={datasetForm.language}
+                    onChange={(event) => handleDatasetFormChange('language', event.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  >
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="cpp">C++</option>
+                  </select>
+                </div>
+              </div>
 
-               <div>
-                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                 <input
-                   type="text"
-                   value={datasetForm.description}
-                   onChange={(event) => handleDatasetFormChange('description', event.target.value)}
-                   className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                   placeholder="Dataset for testing plagiarism detection"
-                 />
-               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <input
+                  type="text"
+                  value={datasetForm.description}
+                  onChange={(event) => handleDatasetFormChange('description', event.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  placeholder="Dataset for testing plagiarism detection"
+                />
+              </div>
 
-               <div className="grid gap-4 sm:grid-cols-2">
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">Number of Files</label>
-                   <input
-                     type="number"
-                     min="5"
-                     max="100"
-                     value={datasetForm.numFiles}
-                     onChange={(event) => handleDatasetFormChange('numFiles', parseInt(event.target.value) || 10)}
-                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                   />
-                 </div>
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">Similarity Type</label>
-                   <select
-                     value={datasetForm.similarityType}
-                     onChange={(event) => handleDatasetFormChange('similarityType', event.target.value)}
-                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                   >
-                     <option value="type1_exact">Type 1 - Exact Copy</option>
-                     <option value="type2_renamed">Type 2 - Renamed Identifiers</option>
-                     <option value="type3_modified">Type 3 - Modified Structure</option>
-                     <option value="type4_semantic">Type 4 - Semantic Equivalence</option>
-                     <option value="token_similarity">Token-Level Similarity</option>
-                     <option value="structural_similarity">Structural Similarity</option>
-                     <option value="semantic_similarity">Semantic Similarity</option>
-                   </select>
-                 </div>
-               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Number of Files</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="100"
+                    value={datasetForm.numFiles}
+                    onChange={(event) => handleDatasetFormChange('numFiles', parseInt(event.target.value) || 10)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Similarity Type</label>
+                  <select
+                    value={datasetForm.similarityType}
+                    onChange={(event) => handleDatasetFormChange('similarityType', event.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  >
+                    <option value="type1_exact">Type 1 - Exact Copy</option>
+                    <option value="type2_renamed">Type 2 - Renamed Identifiers</option>
+                    <option value="type3_modified">Type 3 - Modified Structure</option>
+                    <option value="type4_semantic">Type 4 - Semantic Equivalence</option>
+                    <option value="token_similarity">Token-Level Similarity</option>
+                    <option value="structural_similarity">Structural Similarity</option>
+                    <option value="semantic_similarity">Semantic Similarity</option>
+                  </select>
+                </div>
+              </div>
 
-               <div className="mt-8 flex justify-end gap-3">
-                 <button
-                   type="button"
-                   onClick={() => {
-                     setShowCreateModal(false);
-                     setDatasetForm({
-                       name: '',
-                       description: '',
-                       language: 'python',
-                       numFiles: 10,
-                       similarityType: 'type1_exact',
-                     });
-                   }}
-                   className="px-5 py-3 text-slate-700 hover:bg-slate-100 rounded-xl transition font-medium"
-                 >
-                   Cancel
-                 </button>
-                 <button
-                   type="submit"
-                   disabled={creatingDataset || !datasetForm.name.trim()}
-                   className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl transition flex items-center gap-3 font-semibold min-w-[200px] justify-center"
-                 >
-                   {creatingDataset ? (
-                     <>
-                       <Loader2 size={18} className="animate-spin" />
-                       Generating code samples...
-                     </>
-                   ) : (
-                     'Create Demo Dataset'
-                   )}
-                 </button>
-               </div>
+              <div className="mt-8 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setDatasetForm({
+                      name: '',
+                      description: '',
+                      language: 'python',
+                      numFiles: 10,
+                      similarityType: 'type1_exact',
+                    });
+                  }}
+                  className="px-5 py-3 text-slate-700 hover:bg-slate-100 rounded-xl transition font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingDataset || !datasetForm.name.trim()}
+                  className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl transition flex items-center gap-3 font-semibold min-w-[200px] justify-center"
+                >
+                  {creatingDataset ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Generating code samples...
+                    </>
+                  ) : (
+                    'Create Demo Dataset'
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-     </div>
-   );
+    </div>
+  );
 }
 
 // ── Step 3: Run ─────────────────────────────────────────────────────────────
@@ -1826,37 +1775,37 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           </div>
         )}
 
-         {running && (
-           <div className="mb-5">
-             <div className="flex items-center justify-between mb-2">
-               <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                 <Loader2 size={15} className="text-violet-600 animate-spin" />
-                 {progress}
-               </p>
-               <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
-             </div>
-             <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mb-3">
-               <div
-                 className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500"
-                 style={{ width: `${progressPct}%` }}
-               />
-             </div>
+        {running && (
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <Loader2 size={15} className="text-violet-600 animate-spin" />
+                {progress}
+              </p>
+              <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
+            </div>
+            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+              <div
+                className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
 
-             {/* Detailed progress counter */}
-             {currentFile && totalFiles && (
-               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-                 <div className="flex items-center justify-between">
-                   <div className="text-xs font-semibold text-slate-500">Processing</div>
-                   <div className="text-xs font-bold text-violet-600">{currentFile} / {totalFiles}</div>
-                 </div>
-                 <div className="mt-1 text-sm font-medium text-slate-700 truncate">{currentFilename || 'Preparing files...'}</div>
-                 {currentEngine && (
-                   <div className="mt-1 text-xs text-slate-400">Running with {currentEngine}</div>
-                 )}
-               </div>
-             )}
-           </div>
-         )}
+            {/* Detailed progress counter */}
+            {currentFile && totalFiles && (
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-slate-500">Processing</div>
+                  <div className="text-xs font-bold text-violet-600">{currentFile} / {totalFiles}</div>
+                </div>
+                <div className="mt-1 text-sm font-medium text-slate-700 truncate">{currentFilename || 'Preparing files...'}</div>
+                {currentEngine && (
+                  <div className="mt-1 text-xs text-slate-400">Running with {currentEngine}</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           {!running ? (
@@ -2268,20 +2217,20 @@ function ReportStep({ results, onRestart }) {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Concrete optimization guidance for the next source-code iteration.
-            </p>
-          </div>
-          <div className="grid gap-3 p-6 md:grid-cols-2">
-            {panFeedback.map((item) => (
-              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="font-semibold text-slate-900">{item.title}</div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</div>
-              </div>
-            ))}
-          </div>
+            <div className="px-6 py-5 border-b border-slate-100">
+              <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                Concrete optimization guidance for the next source-code iteration.
+              </p>
+            </div>
+            <div className="grid gap-3 p-6 md:grid-cols-2">
+              {panFeedback.map((item) => (
+                <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="font-semibold text-slate-900">{item.title}</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -2575,122 +2524,10 @@ function ReportStep({ results, onRestart }) {
   );
 }
 
-function BenchmarkWorkflowPanel({ presets, history, selectedPreset, onApplyPreset }) {
-  const recentRuns = Array.isArray(history) ? history.slice(0, 3) : [];
-  const visiblePresets = Array.isArray(presets) ? presets.slice(0, 4) : [];
-
-  if (!visiblePresets.length && !recentRuns.length) {
-    return null;
-  }
-
-  return (
-    <div className="mb-6 grid gap-4 xl:grid-cols-[1.4fr_0.9fr]">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Workflow Presets
-            </div>
-            <div className="mt-1 text-sm text-slate-600">
-              Start from a repeatable benchmark plan, then adjust tools or data.
-            </div>
-          </div>
-          <ClipboardList size={18} className="shrink-0 text-violet-500" />
-        </div>
-
-        {visiblePresets.length ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {visiblePresets.map((preset) => {
-              const active = selectedPreset?.id === preset.id;
-              const runnableCount = preset.runnable_tools?.length ?? 0;
-              const totalTools = preset.tools?.length ?? 0;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => onApplyPreset(preset)}
-                  className={`rounded-xl border p-3 text-left transition ${active
-                    ? 'border-violet-300 bg-violet-50 text-violet-900'
-                    : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:border-slate-300 hover:bg-white'
-                    }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="font-semibold">{preset.name}</div>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${preset.dataset_ready
-                      ? 'bg-emerald-50 text-emerald-700'
-                      : 'bg-amber-50 text-amber-700'
-                      }`}>
-                      {preset.dataset_ready ? 'Ready' : 'Dataset setup'}
-                    </span>
-                  </div>
-                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                    {preset.goal || preset.cadence || 'Repeatable benchmark workflow'}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                      {preset.mode === 'pan_optimization' ? 'PAN' : 'Tool comparison'}
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                      {runnableCount}/{totalTools} tools ready
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-            Presets are not available from the backend yet.
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Recent Runs
-            </div>
-            <div className="mt-1 text-sm text-slate-600">
-              Compare against the last matching workflow after a run completes.
-            </div>
-          </div>
-          <TrendingUp size={18} className="shrink-0 text-emerald-500" />
-        </div>
-
-        {recentRuns.length ? (
-          <div className="space-y-2">
-            {recentRuns.map((run) => (
-              <div key={run.job_id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-800">
-                      {run.preset_name || run.dataset || 'Benchmark run'}
-                    </div>
-                    <div className="mt-0.5 text-xs text-slate-500">
-                      {run.run_at ? new Date(run.run_at).toLocaleString() : 'Recent'} · {run.pairs_tested || 0} pairs
-                    </div>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    {run.benchmark_type === 'pan_optimization' ? 'PAN' : 'Tools'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-            No benchmark history yet.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
   const { user, loading: authLoading } = useAuth();
+  const [activeBenchmarkTab, setActiveBenchmarkTab] = useState<'calibration' | 'comparison'>('calibration');
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [benchmarkMode, setBenchmarkMode] = useState('tool_comparison');
@@ -2799,6 +2636,38 @@ export default function BenchmarkPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Benchmark Suite</h1>
+              <div className="mt-5 flex gap-1 border-b border-slate-200">
+                <button
+                  onClick={() => {
+                    setActiveBenchmarkTab('calibration');
+                    setBenchmarkMode('pan_optimization');
+                    setStep(0);
+                    setCompletedSteps([]);
+                    setResults(null);
+                  }}
+                  className={`px-5 py-3.5 text-sm font-medium border-b-2 -mb-px transition-colors ${activeBenchmarkTab === 'calibration'
+                    ? 'border-violet-500 text-violet-700 bg-violet-50/50'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                  Calibration
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveBenchmarkTab('comparison');
+                    setBenchmarkMode('tool_comparison');
+                    setStep(0);
+                    setCompletedSteps([]);
+                    setResults(null);
+                  }}
+                  className={`px-5 py-3.5 text-sm font-medium border-b-2 -mb-px transition-colors ${activeBenchmarkTab === 'comparison'
+                    ? 'border-violet-500 text-violet-700 bg-violet-50/50'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                  Tool Comparison
+                </button>
+              </div>
             </div>
           </div>
 
