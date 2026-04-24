@@ -54,6 +54,8 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -63,7 +65,21 @@ export default function SettingsPage() {
       .catch(() => setError("Failed to load settings"));
   }, [authLoading, user]);
 
-
+  const saveSettings = async () => {
+    setSaving(true);
+    try {
+      await axios.patch("/api/settings", settings);
+      setSuccess("Settings saved successfully");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: unknown) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.detail
+        : null;
+      setError(message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     if (!settings) return;
@@ -111,9 +127,16 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {success && (
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+            <Shield size={16} className="mt-0.5 shrink-0" />
+            <span>{success}</span>
+          </div>
+        )}
 
 
-        <div className="flex gap-1 mb-6 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+
+        <div className="mb-6 flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -438,6 +461,18 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+
+          <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex justify-end">
+              <button
+                onClick={saveSettings}
+                disabled={saving}
+                className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-blue-500 dark:hover:bg-blue-600"
+              >
+                {saving ? "Saving..." : "Save Settings"}
+              </button>
+            </div>
+          </div>
         </div>
 
 

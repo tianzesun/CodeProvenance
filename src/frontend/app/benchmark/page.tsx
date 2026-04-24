@@ -2575,6 +2575,119 @@ function ReportStep({ results, onRestart }) {
   );
 }
 
+function BenchmarkWorkflowPanel({ presets, history, selectedPreset, onApplyPreset }) {
+  const recentRuns = Array.isArray(history) ? history.slice(0, 3) : [];
+  const visiblePresets = Array.isArray(presets) ? presets.slice(0, 4) : [];
+
+  if (!visiblePresets.length && !recentRuns.length) {
+    return null;
+  }
+
+  return (
+    <div className="mb-6 grid gap-4 xl:grid-cols-[1.4fr_0.9fr]">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Workflow Presets
+            </div>
+            <div className="mt-1 text-sm text-slate-600">
+              Start from a repeatable benchmark plan, then adjust tools or data.
+            </div>
+          </div>
+          <ClipboardList size={18} className="shrink-0 text-violet-500" />
+        </div>
+
+        {visiblePresets.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {visiblePresets.map((preset) => {
+              const active = selectedPreset?.id === preset.id;
+              const runnableCount = preset.runnable_tools?.length ?? 0;
+              const totalTools = preset.tools?.length ?? 0;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => onApplyPreset(preset)}
+                  className={`rounded-xl border p-3 text-left transition ${active
+                    ? 'border-violet-300 bg-violet-50 text-violet-900'
+                    : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:border-slate-300 hover:bg-white'
+                    }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-semibold">{preset.name}</div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${preset.dataset_ready
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                      }`}>
+                      {preset.dataset_ready ? 'Ready' : 'Dataset setup'}
+                    </span>
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                    {preset.goal || preset.cadence || 'Repeatable benchmark workflow'}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {preset.mode === 'pan_optimization' ? 'PAN' : 'Tool comparison'}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {runnableCount}/{totalTools} tools ready
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+            Presets are not available from the backend yet.
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Recent Runs
+            </div>
+            <div className="mt-1 text-sm text-slate-600">
+              Compare against the last matching workflow after a run completes.
+            </div>
+          </div>
+          <TrendingUp size={18} className="shrink-0 text-emerald-500" />
+        </div>
+
+        {recentRuns.length ? (
+          <div className="space-y-2">
+            {recentRuns.map((run) => (
+              <div key={run.job_id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-800">
+                      {run.preset_name || run.dataset || 'Benchmark run'}
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {run.run_at ? new Date(run.run_at).toLocaleString() : 'Recent'} · {run.pairs_tested || 0} pairs
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {run.benchmark_type === 'pan_optimization' ? 'PAN' : 'Tools'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+            No benchmark history yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
   const { user, loading: authLoading } = useAuth();

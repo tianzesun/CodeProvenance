@@ -32,50 +32,46 @@ export default function Sidebar() {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
 
-  const navSections = [
+  const navItems = [
     {
-      items: [
+      href: '/',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+    },
+    {
+      href: '/upload',
+      label: 'New Check',
+      icon: Upload,
+    },
+    {
+      href: '/results',
+      label: 'Reports',
+      icon: BarChart3,
+    },
+    {
+      href: '/settings',
+      label: 'Settings',
+      icon: Settings,
+    },
+    ...(user?.role === 'admin'
+      ? [
         {
-          href: '/',
-          label: 'Dashboard',
-          icon: LayoutDashboard,
-        },
-        {
-          href: '/upload',
-          label: 'New Check',
-          icon: Upload,
-        },
-        {
-          href: '/results',
-          label: 'Reports',
+          href: '/benchmark',
+          label: 'Benchmark',
           icon: BarChart3,
         },
         {
-          href: '/settings',
-          label: 'Settings',
-          icon: Settings,
+          href: '/datasets',
+          label: 'Datasets',
+          icon: Database,
         },
-        ...(user?.role === 'admin'
-          ? [
-            {
-              href: '/benchmark',
-              label: 'Benchmark',
-              icon: BarChart3,
-            },
-            {
-              href: '/datasets',
-              label: 'Datasets',
-              icon: Database,
-            },
-            {
-              href: '/admin',
-              label: 'Users',
-              icon: Shield,
-            },
-          ]
-          : []),
-      ],
-    },
+        {
+          href: '/admin',
+          label: 'Users',
+          icon: Shield,
+        },
+      ]
+      : []),
   ];
 
   const handleLogout = async () => {
@@ -105,81 +101,71 @@ export default function Sidebar() {
       </button>
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl shadow-2xl transition-all duration-300 ease-out lg:translate-x-0 ${
-          collapsed ? 'w-20' : 'w-72'
-        } ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[color:var(--border)] bg-[var(--surface-strong)] backdrop-blur-2xl shadow-2xl transition-all duration-300 ease-out lg:translate-x-0 ${collapsed ? 'w-20' : 'w-72'
+          } ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         <div className={`theme-section-line border-b border-[color:var(--border)] transition-all duration-300 ${collapsed ? 'px-2 py-6' : 'px-6 py-8'}`}>
           <div className="flex items-start justify-between gap-4">
-             <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-4'}`}>
-               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg">
-                 <Shield size={20} />
-               </div>
-               {!collapsed && (
-                 <div>
-                   <div className="font-display text-lg font-semibold text-[var(--text-primary)]">IntegrityDesk</div>
-                   <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Assignment Review</div>
-                 </div>
-               )}
-             </div>
+            <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-4'}`}>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg">
+                <Shield size={20} />
+              </div>
+              {!collapsed && (
+                <div>
+                  <div className="font-display text-lg font-semibold text-[var(--text-primary)]">IntegrityDesk</div>
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">Assignment Review</div>
+                </div>
+              )}
+            </div>
 
-             <button
-               onClick={() => setCollapsed(!collapsed)}
-               className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
-               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-             >
-               {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-             </button>
-           </div>
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="theme-button-secondary inline-flex h-10 w-10 items-center justify-center rounded-2xl transition"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            </button>
+          </div>
 
         </div>
 
-        <nav className={`scrollbar-thin flex-1 space-y-10 overflow-y-auto py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}>
-          {navSections.map((section) => (
-            <div key={section.label}>
-              {!collapsed && (
-                <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                  {section.label}
-                </div>
-              )}
-              <div className={`space-y-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
-                {section.items.map((item) => {
-                  const active = pathname === item.href;
+        <nav className={`scrollbar-thin flex-1 overflow-y-auto py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}>
+          <div className={`space-y-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
+            {navItems.map((item) => {
+              const active = pathname === item.href;
 
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${active
-                        ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
-                        : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
-                        }`}
-                    >
-                      <span
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${active
-                          ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
-                          : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
-                          }`}
-                      >
-                        <item.icon size={17} />
-                      </span>
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                  className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${active
+                    ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
+                    : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
+                    }`}
+                >
+                  <span
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${active
+                      ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
+                      : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+                      }`}
+                  >
+                    <item.icon size={17} />
+                  </span>
 
-                      {!collapsed && (
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">{item.label}</span>
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+                  {!collapsed && (
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{item.label}</span>
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
 
-         <div className={`border-t border-[color:var(--border)] transition-all duration-300 ${collapsed ? 'p-3' : 'p-6'}`}>
+        <div className={`border-t border-[color:var(--border)] transition-all duration-300 ${collapsed ? 'p-3' : 'p-6'}`}>
           <div className="rounded-2xl border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-4 shadow-sm">
             <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-4'}`}>
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-semibold text-white shadow-md">

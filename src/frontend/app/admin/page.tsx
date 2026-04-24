@@ -62,11 +62,10 @@ type RoleFilter = 'all' | AuthRole;
 function RoleBadge({ role }: { role: AuthRole }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-        role === 'admin'
-          ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
-          : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
-      }`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${role === 'admin'
+        ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
+        : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+        }`}
     >
       {role === 'admin' ? 'Admin' : 'Professor'}
     </span>
@@ -76,11 +75,10 @@ function RoleBadge({ role }: { role: AuthRole }) {
 function StatusBadge({ suspended }: { suspended?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-        suspended
-          ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
-          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-      }`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${suspended
+        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+        }`}
     >
       {suspended ? 'Suspended' : 'Active'}
     </span>
@@ -102,7 +100,7 @@ function UserRowSkeleton() {
 function AuthPageSkeleton() {
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="mx-auto max-w-7xl px-4 py-6 lg:px-6 lg:py-8">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="h-5 w-28 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
           <div className="mt-4 h-10 w-72 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
@@ -307,7 +305,7 @@ export default function AdminPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="mx-auto max-w-7xl px-4 py-6 lg:px-6 lg:py-8">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <section className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
