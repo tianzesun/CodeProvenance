@@ -23,37 +23,6 @@ import {
 } from 'lucide-react';
 
 const API = '';
-<<<<<<< HEAD
-=======
-const REVIEW_STATUS_OPTIONS = [
-  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
-  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
-  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
-  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
-  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
-];
-
-function formatTimestamp(value) {
-  if (!value) {
-    return 'Awaiting upload';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function formatPercent(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
-}
 
 function formatPercentPrecise(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
@@ -322,7 +291,7 @@ function getAiRiskTone(score) {
     label: 'Low Risk',
   };
 }
->>>>>>> 2164768a (fix: Update results page fallback title from 'Assignment Check' to 'Assignment Results')
+
 
 export default function ResultsPage() {
   const { id } = useParams();
