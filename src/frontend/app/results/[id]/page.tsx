@@ -45,11 +45,18 @@ function getThreshold(job) {
   return Number.isFinite(threshold) ? threshold : 0.5;
 }
 
+// Simplified review functions for results display
 function getReviewStatus(job) {
-  return REVIEW_STATUS_OPTIONS.some((option) => option.key === job?.review_status)
-    ? job.review_status
-    : 'unreviewed';
+  return job?.review_status || 'unreviewed';
 }
+
+const REVIEW_STATUS_OPTIONS = [
+  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
+  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
+  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
+  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
+  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
+];
 
 function formatReviewStatus(status) {
   return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.label || 'Unreviewed';
@@ -322,12 +329,22 @@ export default function ResultsPage() {
       return;
     }
 
-    axios.get(`${API}/api/jobs/${id}`)
+    console.log('ResultsPage: Fetching job with ID:', id);
+    console.log('ResultsPage: API base URL:', API);
+    console.log('ResultsPage: Full URL:', `${API}/api/job/${id}`);
+
+    axios.get(`${API}/api/job/${id}`)
       .then((res) => {
+        console.log('ResultsPage: Job data received successfully:', res.data);
         setJob(res.data);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('ResultsPage: Failed to fetch job:', error);
+        console.error('ResultsPage: Error response:', error.response);
+        console.error('ResultsPage: Error status:', error.response?.status);
+        console.error('ResultsPage: Error data:', error.response?.data);
+        setError(error.response?.data?.detail || error.response?.data?.message || error.message || 'Failed to load job');
         setLoading(false);
       });
   }, [authLoading, user, id]);
@@ -436,11 +453,10 @@ export default function ResultsPage() {
                   <button
                     type="button"
                     onClick={() => setShowMoreMenu(!showMoreMenu)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
-                      moreTabs.some(tab => activeTab === tab.key)
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${moreTabs.some(tab => activeTab === tab.key)
                         ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
                         : 'theme-card-muted text-[var(--text-secondary)]'
-                    }`}
+                      }`}
                   >
                     More
                     <ChevronDown size={15} className={`transition ${showMoreMenu ? 'rotate-180' : ''}`} />
@@ -456,11 +472,10 @@ export default function ResultsPage() {
                             setActiveTab(tab.key);
                             setShowMoreMenu(false);
                           }}
-                          className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition ${
-                            activeTab === tab.key
+                          className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition ${activeTab === tab.key
                               ? 'bg-blue-600/10 text-blue-600'
                               : 'text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]'
-                          }`}
+                            }`}
                         >
                           <tab.icon size={15} />
                           {tab.label}
