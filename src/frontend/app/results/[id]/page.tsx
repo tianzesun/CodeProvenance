@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
   ArrowRight,
@@ -22,7 +23,36 @@ import {
   Users,
 } from 'lucide-react';
 
-const API = '';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+const REVIEW_STATUS_OPTIONS = [
+  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
+  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
+  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
+  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
+  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
+];
+
+function formatTimestamp(value) {
+  if (!value) {
+    return 'Awaiting upload';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatPercent(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`;
+}
 
 function formatPercentPrecise(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
@@ -45,18 +75,11 @@ function getThreshold(job) {
   return Number.isFinite(threshold) ? threshold : 0.5;
 }
 
-// Simplified review functions for results display
 function getReviewStatus(job) {
-  return job?.review_status || 'unreviewed';
+  return REVIEW_STATUS_OPTIONS.some((option) => option.key === job?.review_status)
+    ? job.review_status
+    : 'unreviewed';
 }
-
-const REVIEW_STATUS_OPTIONS = [
-  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
-  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
-  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
-  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
-  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
-];
 
 function formatReviewStatus(status) {
   return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.label || 'Unreviewed';
@@ -299,7 +322,6 @@ function getAiRiskTone(score) {
   };
 }
 
-
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -307,6 +329,7 @@ export default function ResultsPage() {
 
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -325,29 +348,39 @@ export default function ResultsPage() {
   ];
 
   useEffect(() => {
-    if (authLoading || !user) {
+    if (authLoading) {
+      console.log('Auth still loading...');
+      return;
+    }
+    if (!user) {
+      console.log('No user authenticated, redirecting to login');
+      router.push('/login');
       return;
     }
 
-    console.log('ResultsPage: Fetching job with ID:', id);
-    console.log('ResultsPage: API base URL:', API);
-    console.log('ResultsPage: Full URL:', `${API}/api/job/${id}`);
-
-    axios.get(`${API}/api/job/${id}`)
+    console.log('User authenticated:', user.email, 'Fetching job:', id);
+    apiClient.get(`/api/jobs/${id}`)
       .then((res) => {
-        console.log('ResultsPage: Job data received successfully:', res.data);
+        console.log('Job fetched successfully:', res.data);
         setJob(res.data);
+        setError(null);
         setLoading(false);
       })
-      .catch((error) => {
-        console.error('ResultsPage: Failed to fetch job:', error);
-        console.error('ResultsPage: Error response:', error.response);
-        console.error('ResultsPage: Error status:', error.response?.status);
-        console.error('ResultsPage: Error data:', error.response?.data);
-        setError(error.response?.data?.detail || error.response?.data?.message || error.message || 'Failed to load job');
+      .catch((err) => {
+        console.error('Failed to fetch job:', err?.response?.status, err?.response?.data, err?.message);
+        if (err.response?.status === 404) {
+          setError(`Assignment not found. Job ID "${id}" does not exist. Please check the URL or contact support.`);
+        } else if (err.response?.status === 401 || err.response?.status === 403) {
+          setError('Authentication failed. Please log in again.');
+          router.push('/login');
+        } else if (err.response?.status >= 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError(`Failed to load assignment: ${err?.message || 'Unknown error'}`);
+        }
         setLoading(false);
       });
-  }, [authLoading, user, id]);
+  }, [authLoading, user, id, router]);
 
   // Close More dropdown when clicking outside
   useEffect(() => {
@@ -376,7 +409,52 @@ export default function ResultsPage() {
     return (
       <DashboardLayout>
         <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
-          <div className="text-[var(--text-secondary)]">Assignment not found</div>
+          <div className="text-center space-y-6 max-w-lg">
+            <div className="text-lg font-semibold text-[var(--text-primary)]">
+              {error || 'Assignment not found'}
+            </div>
+
+            <div className="text-sm text-[var(--text-secondary)] space-y-2">
+              <div><strong>Job ID:</strong> {id}</div>
+              <div><strong>API Endpoint:</strong> /api/jobs/{id}</div>
+              <div><strong>User:</strong> {user?.email || 'Not authenticated'}</div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
+              <h3 className="font-semibold text-blue-900 mb-2">How to create assignments:</h3>
+              <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+                <li>Go to the <strong>Upload</strong> page</li>
+                <li>Select your code files (Python, Java, C++, etc.)</li>
+                <li>Choose analysis settings</li>
+                <li>Click "Start Analysis"</li>
+                <li>Wait for processing to complete</li>
+                <li>You'll be redirected to the results page automatically</li>
+              </ol>
+            </div>
+
+            <div className="flex gap-3">
+              <Link
+                href="/upload"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <FileCode size={16} />
+                Upload Files
+              </Link>
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Back to Home
+              </Link>
+            </div>
+
+            <div className="text-xs text-[var(--text-muted)] bg-[var(--surface)] p-3 rounded border">
+              <div className="font-semibold mb-1">Debug Information:</div>
+              <div>Check the browser console (F12) for detailed error logs.</div>
+              <div>If you see "404 Not Found", the job ID doesn't exist.</div>
+              <div>If you see "401 Unauthorized", there may be authentication issues.</div>
+            </div>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -453,10 +531,11 @@ export default function ResultsPage() {
                   <button
                     type="button"
                     onClick={() => setShowMoreMenu(!showMoreMenu)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${moreTabs.some(tab => activeTab === tab.key)
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
+                      moreTabs.some(tab => activeTab === tab.key)
                         ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
                         : 'theme-card-muted text-[var(--text-secondary)]'
-                      }`}
+                    }`}
                   >
                     More
                     <ChevronDown size={15} className={`transition ${showMoreMenu ? 'rotate-180' : ''}`} />
@@ -472,10 +551,11 @@ export default function ResultsPage() {
                             setActiveTab(tab.key);
                             setShowMoreMenu(false);
                           }}
-                          className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition ${activeTab === tab.key
+                          className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition ${
+                            activeTab === tab.key
                               ? 'bg-blue-600/10 text-blue-600'
                               : 'text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]'
-                            }`}
+                          }`}
                         >
                           <tab.icon size={15} />
                           {tab.label}
