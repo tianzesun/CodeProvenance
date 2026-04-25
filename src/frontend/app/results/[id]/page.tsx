@@ -23,6 +23,306 @@ import {
 } from 'lucide-react';
 
 const API = '';
+<<<<<<< HEAD
+=======
+const REVIEW_STATUS_OPTIONS = [
+  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
+  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
+  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
+  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
+  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
+];
+
+function formatTimestamp(value) {
+  if (!value) {
+    return 'Awaiting upload';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatPercent(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`;
+}
+
+function formatPercentPrecise(value) {
+  return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function getAssignmentTitle(job) {
+  return job.assignment_name || job.course_name || 'Assignment Results';
+}
+
+function getReferenceLabel(job) {
+  if (!job?.course_name || job.course_name === job.assignment_name) {
+    return '';
+  }
+
+  return job.course_name;
+}
+
+function getThreshold(job) {
+  const threshold = Number(job?.threshold);
+  return Number.isFinite(threshold) ? threshold : 0.5;
+}
+
+function getReviewStatus(job) {
+  return REVIEW_STATUS_OPTIONS.some((option) => option.key === job?.review_status)
+    ? job.review_status
+    : 'unreviewed';
+}
+
+function formatReviewStatus(status) {
+  return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.label || 'Unreviewed';
+}
+
+function getReviewTone(status) {
+  const toneMap = {
+    unreviewed: {
+      badge: 'border-slate-500/20 bg-slate-500/10 text-slate-600',
+      panel: 'border-slate-500/15 bg-slate-500/[0.06]',
+    },
+    needs_review: {
+      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
+    },
+    confirmed: {
+      badge: 'border-red-500/20 bg-red-500/10 text-red-600',
+      panel: 'border-red-500/15 bg-red-500/[0.06]',
+    },
+    dismissed: {
+      badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+      panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
+    },
+    escalated: {
+      badge: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
+      panel: 'border-violet-500/15 bg-violet-500/[0.06]',
+    },
+  };
+
+  return toneMap[status] || toneMap.unreviewed;
+}
+
+function getReviewStatusDescription(status) {
+  return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.description || REVIEW_STATUS_OPTIONS[0].description;
+}
+
+function pairKey(fileA, fileB) {
+  return [fileA, fileB].sort().join('::');
+}
+
+function includesSubmission(result, submission) {
+  return result.file_a === submission || result.file_b === submission;
+}
+
+function otherSubmission(result, submission) {
+  return result.file_a === submission ? result.file_b : result.file_a;
+}
+
+function getRiskBucket(score) {
+  if (score >= 0.9) {
+    return 'critical';
+  }
+  if (score >= 0.75) {
+    return 'high';
+  }
+  if (score >= 0.5) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function getConfidenceZone(score, calibrationReport) {
+  const zones = Array.isArray(calibrationReport?.confidence_zones)
+    ? calibrationReport.confidence_zones
+    : [];
+  const numericScore = Number(score) || 0;
+  const matched = zones.find((zone) => numericScore >= Number(zone.min_score) && numericScore < Number(zone.max_score));
+  if (matched) {
+    return matched;
+  }
+  if (numericScore >= 0.78) {
+    return { label: 'flag', description: 'High-certainty review zone.' };
+  }
+  if (numericScore >= 0.5) {
+    return { label: 'uncertain', description: 'Manual review zone.' };
+  }
+  return { label: 'clean', description: 'Low-signal region.' };
+}
+
+function getRiskTone(score) {
+  const bucket = getRiskBucket(score);
+  const map = {
+    critical: {
+      badge: 'border-red-500/20 bg-red-500/10 text-red-600',
+      dot: 'bg-red-500',
+      panel: 'border-red-500/15 bg-red-500/[0.06]',
+      text: 'text-red-600',
+    },
+    high: {
+      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+      dot: 'bg-amber-500',
+      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
+      text: 'text-amber-600',
+    },
+    medium: {
+      badge: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-600',
+      dot: 'bg-yellow-500',
+      panel: 'border-yellow-500/15 bg-yellow-500/[0.06]',
+      text: 'text-yellow-600',
+    },
+    low: {
+      badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+      dot: 'bg-emerald-500',
+      panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
+      text: 'text-emerald-600',
+    },
+  };
+  return map[bucket];
+}
+
+function getSubmissionNames(submissions, results) {
+  const names = new Set(Object.keys(submissions || {}));
+  results.forEach((result) => {
+    names.add(result.file_a);
+    names.add(result.file_b);
+  });
+  return Array.from(names);
+}
+
+function getLineCount(text) {
+  if (!text) {
+    return 0;
+  }
+
+  return text.split('\n').length;
+}
+
+function buildSubmissionStats(submissionNames, results, threshold, submissions) {
+  return submissionNames
+    .map((name) => {
+      const matches = results.filter((result) => includesSubmission(result, name));
+      const flaggedMatches = matches.filter((result) => result.score >= threshold);
+      const topMatch = [...matches].sort((a, b) => b.score - a.score)[0] || null;
+
+      return {
+        name,
+        lines: getLineCount(submissions[name] || ''),
+        totalMatches: matches.length,
+        flaggedCount: flaggedMatches.length,
+        maxScore: topMatch?.score || 0,
+        averageScore: matches.length
+          ? matches.reduce((sum, result) => sum + result.score, 0) / matches.length
+          : 0,
+        topMatch,
+        topMatchName: topMatch ? otherSubmission(topMatch, name) : '',
+      };
+    })
+    .sort((a, b) => {
+      if (b.maxScore !== a.maxScore) {
+        return b.maxScore - a.maxScore;
+      }
+      if (b.flaggedCount !== a.flaggedCount) {
+        return b.flaggedCount - a.flaggedCount;
+      }
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function buildFeatureSummary(results) {
+  const featureMap = {};
+
+  results.forEach((result) => {
+    Object.entries(result.features || {}).forEach(([name, value]) => {
+      if (!featureMap[name]) {
+        featureMap[name] = { name, total: 0, count: 0, peak: 0 };
+      }
+      featureMap[name].total += value;
+      featureMap[name].count += 1;
+      featureMap[name].peak = Math.max(featureMap[name].peak, value);
+    });
+  });
+
+  return Object.values(featureMap)
+    .map((entry) => ({
+      name: entry.name,
+      average: entry.count ? entry.total / entry.count : 0,
+      peak: entry.peak,
+    }))
+    .sort((a, b) => b.peak - a.peak);
+}
+
+function buildPairLookup(results) {
+  const lookup = new Map();
+  results.forEach((result) => {
+    lookup.set(pairKey(result.file_a, result.file_b), result.score);
+  });
+  return lookup;
+}
+
+function summarizeMatch(result) {
+  const entries = Object.entries(result.features || {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) {
+    return 'Similarity evidence is available for manual review.';
+  }
+  if (entries.length === 1) {
+    return `${entries[0][0]} is the strongest detection signal in this pair.`;
+  }
+  return `${entries[0][0]} and ${entries[1][0]} are the strongest detection signals in this pair.`;
+}
+
+function truncateName(value, max = 18) {
+  if (!value || value.length <= max) {
+    return value;
+  }
+
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function calculatePossibleComparisons(count) {
+  return count > 1 ? (count * (count - 1)) / 2 : 0;
+}
+
+function getSubmissionRiskDistribution(submissionStats) {
+  return {
+    low: submissionStats.filter((entry) => entry.maxScore < 0.4).length,
+    medium: submissionStats.filter((entry) => entry.maxScore >= 0.4 && entry.maxScore < 0.7).length,
+    high: submissionStats.filter((entry) => entry.maxScore >= 0.7).length,
+  };
+}
+
+function getAiRiskTone(score) {
+  if (score >= 0.7) {
+    return {
+      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
+      label: 'High Risk',
+    };
+  }
+  if (score >= 0.4) {
+    return {
+      badge: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-600',
+      panel: 'border-yellow-500/15 bg-yellow-500/[0.06]',
+      label: 'Needs Review',
+    };
+  }
+  return {
+    badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+    panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
+    label: 'Low Risk',
+  };
+}
+>>>>>>> 2164768a (fix: Update results page fallback title from 'Assignment Check' to 'Assignment Results')
 
 export default function ResultsPage() {
   const { id } = useParams();
