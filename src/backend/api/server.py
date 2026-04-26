@@ -4330,6 +4330,7 @@ async def list_jobs(request: Request):
 
 
 @app.get("/api/job/{job_id}")
+@app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str, request: Request):
     job = _require_job_access(job_id, request)
     return JSONResponse(content=job)

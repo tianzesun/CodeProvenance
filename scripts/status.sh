@@ -24,7 +24,7 @@ else
 fi
 
 # Check embedding server
-EMBEDDING_PID=$(pgrep -f "uvicorn embedding_server:app" 2>/dev/null || echo "")
+EMBEDDING_PID=$(pgrep -f "uvicorn src.backend.services.embedding_server:app" 2>/dev/null || echo "")
 if [ -n "$EMBEDDING_PID" ]; then
     EMBEDDING_PORT=$(ss -tulpn | grep "$EMBEDDING_PID" | grep LISTEN | awk '{print $5}' | cut -d: -f2 | head -1)
     echo "✅ Embedding API:   RUNNING (PID: $EMBEDDING_PID)"

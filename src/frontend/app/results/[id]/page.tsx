@@ -23,8 +23,6 @@ import {
 } from 'lucide-react';
 
 const API = '';
-<<<<<<< HEAD
-=======
 const REVIEW_STATUS_OPTIONS = [
   { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
   { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
@@ -322,7 +320,33 @@ function getAiRiskTone(score) {
     label: 'Low Risk',
   };
 }
->>>>>>> 2164768a (fix: Update results page fallback title from 'Assignment Check' to 'Assignment Results')
+
+function getFileCount(job, submissionNames) {
+  const fileCount = Number(job?.file_count ?? job?.submission_count);
+  return Number.isFinite(fileCount) && fileCount > 0 ? fileCount : submissionNames.length;
+}
+
+function getSummaryValue(summary, keys, fallback = 0) {
+  for (const key of keys) {
+    const value = Number(summary?.[key]);
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function getResultRiskLabel(result, threshold) {
+  if (result.risk_level) {
+    return String(result.risk_level).toUpperCase();
+  }
+  return Number(result.score) >= threshold ? 'FLAGGED' : 'LOW';
+}
+
+function sortResultsByScore(results) {
+  return [...results].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+}
+
 
 export default function ResultsPage() {
   const { id } = useParams();
@@ -353,7 +377,7 @@ export default function ResultsPage() {
       return;
     }
 
-    axios.get(`${API}/api/jobs/${id}`)
+    axios.get(`${API}/api/job/${id}`)
       .then((res) => {
         setJob(res.data);
         setLoading(false);
@@ -396,6 +420,33 @@ export default function ResultsPage() {
     );
   }
 
+  const results = sortResultsByScore(Array.isArray(job.results) ? job.results : []);
+  const threshold = getThreshold(job);
+  const submissions = job.submissions && typeof job.submissions === 'object' ? job.submissions : {};
+  const submissionNames = getSubmissionNames(submissions, results);
+  const submissionStats = buildSubmissionStats(submissionNames, results, threshold, submissions);
+  const fileCount = getFileCount(job, submissionNames);
+  const possibleComparisons = calculatePossibleComparisons(fileCount);
+  const flaggedResults = results.filter((result) => Number(result.score) >= threshold);
+  const topResult = results[0] || null;
+  const summary = job.summary || {};
+  const suspiciousPairs = getSummaryValue(
+    summary,
+    ['suspicious_pairs', 'flagged_pairs', 'high_risk_pairs'],
+    flaggedResults.length,
+  );
+  const averageSimilarity = getSummaryValue(
+    summary,
+    ['average_similarity', 'avg_similarity', 'mean_similarity'],
+    results.length ? results.reduce((sum, result) => sum + (Number(result.score) || 0), 0) / results.length : 0,
+  );
+  const featureSummary = buildFeatureSummary(results);
+  const reviewStatus = getReviewStatus(job);
+  const reviewTone = getReviewTone(reviewStatus);
+  const webAnalysis = job.web_analysis || {};
+  const aiDetection = job.ai_detection || {};
+  const aiSubmissions = Array.isArray(aiDetection.submissions) ? aiDetection.submissions : [];
+
   return (
     <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -411,7 +462,7 @@ export default function ResultsPage() {
                   </div>
                   <div className="space-y-1">
                     <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-                      Student: {job.submission_count ? `Student ${Math.floor(Math.random() * job.submission_count) + 1}` : 'Unknown'}
+                      {getAssignmentTitle(job)}
                     </h1>
                     <p className="text-sm text-[var(--text-secondary)]">
                       Assignment: {job.assignment_name || 'Untitled'}
@@ -425,10 +476,14 @@ export default function ResultsPage() {
                 <div className="flex flex-col gap-4 lg:items-end">
                   <div className="space-y-1 text-right">
                     <div className="text-sm font-medium text-[var(--text-primary)]">
-                      Review Priority: <span className="font-semibold text-emerald-600">Low</span>
+                      Review Priority: <span className={flaggedResults.length ? 'font-semibold text-amber-600' : 'font-semibold text-emerald-600'}>
+                        {flaggedResults.length ? `${flaggedResults.length} flagged` : 'No flagged pairs'}
+                      </span>
                     </div>
                     <div className="text-sm font-medium text-[var(--text-primary)]">
-                      Confidence: <span className="font-semibold text-emerald-600">High</span>
+                      Review Status: <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${reviewTone.badge}`}>
+                        {formatReviewStatus(reviewStatus)}
+                      </span>
                     </div>
                   </div>
 
@@ -523,19 +578,26 @@ export default function ResultsPage() {
 
                         <div className="space-y-1 text-sm text-[var(--text-secondary)]">
                           <div>
-                            <span className="font-medium">Processed:</span> {job.submission_count || 0} submissions
+                            <span className="font-medium">Processed:</span> {fileCount} submissions
                           </div>
                           <div>
-                            <span className="font-medium">Status:</span> {job.status}
+                            <span className="font-medium">Compared:</span> {results.length} pair{results.length === 1 ? '' : 's'}
                           </div>
                           <div>
-                            <span className="font-medium">Completed:</span> {new Date(job.created_at).toLocaleString()}
+                            <span className="font-medium">Flagged:</span> {suspiciousPairs} pair{suspiciousPairs === 1 ? '' : 's'} at {formatPercent(threshold)}
+                          </div>
+                          <div>
+                            <span className="font-medium">Completed:</span> {formatTimestamp(job.created_at)}
                           </div>
                         </div>
 
                         <div className="pt-2">
                           <p className="text-sm font-medium text-[var(--text-primary)]">
-                            {job.status === 'completed' ? 'Ready for review' : 'Analysis is still running'}
+                            {topResult
+                              ? `Top match: ${topResult.file_a} vs ${topResult.file_b} at ${formatPercent(topResult.score)}`
+                              : job.status === 'completed'
+                                ? 'Analysis completed with no comparison rows in the result payload.'
+                                : 'Analysis is still running'}
                           </p>
                         </div>
                       </div>
@@ -563,12 +625,12 @@ export default function ResultsPage() {
                         <div>
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Peer Analysis</div>
                           <div className="text-xs text-[var(--text-secondary)]">
-                            {(job.results || []).length} comparison{(job.results || []).length === 1 ? '' : 's'}
+                            {results.length} comparison{results.length === 1 ? '' : 's'}
                           </div>
                         </div>
                       </div>
                       <p className="mt-3 text-xs text-[var(--text-secondary)] leading-relaxed">
-                        Similarity analysis between student submissions
+                        {possibleComparisons ? `${results.length} of ${possibleComparisons} possible pairs returned by the analysis.` : 'Similarity analysis between uploaded submissions.'}
                       </p>
                     </div>
 
@@ -580,7 +642,7 @@ export default function ResultsPage() {
                         <div>
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Web Sources</div>
                           <div className="text-xs text-[var(--text-secondary)]">
-                            Not analyzed
+                            {webAnalysis.enabled ? `${webAnalysis.matched_submissions || 0} matched` : 'Not enabled'}
                           </div>
                         </div>
                       </div>
@@ -597,7 +659,7 @@ export default function ResultsPage() {
                         <div>
                           <div className="text-sm font-semibold text-[var(--text-primary)]">AI Detection</div>
                           <div className="text-xs text-[var(--text-secondary)]">
-                            Not analyzed
+                            {aiSubmissions.length ? `${aiSubmissions.length} submissions` : 'Not enabled'}
                           </div>
                         </div>
                       </div>
@@ -614,7 +676,7 @@ export default function ResultsPage() {
                         <div>
                           <div className="text-sm font-semibold text-[var(--text-primary)]">File Integrity</div>
                           <div className="text-xs text-[var(--text-secondary)]">
-                            {job.submission_count || 0} file{(job.submission_count || 0) === 1 ? '' : 's'}
+                            {fileCount} file{fileCount === 1 ? '' : 's'}
                           </div>
                         </div>
                       </div>
@@ -628,22 +690,76 @@ export default function ResultsPage() {
 
               {activeTab === 'evidence' && (
                 <div className="space-y-6">
-                  <div className="text-center py-12">
-                    <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-                      Evidence Comparison Tool
+                  <div>
+                    <h2 className="text-2xl font-semibold text-[var(--text-primary)]">
+                      Similarity Results
                     </h2>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Select flagged matches from the results to view detailed side-by-side evidence comparison.
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                      Actual pairwise comparisons returned by the analysis job.
                     </p>
-                    <div className="mt-6">
-                      <Link
-                        href={`/results/${id}`}
-                        className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                      >
-                        <ArrowRight size={16} />
-                        View Results
-                      </Link>
+                  </div>
+
+                  {results.length === 0 ? (
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-6 text-sm text-[var(--text-secondary)]">
+                      No comparison rows were returned for this job. Status: {job.status || 'unknown'}.
                     </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {results.map((result, index) => {
+                        const score = Number(result.score) || 0;
+                        const tone = getRiskTone(score);
+                        const featureEntries = Object.entries(result.features || {})
+                          .sort((a, b) => Number(b[1]) - Number(a[1]))
+                          .slice(0, 4);
+
+                        return (
+                          <div key={`${result.file_a}-${result.file_b}-${index}`} className={`rounded-2xl border px-5 py-4 ${tone.panel}`}>
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-semibold text-[var(--text-primary)]">
+                                    {result.file_a || 'Submission A'} vs {result.file_b || 'Submission B'}
+                                  </span>
+                                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+                                    {getResultRiskLabel(result, threshold)}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-[var(--text-secondary)]">
+                                  {summarizeMatch(result)}
+                                </p>
+                                {featureEntries.length > 0 && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {featureEntries.map(([name, value]) => (
+                                      <span key={name} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+                                        {name}: {formatPercentPrecise(value)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-left lg:text-right">
+                                <div className={`text-3xl font-semibold ${tone.text}`}>
+                                  {formatPercent(score)}
+                                </div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                  threshold {formatPercent(threshold)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3">
+                    <Link href={`${API}/report/${id}/download`} className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold">
+                      <FileCode size={16} />
+                      HTML Report
+                    </Link>
+                    <Link href={`${API}/report/${id}/download-json`} className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold">
+                      <Code2 size={16} />
+                      JSON Report
+                    </Link>
                   </div>
                 </div>
               )}
@@ -666,29 +782,37 @@ export default function ResultsPage() {
                         Peer Sources
                       </h3>
                       <div className="space-y-2">
-                        {(job.results || []).slice(0, 3).map((result, index) => (
+                        {results.map((result, index) => {
+                          const score = Number(result.score) || 0;
+                          const tone = getRiskTone(score);
+                          return (
                           <div key={index} className="flex items-center justify-between p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
                             <div className="flex items-center gap-3">
-                              <div className="h-3 w-3 rounded-full bg-blue-500" />
+                              <div className={`h-3 w-3 rounded-full ${tone.dot}`} />
                               <div>
                                 <div className="text-sm font-medium text-[var(--text-primary)]">
-                                  Student {Math.floor(Math.random() * (job.submission_count || 10)) + 1} vs Student {Math.floor(Math.random() * (job.submission_count || 10)) + 1}
+                                  {result.file_a || 'Submission A'} vs {result.file_b || 'Submission B'}
                                 </div>
                                 <div className="text-xs text-[var(--text-secondary)]">
-                                  {Math.round((result.score || 0) * 100)}% similarity • Code structure matching
+                                  {formatPercent(score)} similarity • {summarizeMatch(result)}
                                 </div>
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20">
-                                MEDIUM
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+                                {getResultRiskLabel(result, threshold)}
                               </span>
-                              <button className="theme-link text-sm font-medium">
-                                View Details
+                              <button type="button" onClick={() => setActiveTab('evidence')} className="theme-link text-sm font-medium">
+                                Evidence
                               </button>
                             </div>
                           </div>
-                        ))}
+                        )})}
+                        {results.length === 0 && (
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
+                            No peer comparison rows are available for this assignment.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -722,28 +846,38 @@ export default function ResultsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border)]">
-                        {Array.from({ length: job.submission_count || 5 }, (_, index) => (
-                          <tr key={index} className="hover:bg-[var(--surface-muted)]">
+                        {submissionStats.map((entry) => {
+                          const tone = getRiskTone(entry.maxScore);
+                          return (
+                          <tr key={entry.name} className="hover:bg-[var(--surface-muted)]">
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-3">
                                 <FileCode size={16} className="text-slate-500" />
                                 <span className="text-sm font-medium text-[var(--text-primary)]">
-                                  submission_{index + 1}.py
+                                  {entry.name}
                                 </span>
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                                Clear
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+                                {entry.flaggedCount ? `${entry.flaggedCount} flagged` : 'Clear'}
                               </span>
                             </td>
                             <td className="px-4 py-4">
                               <div className="text-sm text-[var(--text-secondary)]">
-                                No suspicious content detected
+                                {entry.totalMatches} comparison{entry.totalMatches === 1 ? '' : 's'}, max {formatPercent(entry.maxScore)}
+                                {entry.topMatchName ? ` with ${entry.topMatchName}` : ''}
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        )})}
+                        {submissionStats.length === 0 && (
+                          <tr>
+                            <td colSpan={3} className="px-4 py-6 text-sm text-[var(--text-secondary)]">
+                              No submission file names were returned for this job.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -752,27 +886,117 @@ export default function ResultsPage() {
 
               {moreTabs.some(tab => activeTab === tab.key) && (
                 <div className="space-y-6">
-                  <div className="text-center py-12">
-                    <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-                      Advanced Analysis
-                    </h2>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      {activeTab === 'peer_similarity' && 'Detailed peer-to-peer similarity analysis and comparison matrix'}
-                      {activeTab === 'ai_detection' && 'Advanced AI writing pattern detection and analysis'}
-                      {activeTab === 'insights' && 'Statistical insights and patterns in the assignment data'}
-                      {activeTab === 'result_driller' && 'Deep code analysis and side-by-side comparison tools'}
-                    </p>
-                    <div className="mt-6">
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('overview')}
-                        className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                      >
-                        <ArrowRight size={16} />
-                        Back to Overview
-                      </button>
+                  {activeTab === 'peer_similarity' && (
+                    <div className="space-y-4">
+                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Peer Similarity Matrix</h2>
+                      <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
+                        <table className="w-full min-w-[680px]">
+                          <thead className="bg-[var(--surface-muted)]">
+                            <tr>
+                              <th className="px-3 py-3 text-left text-xs font-semibold uppercase text-[var(--text-muted)]">Submission</th>
+                              {submissionNames.map((name) => (
+                                <th key={name} className="px-3 py-3 text-left text-xs font-semibold uppercase text-[var(--text-muted)]">
+                                  {truncateName(name, 14)}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--border)]">
+                            {submissionNames.map((rowName) => (
+                              <tr key={rowName}>
+                                <td className="px-3 py-3 text-sm font-medium text-[var(--text-primary)]">{truncateName(rowName, 22)}</td>
+                                {submissionNames.map((columnName) => {
+                                  const matched = results.find((result) => pairKey(result.file_a, result.file_b) === pairKey(rowName, columnName));
+                                  const score = rowName === columnName ? null : matched?.score;
+                                  return (
+                                    <td key={columnName} className="px-3 py-3 text-sm text-[var(--text-secondary)]">
+                                      {rowName === columnName ? '—' : score == null ? 'No result' : formatPercent(score)}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {activeTab === 'ai_detection' && (
+                    <div className="space-y-4">
+                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">AI Review</h2>
+                      {aiSubmissions.length === 0 ? (
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
+                          No AI-detection result payload was returned for this job.
+                        </div>
+                      ) : (
+                        aiSubmissions.map((entry) => {
+                          const score = Number(entry.ai_probability ?? entry.score) || 0;
+                          const tone = getAiRiskTone(score);
+                          return (
+                            <div key={entry.name} className={`rounded-xl border px-4 py-3 ${tone.panel}`}>
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <div className="text-sm font-semibold text-[var(--text-primary)]">{entry.name}</div>
+                                  <div className="text-xs text-[var(--text-secondary)]">Confidence {formatPercent(entry.confidence || 0)}</div>
+                                </div>
+                                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+                                  {tone.label}: {formatPercent(score)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'insights' && (
+                    <div className="space-y-4">
+                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Run Insights</h2>
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Average Similarity</div>
+                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(averageSimilarity)}</div>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Top Similarity</div>
+                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(topResult?.score || 0)}</div>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Flagged Pairs</div>
+                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{flaggedResults.length}</div>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Threshold</div>
+                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(threshold)}</div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Engine Signals</h3>
+                        <div className="mt-3 space-y-2">
+                          {featureSummary.map((feature) => (
+                            <div key={feature.name} className="flex items-center justify-between gap-4 text-sm">
+                              <span className="text-[var(--text-secondary)]">{feature.name}</span>
+                              <span className="font-medium text-[var(--text-primary)]">avg {formatPercentPrecise(feature.average)} / peak {formatPercentPrecise(feature.peak)}</span>
+                            </div>
+                          ))}
+                          {featureSummary.length === 0 && (
+                            <div className="text-sm text-[var(--text-secondary)]">No feature scores were returned.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'result_driller' && (
+                    <div className="space-y-4">
+                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Deep Dive</h2>
+                      <pre className="max-h-[520px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-xs text-[var(--text-primary)]">
+                        {JSON.stringify({ id: job.id, status: job.status, summary: job.summary, results }, null, 2)}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
