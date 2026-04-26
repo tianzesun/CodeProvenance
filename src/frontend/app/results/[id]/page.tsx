@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
   ArrowRight,
@@ -22,7 +23,7 @@ import {
   Users,
 } from 'lucide-react';
 
-const API = '';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 const REVIEW_STATUS_OPTIONS = [
   { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
   { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
@@ -321,33 +322,6 @@ function getAiRiskTone(score) {
   };
 }
 
-function getFileCount(job, submissionNames) {
-  const fileCount = Number(job?.file_count ?? job?.submission_count);
-  return Number.isFinite(fileCount) && fileCount > 0 ? fileCount : submissionNames.length;
-}
-
-function getSummaryValue(summary, keys, fallback = 0) {
-  for (const key of keys) {
-    const value = Number(summary?.[key]);
-    if (Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return fallback;
-}
-
-function getResultRiskLabel(result, threshold) {
-  if (result.risk_level) {
-    return String(result.risk_level).toUpperCase();
-  }
-  return Number(result.score) >= threshold ? 'FLAGGED' : 'LOW';
-}
-
-function sortResultsByScore(results) {
-  return [...results].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
-}
-
-
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -355,6 +329,7 @@ export default function ResultsPage() {
 
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -373,19 +348,39 @@ export default function ResultsPage() {
   ];
 
   useEffect(() => {
-    if (authLoading || !user) {
+    if (authLoading) {
+      console.log('Auth still loading...');
+      return;
+    }
+    if (!user) {
+      console.log('No user authenticated, redirecting to login');
+      router.push('/login');
       return;
     }
 
-    axios.get(`${API}/api/job/${id}`)
+    console.log('User authenticated:', user.email, 'Fetching job:', id);
+    apiClient.get(`/api/jobs/${id}`)
       .then((res) => {
+        console.log('Job fetched successfully:', res.data);
         setJob(res.data);
+        setError(null);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Failed to fetch job:', err?.response?.status, err?.response?.data, err?.message);
+        if (err.response?.status === 404) {
+          setError(`Assignment not found. Job ID "${id}" does not exist. Please check the URL or contact support.`);
+        } else if (err.response?.status === 401 || err.response?.status === 403) {
+          setError('Authentication failed. Please log in again.');
+          router.push('/login');
+        } else if (err.response?.status >= 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError(`Failed to load assignment: ${err?.message || 'Unknown error'}`);
+        }
         setLoading(false);
       });
-  }, [authLoading, user, id]);
+  }, [authLoading, user, id, router]);
 
   // Close More dropdown when clicking outside
   useEffect(() => {
@@ -414,7 +409,52 @@ export default function ResultsPage() {
     return (
       <DashboardLayout>
         <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
-          <div className="text-[var(--text-secondary)]">Assignment not found</div>
+          <div className="text-center space-y-6 max-w-lg">
+            <div className="text-lg font-semibold text-[var(--text-primary)]">
+              {error || 'Assignment not found'}
+            </div>
+
+            <div className="text-sm text-[var(--text-secondary)] space-y-2">
+              <div><strong>Job ID:</strong> {id}</div>
+              <div><strong>API Endpoint:</strong> /api/jobs/{id}</div>
+              <div><strong>User:</strong> {user?.email || 'Not authenticated'}</div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
+              <h3 className="font-semibold text-blue-900 mb-2">How to create assignments:</h3>
+              <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+                <li>Go to the <strong>Upload</strong> page</li>
+                <li>Select your code files (Python, Java, C++, etc.)</li>
+                <li>Choose analysis settings</li>
+                <li>Click "Start Analysis"</li>
+                <li>Wait for processing to complete</li>
+                <li>You'll be redirected to the results page automatically</li>
+              </ol>
+            </div>
+
+            <div className="flex gap-3">
+              <Link
+                href="/upload"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <FileCode size={16} />
+                Upload Files
+              </Link>
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Back to Home
+              </Link>
+            </div>
+
+            <div className="text-xs text-[var(--text-muted)] bg-[var(--surface)] p-3 rounded border">
+              <div className="font-semibold mb-1">Debug Information:</div>
+              <div>Check the browser console (F12) for detailed error logs.</div>
+              <div>If you see "404 Not Found", the job ID doesn't exist.</div>
+              <div>If you see "401 Unauthorized", there may be authentication issues.</div>
+            </div>
+          </div>
         </div>
       </DashboardLayout>
     );
