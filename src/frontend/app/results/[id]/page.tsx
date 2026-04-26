@@ -6,7 +6,6 @@ import { useAuth } from '@/components/AuthProvider';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import axios from 'axios';
 import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
@@ -322,6 +321,32 @@ function getAiRiskTone(score) {
   };
 }
 
+function getFileCount(job, submissionNames) {
+  const fileCount = Number(job?.file_count ?? job?.submission_count);
+  return Number.isFinite(fileCount) && fileCount > 0 ? fileCount : submissionNames.length;
+}
+
+function getSummaryValue(summary, keys, fallback = 0) {
+  for (const key of keys) {
+    const value = Number(summary?.[key]);
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function getResultRiskLabel(result, threshold) {
+  if (result.risk_level) {
+    return String(result.risk_level).toUpperCase();
+  }
+  return Number(result.score) >= threshold ? 'FLAGGED' : 'LOW';
+}
+
+function sortResultsByScore(results) {
+  return [...results].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+}
+
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -359,7 +384,7 @@ export default function ResultsPage() {
     }
 
     console.log('User authenticated:', user.email, 'Fetching job:', id);
-    apiClient.get(`/api/jobs/${id}`)
+    apiClient.get(`/api/job/${id}`)
       .then((res) => {
         console.log('Job fetched successfully:', res.data);
         setJob(res.data);
@@ -416,7 +441,7 @@ export default function ResultsPage() {
 
             <div className="text-sm text-[var(--text-secondary)] space-y-2">
               <div><strong>Job ID:</strong> {id}</div>
-              <div><strong>API Endpoint:</strong> /api/jobs/{id}</div>
+              <div><strong>API Endpoint:</strong> /api/job/{id}</div>
               <div><strong>User:</strong> {user?.email || 'Not authenticated'}</div>
             </div>
 
@@ -426,9 +451,9 @@ export default function ResultsPage() {
                 <li>Go to the <strong>Upload</strong> page</li>
                 <li>Select your code files (Python, Java, C++, etc.)</li>
                 <li>Choose analysis settings</li>
-                <li>Click "Start Analysis"</li>
+                <li>Click &quot;Start Analysis&quot;</li>
                 <li>Wait for processing to complete</li>
-                <li>You'll be redirected to the results page automatically</li>
+                <li>You&apos;ll be redirected to the results page automatically</li>
               </ol>
             </div>
 
@@ -451,8 +476,8 @@ export default function ResultsPage() {
             <div className="text-xs text-[var(--text-muted)] bg-[var(--surface)] p-3 rounded border">
               <div className="font-semibold mb-1">Debug Information:</div>
               <div>Check the browser console (F12) for detailed error logs.</div>
-              <div>If you see "404 Not Found", the job ID doesn't exist.</div>
-              <div>If you see "401 Unauthorized", there may be authentication issues.</div>
+              <div>If you see &quot;404 Not Found&quot;, the job ID doesn&apos;t exist.</div>
+              <div>If you see &quot;401 Unauthorized&quot;, there may be authentication issues.</div>
             </div>
           </div>
         </div>
