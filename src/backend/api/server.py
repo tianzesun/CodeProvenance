@@ -5863,6 +5863,9 @@ def _run_moss_cli(submissions, pairs):
             with urllib.request.urlopen(f"{report_url}/") as response:
                 html = response.read().decode("utf-8", "ignore")
 
+            # Debug: log HTML content for troubleshooting
+            logger.info(f"MOSS HTML preview: {html[:500]}...")
+
             row_pattern = re.compile(
                 r'<TR><TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>\s*<TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>',
                 re.IGNORECASE,
@@ -5870,14 +5873,27 @@ def _run_moss_cli(submissions, pairs):
             path_to_filename = {
                 path: filename for filename, path in written_paths.items()
             }
-            for left_path, left_pct, right_path, right_pct in row_pattern.findall(html):
+
+            matches_found = row_pattern.findall(html)
+            logger.info(f"MOSS regex matches found: {len(matches_found)}")
+
+            for left_path, left_pct, right_path, right_pct in matches_found:
                 left_name = path_to_filename.get(left_path)
                 right_name = path_to_filename.get(right_path)
                 if not left_name or not right_name:
                     continue
-                similarity = (float(left_pct) + float(right_pct)) / 200.0
-                score_by_pair[_pair_key(left_name, right_name)] = max(
-                    score_by_pair.get(_pair_key(left_name, right_name), 0.0),
+
+                left_pct_val = float(left_pct)
+                right_pct_val = float(right_pct)
+
+                # Use minimum as similarity score - represents guaranteed overlap
+                similarity = min(left_pct_val, right_pct_val) / 100.0
+
+                logger.info(f"MOSS pair: {left_name} ({left_pct_val}%) vs {right_name} ({right_pct_val}%) -> similarity: {similarity:.3f}")
+
+                pair_key = _pair_key(left_name, right_name)
+                score_by_pair[pair_key] = max(
+                    score_by_pair.get(pair_key, 0.0),
                     max(0.0, min(1.0, similarity)),
                 )
 

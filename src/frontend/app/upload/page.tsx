@@ -71,6 +71,14 @@ const FALLBACK_TOOL_OPTIONS = [
     status: 'Built in',
     engines: ['Winnowing'],
   },
+  {
+    id: 'moss',
+    name: 'MOSS',
+    desc: 'Stanford MOSS (Measure Of Software Similarity). Original command-line tool used by universities worldwide. Provides identical results to running moss.pl directly.',
+    available: true,
+    status: 'External Tool',
+    engines: ['MOSS'],
+  },
 ];
 
 const EXT_COLORS: Record<string, { bg: string; text: string }> = {
