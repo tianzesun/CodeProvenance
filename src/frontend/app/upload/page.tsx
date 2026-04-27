@@ -607,8 +607,9 @@ export default function UploadPage() {
               )}
             </div>
 
-            {/* Mode */}
-            <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+            {/* Mode - Only show for IntegrityDesk (assignment modes are specific to IntegrityDesk fusion engine) */}
+            {selectedToolIds.includes('integritydesk') && (
+              <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
               <div className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2.5">
@@ -713,6 +714,7 @@ export default function UploadPage() {
                 </div>
               </div>
             </div>
+            )}
           </div>
 
           {/* Ready Banner */}
