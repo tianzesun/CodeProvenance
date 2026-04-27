@@ -27,11 +27,18 @@ class ComparisonResult:
 
 
 def _risk_level(score: float) -> str:
-    if score >= 0.9:
+    """Convert similarity score to review priority level.
+
+    0-35%: low review priority
+    35-65%: moderate review priority
+    65-85%: high review priority
+    85%+: critical review priority, requires corroborating evidence
+    """
+    if score >= 0.85:
         return "CRITICAL"
-    elif score >= 0.75:
+    elif score >= 0.65:
         return "HIGH"
-    elif score >= 0.5:
+    elif score >= 0.35:
         return "MEDIUM"
     return "LOW"
 

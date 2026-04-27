@@ -9,10 +9,10 @@ class ArbitrationResult:
     engine_contributions: Dict[str, float]
     agreement_index: float
 
-class BayesianArbitrator:
+class PrecisionWeightedFuser:
     """
-    Statistical arbitration layer to combine multi-engine results.
-    Avoids 'metric inflation' by using a probabilistic consensus model.
+    Precision-weighted fusion layer to combine multi-engine similarity scores.
+    Uses reliability-based weighting to create a statistically robust consensus score.
     """
     
     def __init__(self, engine_prior_precisions: Optional[Dict[str, float]] = None):
@@ -25,7 +25,7 @@ class BayesianArbitrator:
             "winnowing": 2.0
         }
 
-    def arbitrate(self, engine_scores: Dict[str, float]) -> ArbitrationResult:
+    def fuse(self, engine_scores: Dict[str, float]) -> ArbitrationResult:
         """
         Perform Bayesian fusion of engine scores.
         Treats each score as a noisy observation of the 'true' similarity.
@@ -80,7 +80,7 @@ class ConsensusArbitrator:
     If engines disagree significantly, it penalizes the final score.
     """
     
-    def arbitrate(self, engine_scores: Dict[str, float]) -> float:
+    def fuse(self, engine_scores: Dict[str, float]) -> float:
         scores = list(engine_scores.values())
         if not scores:
             return 0.0

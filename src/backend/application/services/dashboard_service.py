@@ -5,11 +5,13 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Review priority levels based on similarity score thresholds
+# These represent investigation priority rather than absolute risk assessment
 RISK_LEVELS: list[tuple[float, str]] = [
-    (0.9, "CRITICAL"),
-    (0.75, "HIGH"),
-    (0.5, "MEDIUM"),
-    (0.0, "LOW"),
+    (0.85, "CRITICAL"),  # Requires corroborating evidence
+    (0.65, "HIGH"),      # High review priority
+    (0.35, "MEDIUM"),    # Moderate review priority
+    (0.0, "LOW"),        # Low review priority
 ]
 
 EXPLANATION_LABELS: Dict[str, str] = {

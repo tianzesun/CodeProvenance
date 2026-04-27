@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import yaml
 
-from src.backend.evaluation.arbitration import BayesianArbitrator
+from src.backend.evaluation.arbitration import PrecisionWeightedFuser
 from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
 from src.backend.engines.scoring.fusion_policy import (
     default_normalization_config,
@@ -173,7 +173,7 @@ class FusionEngine:
             self.weights = {k: v / total for k, v in self.weights.items()}
 
         multiplier = self._config["arbitration"]["prior_precision_multiplier"]
-        self._arbitrator = BayesianArbitrator(
+        self._fuser = PrecisionWeightedFuser(
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
 
@@ -475,7 +475,7 @@ class FusionEngine:
         features: "FeatureVector",
         weight_multipliers: Optional[Dict[str, float]] = None,
     ) -> FusedScore:
-        """Combine engine outputs into a single similarity score using Bayesian arbitration.
+        """Combine engine outputs into a single similarity score using precision-weighted fusion.
 
         Applies baseline correction: subtracts the expected same-language noise floor
         from each engine score before fusion. This prevents unrelated files from
@@ -510,7 +510,7 @@ class FusionEngine:
             corrected = max(0.0, score - baseline) / max(0.01, 1.0 - baseline)
             corrected_scores[name] = round(corrected, 4)
 
-        arbitration = self._arbitrator.arbitrate(corrected_scores)
+        arbitration = self._fuser.fuse(corrected_scores)
 
         final_score = arbitration.fused_score
 
@@ -548,6 +548,15 @@ class FusionEngine:
 
         concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
         lexical_engines = ("fingerprint", "winnowing", "ngram")
+
+        # AI detection cannot alone trigger high-severity outcomes
+        ai_score = corrected_scores.get("ai_detection", 0.0)
+        if ai_score >= evidence_threshold and final_score >= high_score_floor:
+            # If only AI detection is contributing to high score, cap it
+            non_ai_scores = {k: v for k, v in corrected_scores.items() if k != "ai_detection"}
+            max_non_ai = max(non_ai_scores.values()) if non_ai_scores else 0.0
+            if max_non_ai < evidence_threshold:
+                return min(final_score, cap)
         concrete_evidence = sum(
             1
             for name in concrete_engines
