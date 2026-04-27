@@ -4094,9 +4094,13 @@ async def _run_analysis(
     except json.JSONDecodeError:
         requested_engine_keys = []
 
-    engine_weights = _get_upload_engine_weights(
-        current_user.get("tenant_id"), [str(key) for key in requested_engine_keys]
-    )
+    # Use mode-specific weights if available, otherwise fall back to global settings
+    if mode.weights:
+        engine_weights = dict(mode.weights)
+    else:
+        engine_weights = _get_upload_engine_weights(
+            current_user.get("tenant_id"), [str(key) for key in requested_engine_keys]
+        )
     selected_engine_keys = [
         key for key, value in engine_weights.items() if _coerce_float(value) > 0
     ]
@@ -5980,6 +5984,7 @@ def _run_jplag_cli(submissions, pairs):
             if not csv_path.exists():
                 continue
 
+            logger.info(f"JPlag CSV output found at: {csv_path}")
             with csv_path.open(newline="", encoding="utf-8") as handle:
                 reader = csv.DictReader(handle)
                 for row in reader:
@@ -6057,6 +6062,7 @@ def _run_dolos_cli(submissions, pairs):
         if not pairs_path.exists():
             return {"pairs": []}
 
+        logger.info(f"Dolos CSV output found at: {pairs_path}")
         with pairs_path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
@@ -6161,6 +6167,7 @@ def _run_nicad_cli(submissions, pairs):
             if not xml_candidates:
                 continue
 
+            logger.info(f"NiCad XML output found at: {xml_candidates[0]}")
             tree = ET.parse(xml_candidates[0])
             root = tree.getroot()
             for class_node in root.findall("class"):
@@ -6254,6 +6261,7 @@ def _run_pmd_cli(submissions, pairs):
             if len(output_lines) <= 1:
                 continue
 
+            logger.info(f"PMD CPD found {len(output_lines)} output lines")
             path_to_filename = {
                 path: filename for filename, path in written_paths.items()
             }
