@@ -40,7 +40,7 @@ const HOME_CARD_DEFAULT_ORDER = [
   'upload-zip',
   'settings',
 ];
-const HOME_CARD_OPTIONAL_ORDER = ['benchmark-suite', 'admin-console'];
+const HOME_CARD_OPTIONAL_ORDER = ['compare-tools', 'benchmark-suite', 'admin-console'];
 const REVIEW_STATUS_LABELS = {
   unreviewed: 'Unreviewed',
   needs_review: 'Needs Review',
@@ -203,7 +203,7 @@ export default function Home() {
   const longPressTriggeredRef = useRef(false);
   const availableCardIds = user?.role === 'admin'
     ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
-    : HOME_CARD_DEFAULT_ORDER;
+    : [...HOME_CARD_DEFAULT_ORDER, 'compare-tools'];
   const optionalCardIds = availableCardIds.filter((id) => !HOME_CARD_DEFAULT_ORDER.includes(id));
 
   const fetchJobs = useCallback(async () => {
@@ -608,14 +608,27 @@ export default function Home() {
     },
     'benchmark-suite': {
       id: 'benchmark-suite',
-      label: 'Benchmark suite',
+      label: 'IntegrityDesk benchmark',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/benchmark"
           icon={BarChart3}
-          title="Open benchmark suite"
-          description="Compare detection engines, review score patterns, and export benchmark reports."
+          title="Open IntegrityDesk benchmark"
+          description="Admin-only benchmark workspace for tuning IntegrityDesk on labeled data."
+        />
+      ),
+    },
+    'compare-tools': {
+      id: 'compare-tools',
+      label: 'Compare tools',
+      className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
+      content: (
+        <ActionCard
+          href="/compare-tools"
+          icon={BarChart3}
+          title="Compare against other tools"
+          description="Show how IntegrityDesk performs against MOSS, JPlag, Dolos, and other detectors."
         />
       ),
     },

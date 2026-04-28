@@ -48,12 +48,17 @@ export default function Sidebar() {
       label: 'Settings',
       icon: Settings,
     },
+    {
+      href: '/compare-tools',
+      label: 'Compare Tools',
+      icon: BarChart3,
+    },
     ...(user?.role === 'admin'
       ? [
         {
           href: '/benchmark',
           label: 'Benchmark',
-          icon: BarChart3,
+          icon: Database,
         },
         {
           href: '/datasets',

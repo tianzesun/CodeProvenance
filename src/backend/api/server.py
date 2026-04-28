@@ -5178,11 +5178,12 @@ async def run_benchmark(
     logger.info(
         f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}"
     )
-    benchmark_type = (
-        benchmark_type
-        if benchmark_type in {"pan_optimization", "regression_test"}
-        else "tool_comparison"
-    )
+    normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
+    benchmark_type = normalized_protocol["benchmark_type"]
+    protocol = normalized_protocol["protocol"]
+    threshold_policy = normalized_protocol["threshold_policy"]
+    optimization_objective = normalized_protocol["optimization_objective"]
+    report_type = normalized_protocol["report_type"]
 
     if benchmark_type in {"pan_optimization", "regression_test"}:
         dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
@@ -5490,6 +5491,10 @@ async def run_benchmark(
             "optimization_method": "Threshold sweep over 17 cutoffs, maximizing F1; PlagDet reported as primary PAN score",
         },
         "benchmark_type": benchmark_type,
+        "protocol": protocol,
+        "threshold_policy": threshold_policy,
+        "optimization_objective": optimization_objective,
+        "report_type": report_type,
         "benchmark_goal": (
             "admin_pan_optimization"
             if benchmark_type == "pan_optimization"
@@ -5586,6 +5591,51 @@ REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
         "reason": "False accusations must stay rare.",
     },
 }
+
+
+def _normalize_benchmark_protocol(benchmark_type: str) -> Dict[str, str]:
+    """Normalize legacy benchmark types into clearer product protocol metadata."""
+    benchmark_type_aliases = {
+        "development": "pan_optimization",
+        "development_evaluation": "pan_optimization",
+        "calibration": "pan_optimization",
+        "pan_optimization": "pan_optimization",
+        "release": "regression_test",
+        "release_check": "regression_test",
+        "regression": "regression_test",
+        "regression_test": "regression_test",
+        "comparison": "tool_comparison",
+        "tool_comparison": "tool_comparison",
+    }
+    normalized_benchmark_type = benchmark_type_aliases.get(
+        benchmark_type, "tool_comparison"
+    )
+
+    if normalized_benchmark_type == "pan_optimization":
+        return {
+            "benchmark_type": normalized_benchmark_type,
+            "protocol": "development_evaluation",
+            "threshold_policy": "optimize_on_calibration",
+            "optimization_objective": "f1",
+            "report_type": "development_evaluation_report",
+        }
+
+    if normalized_benchmark_type == "regression_test":
+        return {
+            "benchmark_type": normalized_benchmark_type,
+            "protocol": "release_check",
+            "threshold_policy": "locked_threshold",
+            "optimization_objective": "fixed_threshold_guard",
+            "report_type": "release_check_report",
+        }
+
+    return {
+        "benchmark_type": "tool_comparison",
+        "protocol": "tool_comparison",
+        "threshold_policy": "per_tool_scores",
+        "optimization_objective": "comparative_analysis",
+        "report_type": "tool_comparison_report",
+    }
 
 
 def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:

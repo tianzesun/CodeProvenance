@@ -97,6 +97,35 @@ def test_regression_quality_gates_fail_on_low_precision() -> None:
     assert failed == {"precision", "f1_score", "false_positive_rate"}
 
 
+def test_normalize_benchmark_protocol_supports_new_product_names() -> None:
+    """Protocol normalization should accept the new product-facing mode names."""
+    development = server._normalize_benchmark_protocol("development")
+    release = server._normalize_benchmark_protocol("release_check")
+    comparison = server._normalize_benchmark_protocol("comparison")
+
+    assert development == {
+        "benchmark_type": "pan_optimization",
+        "protocol": "development_evaluation",
+        "threshold_policy": "optimize_on_calibration",
+        "optimization_objective": "f1",
+        "report_type": "development_evaluation_report",
+    }
+    assert release == {
+        "benchmark_type": "regression_test",
+        "protocol": "release_check",
+        "threshold_policy": "locked_threshold",
+        "optimization_objective": "fixed_threshold_guard",
+        "report_type": "release_check_report",
+    }
+    assert comparison == {
+        "benchmark_type": "tool_comparison",
+        "protocol": "tool_comparison",
+        "threshold_policy": "per_tool_scores",
+        "optimization_objective": "comparative_analysis",
+        "report_type": "tool_comparison_report",
+    }
+
+
 def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
     """Dataset cards should only expose benchmark-runnable labeled pair datasets."""
 
