@@ -1057,7 +1057,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 }
 
 // ── Step 3: Run ───────────────────────────────────────────────────────────
-function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, onBack, onComplete }) {
+function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, onBack, onComplete }) {
   const { token } = useAuth();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
@@ -1069,6 +1069,11 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
   const hasZipUpload = files.some(f => f.name?.toLowerCase().endsWith('.zip'));
+  const benchmarkType = benchmarkMode === 'calibration'
+    ? 'pan_optimization'
+    : benchmarkMode === 'regression'
+      ? 'regression_test'
+      : 'tool_comparison';
 
   const run = async () => {
     requestControllerRef.current?.abort();
@@ -1092,7 +1097,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             const formData = new FormData();
             formData.append('files', new File([blobA], `${tc.id}_a.py`));
             formData.append('files', new File([blobB], `${tc.id}_b.py`));
-            formData.append('benchmark_type', 'tool_comparison');
+            formData.append('benchmark_type', benchmarkType);
             if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
             selectedTools.forEach(t => formData.append('tools', t));
             try {
@@ -1114,9 +1119,9 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           const formData = new FormData();
           selectedTools.forEach(t => formData.append('tools', t));
           formData.append('dataset', activeDataset.id);
-          formData.append('benchmark_type', 'tool_comparison');
+          formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-          setProgress('Running benchmark analysis…');
+          setProgress(benchmarkType === 'pan_optimization' ? 'Running calibration analysis…' : benchmarkType === 'regression_test' ? 'Running regression test…' : 'Running benchmark analysis…');
           setProgressPct(50);
           const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
           setProgressPct(100);
@@ -1128,10 +1133,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         setProgressPct(20);
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
-        formData.append('benchmark_type', 'tool_comparison');
+        formData.append('benchmark_type', benchmarkType);
         if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
-        setProgress('Running analysis across all tools…');
+        setProgress(benchmarkType === 'pan_optimization' ? 'Running calibration analysis…' : benchmarkType === 'regression_test' ? 'Running regression test…' : 'Running analysis across all tools…');
         setProgressPct(50);
         const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
         setProgressPct(100);
@@ -1236,7 +1241,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
 }
 
 // ── Step 4: Report ────────────────────────────────────────────────────────
-function ReportStep({ results, onRestart }) {
+function ReportStep({ results, onRestart, benchmarkMode }) {
   // FIX #9: use pair identity string as expanded key, not page-relative index
   const [expandedPairs, setExpandedPairs] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -1307,10 +1312,17 @@ function ReportStep({ results, onRestart }) {
         top10Retrieval: Number(metrics.top_10_retrieval || 0),
         top20Retrieval: Number(metrics.top_20_retrieval || 0),
         avgRuntimeSeconds: Number(metrics.avg_runtime_seconds ?? toolScoreMeta.avg_runtime_seconds ?? 0),
+        nPositives: Number(metrics.n_positives || 0),
+        nNegatives: Number(metrics.n_negatives || 0),
         engineContribution: metrics.engine_contribution || {},
         engineContributionText: formatEngineContribution(metrics.engine_contribution || {}),
         scoreDiagnostics: metrics.score_diagnostics || {},
         threshold: metrics.best_threshold,
+        fixedThreshold: metrics.fixed_threshold,
+        fixedThresholdMetrics: metrics.fixed_threshold_metrics || {},
+        confidenceIntervals: metrics.confidence_intervals || {},
+        splitProtocol: metrics.split_protocol || {},
+        metricIntegrity: metrics.metric_integrity || {},
       };
     }).sort((a, b) => b.plagdet - a.plagdet);
 
@@ -1319,6 +1331,14 @@ function ReportStep({ results, onRestart }) {
   const productPanResult = integrityDeskPanResult || topPanResult;
   const panFeedback = buildPanFeedback(productPanResult);
   const panMetricDiagnostics = buildPanMetricDiagnostics(productPanResult);
+  const isCalibrationReport = benchmarkMode === 'calibration'
+    || results.benchmark_type === 'pan_optimization'
+    || results.benchmarkMode === 'pan_optimization'
+    || results.benchmark_goal === 'admin_pan_optimization';
+  const isRegressionReport = benchmarkMode === 'regression'
+    || results.benchmark_type === 'regression_test'
+    || results.benchmark_goal === 'locked_regression_test';
+  const isFocusedMetricReport = isCalibrationReport || isRegressionReport;
 
   const toolFailureRows = Object.entries(results.tool_scores || {})
     .filter(([, meta]) => meta?.error)
@@ -1394,6 +1414,21 @@ function ReportStep({ results, onRestart }) {
     { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
     { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Leading Tool', value: leadingTool?.name || 'N/A' },
   ];
+  const calibrationSummaryCards = productPanResult ? [
+    { icon: Trophy, bg: 'bg-blue-50', color: 'text-blue-600', label: 'PlagDet', value: `${(productPanResult.plagdet * 100).toFixed(1)}%` },
+    { icon: CheckCircle2, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'F1 Score', value: `${(productPanResult.f1Score * 100).toFixed(1)}%` },
+    { icon: Target, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Precision', value: `${(productPanResult.precision * 100).toFixed(1)}%` },
+    { icon: AlertCircle, bg: 'bg-rose-50', color: 'text-rose-600', label: 'False Positive Rate', value: `${(productPanResult.falsePositiveRate * 100).toFixed(1)}%` },
+  ] : [];
+  const reportSummaryCards = isFocusedMetricReport && calibrationSummaryCards.length
+    ? calibrationSummaryCards
+    : summaryCards;
+  const metricIntegrity = productPanResult?.metricIntegrity || {};
+  const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
+  const confidenceIntervals = productPanResult?.confidenceIntervals || {};
+  const splitProtocol = productPanResult?.splitProtocol || {};
+  const metricWarnings = metricIntegrity.warnings || [];
+  const qualityGates = results.quality_gates || null;
 
   return (
     <div className="space-y-6">
@@ -1404,7 +1439,7 @@ function ReportStep({ results, onRestart }) {
             <FileText size={20} className="text-violet-600" />
           </div>
           <div>
-            <p className="font-bold text-violet-900">{results.datasetName || 'Benchmark'} Report</p>
+            <p className="font-bold text-violet-900">{results.datasetName || 'Benchmark'} {isRegressionReport ? 'Regression Test Report' : isCalibrationReport ? 'Calibration Report' : 'Report'}</p>
             <p className="text-sm text-violet-600 mt-0.5">Generated {results.runAt ? new Date(results.runAt).toLocaleString() : 'just now'}</p>
           </div>
         </div>
@@ -1434,7 +1469,7 @@ function ReportStep({ results, onRestart }) {
       )}
 
       {/* Comparison delta banner */}
-      {comparison.has_previous && (
+      {!isFocusedMetricReport && comparison.has_previous && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1460,7 +1495,7 @@ function ReportStep({ results, onRestart }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {summaryCards.map(({ icon: Icon, bg, color, label, value }) => (
+        {reportSummaryCards.map(({ icon: Icon, bg, color, label, value }) => (
           <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
             <div className="flex items-center gap-3 mb-3">
               <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
@@ -1480,6 +1515,35 @@ function ReportStep({ results, onRestart }) {
           {toolFailureRows.map(f => (
             <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>
           ))}
+        </div>
+      )}
+
+      {isRegressionReport && qualityGates && (
+        <div className={`rounded-2xl border p-5 shadow-sm ${qualityGates.passed ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className={`font-semibold ${qualityGates.passed ? 'text-emerald-900' : 'text-red-900'}`}>Regression Quality Gates</h2>
+              <p className={`mt-1 text-sm ${qualityGates.passed ? 'text-emerald-700' : 'text-red-700'}`}>{qualityGates.summary}</p>
+            </div>
+            <span className={`rounded-full px-3 py-1 text-xs font-bold ${qualityGates.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+              {qualityGates.passed ? 'PASS' : 'FAIL'}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {(qualityGates.gates || []).map(gate => (
+              <div key={gate.metric} className="rounded-xl border border-white/70 bg-white/80 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{gate.label}</div>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${gate.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                    {gate.passed ? 'Pass' : 'Fail'}
+                  </span>
+                </div>
+                <div className="mt-2 text-2xl font-bold text-slate-900">{formatPanMetricValue({ value: gate.value })}</div>
+                <div className="mt-1 text-xs text-slate-500">{gate.direction === 'min' ? 'Minimum' : 'Maximum'} {formatPanMetricValue({ value: gate.threshold })}</div>
+                <div className="mt-3 text-xs leading-5 text-slate-500">{gate.reason}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1535,11 +1599,54 @@ function ReportStep({ results, onRestart }) {
               ))}
             </div>
           </div>
+
+          {isFocusedMetricReport && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100">
+                <h2 className="font-semibold text-slate-900">Benchmark Trust Notes</h2>
+                <p className="text-sm text-slate-500 mt-0.5">How to interpret this calibration run without overstating the result.</p>
+              </div>
+              <div className="grid gap-4 p-6 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Label Coverage</div>
+                  <div className="mt-3 text-sm leading-6 text-slate-600">
+                    {splitProtocol.holdout_positive_pairs ?? metricIntegrity.positive_pairs ?? productPanResult.nPositives ?? 0} positive pairs and {splitProtocol.holdout_negative_pairs ?? metricIntegrity.negative_pairs ?? productPanResult.nNegatives ?? 0} negative pairs were held out for PAN metrics.
+                  </div>
+                  <div className="mt-2 text-xs font-semibold text-slate-500">
+                    Protocol: {splitProtocol.protocol === 'deterministic_stratified_calibration_holdout' ? 'Stratified holdout' : 'Fallback, no holdout'}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold Check</div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-slate-500">Held-out F1</div>
+                      <div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.heldout_f1 ?? productPanResult.f1Score)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Fixed 0.50 F1</div>
+                      <div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.fixed_threshold_f1 ?? fixedThresholdMetrics.f1_score)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 text-xs leading-5 text-slate-500">
+                    {confidenceIntervals.available && confidenceIntervals.f1
+                      ? `95% bootstrap F1 CI: ${formatMetric(confidenceIntervals.f1.ci_lower)}-${formatMetric(confidenceIntervals.f1.ci_upper)}.`
+                      : 'Confidence interval unavailable for this run size.'}
+                  </div>
+                </div>
+              </div>
+              {metricWarnings.length > 0 && (
+                <div className="border-t border-amber-100 bg-amber-50 px-6 py-4 text-sm leading-6 text-amber-800">
+                  {metricWarnings.map(warning => <div key={warning}>{warning}</div>)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* Charts */}
-      {chartData.length > 0 && (
+      {!isFocusedMetricReport && chartData.length > 0 && (
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
@@ -1638,7 +1745,7 @@ function ReportStep({ results, onRestart }) {
       )}
 
       {/* FIX #2: Detailed pair results table — properly closed JSX structure */}
-      {(pair_results?.length || 0) > 0 && (
+      {!isFocusedMetricReport && (pair_results?.length || 0) > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>
@@ -1824,6 +1931,7 @@ export default function BenchmarkPage() {
                 <div className="mt-5 flex gap-1 border-b border-slate-200">
                   {[
                     { id: 'calibration', label: 'Calibration' },
+                    { id: 'regression', label: 'Regression Test' },
                     { id: 'comparison', label: 'Tool Comparison' },
                   ].map(tab => (
                     <button key={tab.id}
@@ -1880,6 +1988,7 @@ export default function BenchmarkPage() {
               files={files}
               benchmarkDatasets={benchmarkDatasets}
               selectedPreset={selectedPreset}
+              benchmarkMode={activeBenchmarkTab}
               onBack={() => setStep(1)}
               onComplete={data => {
                 setResults(data);
@@ -1888,7 +1997,7 @@ export default function BenchmarkPage() {
             />
           )}
           {step === 3 && results && (
-            <ReportStep results={results} onRestart={restart} />
+            <ReportStep results={results} onRestart={restart} benchmarkMode={activeBenchmarkTab} />
           )}
         </div>
       </div>

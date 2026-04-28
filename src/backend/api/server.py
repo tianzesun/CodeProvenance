@@ -109,6 +109,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-datasets",
     "/api/benchmark-tools",
     "/api/benchmark",
+    "/api/benchmark/export-pdf",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -528,6 +529,7 @@ def _dataset_default_language(dataset_id: str) -> str:
     """Return the default language for a known benchmark dataset."""
     return {
         "poj104": "mixed",
+        "poolc_600k_python": "python",
         "codesearchnet": "mixed",
         "codexglue_clone": "java",
         "codexglue_defect": "c",
@@ -536,6 +538,7 @@ def _dataset_default_language(dataset_id: str) -> str:
         "mbpp": "python",
         "kaggle_student_code": "python",
         "synthetic": "python",
+        "xiangtan": "java",
         "clough_stevenson_style": "python",
     }.get(dataset_id, "mixed")
 
@@ -633,6 +636,20 @@ def _infer_dataset_size_label(
         except OSError:
             pass
 
+    pairs_csv = dataset_dir / "pairs.csv"
+    if pairs_csv.exists():
+        try:
+            with pairs_csv.open("r", encoding="utf-8", newline="") as csv_file:
+                pair_count = max(0, sum(1 for _ in csv_file) - 1)
+            if pair_count > 0:
+                return f"{pair_count:,} labeled pairs"
+        except OSError:
+            pass
+
+    parquet_files = sorted((dataset_dir / "data").glob("*.parquet"))
+    if parquet_files:
+        return f"{len(parquet_files):,} parquet shard{'s' if len(parquet_files) != 1 else ''}"
+
     splits = dataset_info.get("splits") or {}
     if isinstance(splits, dict):
         train_info = splits.get("train") or next(iter(splits.values()), {})
@@ -659,6 +676,184 @@ def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
 
     raw_pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
     return [item for item in raw_pairs if isinstance(item, dict)]
+
+
+def _count_csv_binary_labels(
+    csv_path: PathLib, label_column: str = "Label"
+) -> tuple[int, int, int]:
+    """Count total, positive, and negative labels in a CSV pair manifest."""
+    if not csv_path.exists():
+        return 0, 0, 0
+
+    total = 0
+    positives = 0
+    negatives = 0
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                total += 1
+                if _label_to_clone_grade(row.get(label_column, 0)) >= 2:
+                    positives += 1
+                else:
+                    negatives += 1
+    except OSError:
+        return 0, 0, 0
+
+    return total, positives, negatives
+
+
+def _count_generated_pair_labels(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Count total, positive, and negative labels in a generated pair dataset."""
+    raw_pairs = _read_generated_pair_items(dataset_root)
+    positives = sum(
+        1
+        for pair in raw_pairs
+        if _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) >= 2
+    )
+    return len(raw_pairs), positives, len(raw_pairs) - positives
+
+
+def _has_loadable_huggingface_dataset(dataset_root: PathLib) -> bool:
+    """Return whether a HuggingFace dataset directory can be loaded locally."""
+    hf_path = dataset_root / "huggingface"
+    if not hf_path.exists():
+        return False
+
+    dataset_dict = _read_json_file(hf_path / "dataset_dict.json")
+    splits = dataset_dict.get("splits")
+    if isinstance(splits, list) and splits:
+        for split_name in splits:
+            split_dir = hf_path / str(split_name)
+            if not split_dir.exists():
+                return False
+            if not (split_dir / "state.json").exists():
+                return False
+            if not any(split_dir.glob("*.arrow")):
+                return False
+        return True
+
+    return (hf_path / "state.json").exists() and any(hf_path.glob("*.arrow"))
+
+
+def _build_benchmark_dataset_readiness(
+    dataset_id: str, dataset_root: PathLib
+) -> Dict[str, Any]:
+    """Describe whether a dataset should be visible as runnable in the dashboard."""
+    if dataset_id.startswith("demo_"):
+        original_dir = dataset_root / "original"
+        plagiarized_dir = dataset_root / "plagiarized"
+        runnable = original_dir.exists() and plagiarized_dir.exists()
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_demo_pairs",
+            "reason": (
+                "Demo dataset has original and plagiarized folders."
+                if runnable
+                else "Demo dataset is missing original or plagiarized files."
+            ),
+        }
+
+    if dataset_id in BUILTIN_PAIR_DATASET_IDS:
+        runnable = _builtin_pair_dataset_path(dataset_id).exists()
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_fixture",
+            "reason": (
+                "Built-in labeled fixture is available."
+                if runnable
+                else "Built-in labeled fixture is missing."
+            ),
+        }
+
+    if (dataset_root / "generated_pairs.jsonl").exists():
+        total, positives, negatives = _count_generated_pair_labels(dataset_root)
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "needs_positive_and_negative_pairs",
+            "reason": f"{positives} positive and {negatives} negative labeled pairs.",
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
+        }
+
+    if dataset_id == "kaggle_student_code":
+        total, positives, negatives = _count_csv_binary_labels(
+            dataset_root / "cheating_dataset.csv"
+        )
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_labeled_csv",
+            "reason": f"{positives} positive and {negatives} negative labeled pairs.",
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
+        }
+
+    if dataset_id == "xiangtan":
+        pairs_csv = dataset_root / "pairs.csv"
+        source_dir = dataset_root / "source"
+        positive_pairs = (
+            max(0, sum(1 for _ in pairs_csv.open()) - 1) if pairs_csv.exists() else 0
+        )
+        source_files = list(source_dir.rglob("*.java")) if source_dir.exists() else []
+        runnable = positive_pairs > 0 and len(source_files) >= 4
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_xiangtan_sources",
+            "reason": (
+                f"{positive_pairs} positive pairs plus generated negative pairs."
+                if runnable
+                else "Xiangtan needs pairs.csv and Java source files."
+            ),
+            "pair_count": positive_pairs,
+            "positive_pairs": positive_pairs,
+        }
+
+    if dataset_id == "poj104":
+        runnable = _has_loadable_huggingface_dataset(dataset_root)
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "incomplete_huggingface_dataset",
+            "reason": (
+                "POJ-104 HuggingFace dataset is loadable."
+                if runnable
+                else "POJ-104 HuggingFace dataset is incomplete or missing."
+            ),
+        }
+
+    if dataset_id == "poolc_600k_python":
+        parquet_files = sorted((dataset_root / "data").glob("*.parquet"))
+        runnable = bool(parquet_files)
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_parquet_shards",
+            "reason": (
+                f"{len(parquet_files)} local parquet shard(s) available."
+                if runnable
+                else "PoolC needs at least one local parquet shard."
+            ),
+        }
+
+    if dataset_id == "codexglue_clone":
+        runnable = _has_loadable_huggingface_dataset(dataset_root)
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "incomplete_huggingface_dataset",
+            "reason": (
+                "CodeXGLUE clone dataset is loadable."
+                if runnable
+                else "CodeXGLUE clone dataset is incomplete; download all splits first."
+            ),
+        }
+
+    return {
+        "runnable": False,
+        "status": "unsupported_dataset_layout",
+        "reason": "No labeled pair loader is available for this dataset layout.",
+    }
 
 
 def _build_benchmark_quality_certificate(
@@ -1793,10 +1988,14 @@ def _load_pair_labeled_benchmark_dataset(
         return _load_synthetic_pair_dataset(dataset_root, target_dir)
     if dataset_id == "kaggle_student_code":
         return _load_kaggle_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "xiangtan":
+        return _load_xiangtan_pair_dataset(dataset_root, target_dir)
     if dataset_id == "codexglue_clone":
         return _load_codexglue_pair_dataset(dataset_root, target_dir)
     if dataset_id == "poj104":
         return _load_poj104_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "poolc_600k_python":
+        return _load_poolc_pair_dataset(dataset_root, target_dir)
     return {}, []
 
 
@@ -1884,6 +2083,97 @@ def _load_kaggle_pair_dataset(
     return submissions, explicit_pairs
 
 
+def _load_xiangtan_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load Xiangtan-style Java clone pairs and generate matched negatives."""
+    pairs_csv = dataset_root / "pairs.csv"
+    source_dir = dataset_root / "source"
+    if not pairs_csv.exists() or not source_dir.exists():
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    positive_originals: List[PathLib] = []
+
+    with pairs_csv.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for idx, row in enumerate(reader):
+            if idx >= PAIR_BENCHMARK_MAX_PAIRS // 2:
+                break
+
+            clone_type = str(row.get("clone_type", "")).strip()
+            type_dir = source_dir / clone_type if clone_type else source_dir
+            source_a = type_dir / str(row.get("file1", ""))
+            source_b = type_dir / str(row.get("file2", ""))
+            if not source_a.exists() or not source_b.exists():
+                continue
+
+            pair_id = f"xiangtan_pos_{idx:05d}"
+            file_a = _write_pair_submission(
+                submissions,
+                target_dir,
+                f"{pair_id}_a.java",
+                source_a.read_text(encoding="utf-8", errors="ignore"),
+            )
+            file_b = _write_pair_submission(
+                submissions,
+                target_dir,
+                f"{pair_id}_b.java",
+                source_b.read_text(encoding="utf-8", errors="ignore"),
+            )
+            positive_originals.append(source_a)
+            explicit_pairs.append(
+                {
+                    "file_a": file_a,
+                    "file_b": file_b,
+                    "label": _label_to_clone_grade(1, clone_type.replace("T", "")),
+                    "case_category": "true_positive",
+                    "split": "test",
+                }
+            )
+
+    unique_originals = list(dict.fromkeys(positive_originals))
+    target_negative_count = min(len(explicit_pairs), PAIR_BENCHMARK_MAX_PAIRS // 2)
+    negative_count = 0
+    for left_index, source_a in enumerate(unique_originals):
+        if negative_count >= target_negative_count:
+            break
+        for source_b in unique_originals[left_index + 1 :]:
+            if negative_count >= target_negative_count:
+                break
+            if source_a.stem.replace("_original", "") == source_b.stem.replace(
+                "_original", ""
+            ):
+                continue
+
+            pair_id = f"xiangtan_neg_{negative_count:05d}"
+            file_a = _write_pair_submission(
+                submissions,
+                target_dir,
+                f"{pair_id}_a.java",
+                source_a.read_text(encoding="utf-8", errors="ignore"),
+            )
+            file_b = _write_pair_submission(
+                submissions,
+                target_dir,
+                f"{pair_id}_b.java",
+                source_b.read_text(encoding="utf-8", errors="ignore"),
+            )
+            explicit_pairs.append(
+                {
+                    "file_a": file_a,
+                    "file_b": file_b,
+                    "label": 0,
+                    "case_category": "true_negative",
+                    "split": "test",
+                }
+            )
+            negative_count += 1
+
+    return submissions, explicit_pairs
+
+
 def _load_codexglue_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
@@ -1905,6 +2195,58 @@ def _load_codexglue_pair_dataset(
         label_key="label",
         extension="java",
     )
+
+
+def _load_poolc_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced sample from local PoolC Python clone-detection shards."""
+    parquet_files = sorted((dataset_root / "data").glob("*.parquet"))
+    if not parquet_files:
+        return {}, []
+
+    import pyarrow.parquet as pq
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
+    counts = {0: 0, 1: 0}
+
+    for parquet_file in parquet_files:
+        table = pq.ParquetFile(parquet_file)
+        for batch in table.iter_batches(
+            batch_size=1024, columns=["code1", "code2", "similar"]
+        ):
+            rows = batch.to_pylist()
+            for item in rows:
+                binary_label = 1 if bool(item.get("similar")) else 0
+                if counts[binary_label] >= target_per_class:
+                    if all(value >= target_per_class for value in counts.values()):
+                        return submissions, explicit_pairs
+                    continue
+
+                code_a = str(item.get("code1", ""))
+                code_b = str(item.get("code2", ""))
+                if not code_a.strip() or not code_b.strip():
+                    continue
+
+                pair_id = f"poolc_{len(explicit_pairs):06d}"
+                file_a = _write_pair_submission(
+                    submissions, target_dir, f"{pair_id}_a.py", code_a
+                )
+                file_b = _write_pair_submission(
+                    submissions, target_dir, f"{pair_id}_b.py", code_b
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "label": 3 if binary_label else 0,
+                    }
+                )
+                counts[binary_label] += 1
+
+    return submissions, explicit_pairs
 
 
 def _load_hf_binary_pair_rows(
@@ -1952,7 +2294,7 @@ def _load_hf_binary_pair_rows(
 def _load_poj104_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
-    """Create same-problem positive and different-problem negative POJ-104 pairs."""
+    """Create balanced same-problem and different-problem POJ-104 pairs."""
     hf_path = dataset_root / "huggingface"
     if not hf_path.exists():
         return {}, []
@@ -1960,53 +2302,67 @@ def _load_poj104_pair_dataset(
     from datasets import load_from_disk
 
     dataset = load_from_disk(str(hf_path))
-    split = dataset["test"] if "test" in dataset else next(iter(dataset.values()))
     by_label: Dict[str, List[Dict[str, Any]]] = {}
-    for item in split:
-        by_label.setdefault(str(item.get("label")), []).append(item)
+    preferred_splits = [
+        name for name in ("test", "validation", "train") if name in dataset
+    ]
+    for split_name in preferred_splits or list(dataset.keys()):
+        for item in dataset[split_name]:
+            by_label.setdefault(str(item.get("label")), []).append(item)
 
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
-    labels = [label for label, items in by_label.items() if len(items) >= 2]
+    labels = sorted(label for label, items in by_label.items() if len(items) >= 2)
     target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
 
-    for idx, label in enumerate(labels):
-        if (
-            len([pair for pair in explicit_pairs if pair["label"] >= 2])
-            >= target_per_class
-        ):
-            break
-        a, b = by_label[label][0], by_label[label][1]
-        pair_id = f"poj104_pos_{idx:05d}"
-        file_a = _write_pair_submission(
-            submissions, target_dir, f"{pair_id}_a.c", str(a.get("code", ""))
-        )
-        file_b = _write_pair_submission(
-            submissions, target_dir, f"{pair_id}_b.c", str(b.get("code", ""))
-        )
-        explicit_pairs.append({"file_a": file_a, "file_b": file_b, "label": 3})
+    positive_count = 0
+    while positive_count < target_per_class:
+        made_progress = False
+        for label in labels:
+            if positive_count >= target_per_class:
+                break
+            items = by_label[label]
+            pair_offset = positive_count // max(1, len(labels))
+            left_index = (pair_offset * 2) % len(items)
+            right_index = (left_index + 1) % len(items)
+            if left_index == right_index:
+                continue
 
-    negative_count = 0
-    for idx in range(max(0, len(labels) - 1)):
-        if negative_count >= target_per_class:
+            a, b = items[left_index], items[right_index]
+            pair_id = f"poj104_pos_{positive_count:05d}"
+            file_a = _write_pair_submission(
+                submissions, target_dir, f"{pair_id}_a.c", str(a.get("code", ""))
+            )
+            file_b = _write_pair_submission(
+                submissions, target_dir, f"{pair_id}_b.c", str(b.get("code", ""))
+            )
+            explicit_pairs.append({"file_a": file_a, "file_b": file_b, "label": 3})
+            positive_count += 1
+            made_progress = True
+        if not made_progress:
             break
-        left_label = labels[idx]
-        right_label = labels[idx + 1]
-        pair_id = f"poj104_neg_{idx:05d}"
+
+    for negative_count in range(target_per_class if len(labels) >= 2 else 0):
+        left_label = labels[negative_count % len(labels)]
+        right_label = labels[(negative_count + 1) % len(labels)]
+        left_items = by_label[left_label]
+        right_items = by_label[right_label]
+        left_item = left_items[negative_count % len(left_items)]
+        right_item = right_items[negative_count % len(right_items)]
+        pair_id = f"poj104_neg_{negative_count:05d}"
         file_a = _write_pair_submission(
             submissions,
             target_dir,
             f"{pair_id}_a.c",
-            str(by_label[left_label][0].get("code", "")),
+            str(left_item.get("code", "")),
         )
         file_b = _write_pair_submission(
             submissions,
             target_dir,
             f"{pair_id}_b.c",
-            str(by_label[right_label][0].get("code", "")),
+            str(right_item.get("code", "")),
         )
         explicit_pairs.append({"file_a": file_a, "file_b": file_b, "label": 0})
-        negative_count += 1
 
     return submissions, explicit_pairs
 
@@ -4698,6 +5054,15 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
             if metadata.get("exclude_from_benchmark"):
                 continue
 
+            readiness = _build_benchmark_dataset_readiness(dataset_id, item)
+            if not readiness.get("runnable"):
+                logger.debug(
+                    "Hiding benchmark dataset %s: %s",
+                    dataset_id,
+                    readiness.get("reason", "not runnable"),
+                )
+                continue
+
             # Determine if this is a demo dataset
             is_demo = dataset_id.startswith("demo_")
             dataset_dir = _resolve_benchmark_dataset_dir(dataset_id) or item
@@ -4736,6 +5101,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 "created_at": metadata.get("created", metadata.get("created_at", "")),
                 "is_demo": is_demo,
                 "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, item),
+                "benchmark_availability": readiness,
             }
             benchmark_quality = _build_benchmark_quality_certificate(item)
             if benchmark_quality:
@@ -4756,6 +5122,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
         if not metadata:
             continue
         dataset_root = BENCHMARK_DATA_DIR / dataset_id
+        readiness = _build_benchmark_dataset_readiness(dataset_id, dataset_root)
         benchmark_quality = _build_benchmark_quality_certificate(dataset_root)
         dataset_record = {
             "id": dataset_id,
@@ -4778,6 +5145,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
             "has_ground_truth": _dataset_has_pair_ground_truth(
                 dataset_id, dataset_root
             ),
+            "benchmark_availability": readiness,
         }
         if benchmark_quality:
             dataset_record["benchmark_quality"] = benchmark_quality
@@ -4788,26 +5156,9 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
 
 def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bool:
     """Return true when a dataset can support pair-level benchmark metrics."""
-    if dataset_id.startswith("demo_"):
-        return (dataset_root / "original").exists() and (
-            dataset_root / "plagiarized"
-        ).exists()
-    if (
-        dataset_id in BUILTIN_PAIR_DATASET_IDS
-        and _builtin_pair_dataset_path(dataset_id).exists()
-    ):
-        return True
-    if (dataset_root / "generated_pairs.jsonl").exists():
-        return (dataset_root / "generated_pairs.jsonl").exists()
-    if dataset_id == "kaggle_student_code":
-        return (dataset_root / "cheating_dataset.csv").exists()
-    if dataset_id in {"codexglue_clone", "poj104"}:
-        return (dataset_root / "huggingface" / "dataset_dict.json").exists()
-    if dataset_id.startswith("synthetic"):
-        has_original = any(dataset_root.glob("original_*"))
-        has_plagiarized = any(dataset_root.glob("plagiarized_*"))
-        return has_original and has_plagiarized
-    return (dataset_root / "ground_truth.json").exists()
+    return bool(
+        _build_benchmark_dataset_readiness(dataset_id, dataset_root).get("runnable")
+    )
 
 
 @app.post("/api/benchmark")
@@ -4828,12 +5179,12 @@ async def run_benchmark(
         f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}"
     )
     benchmark_type = (
-        "pan_optimization"
-        if benchmark_type == "pan_optimization"
+        benchmark_type
+        if benchmark_type in {"pan_optimization", "regression_test"}
         else "tool_comparison"
     )
 
-    if benchmark_type == "pan_optimization":
+    if benchmark_type in {"pan_optimization", "regression_test"}:
         dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
         has_labeled_ground_truth = bool(
             dataset
@@ -5068,6 +5419,11 @@ async def run_benchmark(
                     dataset or "custom",
                     tool_timings.get(tool_name, 0.0),
                     _compute_engine_contribution(tool_data.get("pairs", [])),
+                    threshold_strategy=(
+                        "fixed_threshold"
+                        if benchmark_type == "regression_test"
+                        else "calibration_holdout"
+                    ),
                 )
                 evaluation_results[tool_name] = metrics
 
@@ -5137,7 +5493,11 @@ async def run_benchmark(
         "benchmark_goal": (
             "admin_pan_optimization"
             if benchmark_type == "pan_optimization"
-            else "professor_tool_comparison"
+            else (
+                "locked_regression_test"
+                if benchmark_type == "regression_test"
+                else "professor_tool_comparison"
+            )
         ),
         "has_ground_truth": bool(ground_truth_labels),
     }
@@ -5148,6 +5508,10 @@ async def run_benchmark(
     if evaluation_results:
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
+        if benchmark_type == "regression_test":
+            response["quality_gates"] = _build_regression_quality_gates(
+                evaluation_results.get("integritydesk") or {}
+            )
 
     response = _persist_benchmark_response(response)
     return JSONResponse(content=response)
@@ -5194,6 +5558,73 @@ def _get_ground_truth_labels(
     elif dataset == "codesearchnet":
         return []
     return []
+
+
+REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
+    "precision": {
+        "label": "Precision",
+        "min": 0.90,
+        "direction": "min",
+        "reason": "Clean pairs should rarely be flagged.",
+    },
+    "recall": {
+        "label": "Recall",
+        "min": 0.75,
+        "direction": "min",
+        "reason": "Known plagiarism should remain discoverable.",
+    },
+    "f1_score": {
+        "label": "F1 Score",
+        "min": 0.80,
+        "direction": "min",
+        "reason": "Precision and recall should stay balanced.",
+    },
+    "false_positive_rate": {
+        "label": "False Positive Rate",
+        "max": 0.05,
+        "direction": "max",
+        "reason": "False accusations must stay rare.",
+    },
+}
+
+
+def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Build pass/fail gates for fixed-threshold benchmark regression runs."""
+    if not metrics or metrics.get("error"):
+        return {
+            "passed": False,
+            "gates": [],
+            "summary": "No IntegrityDesk metrics available.",
+        }
+
+    gates = []
+    for metric_key, config in REGRESSION_QUALITY_GATE_THRESHOLDS.items():
+        value = _coerce_float(metrics.get(metric_key))
+        direction = str(config["direction"])
+        threshold = _coerce_float(
+            config.get("min") if direction == "min" else config.get("max")
+        )
+        passed = value >= threshold if direction == "min" else value <= threshold
+        gates.append(
+            {
+                "metric": metric_key,
+                "label": config["label"],
+                "value": round(value, 4),
+                "threshold": round(threshold, 4),
+                "direction": direction,
+                "passed": passed,
+                "reason": config["reason"],
+            }
+        )
+
+    passed_count = sum(1 for gate in gates if gate["passed"])
+    return {
+        "passed": passed_count == len(gates),
+        "passed_count": passed_count,
+        "total_count": len(gates),
+        "gates": gates,
+        "summary": f"{passed_count}/{len(gates)} quality gates passed.",
+    }
 
 
 def _get_ground_truth_basis(dataset: str) -> str:
@@ -5267,6 +5698,7 @@ def _compute_evaluation_metrics(
     dataset_name: str,
     runtime_seconds: float = 0.0,
     engine_contribution: Optional[Dict[str, float]] = None,
+    threshold_strategy: str = "calibration_holdout",
 ) -> Dict[str, Any]:
     """Compute PAN-aligned evaluation metrics for labeled benchmark pairs.
 
@@ -5284,61 +5716,54 @@ def _compute_evaluation_metrics(
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
-    # Find the PAN/PlagDet operating point. This endpoint is an optimization
-    # benchmark, so the threshold sweep must maximize F1/PlagDet instead of
-    # applying the stricter production precision target from engine settings.
-    best_threshold = 0.5
-    best_cm = None
-    best_candidate_key = None
-    sweep_thresholds = sorted(
-        {
-            round(float(threshold), 6)
-            for threshold in np.concatenate(
-                [
-                    np.linspace(0.05, 0.95, 91),
-                    scores_arr,
-                    np.maximum(0.0, scores_arr - 1e-6),
-                    np.minimum(1.0, scores_arr + 1e-6),
-                ]
-            )
-        }
+    split_protocol = _build_stratified_calibration_holdout_split(binary_labels)
+    threshold_indices = split_protocol["calibration_indices"]
+    evaluation_indices = split_protocol["holdout_indices"]
+    threshold_scores_arr = scores_arr[threshold_indices]
+    threshold_labels_arr = labels_arr[threshold_indices]
+    evaluation_scores_arr = scores_arr[evaluation_indices]
+    evaluation_labels_arr = labels_arr[evaluation_indices]
+
+    fixed_threshold = 0.5
+    normalized_threshold_strategy = (
+        "fixed_threshold"
+        if threshold_strategy == "fixed_threshold"
+        else "calibration_holdout"
     )
+    best_threshold = fixed_threshold
 
-    for threshold in sweep_thresholds:
-        preds = (scores_arr >= threshold).astype(int)
-
-        tp = np.sum((preds == 1) & (labels_arr == 1))
-        fp = np.sum((preds == 1) & (labels_arr == 0))
-        tn = np.sum((preds == 0) & (labels_arr == 0))
-        fn = np.sum((preds == 0) & (labels_arr == 1))
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0
+    if normalized_threshold_strategy == "calibration_holdout":
+        # Find the PAN/PlagDet operating point on the calibration slice only.
+        # Held-out metrics below are the trustworthy headline when a holdout exists.
+        best_candidate_key = None
+        sweep_thresholds = sorted(
+            {
+                round(float(threshold), 6)
+                for threshold in np.concatenate(
+                    [
+                        np.linspace(0.05, 0.95, 91),
+                        threshold_scores_arr,
+                        np.maximum(0.0, threshold_scores_arr - 1e-6),
+                        np.minimum(1.0, threshold_scores_arr + 1e-6),
+                    ]
+                )
+            }
         )
-        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
-        candidate = {
-            "threshold": float(threshold),
-            "precision": float(precision),
-            "recall": float(recall),
-            "f1": float(f1),
-            "false_positive_rate": float(false_positive_rate),
-            "cm": {"tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn)},
-        }
-        candidate_key = (
-            float(f1),
-            float(recall),
-            float(precision),
-            -float(false_positive_rate),
-            -float(threshold),
-        )
-        if best_candidate_key is None or candidate_key > best_candidate_key:
-            best_threshold = threshold
-            best_cm = candidate["cm"]
-            best_candidate_key = candidate_key
+
+        for threshold in sweep_thresholds:
+            candidate = _binary_metrics_at_threshold(
+                threshold_scores_arr, threshold_labels_arr, threshold
+            )
+            candidate_key = (
+                float(candidate["f1_score"]),
+                float(candidate["recall"]),
+                float(candidate["precision"]),
+                -float(candidate["false_positive_rate"]),
+                -float(threshold),
+            )
+            if best_candidate_key is None or candidate_key > best_candidate_key:
+                best_threshold = threshold
+                best_candidate_key = candidate_key
 
     # Compute ROC-AUC and PR-AUC
     try:
@@ -5355,30 +5780,39 @@ def _compute_evaluation_metrics(
         roc_auc = _compute_auc_fallback(scores_arr, labels_arr, "roc")
         pr_auc = _compute_auc_fallback(scores_arr, labels_arr, "pr")
 
-    precision = (
-        best_cm["tp"] / (best_cm["tp"] + best_cm["fp"])
-        if best_cm and (best_cm["tp"] + best_cm["fp"]) > 0
-        else 0
+    optimized_metrics = _binary_metrics_at_threshold(
+        threshold_scores_arr, threshold_labels_arr, best_threshold
     )
-    recall = (
-        best_cm["tp"] / (best_cm["tp"] + best_cm["fn"])
-        if best_cm and (best_cm["tp"] + best_cm["fn"]) > 0
-        else 0
+    evaluation_metrics = _binary_metrics_at_threshold(
+        evaluation_scores_arr, evaluation_labels_arr, best_threshold
     )
-    f1_score = (
-        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    )
+    precision = float(evaluation_metrics["precision"])
+    recall = float(evaluation_metrics["recall"])
+    f1_score = float(evaluation_metrics["f1_score"])
+    best_cm = evaluation_metrics["confusion_matrix"]
     granularity = 1.0
     plagdet = f1_score / math.log2(1 + granularity)
-    top_10_retrieval = _compute_top_k_precision(scores, binary_labels, k=10)
-    top_20_retrieval = _compute_top_k_precision(scores, binary_labels, k=20)
-    top_10_recall = _compute_top_k_recall(scores, binary_labels, k=10)
-    top_20_recall = _compute_top_k_recall(scores, binary_labels, k=20)
+    evaluation_scores = [float(score) for score in evaluation_scores_arr.tolist()]
+    evaluation_binary_labels = [int(label) for label in evaluation_labels_arr.tolist()]
+    top_10_retrieval = _compute_top_k_precision(
+        evaluation_scores, evaluation_binary_labels, k=10
+    )
+    top_20_retrieval = _compute_top_k_precision(
+        evaluation_scores, evaluation_binary_labels, k=20
+    )
+    top_10_recall = _compute_top_k_recall(
+        evaluation_scores, evaluation_binary_labels, k=10
+    )
+    top_20_recall = _compute_top_k_recall(
+        evaluation_scores, evaluation_binary_labels, k=20
+    )
     avg_runtime_seconds = runtime_seconds / max(1, len(scores))
-    false_positive_rate = (
-        best_cm["fp"] / (best_cm["fp"] + best_cm["tn"])
-        if best_cm and (best_cm["fp"] + best_cm["tn"]) > 0
-        else 0
+    false_positive_rate = float(evaluation_metrics["false_positive_rate"])
+    fixed_threshold_metrics = _binary_metrics_at_threshold(
+        evaluation_scores_arr, evaluation_labels_arr, fixed_threshold
+    )
+    confidence_intervals = _classification_confidence_intervals(
+        evaluation_scores, evaluation_binary_labels, float(best_threshold)
     )
     score_diagnostics = _build_score_diagnostics(scores_arr, labels_arr)
     calibration_curve = _build_threshold_calibration_points(
@@ -5390,14 +5824,26 @@ def _compute_evaluation_metrics(
         "line_number_conversion": "not_used_for_pair_level_benchmark",
         "granularity_handling": "pair_level_single_detection_per_true_pair",
         "weight_tuning_protocol": (
-            "This endpoint selects a reporting threshold on the evaluation set; "
-            "do not use the same run for final weight-tuning claims."
+            "Regression uses a fixed threshold. Calibration selects a threshold on "
+            "the calibration slice and reports headline metrics on the held-out slice."
         ),
         "external_score_calibration": (
             "External tools are evaluated independently; normalize or calibrate "
             "scores before combining them into fusion weights."
         ),
     }
+    metric_integrity = _build_metric_integrity_summary(
+        scores=scores,
+        labels=labels,
+        binary_labels=binary_labels,
+        best_threshold=float(best_threshold),
+        fixed_threshold=fixed_threshold,
+        optimized_metrics=optimized_metrics,
+        heldout_metrics=evaluation_metrics,
+        fixed_threshold_metrics=fixed_threshold_metrics,
+        split_protocol=split_protocol,
+        confidence_intervals=confidence_intervals,
+    )
     calibration_report = _build_calibration_report(float(best_threshold), "benchmark")
 
     return {
@@ -5407,6 +5853,14 @@ def _compute_evaluation_metrics(
         "n_positives": int(sum(binary_labels)),
         "n_negatives": int(len(binary_labels) - sum(binary_labels)),
         "best_threshold": round(best_threshold, 2),
+        "best_threshold_exact": round(float(best_threshold), 6),
+        "threshold_strategy": normalized_threshold_strategy,
+        "fixed_threshold": fixed_threshold,
+        "fixed_threshold_metrics": fixed_threshold_metrics,
+        "calibration_metrics": optimized_metrics,
+        "holdout_metrics": evaluation_metrics,
+        "split_protocol": split_protocol,
+        "confidence_intervals": confidence_intervals,
         "best_f1": round(f1_score, 4),
         "precision": round(precision, 4),
         "recall": round(recall, 4),
@@ -5430,6 +5884,7 @@ def _compute_evaluation_metrics(
         "score_diagnostics": score_diagnostics,
         "calibration_curve": calibration_curve,
         "calibration_report": calibration_report,
+        "metric_integrity": metric_integrity,
         "metric_assumptions": metric_assumptions,
         "pan_metrics": {
             "precision": round(precision, 4),
@@ -5447,8 +5902,173 @@ def _compute_evaluation_metrics(
             "ai_generated_recall": None,
             "avg_runtime_seconds": round(avg_runtime_seconds, 6),
             "score_diagnostics": score_diagnostics,
+            "metric_integrity": metric_integrity,
+            "confidence_intervals": confidence_intervals,
         },
         "granularity_basis": "pair_level_single_detection",
+    }
+
+
+def _binary_metrics_at_threshold(
+    scores_arr: np.ndarray, labels_arr: np.ndarray, threshold: float
+) -> Dict[str, Any]:
+    """Compute binary confusion metrics at a concrete decision threshold."""
+    preds = (scores_arr >= threshold).astype(int)
+    tp = int(np.sum((preds == 1) & (labels_arr == 1)))
+    fp = int(np.sum((preds == 1) & (labels_arr == 0)))
+    tn = int(np.sum((preds == 0) & (labels_arr == 0)))
+    fn = int(np.sum((preds == 0) & (labels_arr == 1)))
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1_score = (
+        2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    )
+    false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+    return {
+        "threshold": round(float(threshold), 6),
+        "precision": round(float(precision), 4),
+        "recall": round(float(recall), 4),
+        "f1_score": round(float(f1_score), 4),
+        "false_positive_rate": round(float(false_positive_rate), 4),
+        "confusion_matrix": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
+    }
+
+
+def _build_stratified_calibration_holdout_split(
+    binary_labels: List[int],
+) -> Dict[str, Any]:
+    """Create deterministic calibration and held-out indices with class balance."""
+    positive_indices = [
+        index for index, label in enumerate(binary_labels) if label == 1
+    ]
+    negative_indices = [
+        index for index, label in enumerate(binary_labels) if label == 0
+    ]
+    can_holdout = len(positive_indices) >= 2 and len(negative_indices) >= 2
+
+    if not can_holdout:
+        all_indices = list(range(len(binary_labels)))
+        return {
+            "protocol": "resubstitution_fallback",
+            "calibration_indices": all_indices,
+            "holdout_indices": all_indices,
+            "calibration_size": len(all_indices),
+            "holdout_size": len(all_indices),
+            "calibration_positive_pairs": len(positive_indices),
+            "calibration_negative_pairs": len(negative_indices),
+            "holdout_positive_pairs": len(positive_indices),
+            "holdout_negative_pairs": len(negative_indices),
+            "warning": (
+                "Need at least two positive and two negative pairs for a held-out split."
+            ),
+        }
+
+    calibration_indices: List[int] = []
+    holdout_indices: List[int] = []
+    for class_indices in (positive_indices, negative_indices):
+        split_at = max(1, len(class_indices) // 2)
+        calibration_indices.extend(class_indices[:split_at])
+        holdout_indices.extend(class_indices[split_at:])
+
+    calibration_indices = sorted(calibration_indices)
+    holdout_indices = sorted(holdout_indices)
+    calibration_labels = [binary_labels[index] for index in calibration_indices]
+    holdout_labels = [binary_labels[index] for index in holdout_indices]
+
+    return {
+        "protocol": "deterministic_stratified_calibration_holdout",
+        "calibration_indices": calibration_indices,
+        "holdout_indices": holdout_indices,
+        "calibration_size": len(calibration_indices),
+        "holdout_size": len(holdout_indices),
+        "calibration_positive_pairs": int(sum(calibration_labels)),
+        "calibration_negative_pairs": int(
+            len(calibration_labels) - sum(calibration_labels)
+        ),
+        "holdout_positive_pairs": int(sum(holdout_labels)),
+        "holdout_negative_pairs": int(len(holdout_labels) - sum(holdout_labels)),
+        "warning": "",
+    }
+
+
+def _classification_confidence_intervals(
+    scores: List[float], binary_labels: List[int], threshold: float
+) -> Dict[str, Any]:
+    """Return reproducible bootstrap confidence intervals for held-out metrics."""
+    if len(scores) < 2 or len(set(binary_labels)) < 2:
+        return {
+            "available": False,
+            "reason": "Need at least two held-out pairs spanning both classes.",
+        }
+
+    try:
+        from src.backend.evaluation.significance import bootstrap_confidence_interval
+
+        intervals = bootstrap_confidence_interval(
+            scores,
+            binary_labels,
+            threshold=threshold,
+            ci_level=0.95,
+            n_bootstrap=500,
+            seed=42,
+        )
+    except Exception as exc:
+        return {"available": False, "reason": str(exc)}
+
+    return {"available": True, "method": "bootstrap_percentile", **intervals}
+
+
+def _build_metric_integrity_summary(
+    scores: List[float],
+    labels: List[int],
+    binary_labels: List[int],
+    best_threshold: float,
+    fixed_threshold: float,
+    optimized_metrics: Dict[str, Any],
+    heldout_metrics: Dict[str, Any],
+    fixed_threshold_metrics: Dict[str, Any],
+    split_protocol: Dict[str, Any],
+    confidence_intervals: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Describe benchmark metric trust boundaries and validation checks."""
+    positive_count = int(sum(binary_labels))
+    negative_count = int(len(binary_labels) - positive_count)
+    warnings = []
+    if positive_count == 0 or negative_count == 0:
+        warnings.append("Metrics need both positive and negative labeled pairs.")
+    if split_protocol.get("protocol") == "resubstitution_fallback":
+        warnings.append(
+            str(split_protocol.get("warning") or "No held-out split available.")
+        )
+    if abs(best_threshold - fixed_threshold) > 1e-6:
+        warnings.append(
+            "Threshold was calibrated from labeled benchmark pairs; compare fixed-threshold "
+            "metrics and held-out confidence intervals before making release claims."
+        )
+
+    return {
+        "label_count_matches_score_count": len(scores) == len(labels),
+        "positive_pairs": positive_count,
+        "negative_pairs": negative_count,
+        "optimized_threshold": round(float(best_threshold), 6),
+        "fixed_threshold": round(float(fixed_threshold), 6),
+        "calibration_confusion_matrix": optimized_metrics.get("confusion_matrix", {}),
+        "heldout_confusion_matrix": heldout_metrics.get("confusion_matrix", {}),
+        "fixed_threshold_confusion_matrix": fixed_threshold_metrics.get(
+            "confusion_matrix", {}
+        ),
+        "calibration_f1": round(float(optimized_metrics.get("f1_score", 0.0)), 4),
+        "heldout_f1": round(float(heldout_metrics.get("f1_score", 0.0)), 4),
+        "fixed_threshold_f1": fixed_threshold_metrics.get("f1_score", 0.0),
+        "calibration_bias_warning": (
+            abs(best_threshold - fixed_threshold) > 1e-6
+            or split_protocol.get("protocol") == "resubstitution_fallback"
+        ),
+        "split_protocol": split_protocol,
+        "confidence_intervals": confidence_intervals,
+        "warnings": warnings,
     }
 
 
@@ -5893,7 +6513,9 @@ def _run_moss_cli(submissions, pairs):
                 # Use minimum as similarity score - represents guaranteed overlap
                 similarity = min(left_pct_val, right_pct_val) / 100.0
 
-                logger.info(f"MOSS pair: {left_name} ({left_pct_val}%) vs {right_name} ({right_pct_val}%) -> similarity: {similarity:.3f}")
+                logger.info(
+                    f"MOSS pair: {left_name} ({left_pct_val}%) vs {right_name} ({right_pct_val}%) -> similarity: {similarity:.3f}"
+                )
 
                 pair_key = _pair_key(left_name, right_name)
                 score_by_pair[pair_key] = max(
@@ -7652,7 +8274,7 @@ def _generate_committee_report(
 <td>{flagged_engines}/5</td>
 </tr>"""
 
-    html += f"""</tbody></table></div>
+    html += """</tbody></table></div>
 
 <div class="findings-section">
 <div class="section-title">Detailed Findings &amp; Evidence</div>"""
