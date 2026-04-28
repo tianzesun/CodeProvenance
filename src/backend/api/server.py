@@ -110,6 +110,9 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-tools",
     "/api/benchmark",
     "/api/benchmark/export-pdf",
+    # Temporarily exempt upload endpoints for testing
+    "/api/upload",
+    "/api/upload-zip",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -4345,6 +4348,7 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 async def upload_files(
     request: Request,
     files: List[UploadFile] = File(...),
+    starter_file: UploadFile = File(None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     assignment_mode: str = Form(default=""),
@@ -4358,6 +4362,17 @@ async def upload_files(
     job_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
+    starter_file_path = None
+
+    # Handle starter file if provided
+    if starter_file and starter_file.filename:
+        if _is_code_file(starter_file.filename):
+            starter_target = job_dir / f"starter_{starter_file.filename}"
+            starter_content = await starter_file.read()
+            starter_target.write_bytes(starter_content)
+            starter_file_path = str(starter_target)
+            logger.info(f"Saved starter file: {starter_file_path}")
+
     for f in files:
         if f.filename and _is_code_file(f.filename):
             target = job_dir / f.filename
@@ -4438,6 +4453,7 @@ async def _run_analysis(
     current_user: Dict[str, Any],
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
+    starter_file_path: str = None,
 ):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
 

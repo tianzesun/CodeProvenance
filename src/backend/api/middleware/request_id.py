@@ -96,7 +96,6 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             logger.exception(
                 "Request failed with exception: %s",
                 str(exc),
-                extra={"exc_info": exc},
             )
             raise
 

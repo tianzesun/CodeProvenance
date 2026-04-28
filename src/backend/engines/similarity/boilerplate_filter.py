@@ -31,6 +31,31 @@ class BoilerplateFilter:
         self.template_fingerprints: Set[str] = set()
         self.analyzer = DeepCodeAnalyzer()
         self.enabled = True
+
+        # Semantic file-type filtering to prevent inappropriate comparisons
+        self.config_file_types = {
+            'tailwind.config.js', 'tailwind.config.ts', 'tailwind.config.mjs',
+            'vite.config.js', 'vite.config.ts', 'vite.config.mjs',
+            'webpack.config.js', 'webpack.config.ts',
+            'babel.config.js', 'babel.config.json',
+            'tsconfig.json', 'package.json', 'package-lock.json', 'yarn.lock',
+            '.eslintrc.js', '.eslintrc.json', '.prettierrc',
+            'jest.config.js', 'jest.config.ts',
+            'next.config.js', 'next.config.ts',
+            'nuxt.config.js', 'nuxt.config.ts',
+            'vue.config.js',
+            'angular.json',
+            'svelte.config.js',
+            'rollup.config.js',
+            'snowpack.config.js',
+            'parcelrc', '.parcelrc',
+            'gulpfile.js', 'gruntfile.js',
+            'dockerfile', 'docker-compose.yml',
+            '.gitignore', '.gitattributes',
+            'readme.md', 'readme.txt',
+            'license', 'license.md', 'license.txt',
+            'changelog.md', 'contributing.md'
+        }
         
     def add_template(self, parsed_code: Dict[str, Any]) -> None:
         """
@@ -52,6 +77,108 @@ class BoilerplateFilter:
         # Add structure fingerprint
         if analysis.get('structure_fingerprint'):
             self.template_fingerprints.add(analysis['structure_fingerprint'])
+
+    def should_skip_comparison(self, filename_a: str, filename_b: str) -> bool:
+        """
+        Check if two files should be skipped from plagiarism comparison
+        due to semantic incompatibility.
+
+        Args:
+            filename_a: Name of first file
+            filename_b: Name of second file
+
+        Returns:
+            True if comparison should be skipped
+        """
+        if not self.enabled:
+            return False
+
+        name_a = filename_a.lower()
+        name_b = filename_b.lower()
+
+        # Skip comparison if both files are config/tool-specific files
+        # but serve different purposes
+        a_is_config = any(config_type in name_a for config_type in self.config_file_types)
+        b_is_config = any(config_type in name_b for config_type in self.config_file_types)
+
+        if a_is_config and b_is_config:
+            # Extract the tool/framework name from filename
+            a_tool = self._extract_tool_name(name_a)
+            b_tool = self._extract_tool_name(name_b)
+
+            # If they're for different tools, skip comparison
+            if a_tool and b_tool and a_tool != b_tool:
+                return True
+
+        return False
+
+    def _extract_tool_name(self, filename: str) -> str:
+        """
+        Extract the tool/framework name from a config filename.
+
+        Examples:
+        - 'tailwind.config.js' -> 'tailwind'
+        - 'vite.config.ts' -> 'vite'
+        - 'webpack.config.js' -> 'webpack'
+        - 'package.json' -> 'npm'
+        """
+        filename = filename.lower()
+
+        # Direct mappings for common config files
+        if 'tailwind' in filename:
+            return 'tailwind'
+        elif 'vite' in filename:
+            return 'vite'
+        elif 'webpack' in filename:
+            return 'webpack'
+        elif 'babel' in filename:
+            return 'babel'
+        elif 'typescript' in filename or 'tsconfig' in filename:
+            return 'typescript'
+        elif 'package' in filename:
+            return 'npm'
+        elif 'eslint' in filename:
+            return 'eslint'
+        elif 'prettier' in filename:
+            return 'prettier'
+        elif 'jest' in filename:
+            return 'jest'
+        elif 'next' in filename:
+            return 'nextjs'
+        elif 'nuxt' in filename:
+            return 'nuxt'
+        elif 'vue' in filename:
+            return 'vue'
+        elif 'angular' in filename:
+            return 'angular'
+        elif 'svelte' in filename:
+            return 'svelte'
+        elif 'rollup' in filename:
+            return 'rollup'
+        elif 'snowpack' in filename:
+            return 'snowpack'
+        elif 'parcel' in filename:
+            return 'parcel'
+        elif 'gulp' in filename:
+            return 'gulp'
+        elif 'grunt' in filename:
+            return 'grunt'
+        elif 'docker' in filename:
+            return 'docker'
+        elif 'readme' in filename:
+            return 'readme'
+        elif 'license' in filename:
+            return 'license'
+        elif 'changelog' in filename:
+            return 'changelog'
+        elif 'contributing' in filename:
+            return 'contributing'
+        elif 'gitignore' in filename:
+            return 'git'
+        elif 'gitattributes' in filename:
+            return 'git'
+
+        return None
     
     def calculate_boilerplate_ratio(self, parsed_code: Dict[str, Any]) -> float:
         """

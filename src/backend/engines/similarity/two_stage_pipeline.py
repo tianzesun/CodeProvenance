@@ -67,7 +67,8 @@ class TwoStageSimilarityPipeline:
             "stage2_time_ms": 0,
             "total_time_ms": 0,
             "verified_matches": 0,
-            "rejected_candidates": 0
+            "rejected_candidates": 0,
+            "semantic_filtered": 0
         }
         
         total_start = time.perf_counter()
@@ -92,9 +93,24 @@ class TwoStageSimilarityPipeline:
                 "parsed": candidate.get("parsed", {})
             })
         
+        # Apply semantic filtering to remove inappropriate comparisons
+        query_filename = query_submission.get("filename", "").lower()
+        filtered_results = []
+        semantic_filtered = 0
+        for result in stage1_results:
+            candidate_filename = result.get("candidate_id", "").lower()
+            if not self.boilerplate_filter.should_skip_comparison(query_filename, candidate_filename):
+                filtered_results.append(result)
+            else:
+                semantic_filtered += 1
+                logger.debug("Skipped semantic-incompatible pair: %s vs %s",
+                           query_filename, candidate_filename)
+
+        metrics["semantic_filtered"] = semantic_filtered
+
         # Filter and sort to get Top-N candidates
-        stage1_results.sort(key=lambda r: r["score"], reverse=True)
-        top_candidates = stage1_results[:self.top_n]
+        filtered_results.sort(key=lambda r: r["score"], reverse=True)
+        top_candidates = filtered_results[:self.top_n]
         
         metrics["stage1_time_ms"] = int((time.perf_counter() - stage1_start) * 1000)
         metrics["stage2_count"] = len(top_candidates)

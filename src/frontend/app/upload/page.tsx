@@ -21,7 +21,7 @@ import {
   Shield,
 } from 'lucide-react';
 
-const API = '';
+const API = 'http://localhost:8080';
 const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
 const UPLOAD_ENGINE_OPTIONS = [
   { key: 'token', label: 'Token' },
@@ -30,6 +30,57 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'gst', label: 'GST' },
   { key: 'semantic', label: 'Semantic' },
 ];
+const DETECTION_MODES = [
+  {
+    id: 'auto_detect',
+    name: 'Auto Detect',
+    subtitle: '(Recommended)',
+    desc: 'AI automatically chooses the best detection strategy based on your files',
+    icon: Sparkles,
+    recommended: true,
+  },
+  {
+    id: 'intro_programming',
+    name: 'Intro Programming',
+    subtitle: 'Python/Java/C Basics',
+    desc: 'Loops, functions, arrays. Students share similar answers with template code. Strong rename/copy detection needed.',
+    icon: Zap,
+    recommended: false,
+  },
+  {
+    id: 'data_structures',
+    name: 'Data Structures / OOP',
+    subtitle: 'Linked List, Tree, Classes',
+    desc: 'Structure matters most. Students rename and reorder code. Focus on AST and control flow analysis.',
+    icon: Layers3,
+    recommended: false,
+  },
+  {
+    id: 'algorithms',
+    name: 'Algorithms / Advanced Logic',
+    subtitle: 'Recursion, DP, Graph',
+    desc: 'Logic similarity hidden behind different implementations. Deep semantic and behavioral analysis required.',
+    icon: Settings2,
+    recommended: false,
+  },
+  {
+    id: 'project',
+    name: 'Project / Software Engineering',
+    subtitle: 'Web Apps, Team Projects',
+    desc: 'Multi-file projects with shared frameworks. Focus on history and module-level comparisons.',
+    icon: FolderArchive,
+    recommended: false,
+  },
+  {
+    id: 'notebook_analysis',
+    name: 'Notebook / Data Analysis / AI',
+    subtitle: 'Jupyter, Pandas, ML',
+    desc: 'Notebook cells with common imports and boilerplate. Compare custom logic only, ignore standard libraries.',
+    icon: FileUp,
+    recommended: false,
+  },
+];
+
 const FALLBACK_TOOL_OPTIONS = [
   {
     id: 'integritydesk',
@@ -154,7 +205,7 @@ export default function UploadPage() {
   const [threshold, setThreshold] = useState(0.5);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
-  const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
+  const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('auto_detect');
   const [modeSuggestion, setModeSuggestion] = useState<ModeSuggestion | null>(null);
   const [modeSuggesting, setModeSuggesting] = useState(false);
   const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
@@ -216,6 +267,7 @@ export default function UploadPage() {
       setActiveEngines(keys.length > 0 ? keys : UPLOAD_ENGINE_OPTIONS.map((e) => e.key));
       setAssignmentModes(Array.isArray(mp?.modes) ? mp.modes : []);
       if (typeof mp?.default_mode_id === 'string') setSelectedAssignmentModeId((c) => c || mp.default_mode_id);
+      else setSelectedAssignmentModeId((c) => c || 'auto_detect');
     }).catch(() => {
       if (active) { setThreshold(0.5); setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((e) => e.key)); setAssignmentModes([]); }
     }).finally(() => { if (active) { setThresholdLoading(false); setModesLoading(false); } });
@@ -250,24 +302,134 @@ export default function UploadPage() {
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') return;
     window.localStorage.setItem(uploadFormStorageKey, JSON.stringify({
-      course_name: courseName, assignment_name: assignmentName, assignment_mode: selectedAssignmentModeId,
+      course_name: courseName, assignment_name: assignmentName, assignment_mode: getBackendModeId(selectedAssignmentModeId),
     }));
   }, [assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
 
+  const autoDetectMode = useCallback(() => {
+    if (files.length === 0) return 'intro_programming';
+
+    const fileNames = files.map(f => f.name.toLowerCase());
+    const fileSizes = files.map(f => f.size);
+
+    // Primary file type detection
+    const hasNotebooks = fileNames.some(name => name.endsWith('.ipynb'));
+    const hasPython = fileNames.some(name => name.endsWith('.py'));
+    const hasJava = fileNames.some(name => name.endsWith('.java'));
+    const hasCpp = fileNames.some(name => name.endsWith('.cpp') || name.endsWith('.cc') || name.endsWith('.h'));
+    const hasWeb = fileNames.some(name => name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.html') || name.endsWith('.css'));
+
+    // Basic metrics
+    const fileCount = files.length;
+    const avgSize = fileSizes.reduce((sum, size) => sum + size, 0) / fileCount;
+    const maxSize = Math.max(...fileSizes);
+
+    // 1. Notebook / Data Analysis / AI (highest priority - ML/data science indicators)
+    if (hasNotebooks || fileNames.some(name =>
+      name.includes('pandas') || name.includes('numpy') || name.includes('sklearn') ||
+      name.includes('matplotlib') || name.includes('tensorflow') || name.includes('pytorch') ||
+      name.includes('jupyter') || name.includes('analysis') || name.includes('ml') || name.includes('ai')
+    )) {
+      return 'notebook_analysis';
+    }
+
+    // 2. Project / Software Engineering (large multi-file, complex projects)
+    if (fileCount >= 8 || maxSize > 50000 || avgSize > 25000 || fileNames.some(name =>
+      name.includes('main') || name.includes('app') || name.includes('server') ||
+      name.includes('client') || name.includes('database') || name.includes('api')
+    )) {
+      return 'project';
+    }
+
+    // 3. Algorithms / Advanced Logic (complex algorithms, competitive programming style)
+    if (avgSize > 12000 || fileNames.some(name =>
+      name.includes('graph') || name.includes('dp') || name.includes('dynamic') ||
+      name.includes('sort') || name.includes('search') || name.includes('tree') ||
+      name.includes('recursion') || name.includes('backtrack') || name.includes('dfs') || name.includes('bfs')
+    )) {
+      return 'algorithms';
+    }
+
+    // 4. Data Structures / OOP (Java/C++ with class structures, moderate complexity)
+    if ((hasJava || hasCpp) && (avgSize > 4000 || fileNames.some(name =>
+      name.includes('list') || name.includes('stack') || name.includes('queue') ||
+      name.includes('hash') || name.includes('map') || name.includes('set') ||
+      name.includes('linked') || name.includes('binary') || name.includes('bst')
+    ))) {
+      return 'data_structures';
+    }
+
+    // 5. Intro Programming (default - simple assignments, basic syntax)
+    return 'intro_programming';
+  }, [files]);
+
+  const getBackendModeId = useCallback((frontendModeId: string) => {
+    if (frontendModeId === 'auto_detect') {
+      return autoDetectMode();
+    }
+
+    // Map simplified frontend modes to actual backend assignment modes
+    const modeMapping: Record<string, string> = {
+      'intro_programming': 'intro_programming',                    // Token-focused for starter code, templates
+      'data_structures': 'data_structures_algorithms',            // AST-focused for structure and classes
+      'algorithms': 'algorithmic_code',                           // Semantic-focused for logic similarity
+      'project': 'software_engineering_large_project',            // History-focused for multi-file projects
+      'notebook_analysis': 'notebook_ai',                         // Cell-focused for notebooks and data analysis
+    };
+
+    return modeMapping[frontendModeId] || 'intro_programming'; // fallback to intro programming
+  }, [autoDetectMode]);
+
   useEffect(() => {
-    if (modesLoading || assignmentModes.length === 0) return;
-    if (!courseName.trim() && !assignmentName.trim() && files.length === 0) { setModeSuggestion(null); return; }
+    if (files.length === 0 && !courseName.trim() && !assignmentName.trim()) {
+      setModeSuggestion(null);
+      return;
+    }
+
     const timer = window.setTimeout(async () => {
       setModeSuggesting(true);
       try {
-        const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
-          course_name: courseName, assignment_name: assignmentName, filenames: files.map((f) => f.name),
-        });
-        setModeSuggestion(res.data);
+        // For auto-detect, use local logic
+        if (files.length > 0) {
+          const recommendedMode = autoDetectMode();
+          const modeInfo = DETECTION_MODES.find(m => m.id === recommendedMode);
+          if (modeInfo) {
+            const fileCount = files.length;
+            const avgSize = files.reduce((sum, f) => sum + f.size, 0) / files.length;
+            const fileNames = files.map(f => f.name.toLowerCase());
+            const hasNotebooks = fileNames.some(name => name.endsWith('.ipynb'));
+            const hasLargeFiles = avgSize > 20000;
+            const hasManyFiles = fileCount > 5;
+
+            let reasoning = [];
+            if (hasNotebooks) {
+              reasoning.push("Detected Jupyter notebooks - using cell-aware analysis");
+            } else if (hasManyFiles) {
+              reasoning.push(`${fileCount} files suggest multi-file project structure`);
+            } else if (hasLargeFiles) {
+              reasoning.push(`Large files (${Math.round(avgSize/1000)}KB avg) indicate complex algorithms`);
+            } else {
+              reasoning.push(`${fileCount} moderate-sized files typical of ${modeInfo.subtitle.toLowerCase()}`);
+            }
+
+            setModeSuggestion({
+              recommended_mode_id: recommendedMode,
+              recommended_mode_name: modeInfo.name,
+              confidence: 0.85,
+              reasons: reasoning,
+            });
+          }
+        } else {
+          // Fallback to API for course/assignment name based suggestions
+          const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
+            course_name: courseName, assignment_name: assignmentName, filenames: [],
+          });
+          setModeSuggestion(res.data);
+        }
       } catch { setModeSuggestion(null); } finally { setModeSuggesting(false); }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [assignmentModes.length, assignmentName, courseName, files, modesLoading]);
+  }, [files, courseName, assignmentName, autoDetectMode]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
@@ -284,9 +446,10 @@ export default function UploadPage() {
     setUploading(true);
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
+    if (starterFile) fd.append('starter_file', starterFile);
     fd.append('course_name', courseName || assignmentName || 'Assignment Check');
     fd.append('assignment_name', assignmentName || courseName || 'Assignment Check');
-    fd.append('assignment_mode', selectedAssignmentModeId);
+    fd.append('assignment_mode', getBackendModeId(selectedAssignmentModeId));
     fd.append('threshold', String(threshold));
     fd.append('engine_keys', JSON.stringify(activeEngines));
     fd.append('tool_ids', JSON.stringify(selectedToolIds));
@@ -375,8 +538,10 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* Upload Card */}
-          <div className="rounded-2xl bg-white mb-4 overflow-hidden relative transition-all duration-300" style={cardShadow}>
+          {/* Upload Sections */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {/* Upload Card */}
+            <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
             <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -537,6 +702,84 @@ export default function UploadPage() {
                 <p className="text-sm text-amber-700">Remove the ZIP or the other files — can't mix both.</p>
               </div>
             )}
+            </div>
+
+            {/* Starter Code Upload */}
+            <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
+                    <Sparkles size={13} style={{ color: '#64748b' }} />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-slate-800">Starter Code (Optional)</span>
+                    <p className="text-xs text-slate-500 mt-0.5">Upload template/boilerplate code to exclude from similarity analysis</p>
+                  </div>
+                </div>
+                {starterFile && (
+                  <button
+                    type="button"
+                    onClick={() => setStarterFile(null)}
+                    className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              {!starterFile ? (
+                <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center transition-all duration-200 hover:border-blue-300 hover:bg-blue-50/30">
+                  <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                    <Sparkles size={20} style={{ color: '#64748b' }} />
+                  </div>
+                  <p className="text-sm font-medium text-slate-700 mb-2">Upload Starter Code</p>
+                  <p className="text-xs text-slate-500 mb-4 max-w-xs mx-auto">
+                    Provide template files that students build upon. These will be automatically excluded from plagiarism detection.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => starterFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300"
+                    style={{ borderColor: '#e2e8f0', color: '#475569' }}
+                  >
+                    <FileUp size={13} /> Choose File
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border p-4" style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold"
+                      style={{ background: getExtColor(starterFile.name).bg, color: getExtColor(starterFile.name).text }}>
+                      {getExt(starterFile.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{starterFile.name}</p>
+                      <p className="text-xs text-slate-500">{formatSize(starterFile.size)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => starterFileInputRef.current?.click()}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={starterFileInputRef}
+              type="file"
+              className="hidden"
+              accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setStarterFile(file);
+              }}
+            />
+            </div>
           </div>
 
           {/* Config */}
@@ -550,7 +793,7 @@ export default function UploadPage() {
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
                       <Settings2 size={13} style={{ color: '#64748b' }} />
                     </div>
-                    <span className="text-sm font-semibold text-slate-800">Detection Tools</span>
+                    <span className="text-sm font-semibold text-slate-800">Tools</span>
                   </div>
                   {!toolsLoading && toolOptions.length > 1 && (
                     <button
@@ -560,7 +803,7 @@ export default function UploadPage() {
                       )}
                       className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors"
                     >
-                      {selectedToolIds.length === toolOptions.length ? 'Unselect all' : 'Select all'}
+                      {selectedToolIds.length === toolOptions.length ? 'Clear' : 'All'}
                     </button>
                   )}
                 </div>
@@ -570,7 +813,7 @@ export default function UploadPage() {
                     <Loader2 size={13} className="animate-spin" /> Loading tools…
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="flex flex-wrap gap-2">
                     {toolOptions.map((tool) => {
                       const on = selectedToolIds.includes(tool.id);
                       return (
@@ -578,21 +821,13 @@ export default function UploadPage() {
                           key={tool.id}
                           type="button"
                           onClick={() => toggleTool(tool.id)}
-                          className="w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200"
+                          className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 hover:scale-105"
                           style={on
-                            ? { borderColor: '#bfdbfe', background: '#eff6ff' }
-                            : { borderColor: '#f1f5f9', background: '#f8fafc' }}
+                            ? { borderColor: '#2563eb', background: '#dbeafe', color: '#1d4ed8' }
+                            : { borderColor: '#e2e8f0', background: '#f8fafc', color: '#64748b' }}
                         >
-                          <div
-                            className="w-4 h-4 rounded flex items-center justify-center border-2 transition-all duration-200 shrink-0"
-                            style={on ? { borderColor: '#2563eb', background: '#2563eb' } : { borderColor: '#cbd5e1', background: 'white' }}
-                          >
-                            {on && <Check size={9} className="text-white" strokeWidth={3} />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold" style={{ color: on ? '#1d4ed8' : '#374151' }}>{tool.name}</p>
-                            {tool.desc && <p className="text-xs text-slate-400 truncate">{tool.desc}</p>}
-                          </div>
+                          {on && <Check size={10} className="text-blue-600" strokeWidth={3} />}
+                          {tool.name}
                         </button>
                       );
                     })}
@@ -616,7 +851,7 @@ export default function UploadPage() {
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
                       <Layers3 size={13} style={{ color: '#64748b' }} />
                     </div>
-                    <span className="text-sm font-semibold text-slate-800">Detection Mode</span>
+                    <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
                   </div>
                   {selectedAssignmentMode?.version && (
                     <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5" style={{ background: '#f1f5f9', color: '#94a3b8' }}>
@@ -625,45 +860,72 @@ export default function UploadPage() {
                   )}
                 </div>
 
-                {modesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-400 py-3">
-                    <Loader2 size={13} className="animate-spin" /> Loading…
-                  </div>
-                ) : assignmentModes.length > 0 ? (
-                  <select
-                    value={selectedAssignmentModeId || ''}
-                    onChange={(e) => setSelectedAssignmentModeId(e.target.value)}
-                    className="w-full h-11 px-3.5 rounded-xl border text-sm font-medium text-slate-800 outline-none transition-all duration-200 focus:ring-2 focus:ring-blue-400/15"
-                    style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-                  >
-                    {assignmentModes.map((mode) => {
-                      const adv = mode.access === 'advanced';
-                      const label = mode.overlay ? 'Overlay' : adv ? 'Advanced' : mode.category || 'Mode';
-                      return (
-                        <option key={mode.id} value={mode.id}>
-                          {mode.name} ({label}){mode.pipelines?.length ? ` · ${mode.pipelines.join(' + ')}` : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                ) : (
-                  <div className="h-11 flex items-center px-3.5 rounded-xl border text-sm text-slate-400"
-                    style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}>
-                    Mode catalog unavailable
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {DETECTION_MODES.map((mode) => {
+                    const isSelected = selectedAssignmentModeId === mode.id;
+                    const IconComponent = mode.icon;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setSelectedAssignmentModeId(mode.id)}
+                        className="group relative rounded-xl border p-4 text-left transition-all duration-200 hover:scale-[1.02]"
+                        style={isSelected
+                          ? { borderColor: '#2563eb', background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', boxShadow: '0 4px 16px rgba(37,99,235,0.15)' }
+                          : { borderColor: '#f1f5f9', background: '#f8fafc', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}
+                      >
+                        {isSelected && (
+                          <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center">
+                            <Check size={12} className="text-white" strokeWidth={3} />
+                          </div>
+                        )}
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                            style={isSelected ? { background: '#dbeafe' } : { background: '#f1f5f9' }}
+                          >
+                            <IconComponent
+                              size={16}
+                              style={isSelected ? { color: '#2563eb' } : { color: '#64748b' }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-semibold truncate" style={{ color: isSelected ? '#1d4ed8' : '#374151' }}>
+                                {mode.name}
+                              </p>
+                              {mode.recommended && (
+                                <span className="text-[10px] font-bold tracking-wider rounded-full px-2 py-0.5 bg-blue-100 text-blue-700">
+                                  Recommended
+                                </span>
+                              )}
+                            </div>
+                            {mode.subtitle && (
+                              <p className="text-[10px] font-medium uppercase tracking-wider mb-1" style={{ color: isSelected ? '#60a5fa' : '#9ca3af' }}>
+                                {mode.subtitle}
+                              </p>
+                            )}
+                            <p className="text-xs leading-relaxed" style={{ color: isSelected ? '#3b82f6' : '#6b7280' }}>
+                              {mode.desc}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedAssignmentModeId && selectedAssignmentModeId !== 'auto_detect' && (
+                  <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                    <p className="text-xs leading-relaxed text-slate-600">
+                      {(() => {
+                        const mode = DETECTION_MODES.find(m => m.id === selectedAssignmentModeId);
+                        if (!mode) return 'Selected mode will optimize detection for this assignment type.';
+                        return mode.subtitle ? `${mode.name} (${mode.subtitle}): ${mode.desc}` : `${mode.name}: ${mode.desc}`;
+                      })()}
+                    </p>
                   </div>
                 )}
-
-                {selectedAssignmentMode?.context && (
-                  <p className="mt-2.5 text-xs text-slate-500 leading-relaxed">{selectedAssignmentMode.context}</p>
-                )}
-
-                {selectedAssignmentMode?.warnings?.length ? (
-                  <div className="mt-3 flex items-start gap-2 rounded-xl px-3.5 py-3"
-                    style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
-                    <AlertCircle size={13} style={{ color: '#f59e0b' }} className="mt-0.5 shrink-0" />
-                    <p className="text-xs leading-relaxed" style={{ color: '#92400e' }}>{selectedAssignmentMode.warnings[0]}</p>
-                  </div>
-                ) : null}
 
                 {/* AI Suggestion */}
                 <div
