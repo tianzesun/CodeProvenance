@@ -1,14 +1,12 @@
 weights:
-  ast: 0.45
-  token: 0.15
-  winnowing: 0.05
-  gst: 0.05
-  semantic: 0.15
-  web: 0.0
-  ai_detection: 0.0
-  execution_cfg: 0.15
-  tree_kernel: 0.15
-  cfg: 0.05
+  token: 0.1132
+  ngram: 0.0755
+  winnowing: 0.0755
+  ast: 0.283
+  graph: 0.0943
+  execution: 0.1321
+  embedding: 0.1509
+  llm: 0.0755
 baseline_correction:
   baselines:
     winnowing: 0.35
@@ -18,53 +16,52 @@ baseline_correction:
     embedding: 0.25
 precision_guard:
   enabled: true
-  high_score_floor: 0.68
+  high_score_floor: 0.66
   extreme_score_floor: 0.85
   evidence_threshold: 0.4
-  lexical_threshold: 0.45
-  minimum_concrete_engines: 2
-  minimum_concrete_engines_high_score: 1
+  lexical_threshold: 0.42
+  minimum_concrete_engines: 3
+  minimum_concrete_engines_high_score: 2
   minimum_lexical_engines: 1
-  minimum_lexical_engines_high_score: 0
-  penalty_multiplier: 0.85
-  semantic_only_cap: 0.45
-  cfg_high_score_bypass: true
-  ast_bypass_threshold: 0.85
+  minimum_lexical_engines_high_score: 1
+  penalty_multiplier: 0.8
+  semantic_only_cap: 0.38
+  cfg_high_score_bypass: false
+  ast_bypass_threshold: 0.88
 arbitration:
   enabled: true
   prior_precision_multiplier: 20.0
   minimum_agreement: 0.3
 ast_boost:
   enabled: true
-  threshold: 0.80
-  minimum_guaranteed_score: 0.65
-  bypass_precision_guards: true
+  threshold: 0.86
+  minimum_guaranteed_score: 0.68
+  bypass_precision_guards: false
 deep_verify:
-  tree_kernel_min: 0.60
+  tree_kernel_min: 0.6
   ast_normalized_min: 0.45
-  cfg_similarity_min: 0.50
+  cfg_similarity_min: 0.5
   minimum_agreeing_engines: 3
   minimum_agreeing_engines_high_score: 2
   final_confidence_floor: 0.65
   false_positive_safety_cap: 0.58
   cfg_bypass_enabled: true
-  cfg_bypass_threshold: 0.80
+  cfg_bypass_threshold: 0.8
 decision:
-  default_threshold: 0.78
+  default_threshold: 0.82
   minimum_confidence: 0.4
-  minimum_engine_agreement: 2
+  minimum_engine_agreement: 3
   uncertainty_review_threshold: 0.75
   false_positive_bias: 1.5
   precision_target: 0.95
-
 thresholds:
   identical: 0.85
-  high_similarity: 0.80
+  high_similarity: 0.8
   medium_similarity: 0.62
   low_similarity: 0.35
-  auto_refer: 0.90
+  auto_refer: 0.9
   embedding_match: 0.85
-  minimum_reportable: 0.20
+  minimum_reportable: 0.2
 toggles:
   baseline_correction: true
   bayesian_arbitration: true
@@ -82,7 +79,7 @@ advanced:
   reload_interval: 10
   benchmark_dataset: ir_plag
   auto_optimize_thresholds: true
-  weights_need_validation: false
+  weights_need_validation: true
 score_normalization:
   common_scale: similarity_probability_0_to_1
   external_tools:
@@ -121,15 +118,17 @@ score_normalization:
     range:
     - 0
     - 1
-  calibration_note: Normalization only aligns score scales. Probability calibration still requires labeled train/validation data per engine.
+  calibration_note: Normalization only aligns score scales. Probability calibration
+    still requires labeled train/validation data per engine.
 fusion_presets:
   algorithm_data_structure:
     id: algorithm_data_structure
     name: Algorithm/Data Structure
-    description: Emphasizes structural evidence for assignments with shared boilerplate and common textbook patterns.
+    description: Emphasizes structural evidence for assignments with shared boilerplate
+      and common textbook patterns.
     weights:
       ast: 0.28
-      tree_kernel: 0.20
+      tree_kernel: 0.2
       cfg: 0.16
       execution_cfg: 0.16
       token: 0.08
@@ -148,13 +147,14 @@ fusion_presets:
   open_ended_coding:
     id: open_ended_coding
     name: Open-ended Coding
-    description: Balances lexical, structural, and semantic evidence for projects where implementations can legitimately differ.
+    description: Balances lexical, structural, and semantic evidence for projects
+      where implementations can legitimately differ.
     weights:
       ast: 0.22
       token: 0.14
-      winnowing: 0.10
-      gst: 0.10
-      semantic: 0.20
+      winnowing: 0.1
+      gst: 0.1
+      semantic: 0.2
       execution_cfg: 0.14
       tree_kernel: 0.06
       cfg: 0.04
@@ -170,12 +170,13 @@ fusion_presets:
   essay_report:
     id: essay_report
     name: Essay/Report
-    description: Prioritizes text similarity and AI-writing evidence while suppressing code-only evidence surfaces.
+    description: Prioritizes text similarity and AI-writing evidence while suppressing
+      code-only evidence surfaces.
     weights:
       semantic: 0.34
       web: 0.22
       ai_detection: 0.28
-      token: 0.10
+      token: 0.1
       winnowing: 0.06
     evidence_surfaces:
     - text_similarity
@@ -189,13 +190,14 @@ fusion_presets:
   mixed_submission:
     id: mixed_submission
     name: Mixed Submission
-    description: Runs code and write-up pipelines independently and reports the evidence separately so one modality does not hide the other.
+    description: Runs code and write-up pipelines independently and reports the evidence
+      separately so one modality does not hide the other.
     weights:
       ast: 0.18
-      token: 0.10
+      token: 0.1
       winnowing: 0.08
       gst: 0.07
-      semantic: 0.20
+      semantic: 0.2
       web: 0.12
       ai_detection: 0.12
       execution_cfg: 0.08
@@ -223,3 +225,993 @@ weight_governance:
   - admin
   - developer
   audit_log_required: true
+assignment_modes:
+  catalog_version: 2026.04.phase2
+  default_mode_id: intro_programming
+  universal_preprocessing:
+    version: 2026.04.phase2
+    stages:
+    - id: encoding_normalization
+      name: Encoding normalization
+      action: Convert all submissions to UTF-8 before parsing.
+      log_when: source encoding is not UTF-8 or contains unusual characters
+    - id: whitespace_normalization
+      name: Whitespace normalization
+      action: Normalize indentation, trailing spaces, blank lines, and line endings.
+      log_when: normalization changes comparable content
+    - id: comment_handling
+      name: Comment handling
+      action: Preserve comments for token evidence, exclude them from structural engines,
+        and surface identical comment blocks separately.
+      log_when: identical comment blocks appear across submissions
+    - id: metadata_stripping
+      name: Metadata stripping
+      action: Remove names, IDs, timestamps, and other identifying metadata.
+      log_when: identity-like metadata is removed
+    - id: file_tree_normalization
+      name: File tree normalization
+      action: Canonicalize multi-file project roots and folder names.
+      log_when: project roots or folder labels are rewritten
+    comment_policy:
+      token_engine: preserve
+      structural_engines: exclude
+      evidence_layer: surface_identical_comment_blocks_as_secondary_signal
+    required_logs:
+    - encoding_changes
+    - metadata_stripped
+    - comment_block_matches
+    - file_tree_rewrites
+  modes:
+  - id: intro_programming
+    version: 1.0.0
+    name: Introductory Programming
+    category: coding
+    access: standard
+    context: CS1 and CS2 assignments with high legitimate convergence risk.
+    preprocessing:
+    - starter_code_elimination_required_at_assignment_creation
+    - identifier_normalization
+    - dead_code_comment_cross_check
+    - canonical_intro_algorithm_matching
+    required_inputs:
+    - starter_files_recommended
+    detection_passes:
+    - name: normalized_token_comparison
+      weight: highest
+    - name: raw_token_comparison
+      weight: high
+    - name: control_flow_sequence_comparison
+      weight: medium
+    calibration:
+    - compute_class_baseline_before_pair_scoring
+    - normalize pair scores relative to class average
+    - surface class baseline in results
+    evidence_surfaces:
+    - side_by_side_normalized_view
+    - side_by_side_raw_view
+    - matching_segment_coverage
+    - identical_comment_blocks
+    - submission_timestamp_pairing
+    edge_case_policies:
+    - canonical algorithm matches are warnings, not flags
+    - elevate online tutorial/source matching for this mode
+    - warn before results if no starter code was provided
+    - reduce ast weight for simple programs
+    - ai detection alone cannot trigger high or critical risk
+    - high risk requires at least 2 primary engines above threshold
+    - critical risk requires 2 primary engines plus 1 supporting engine
+    warnings:
+    - No starter code provided. Similarity scores may be inflated by shared template
+      content.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: data_structures_algorithms
+    version: 1.0.0
+    name: Data Structures & Algorithms
+    category: coding
+    access: standard
+    context: Algorithmic assignments where correctness and similarity are correlated.
+    preprocessing:
+    - mandatory_ast_construction
+    - dead_code_and_scaffolding_strip
+    - function_level_segmentation
+    - algorithm_family_classification
+    required_inputs:
+    - starter_files_recommended
+    - algorithm_family_optional
+    detection_passes:
+    - name: ast_structural_isomorphism
+      weight: highest
+    - name: control_flow_graph_comparison
+      weight: high
+    - name: complexity_signature_matching
+      weight: medium
+    - name: identifier_semantic_analysis
+      weight: low_supplementary
+    calibration:
+    - use_algorithm_family_specific_thresholds
+    - downweight canonical textbook implementation matches
+    - prioritize public repository source matches when found
+    evidence_surfaces:
+    - ast_visualization_side_by_side
+    - function_level_breakdown
+    - public_repository_match
+    - complexity_profile_table
+    edge_case_policies:
+    - strip professor-provided skeleton and pseudocode-informed scaffold
+    - manual review flag for cross-language batches without structural support
+    warnings: []
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: systems_programming
+    version: 1.0.0
+    name: Systems Programming
+    category: coding
+    access: standard
+    context: Low-level projects with constrained API usage and high design variance.
+    preprocessing:
+    - system_call_suppression
+    - standard_error_handling_pattern_suppression
+    - header_include_normalization
+    - multi_file_project_assembly
+    required_inputs:
+    - reference_implementations_as_starter_code_optional
+    detection_passes:
+    - name: inter_system_call_logic_comparison
+      weight: highest
+    - name: data_structure_design_comparison
+      weight: high
+    - name: memory_management_pattern_comparison
+      weight: high
+    - name: concurrency_pattern_comparison
+      weight: medium
+    calibration:
+    - score independent design decision overlap
+    - separate API usage from authored logic
+    - elevate online tutorial matching
+    evidence_surfaces:
+    - design_decision_comparison_table
+    - inter_system_call_logic_diff
+    - tutorial_or_blog_source_match
+    edge_case_policies:
+    - treat provided reference implementations as starter code
+    - manual review for assembly language if no assembly engine is available
+    warnings: []
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: database_sql
+    version: 1.0.0
+    name: Database & SQL
+    category: database
+    access: standard
+    context: SQL assignments where semantic equivalence matters more than syntax.
+    preprocessing:
+    - sql_keyword_case_normalization
+    - sql_comment_stripping
+    - alias_normalization
+    - commutative_clause_canonicalization
+    - schema_aware_processing_when_schema_is_provided
+    required_inputs:
+    - database_schema_recommended
+    detection_passes:
+    - name: normalized_string_identity
+      weight: highest
+    - name: query_plan_equivalence
+      weight: high
+    - name: clause_level_similarity
+      weight: medium
+    - name: relationship_topology_for_schema_design
+      weight: highest_when_schema_design
+    calibration:
+    - simple_select_queries_use_very_high_threshold
+    - complex_multi_join_queries_use_moderate_threshold
+    - stored_procedures_also_run_code_pipeline
+    evidence_surfaces:
+    - normalized_query_side_by_side
+    - raw_query_side_by_side
+    - er_diagram_comparison
+    - query_plan_visualization
+    edge_case_policies:
+    - canonical textbook query patterns are warnings, not flags
+    - normalize MySQL, PostgreSQL, and SQLite dialect differences
+    warnings: []
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: software_engineering_large_project
+    version: 1.0.0
+    name: Software Engineering & Large Projects
+    category: project
+    access: standard
+    context: Large multi-file projects with framework boilerplate and group dynamics.
+    preprocessing:
+    - framework_scaffolding_suppression
+    - dependency_file_exclusion_by_default
+    - build_artifact_exclusion
+    - language_detection_per_file
+    - cross_semester_policy_gate
+    required_inputs:
+    - group_roster_optional
+    - cross_semester_opt_in_optional
+    detection_passes:
+    - name: project_architecture_comparison
+      weight: high
+    - name: module_level_semantic_comparison
+      weight: highest
+    - name: function_level_cross_file_comparison
+      weight: high
+    - name: commit_history_analysis
+      weight: supplementary
+    - name: github_project_matching
+      weight: high_external
+    calibration:
+    - report overall similarity, max module similarity, and architecture match
+    - exclude within-group pairs from cross-group plagiarism scoring
+    - use coverage-based scoring for copied functional logic
+    evidence_surfaces:
+    - project_architecture_diff
+    - module_similarity_breakdown
+    - function_match_list
+    - commit_history_summary
+    - github_match_with_file_list
+    edge_case_policies:
+    - declared reuse is separated from undeclared reuse
+    - credited open-source matches are surfaced differently from unattributed matches
+    warnings: []
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: ml_data_science
+    version: 1.0.0
+    name: Machine Learning & Data Science
+    category: notebook
+    access: standard
+    context: Notebook-heavy work with separate code, narrative, and AI-risk streams.
+    preprocessing:
+    - notebook_decomposition
+    - output_cell_stripping
+    - ml_library_boilerplate_suppression
+    - starter_notebook_elimination
+    - random_seed_standardization_notes
+    required_inputs:
+    - starter_notebook_recommended
+    - dataset_source_optional
+    detection_passes:
+    - name: model_architecture_comparison
+      weight: highest_code
+    - name: data_pipeline_comparison
+      weight: high_code
+    - name: suppressed_token_logic_comparison
+      weight: medium_code
+    - name: markdown_ai_detection
+      weight: highest_text
+    - name: markdown_text_similarity
+      weight: high_text
+    - name: kaggle_huggingface_kernel_matching
+      weight: high_external
+    calibration:
+    - report code and markdown scores separately
+    - apply class baseline normalization to code stream
+    - use clean, uncertain, and flag bands for AI detection
+    evidence_surfaces:
+    - separate_code_and_markdown_tabs
+    - passage_level_ai_confidence
+    - model_architecture_diagram
+    - kaggle_kernel_cell_match
+    edge_case_policies:
+    - strip declared shared exploration notebooks
+    - do not let output divergence mask code similarity
+    warnings: []
+    pipelines:
+    - code
+    - text
+    - ai_detection
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: web_development
+    version: 1.0.0
+    name: Web Development
+    category: web
+    access: standard
+    context: HTML, CSS, and JavaScript projects with high framework boilerplate.
+    preprocessing:
+    - html_css_javascript_layer_separation
+    - framework_boilerplate_suppression_per_layer
+    - minification_reversal
+    - dependency_audit_as_supplementary_signal
+    - framework_detection
+    required_inputs:
+    - framework_optional
+    detection_passes:
+    - name: html_semantic_structure_comparison
+      weight: medium
+    - name: custom_css_rule_comparison
+      weight: medium
+    - name: javascript_logic_flow_comparison
+      weight: highest
+    - name: component_structure_comparison
+      weight: high
+    - name: event_handling_pattern_comparison
+      weight: medium
+    - name: template_theme_matching
+      weight: high_external
+    calibration:
+    - adapt thresholds to detected framework
+    - suppress standard responsive breakpoint patterns
+    - treat visual similarity as evidence, not the only score
+    evidence_surfaces:
+    - html_css_javascript_tabs
+    - template_three_way_comparison
+    - visual_rendering_comparison
+    edge_case_policies:
+    - respect declared shared component libraries for groups
+    - use framework-version-aware normalization
+    warnings: []
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: theory_proofs
+    version: 1.0.0
+    name: Theory & Proofs
+    category: text
+    access: standard
+    context: Mathematical proofs where canonical structures are common.
+    preprocessing:
+    - mathematical_notation_normalization
+    - proof_type_classification
+    - named_theorem_reference_normalization
+    required_inputs:
+    - proof_domain_optional
+    detection_passes:
+    - name: proof_structure_comparison
+      weight: highest
+    - name: logical_dependency_graph_comparison
+      weight: high
+    - name: surface_text_comparison
+      weight: medium
+    - name: proof_ai_detection
+      weight: elevated
+    calibration:
+    - flag only when structural and surface text similarity both exceed threshold
+    - surface canonical proof matches without implying wrongdoing
+    - use the most conservative flagging policy
+    evidence_surfaces:
+    - logical_structure_comparison
+    - prose_similarity_view
+    - canonical_proof_match
+    edge_case_policies:
+    - compare within proof approach when multiple valid approaches exist
+    - detect partial proof copying even with length imbalance
+    warnings: []
+    pipelines:
+    - text
+    - ai_detection
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: research_report_essay
+    version: 1.0.0
+    name: Research Report & Essay
+    category: text
+    access: standard
+    context: Reports and essays with direct-copy, paraphrase, AI, and humanizer risk.
+    preprocessing:
+    - citation_reference_secondary_signal
+    - proper_quote_detection_and_exclusion
+    - section_structure_identification
+    - linguistic_unicode_normalization
+    required_inputs:
+    - ai_policy_optional
+    - field_optional
+    detection_passes:
+    - name: semantic_paraphrase_detection
+      weight: highest
+    - name: per_section_ai_generation_detection
+      weight: highest
+    - name: humanizer_detection
+      weight: high
+    - name: argument_structure_comparison
+      weight: medium
+    - name: cross_semester_self_plagiarism
+      weight: high
+    - name: academic_database_matching
+      weight: high_external
+    calibration:
+    - report text, AI, and humanizer scores separately
+    - use passage-level AI confidence bands
+    - surface AI calibration date in reports
+    - document CS-writing calibration scope
+    evidence_surfaces:
+    - document_summary_by_signal
+    - annotated_similarity_document
+    - ai_heatmap_document
+    - academic_source_citation_match
+    edge_case_policies:
+    - support AI-permitted-with-disclosure setting
+    - show ESL caution note for borderline AI results
+    - respect group assignment configuration
+    warnings:
+    - AI detection is probabilistic and requires manual review for borderline cases.
+    - AI detection accuracy may vary for submissions not written by native English
+      speakers.
+    pipelines:
+    - text
+    - ai_detection
+    - external_sources
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  - id: exam_mode
+    version: 1.0.0
+    name: Exam Mode
+    category: overlay
+    access: standard_overlay
+    context: Time-aware overlay applied on top of another assignment mode.
+    preprocessing:
+    - submission_timestamp_verification
+    - exam_window_validation
+    - sequential_submission_detection
+    required_inputs:
+    - base_mode_required
+    - exam_window_required
+    detection_passes:
+    - name: time_adjusted_thresholding
+      weight: overlay
+    - name: communication_pattern_cluster_analysis
+      weight: supplementary
+    - name: identical_error_detection
+      weight: high
+    calibration:
+    - keep base-mode engine weights
+    - use stricter thresholds during exam window
+    - interpret temporal proximity as evidence, not proof
+    evidence_surfaces:
+    - submission_timeline_visualization
+    - flagged_pair_connectors
+    edge_case_policies:
+    - late submissions are integrity flags separate from similarity
+    - cluster flags are separate from pairwise flags
+    warnings: []
+    pipelines:
+    - code
+    overlay: true
+    base_mode_required: true
+    weights: {}
+  - id: foundations_code
+    version: 1.0.0
+    name: Foundations Code
+    category: coding
+    access: standard
+    context: CS1/CS2 assignments where many correct submissions naturally look alike,
+      so false positives are the biggest danger.
+    preprocessing:
+    - starter_code_elimination_required_at_assignment_creation
+    - identifier_normalization
+    - dead_code_comment_cross_check
+    - canonical_intro_algorithm_matching
+    required_inputs:
+    - starter_files_recommended
+    detection_passes:
+    - name: normalized_token_comparison
+      weight: highest
+    - name: raw_token_comparison
+      weight: high
+    - name: ast_structural_isomorphism
+      weight: high
+    - name: tree_kernel_similarity
+      weight: high
+    - name: winnowing_fingerprint
+      weight: medium
+    - name: greedy_string_tiling
+      weight: medium
+    - name: fingerprint_hashing
+      weight: medium
+    - name: ngram_statistics
+      weight: medium
+    - name: semantic_embedding
+      weight: low
+    - name: control_flow_graph
+      weight: low
+    - name: execution_control_flow
+      weight: very_low
+    - name: neural_embedding
+      weight: very_low
+    - name: web_content_matching
+      weight: very_low
+    - name: ai_detection
+      weight: very_low
+    calibration:
+    - compute_class_baseline_before_pair_scoring
+    - normalize_pair_scores_relative_to_class_average
+    - surface_class_baseline_in_results
+    - downweight_ast_for_beginner_patterns
+    evidence_surfaces:
+    - side_by_side_normalized_view
+    - side_by_side_raw_view
+    - matching_segment_coverage
+    - identical_comment_blocks
+    - submission_timestamp_pairing
+    - beginner_pattern_analysis
+    edge_case_policies:
+    - canonical_algorithm_matches_are_warnings_not_flags
+    - elevate_online_tutorial_matching_for_this_mode
+    - warn_before_results_if_no_starter_code_was_provided
+    - reduce_ast_weight_for_simple_programs
+    warnings:
+    - No starter code provided. Similarity scores may be inflated by shared template
+      content.
+    - Beginner assignments often have naturally similar correct solutions.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      ast: 0.24
+      token: 0.18
+      tree_kernel: 0.14
+      winnowing: 0.1
+      gst: 0.08
+      fingerprint: 0.08
+      ngram: 0.06
+      semantic: 0.05
+      cfg: 0.03
+      execution_cfg: 0.01
+      embedding: 0.01
+      web: 0.01
+      ai_detection: 0.01
+  - id: algorithmic_code
+    version: 1.0.0
+    name: Algorithmic Code
+    category: coding
+    access: standard
+    context: Data structures and algorithms assignments where students may rewrite
+      syntax but preserve the same logic and flow.
+    preprocessing:
+    - mandatory_ast_construction
+    - dead_code_and_scaffolding_strip
+    - function_level_segmentation
+    - algorithm_family_classification
+    - variable_renaming_normalization
+    required_inputs:
+    - starter_files_recommended
+    - algorithm_family_optional
+    detection_passes:
+    - name: ast_structural_isomorphism
+      weight: highest
+    - name: semantic_embedding
+      weight: highest
+    - name: execution_control_flow
+      weight: highest
+    - name: tree_kernel_similarity
+      weight: highest
+    - name: control_flow_graph
+      weight: high
+    - name: neural_embedding
+      weight: high
+    - name: normalized_token_comparison
+      weight: medium
+    - name: winnowing_fingerprint
+      weight: low
+    - name: greedy_string_tiling
+      weight: low
+    - name: fingerprint_hashing
+      weight: very_low
+    - name: ngram_statistics
+      weight: very_low
+    - name: web_content_matching
+      weight: very_low
+    - name: ai_detection
+      weight: very_low
+    calibration:
+    - use_algorithm_family_specific_thresholds
+    - downweight_canonical_textbook_implementation_matches
+    - prioritize_public_repository_source_matches_when_found
+    - emphasize_logic_preservation_over_syntax_preservation
+    evidence_surfaces:
+    - logic_flow_diagram
+    - algorithm_structure_comparison
+    - semantic_similarity_heatmap
+    - execution_path_analysis
+    - variable_renaming_detection
+    - algorithm_family_classification
+    edge_case_policies:
+    - logic_preserving_plagiarism_often_survives_variable_renaming
+    - elevate_algorithm_repository_matches
+    - structural_views_more_robust_than_text_only_views
+    - downweight_syntax_only_similarities
+    warnings:
+    - Algorithm assignments often have multiple correct implementations.
+    - Focus on logic preservation rather than syntax similarity.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      ast: 0.2
+      semantic: 0.16
+      execution_cfg: 0.14
+      tree_kernel: 0.12
+      cfg: 0.1
+      embedding: 0.1
+      token: 0.08
+      winnowing: 0.04
+      gst: 0.03
+      fingerprint: 0.01
+      ngram: 0.01
+      web: 0.005
+      ai_detection: 0.005
+  - id: systems_projects
+    version: 1.0.0
+    name: Systems & Projects
+    category: project
+    access: standard
+    context: Systems programming and larger software engineering submissions with
+      shared headers, frameworks, and architectural patterns.
+    preprocessing:
+    - framework_scaffolding_suppression
+    - dependency_file_exclusion_by_default
+    - build_artifact_exclusion
+    - header_include_normalization
+    - system_call_pattern_extraction
+    required_inputs:
+    - project_structure_recommended
+    detection_passes:
+    - name: ast_structural_isomorphism
+      weight: highest
+    - name: control_flow_graph
+      weight: highest
+    - name: execution_control_flow
+      weight: highest
+    - name: tree_kernel_similarity
+      weight: highest
+    - name: fingerprint_hashing
+      weight: high
+    - name: semantic_embedding
+      weight: medium
+    - name: normalized_token_comparison
+      weight: medium
+    - name: web_content_matching
+      weight: medium
+    - name: greedy_string_tiling
+      weight: low
+    - name: ngram_statistics
+      weight: low
+    - name: ai_detection
+      weight: very_low
+    calibration:
+    - prioritize_architecture_and_design_similarity
+    - downweight_single_function_similarities
+    - elevate_framework_and_boilerplate_matches
+    - cross_file_analysis_required
+    evidence_surfaces:
+    - project_architecture_diagram
+    - cross_file_dependency_analysis
+    - framework_usage_patterns
+    - header_include_similarity
+    - system_call_sequences
+    - build_configuration_comparison
+    edge_case_policies:
+    - projects_need_more_graph_and_architecture_sensitivity
+    - web_content_matters_more_for_tutorial_driven_implementations
+    - framework_boilerplate_is_expected_shared_code
+    - elevate_file_level_design_similarity
+    warnings:
+    - Large projects often share framework code legitimately.
+    - Focus on architectural and design similarities over individual functions.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      ast: 0.18
+      cfg: 0.14
+      execution_cfg: 0.14
+      tree_kernel: 0.12
+      fingerprint: 0.1
+      semantic: 0.09
+      token: 0.08
+      web: 0.06
+      winnowing: 0.04
+      gst: 0.02
+      ngram: 0.01
+      embedding: 0.01
+      ai_detection: 0.01
+  - id: sql_data_logic
+    version: 1.0.0
+    name: SQL & Data Logic
+    category: database
+    access: standard
+    context: SQL assignments where semantic equivalence matters more than syntax,
+      with multiple ways to express the same query logic.
+    preprocessing:
+    - sql_keyword_case_normalization
+    - sql_comment_stripping
+    - alias_normalization
+    - query_structure_canonicalization
+    - table_relationship_extraction
+    required_inputs:
+    - schema_definition_optional
+    detection_passes:
+    - name: semantic_embedding
+      weight: highest
+    - name: neural_embedding
+      weight: highest
+    - name: normalized_token_comparison
+      weight: high
+    - name: ast_structural_isomorphism
+      weight: medium
+    - name: ngram_statistics
+      weight: medium
+    - name: greedy_string_tiling
+      weight: medium
+    - name: winnowing_fingerprint
+      weight: low
+    - name: fingerprint_hashing
+      weight: low
+    - name: tree_kernel_similarity
+      weight: low
+    - name: control_flow_graph
+      weight: very_low
+    - name: execution_control_flow
+      weight: very_low
+    - name: ai_detection
+      weight: very_low
+    calibration:
+    - prioritize_semantic_equivalence_over_syntactic_similarity
+    - normalize_for_query_rewriting_patterns
+    - elevate_join_and_filter_logic_matches
+    - downweight_whitespace_and_alias_differences
+    evidence_surfaces:
+    - query_logic_diagram
+    - table_relationship_visualization
+    - semantic_equivalence_explanation
+    - join_pattern_analysis
+    - filter_condition_comparison
+    - query_optimization_suggestions
+    edge_case_policies:
+    - sql_cheating_often_hides_inside_equivalent_joins_and_filters
+    - pure_control_flow_reasoning_adds_less_value_than_query_semantic_similarity
+    - elevate_schema_understanding_matches
+    - normalize_for_legitimate_query_rewriting
+    warnings:
+    - SQL has many equivalent ways to express the same logic.
+    - Focus on query semantics rather than exact syntax matching.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      semantic: 0.2
+      embedding: 0.16
+      token: 0.15
+      ast: 0.12
+      ngram: 0.1
+      gst: 0.08
+      winnowing: 0.06
+      fingerprint: 0.05
+      tree_kernel: 0.04
+      web: 0.02
+      cfg: 0.01
+      execution_cfg: 0.005
+      ai_detection: 0.005
+  - id: notebook_ai
+    version: 1.0.0
+    name: Notebook & Applied AI
+    category: notebook
+    access: standard
+    context: Notebook assignments mixing code, markdown, outputs, copied snippets,
+      and AI-assisted drafting.
+    preprocessing:
+    - notebook_decomposition
+    - output_cell_stripping
+    - markdown_ai_detection
+    - code_cell_extraction
+    - cell_dependency_analysis
+    - mixed_content_separation
+    required_inputs:
+    - notebook_format_required
+    detection_passes:
+    - name: semantic_embedding
+      weight: highest
+    - name: neural_embedding
+      weight: highest
+    - name: ast_structural_isomorphism
+      weight: highest
+    - name: normalized_token_comparison
+      weight: high
+    - name: web_content_matching
+      weight: medium
+    - name: ngram_statistics
+      weight: medium
+    - name: fingerprint_hashing
+      weight: medium
+    - name: ai_detection
+      weight: moderate_capped
+    - name: control_flow_graph
+      weight: low
+    - name: greedy_string_tiling
+      weight: low
+    - name: winnowing_fingerprint
+      weight: low
+    - name: tree_kernel_similarity
+      weight: low
+    - name: execution_control_flow
+      weight: very_low
+    calibration:
+    - balance_code_and_text_similarity_signals
+    - cap_ai_detection_influence
+    - elevate_notebook_specific_patterns
+    - separate_code_and_narrative_analysis
+    evidence_surfaces:
+    - notebook_cell_comparison
+    - code_narrative_integration_analysis
+    - ai_generation_probability_heatmap
+    - copied_snippet_detection
+    - markdown_similarity_analysis
+    - cell_execution_pattern_comparison
+    edge_case_policies:
+    - notebook_misconduct_can_involve_copied_code_explanations_and_ai_drafting
+    - ai_should_help_prioritize_review_not_dominate_decision
+    - balance_lexical_structural_and_semantic_signals
+    - flag_notebook_specific_anomalies
+    warnings:
+    - Notebooks mix code, text, and AI-generated content.
+    - AI detection helps prioritize but should not dominate scoring.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      semantic: 0.16
+      embedding: 0.14
+      ast: 0.14
+      token: 0.12
+      web: 0.1
+      ai_detection: 0.08
+      ngram: 0.07
+      fingerprint: 0.06
+      winnowing: 0.04
+      gst: 0.03
+      tree_kernel: 0.03
+      cfg: 0.02
+      execution_cfg: 0.01
+  - id: reports_proofs
+    version: 1.0.0
+    name: Reports & Proofs
+    category: text
+    access: standard
+    context: Text-based assignments like reports and mathematical proofs with outside-source
+      overlap, paraphrase, and AI risks.
+    preprocessing:
+    - citation_reference_secondary_signal
+    - proper_quote_detection_and_exclusion
+    - section_structure_identification
+    - mathematical_notation_normalization
+    - authorship_pattern_extraction
+    required_inputs:
+    - text_format_required
+    detection_passes:
+    - name: web_content_matching
+      weight: highest
+    - name: semantic_embedding
+      weight: highest
+    - name: neural_embedding
+      weight: highest
+    - name: ngram_statistics
+      weight: highest
+    - name: ai_detection
+      weight: high
+    - name: normalized_token_comparison
+      weight: medium
+    - name: greedy_string_tiling
+      weight: low
+    - name: fingerprint_hashing
+      weight: low
+    - name: winnowing_fingerprint
+      weight: low
+    - name: ast_structural_isomorphism
+      weight: very_low
+    - name: tree_kernel_similarity
+      weight: very_low
+    - name: control_flow_graph
+      weight: very_low
+    - name: execution_control_flow
+      weight: very_low
+    calibration:
+    - prioritize_outside_source_overlap_and_paraphrase_detection
+    - elevate_ai_authorship_inconsistencies
+    - downweight_code_graph_reasoning_for_text
+    - focus_on_authorship_and_source_attribution
+    evidence_surfaces:
+    - source_attribution_analysis
+    - paraphrase_detection_map
+    - citation_integrity_check
+    - authorship_consistency_score
+    - ai_generation_probability_timeline
+    - outside_source_overlap_visualization
+    edge_case_policies:
+    - text_based_misconduct_is_about_source_overlap_paraphrase_and_authorship
+    - ai_cannot_be_treated_as_proof_by_itself
+    - elevate_online_tutorial_and_documentation_matches
+    - focus_on_semantic_similarity_over_syntactic_matching
+    warnings:
+    - Text assignments are highly susceptible to AI generation and source copying.
+    - Focus on authorship patterns and source attribution rather than exact matching.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights:
+      web: 0.22
+      semantic: 0.18
+      embedding: 0.16
+      ngram: 0.14
+      ai_detection: 0.1
+      token: 0.08
+      gst: 0.04
+      fingerprint: 0.03
+      winnowing: 0.02
+      ast: 0.01
+      tree_kernel: 0.01
+      cfg: 0.005
+      execution_cfg: 0.005
+  - id: custom
+    version: 1.0.0
+    name: Custom
+    category: advanced
+    access: advanced
+    context: Power-user mode for unusual assignments and unvalidated configurations.
+    preprocessing:
+    - professor_selected_engine_set
+    - custom_suppression_list_upload
+    - custom_threshold_zones
+    - custom_external_source_settings
+    - custom_ai_detection_sensitivity
+    required_inputs:
+    - explicit_advanced_opt_in
+    detection_passes:
+    - name: professor_configured_pipeline
+      weight: custom
+    calibration:
+    - require weights to sum to 100 percent
+    - show benchmark false-positive estimates beside thresholds
+    - stamp reports with custom-mode warning
+    evidence_surfaces:
+    - custom_configuration_summary
+    - persistent_unvalidated_configuration_warning
+    - exportable_importable_configuration
+    edge_case_policies:
+    - do not present custom mode as a peer to validated standard modes
+    - collect successful custom configs for future preset promotion
+    warnings:
+    - This analysis used a custom configuration that has not been validated against
+      standardized benchmarks. Results should be interpreted with additional caution.
+    pipelines:
+    - code
+    overlay: false
+    base_mode_required: false
+    weights: {}
+  cross_mode_policy:
+    mode_versioning: Every report stores mode ID and version.
+    performance_dashboard: Precision and recall are tracked per mode for internal
+      calibration.
+    professor_feedback_loop: Result feedback supports confirmed plagiarism, false
+      positive, and uncertain.
+    recommendation_engine_ready: Assignment metadata should support future automatic
+      mode recommendations.

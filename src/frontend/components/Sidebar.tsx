@@ -6,13 +6,16 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
-  Database,
+  ClipboardList,
+  FileText,
   LayoutDashboard,
   LogOut,
   Menu,
   MoonStar,
+  SearchCheck,
   Settings,
   Shield,
   SunMedium,
@@ -37,33 +40,55 @@ export default function Sidebar() {
       href: '/',
       label: 'Dashboard',
       icon: LayoutDashboard,
+      activeOn: ['/'],
     },
     {
-      href: '/upload',
-      label: 'New Check',
+      href: '/courses',
+      label: 'Courses',
+      icon: BookOpen,
+      activeOn: ['/courses'],
+    },
+    {
+      href: '/assignments',
+      label: 'Assignments',
       icon: Upload,
+      activeOn: ['/assignments'],
+    },
+    {
+      href: '/cases',
+      label: 'Cases',
+      icon: SearchCheck,
+      activeOn: ['/cases', '/results'],
+    },
+    {
+      href: '/reports',
+      label: 'Reports',
+      icon: FileText,
+      activeOn: ['/reports'],
+    },
+    {
+      href: '/analytics',
+      label: 'Analytics',
+      icon: BarChart3,
+      activeOn: ['/analytics'],
     },
     {
       href: '/settings',
       label: 'Settings',
       icon: Settings,
-    },
-    {
-      href: '/compare-tools',
-      label: 'Compare Tools',
-      icon: BarChart3,
+      activeOn: ['/settings'],
     },
     ...(user?.role === 'admin'
       ? [
         {
           href: '/benchmark',
           label: 'Benchmark',
-          icon: Database,
+          icon: ClipboardList,
         },
         {
           href: '/datasets',
           label: 'Datasets',
-          icon: Database,
+          icon: ClipboardList,
         },
         {
           href: '/admin',
@@ -133,7 +158,7 @@ export default function Sidebar() {
         <nav className={`scrollbar-thin flex-1 overflow-y-auto py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}>
           <div className={`space-y-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
             {navItems.map((item) => {
-              const active = pathname === item.href;
+              const active = item.activeOn?.some((path) => path === pathname || (path !== '/' && pathname?.startsWith(path)));
 
               return (
                 <Link

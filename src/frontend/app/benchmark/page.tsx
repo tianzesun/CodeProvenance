@@ -964,7 +964,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
         <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">← Back</button>
         <button onClick={onNext} disabled={!canProceed}
           className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-          Ready to Run <ChevronRight size={18} />
+          <Play size={18} />Start Benchmark
         </button>
       </div>
 
@@ -1046,13 +1046,14 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 }
 
 // ── Step 3: Run ────────────────────────────────────────────────────────────
-function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, onBack, onComplete }) {
+function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, autoStart = false, onBack, onComplete }) {
   const { token } = useAuth();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [progressPct, setProgressPct] = useState(0);
   const [error, setError] = useState('');
   const requestControllerRef = useRef(null);
+  const autoStartedRef = useRef(false);
 
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
@@ -1129,6 +1130,17 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     }
   };
 
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    const timer = window.setTimeout(() => run(), 0);
+    return () => window.clearTimeout(timer);
+  }, [autoStart]);
+
+  useEffect(() => {
+    return () => requestControllerRef.current?.abort();
+  }, []);
+
   const stop = () => { requestControllerRef.current?.abort(); setRunning(false); setProgress('Cancelling run…'); setProgressPct(0); };
 
   return (
@@ -1175,7 +1187,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         <div className="flex items-center gap-3">
           {!running ? (
             <button onClick={run} className="flex-1 flex items-center justify-center gap-3 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl text-base">
-              <Play size={20} />Start Benchmark
+              <Play size={20} />Run Again
             </button>
           ) : (
             <button onClick={stop} className="flex-1 flex items-center justify-center gap-3 py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-500/25 text-base">
@@ -1216,18 +1228,6 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     activeTools.forEach(t => { const tr = pair.tool_results?.find(r => r.tool === t); d[t] = tr ? Math.round(tr.score * 1000) / 10 : 0; });
     return d;
   });
-
-  const toolLeaderboard = activeTools.map(tool => {
-    const toolInfo = TOOLS.find(t => t.id === tool);
-    const scores = (pair_results || []).map(pair => pair.tool_results?.find(r => r.tool === tool)?.score).filter(s => typeof s === 'number');
-    const average = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : 0;
-    const peak = scores.length ? Math.max(...scores) : 0;
-    const minimum = scores.length ? Math.min(...scores) : 0;
-    return { id: tool, name: toolInfo?.name || tool, shortName: toolInfo?.name || tool, color: toolInfo?.color ?? '#94a3b8', average: Math.round(average * 1000) / 10, peak: Math.round(peak * 1000) / 10, minimum: Math.round(minimum * 1000) / 10, spread: Math.round((peak - minimum) * 1000) / 10, pairCount: scores.length };
-  }).sort((a, b) => b.average - a.average);
-
-  const leadingTool = toolLeaderboard[0] || null;
-  const leadingToolInfo = leadingTool ? TOOLS.find(t => t.id === leadingTool.id) : null;
 
   const panEvaluationRows = Object.entries(results.evaluation || {})
     .filter(([, metrics]) => metrics && !metrics.error)
@@ -1303,24 +1303,46 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     finally { setPdfDownloading(false); }
   };
 
-  const summaryCards = [
-    { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
-    { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
-    { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
-    { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Leading Tool', value: leadingTool?.name || 'N/A' },
-  ];
-  const calibrationSummaryCards = productPanResult ? [
-    { icon: Trophy, bg: 'bg-blue-50', color: 'text-blue-600', label: 'PlagDet', value: `${(productPanResult.plagdet * 100).toFixed(1)}%` },
-    { icon: CheckCircle2, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'F1 Score', value: `${(productPanResult.f1Score * 100).toFixed(1)}%` },
-    { icon: Target, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Precision', value: `${(productPanResult.precision * 100).toFixed(1)}%` },
-    { icon: AlertCircle, bg: 'bg-rose-50', color: 'text-rose-600', label: 'False Positive Rate', value: `${(productPanResult.falsePositiveRate * 100).toFixed(1)}%` },
-  ] : [];
-  const reportSummaryCards = isFocusedMetricReport && calibrationSummaryCards.length ? calibrationSummaryCards : summaryCards;
   const metricIntegrity = productPanResult?.metricIntegrity || {};
   const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
   const confidenceIntervals = productPanResult?.confidenceIntervals || {};
   const splitProtocol = productPanResult?.splitProtocol || {};
   const metricWarnings = metricIntegrity.warnings || [];
+  const decisionThreshold = Number(productPanResult?.threshold ?? productPanResult?.fixedThreshold ?? 0.5);
+  const labeledPairAudit = (pair_results || [])
+    .map((pair) => {
+      if (pair.ground_truth_label === undefined || pair.ground_truth_label === null) return null;
+      const toolResult = (pair.tool_results || []).find(tr => tr.tool === productPanResult?.toolId);
+      if (!toolResult || typeof toolResult.score !== 'number') return null;
+      const actual = Number(pair.ground_truth_label) >= 2;
+      const predicted = Number(toolResult.score) >= decisionThreshold;
+      return { ...pair, score: Number(toolResult.score), actual, predicted };
+    })
+    .filter(Boolean);
+  const localConfusion = labeledPairAudit.reduce((acc, pair) => {
+    if (pair.actual && pair.predicted) acc.tp += 1;
+    else if (!pair.actual && pair.predicted) acc.fp += 1;
+    else if (!pair.actual && !pair.predicted) acc.tn += 1;
+    else acc.fn += 1;
+    return acc;
+  }, { tp: 0, fp: 0, tn: 0, fn: 0 });
+  const heldoutConfusion = metricIntegrity.heldout_confusion_matrix || {};
+  const confusion = labeledPairAudit.length ? localConfusion : {
+    tp: Number(heldoutConfusion.tp || 0),
+    fp: Number(heldoutConfusion.fp || 0),
+    tn: Number(heldoutConfusion.tn || 0),
+    fn: Number(heldoutConfusion.fn || 0),
+  };
+  const falsePositiveExamples = labeledPairAudit.filter(pair => !pair.actual && pair.predicted).sort((a, b) => b.score - a.score).slice(0, 3);
+  const falseNegativeExamples = labeledPairAudit.filter(pair => pair.actual && !pair.predicted).sort((a, b) => a.score - b.score).slice(0, 3);
+  const heldoutSize = Number(splitProtocol.holdout_size || 0);
+  const hasHoldout = splitProtocol.protocol === 'deterministic_stratified_calibration_holdout';
+  const hasConfidenceInterval = Boolean(confidenceIntervals.available && confidenceIntervals.f1);
+  const trustLevel = hasHoldout && hasConfidenceInterval && heldoutSize >= 20
+    ? { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Held-out labels and confidence intervals are available.' }
+    : hasHoldout
+      ? { label: 'Moderate', className: 'bg-amber-100 text-amber-700', description: 'Held-out labels are used, but the sample is small or intervals are unavailable.' }
+      : { label: 'Limited', className: 'bg-rose-100 text-rose-700', description: 'No separate holdout was available; treat this as a smoke test, not a certification.' };
 
   return (
     <div className="space-y-6">
@@ -1367,21 +1389,6 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
         </div>
       )}
 
-      {/* Summary cards */}
-      {!isComparisonReport && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {reportSummaryCards.map(({ icon: Icon, bg, color, label, value }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}><Icon size={18} className={color} /></div>
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
-              </div>
-              <div className={`text-2xl font-bold ${color}`}>{value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Tool failure warnings */}
       {!isComparisonReport && toolFailureRows.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
@@ -1418,6 +1425,101 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
       {/* PAN scorecard */}
       {isFocusedMetricReport && productPanResult && (
         <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="font-semibold text-slate-900">Score Trust & Error Audit</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">Why the PAN numbers are credible, and where they should not be overclaimed.</p>
+                </div>
+                <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${trustLevel.className}`}>{trustLevel.label} trust</span>
+              </div>
+            </div>
+            <div className="grid gap-4 p-6 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Protocol</div>
+                <div className="mt-3 text-sm font-semibold text-slate-900">{hasHoldout ? 'Stratified holdout' : 'Fallback evaluation'}</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{trustLevel.description}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Held-Out Labels</div>
+                <div className="mt-3 text-sm leading-6 text-slate-600">{splitProtocol.holdout_positive_pairs ?? metricIntegrity.positive_pairs ?? productPanResult.nPositives ?? 0} positive pairs and {splitProtocol.holdout_negative_pairs ?? metricIntegrity.negative_pairs ?? productPanResult.nNegatives ?? 0} negative pairs.</div>
+                <div className="mt-2 text-xs font-semibold text-slate-500">Total evaluated: {heldoutSize || ((confusion.tp || 0) + (confusion.fp || 0) + (confusion.tn || 0) + (confusion.fn || 0))}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold</div>
+                <div className="mt-3 text-2xl font-bold text-slate-900">{Number.isFinite(decisionThreshold) ? decisionThreshold.toFixed(2) : 'N/A'}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">Fixed {formatMetric(productPanResult.fixedThreshold ?? productPanResult.fixed_threshold ?? 0.82)} F1: {formatMetric(metricIntegrity.fixed_threshold_f1 ?? fixedThresholdMetrics.f1_score)}. Held-out F1: {formatMetric(metricIntegrity.heldout_f1 ?? productPanResult.f1Score)}.</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Confidence</div>
+                <div className="mt-3 text-sm font-semibold text-slate-900">{hasConfidenceInterval ? 'Bootstrap CI available' : 'CI unavailable'}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">{hasConfidenceInterval ? `95% F1 CI: ${formatMetric(confidenceIntervals.f1.ci_lower)}-${formatMetric(confidenceIntervals.f1.ci_upper)}.` : 'Use a larger labeled holdout to narrow uncertainty.'}</div>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 px-6 py-5">
+              <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+                <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <div className="p-3 border-r border-slate-200">Actual Positive</div>
+                    <div className="p-3">Actual Negative</div>
+                  </div>
+                  <div className="grid grid-cols-2 text-center">
+                    <div className="p-4 border-r border-b border-slate-200">
+                      <div className="text-xs text-slate-500">True Positives</div>
+                      <div className="mt-1 text-2xl font-bold text-emerald-600">{confusion.tp || 0}</div>
+                    </div>
+                    <div className="p-4 border-b border-slate-200">
+                      <div className="text-xs text-slate-500">False Positives</div>
+                      <div className="mt-1 text-2xl font-bold text-rose-600">{confusion.fp || 0}</div>
+                    </div>
+                    <div className="p-4 border-r border-slate-200">
+                      <div className="text-xs text-slate-500">False Negatives</div>
+                      <div className="mt-1 text-2xl font-bold text-amber-600">{confusion.fn || 0}</div>
+                    </div>
+                    <div className="p-4">
+                      <div className="text-xs text-slate-500">True Negatives</div>
+                      <div className="mt-1 text-2xl font-bold text-slate-700">{confusion.tn || 0}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
+                    <div className="font-semibold text-rose-900">False positives to inspect</div>
+                    <p className="mt-1 text-xs leading-5 text-rose-700">Clean pairs scoring above threshold reduce precision.</p>
+                    <div className="mt-3 space-y-2">
+                      {falsePositiveExamples.length ? falsePositiveExamples.map(pair => (
+                        <div key={`${pair.file_a}-${pair.file_b}`} className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-700">
+                          <div className="font-semibold text-slate-900">{pair.label}</div>
+                          <div>{pair.file_a} vs {pair.file_b}</div>
+                          <div className="mt-1 font-semibold text-rose-700">Score {(pair.score * 100).toFixed(1)}%</div>
+                        </div>
+                      )) : <div className="text-sm text-rose-700">{labeledPairAudit.length ? 'No false positives at this threshold.' : 'Pair-level labels are not attached to rows, so examples are unavailable.'}</div>}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                    <div className="font-semibold text-amber-900">False negatives to inspect</div>
+                    <p className="mt-1 text-xs leading-5 text-amber-700">Plagiarized pairs scoring below threshold reduce recall.</p>
+                    <div className="mt-3 space-y-2">
+                      {falseNegativeExamples.length ? falseNegativeExamples.map(pair => (
+                        <div key={`${pair.file_a}-${pair.file_b}`} className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-700">
+                          <div className="font-semibold text-slate-900">{pair.label}</div>
+                          <div>{pair.file_a} vs {pair.file_b}</div>
+                          <div className="mt-1 font-semibold text-amber-700">Score {(pair.score * 100).toFixed(1)}%</div>
+                        </div>
+                      )) : <div className="text-sm text-amber-700">{labeledPairAudit.length ? 'No false negatives at this threshold.' : 'Pair-level labels are not attached to rows, so examples are unavailable.'}</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {metricWarnings.length > 0 && (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">{metricWarnings.map(warning => <div key={warning}>{warning}</div>)}</div>
+              )}
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">PAN Evaluation Scorecard</h2>
@@ -1462,32 +1564,6 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
             </div>
           </div>
 
-          {isFocusedMetricReport && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100">
-                <h2 className="font-semibold text-slate-900">Benchmark Trust Notes</h2>
-                <p className="text-sm text-slate-500 mt-0.5">How to interpret this calibration run without overstating the result.</p>
-              </div>
-              <div className="grid gap-4 p-6 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Label Coverage</div>
-                  <div className="mt-3 text-sm leading-6 text-slate-600">{splitProtocol.holdout_positive_pairs ?? metricIntegrity.positive_pairs ?? productPanResult.nPositives ?? 0} positive pairs and {splitProtocol.holdout_negative_pairs ?? metricIntegrity.negative_pairs ?? productPanResult.nNegatives ?? 0} negative pairs were held out for PAN metrics.</div>
-                  <div className="mt-2 text-xs font-semibold text-slate-500">Protocol: {splitProtocol.protocol === 'deterministic_stratified_calibration_holdout' ? 'Stratified holdout' : 'Fallback, no holdout'}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold Check</div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                    <div><div className="text-slate-500">Held-out F1</div><div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.heldout_f1 ?? productPanResult.f1Score)}</div></div>
-                    <div><div className="text-slate-500">Fixed 0.50 F1</div><div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.fixed_threshold_f1 ?? fixedThresholdMetrics.f1_score)}</div></div>
-                  </div>
-                  <div className="mt-3 text-xs leading-5 text-slate-500">{confidenceIntervals.available && confidenceIntervals.f1 ? `95% bootstrap F1 CI: ${formatMetric(confidenceIntervals.f1.ci_lower)}-${formatMetric(confidenceIntervals.f1.ci_upper)}.` : 'Confidence interval unavailable for this run size.'}</div>
-                </div>
-              </div>
-              {metricWarnings.length > 0 && (
-                <div className="border-t border-amber-100 bg-amber-50 px-6 py-4 text-sm leading-6 text-amber-800">{metricWarnings.map(warning => <div key={warning}>{warning}</div>)}</div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -1703,7 +1779,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   }, [authLoading, user]);
 
   const activeMode = availableModes.find(m => m.id === activeModeId) || availableModes[0];
-  const ActiveModeIcon = activeMode.icon;
 
   useEffect(() => {
     const nextModeId = modeScope === 'comparison' ? 'comparison' : 'development';
@@ -1751,7 +1826,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
           {/* ── Page header ─────────────────────────────────────────────── */}
           {modeScope !== 'comparison' && (
-            <div>
+            <div className="flex flex-col gap-4 mb-1 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3 mb-1">
                 <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
                   <FlaskConical size={18} className="text-white" />
@@ -1765,10 +1840,26 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   </p>
                 </div>
               </div>
+              <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
+                <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
+              </div>
             </div>
           )}
           {modeScope === 'comparison' && (
-            <div className="flex items-center justify-end mb-1">
+            <div className="flex flex-col gap-4 mb-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
+                  <GitCompare size={18} className="text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+                    Compare Tools
+                  </h1>
+                  <p className="text-sm text-slate-500">
+                    Compare IntegrityDesk against external detection tools on the same benchmark data.
+                  </p>
+                </div>
+              </div>
               <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
                 <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
               </div>
@@ -1811,23 +1902,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
           {/* ── Step wizard ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            {modeScope !== 'comparison' && (
-              <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex items-center gap-3 flex-1">
-                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${activeMode.accent} flex items-center justify-center shadow shrink-0`}>
-                    <ActiveModeIcon size={16} className="text-white" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{activeMode.eyebrow}</div>
-                    <div className="text-sm font-semibold text-slate-900">{activeMode.label}</div>
-                  </div>
-                </div>
-                <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-                  <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
-                </div>
-              </div>
-            )}
-
             {/* Run config summary bar — visible in steps 1+ */}
             {step >= 1 && step < 3 && (
               <div className="px-5 py-3 bg-slate-50/70 border-b border-slate-100">
@@ -1879,6 +1953,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   benchmarkDatasets={benchmarkDatasets}
                   selectedPreset={null}
                   benchmarkMode={activeModeId}
+                  autoStart
                   onBack={() => setStep(1)}
                   onComplete={data => { setResults(data); goToStep(3, 2); }}
                 />

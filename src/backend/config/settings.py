@@ -38,7 +38,7 @@ ENGINE_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
         "execution": 0.20,
         "embedding": 0.17,
         "llm": 0.05,
-    }
+    },
 }
 
 DEFAULT_DETECTION_MODES = [
@@ -65,7 +65,7 @@ class AppSettings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Similarity
-    DEFAULT_THRESHOLD: float = 0.5
+    DEFAULT_THRESHOLD: float = 0.82
 
     # LLM / AI
     OPENAI_API_KEY: Optional[str] = None

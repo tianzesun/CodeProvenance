@@ -19,7 +19,10 @@ import {
   ArrowRight,
   Zap,
   Shield,
+  Clock3,
+  SearchCheck,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 const API = '';
 const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
@@ -140,6 +143,12 @@ const btnShadow = { boxShadow: '0 1px 2px rgba(37,99,235,0.2), 0 4px 14px rgba(3
 const dotGrid = { backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' };
 const blueBg = { background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' };
 const blueCardBg = { background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', border: '1px solid #bfdbfe' };
+const progressTasks = [
+  'Removing starter code',
+  'Building similarity candidates',
+  'Comparing prior semesters',
+  'Ranking cases worth review',
+];
 
 export default function UploadPage() {
   const router = useRouter();
@@ -174,6 +183,18 @@ export default function UploadPage() {
   const starterFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  useEffect(() => {
+    if (!uploading) {
+      setProgress(0);
+      return;
+    }
+    setProgress(0.12);
+    const timer = window.setInterval(() => {
+      setProgress((current) => Math.min(0.92, current + 0.035));
+    }, 600);
+    return () => window.clearInterval(timer);
+  }, [uploading]);
 
   const startPolling = useCallback((jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -282,6 +303,7 @@ export default function UploadPage() {
     if (selectedToolIds.includes('integritydesk') && activeEngines.length === 0) { setError('Select at least one engine.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
+    setProgress(0.18);
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     fd.append('course_name', courseName || assignmentName || 'Assignment Check');
@@ -321,11 +343,11 @@ export default function UploadPage() {
                   </div>
                   <div>
                     <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                      New Assignment Check
+                      Upload Assignment
                     </h1>
                   </div>
                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                    Upload submission files, configure detection settings, and run a full similarity analysis.
+                    Upload a ZIP, LMS export, or repository bundle. IntegrityDesk detects the assignment shape, removes starter code, calibrates thresholds, and returns only the cases worth instructor time.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
@@ -342,12 +364,36 @@ export default function UploadPage() {
                         </svg>
                         Analyzing…
                       </>
-                      : <><Zap size={16} />Run Check<ArrowRight size={15} className="opacity-70" /></>}
+                      : <><Zap size={16} />Analyze Assignment<ArrowRight size={15} className="opacity-70" /></>}
                   </button>
                 </div>
               </div>
             </div>
           </section>
+
+          {uploading && (
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-950">
+                    <Loader2 size={16} className="animate-spin" />
+                    Analyzing {zipFile ? 'submissions from archive' : `${files.length} submissions`}...
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+                  </div>
+                </div>
+                <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">
+                  {progressTasks.map((task, index) => (
+                    <div key={task} className="flex items-center gap-2">
+                      <Check size={14} className={progress > (index + 1) * 0.18 ? 'text-blue-700' : 'text-blue-300'} />
+                      {task}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Context Fields */}
           <div className="grid gap-4 lg:grid-cols-2 mb-4">
@@ -413,19 +459,28 @@ export default function UploadPage() {
                     <UploadIcon size={28} style={{ color: isDragOver ? '#3b82f6' : '#94a3b8', transition: 'color 0.2s' }} />
                   </div>
                   <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
-                    {isDragOver ? 'Release to upload' : 'Drop submission files here'}
+                    {isDragOver ? 'Release to upload' : 'Drag files here'}
                   </h3>
                   <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
-                    Upload multiple code files for comparison, or a single ZIP archive containing all submissions
+                    Upload a ZIP archive, LMS export, Git repository bundle, or multiple submission files.
                   </p>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
-                    style={{ borderColor: '#e2e8f0', color: '#475569', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                  >
-                    <FileUp size={13} />Browse files
-                  </button>
+                  <div className="flex flex-wrap justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                      className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
+                      style={{ borderColor: '#e2e8f0', color: '#475569', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                    >
+                      <FileUp size={13} />Browse files
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium text-slate-400"
+                      style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
+                    >
+                      <FolderArchive size={13} />Import from LMS
+                    </button>
+                  </div>
                   <p className="mt-5 text-xs text-slate-300 font-medium">
                     .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift · .zip
                   </p>
@@ -534,13 +589,28 @@ export default function UploadPage() {
             {hasMixedZipSelection && (
               <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
                 <AlertCircle size={13} className="text-amber-500 shrink-0" />
-                <p className="text-sm text-amber-700">Remove the ZIP or the other files — can't mix both.</p>
+                <p className="text-sm text-amber-700">Remove the ZIP or the other files. Do not mix both.</p>
               </div>
             )}
           </div>
 
+          {files.length > 0 && (
+            <div className="grid gap-4 md:grid-cols-3">
+              <AutoStep icon={SearchCheck} title="Language detected automatically" detail="No manual engine setup required." />
+              <AutoStep icon={Shield} title="Starter code handled" detail="Shared templates are excluded from evidence." />
+              <AutoStep icon={Clock3} title="Estimated review time" detail="Top cases are ranked by instructor value." />
+            </div>
+          )}
+
           {/* Config */}
-          <div className="grid gap-4 lg:grid-cols-2">
+          <details className="rounded-2xl bg-white p-5" style={cardShadow}>
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+              Advanced detection settings
+            </summary>
+            <p className="mt-2 text-sm text-slate-500">
+              Defaults are recommended for professors. These controls are mainly for administrators validating custom workflows.
+            </p>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
 
             {/* Tools */}
             <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
@@ -674,11 +744,11 @@ export default function UploadPage() {
                 >
                   <div className="flex items-center gap-1.5 mb-2">
                     <Sparkles size={11} style={{ color: modeSuggestion ? '#60a5fa' : '#cbd5e1' }} />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">AI Suggestion</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Recommended Mode</span>
                   </div>
                   {modeSuggesting ? (
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <Loader2 size={11} className="animate-spin" /> Analyzing context…
+                    <Loader2 size={11} className="animate-spin" /> Reading assignment context…
                     </div>
                   ) : modeSuggestion ? (
                     <div className="flex items-start justify-between gap-3">
@@ -708,7 +778,7 @@ export default function UploadPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Add files or assignment details for a mode suggestion.
+                      Add files or assignment details for a recommendation.
                     </p>
                   )}
                 </div>
@@ -716,6 +786,7 @@ export default function UploadPage() {
             </div>
             )}
           </div>
+          </details>
 
           {/* Ready Banner */}
           {canRunCheck && (
@@ -729,7 +800,7 @@ export default function UploadPage() {
                     {zipFile ? '1 archive' : `${selectedFiles.length} files`} ready to analyze
                   </p>
                   <p className="text-xs" style={{ color: '#60a5fa' }}>
-                    {selectedToolIds.length} tool{selectedToolIds.length !== 1 ? 's' : ''} · {activeEngines.length} engine{activeEngines.length !== 1 ? 's' : ''} active
+                    Auto profile · starter code removal · previous-term matching when available
                   </p>
                 </div>
               </div>
@@ -741,7 +812,7 @@ export default function UploadPage() {
               >
                 {uploading
                   ? <><Loader2 size={14} className="animate-spin" />Analyzing…</>
-                  : <><Zap size={14} />Run Check<ArrowRight size={13} className="opacity-70" /></>}
+                  : <><Zap size={14} />Analyze Assignment<ArrowRight size={13} className="opacity-70" /></>}
               </button>
             </div>
           )}
@@ -749,5 +820,21 @@ export default function UploadPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function AutoStep({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4" style={cardShadow}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+          <Icon size={16} />
+        </div>
+        <div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <div className="mt-1 text-sm leading-5 text-slate-500">{detail}</div>
+        </div>
+      </div>
+    </div>
   );
 }

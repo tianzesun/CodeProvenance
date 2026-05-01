@@ -17,6 +17,7 @@ from src.backend.engines.scoring.fusion_policy import (
     default_weight_governance_policy,
     fusion_presets_payload,
 )
+from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -32,6 +33,10 @@ class FusedScore:
     agreement_index: float = 1.0
     components: Dict[str, float] = field(default_factory=dict)
     contributions: Dict[str, float] = field(default_factory=dict)
+    review_priority: float = 0.0
+    professor_summary: str = ""
+    evidence_reasons: list[str] = field(default_factory=list)
+    evidence_guardrails: list[str] = field(default_factory=list)
 
 
 # Baseline scores expected for two unrelated files in the same language.
@@ -176,6 +181,7 @@ class FusionEngine:
         self._fuser = PrecisionWeightedFuser(
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
+        self._ranker = EvidenceFusionRanker()
 
     @staticmethod
     def _normalize_weight_names(weights: Dict[str, float]) -> Dict[str, float]:
@@ -518,6 +524,8 @@ class FusionEngine:
         final_score = min(1.0, max(0.0, final_score))
         final_score = self._apply_precision_guards(corrected_scores, final_score)
 
+        evidence_rank = self._ranker.rank_pair(raw_scores, base_score=final_score)
+
         return FusedScore(
             final_score=final_score,
             confidence=arbitration.agreement_index,
@@ -525,6 +533,10 @@ class FusionEngine:
             agreement_index=arbitration.agreement_index,
             components=raw_scores,
             contributions=arbitration.engine_contributions,
+            review_priority=evidence_rank.review_priority,
+            professor_summary=evidence_rank.professor_summary,
+            evidence_reasons=evidence_rank.reasons,
+            evidence_guardrails=evidence_rank.guardrails,
         )
 
     def _apply_precision_guards(
@@ -553,7 +565,9 @@ class FusionEngine:
         ai_score = corrected_scores.get("ai_detection", 0.0)
         if ai_score >= evidence_threshold and final_score >= high_score_floor:
             # If only AI detection is contributing to high score, cap it
-            non_ai_scores = {k: v for k, v in corrected_scores.items() if k != "ai_detection"}
+            non_ai_scores = {
+                k: v for k, v in corrected_scores.items() if k != "ai_detection"
+            }
             max_non_ai = max(non_ai_scores.values()) if non_ai_scores else 0.0
             if max_non_ai < evidence_threshold:
                 return min(final_score, cap)
@@ -598,6 +612,7 @@ class FusionEngine:
         total = sum(self.weights.values())
         if total > 0:
             self.weights = {k: v / total for k, v in self.weights.items()}
-        self._arbitrator = BayesianArbitrator(
-            engine_prior_precisions={k: v * 20 for k, v in self.weights.items()}
+        multiplier = self._config["arbitration"]["prior_precision_multiplier"]
+        self._fuser = PrecisionWeightedFuser(
+            engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )

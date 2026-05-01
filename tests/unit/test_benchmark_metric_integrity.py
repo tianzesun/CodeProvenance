@@ -3,6 +3,16 @@
 import asyncio
 import json
 
+from src.backend.application.services.batch_detection_service import (
+    BatchDetectionService,
+    DECISION_BLOCK_TOKEN,
+    ITERATIVE_BLOCK_TOKEN,
+    _apply_structure_sensitivity_floor,
+    _clean_similarity_baseline,
+    _logic_flow_tokens,
+    _logic_flow_similarity,
+    _subtract_clean_baseline,
+)
 from src.backend.api import server
 
 
@@ -75,7 +85,8 @@ def test_fixed_threshold_strategy_does_not_optimize_regression_threshold() -> No
     )
 
     assert metrics["threshold_strategy"] == "fixed_threshold"
-    assert metrics["best_threshold_exact"] == 0.5
+    assert metrics["best_threshold_exact"] == 0.82
+    assert metrics["fixed_threshold"] == 0.82
     assert metrics["confusion_matrix"] == {"tp": 0, "fp": 0, "tn": 1, "fn": 1}
     assert metrics["metric_integrity"]["calibration_bias_warning"] is False
 
@@ -158,3 +169,183 @@ def test_xiangtan_loader_produces_positive_and_negative_pairs(tmp_path) -> None:
     assert any(label >= 2 for label in labels)
     assert any(label == 0 for label in labels)
     assert len(labels) > 75
+
+
+def test_xiangtan_negative_pairs_use_different_behavior_signatures(tmp_path) -> None:
+    """Xiangtan negatives must not pair same-solution aliases as false negatives."""
+    submissions, pairs = server._load_xiangtan_pair_dataset(
+        server.BENCHMARK_DATA_DIR / "xiangtan", tmp_path
+    )
+
+    negative_pairs = [pair for pair in pairs if pair["label"] == 0]
+
+    assert negative_pairs
+    for pair in negative_pairs:
+        signature_a = server._java_behavior_signature(submissions[pair["file_a"]])
+        signature_b = server._java_behavior_signature(submissions[pair["file_b"]])
+        assert signature_a != signature_b
+
+
+def test_clean_baseline_subtraction_treats_normal_similarity_as_zero() -> None:
+    """Labeled clean-pair similarity should become the benchmark zero point."""
+    baseline = _clean_similarity_baseline([0.84, 0.85, 0.86])
+
+    assert baseline == 0.85
+    assert _subtract_clean_baseline(0.85, baseline) == 0.0
+    assert round(_subtract_clean_baseline(0.925, baseline), 3) == 0.5
+
+
+def test_logic_flow_signature_distinguishes_common_skeleton_from_logic_match() -> None:
+    """Shared Java method skeletons should be explainable as normal similarity."""
+    sum_code = """
+public class ArraySum {
+    public int sumArray(int[] arr) {
+        int total = 0;
+        for (int i = 0; i < arr.length; i++) {
+            total += arr[i];
+        }
+        return total;
+    }
+}
+"""
+    max_code = """
+public class MaxFinder {
+    public int findMax(int[] arr) {
+        int max = arr[0];
+        for (int i = 1; i < arr.length; i++) {
+            if (arr[i] > max) {
+                max = arr[i];
+            }
+        }
+        return max;
+    }
+}
+"""
+
+    logic_flow = _logic_flow_similarity(sum_code, max_code)
+
+    assert logic_flow < 0.72
+
+
+def test_for_and_while_normalize_to_iterative_block() -> None:
+    """For/while rewrites should preserve control-flow similarity."""
+    for_loop = """
+for (int i = 0; i < items.length; i++) {
+    total += items[i];
+}
+"""
+    while_loop = """
+int i = 0;
+while (i < items.length) {
+    total += items[i];
+    i++;
+}
+"""
+
+    assert ITERATIVE_BLOCK_TOKEN in _logic_flow_tokens(for_loop)
+    assert ITERATIVE_BLOCK_TOKEN in _logic_flow_tokens(while_loop)
+    assert "for" not in _logic_flow_tokens(for_loop)
+    assert "while" not in _logic_flow_tokens(while_loop)
+    assert _logic_flow_similarity(for_loop, while_loop) >= 0.75
+
+
+def test_if_and_switch_normalize_to_decision_block() -> None:
+    """If/switch rewrites should be treated as decision blocks."""
+    if_code = """
+if (score > 90) {
+    grade = 1;
+} else {
+    grade = 0;
+}
+"""
+    switch_code = """
+switch (bucket) {
+    case 9:
+        grade = 1;
+        break;
+    default:
+        grade = 0;
+}
+"""
+
+    assert DECISION_BLOCK_TOKEN in _logic_flow_tokens(if_code)
+    assert DECISION_BLOCK_TOKEN in _logic_flow_tokens(switch_code)
+    assert "if" not in _logic_flow_tokens(if_code)
+    assert "switch" not in _logic_flow_tokens(switch_code)
+    assert _logic_flow_similarity(if_code, switch_code) >= 0.35
+
+
+def test_logic_flow_strips_comments_before_matching() -> None:
+    """Comments should not inflate or deflate structural similarity."""
+    base_code = """
+int total = 0;
+for (int i = 0; i < nums.length; i++) {
+    total += nums[i];
+}
+return total;
+"""
+    commented_code = """
+// The following loop walks through the array.
+int total = 0;
+for (int i = 0; i < nums.length; i++) {
+    /* This comment should not become punctuation evidence. */
+    total += nums[i];
+}
+return total; // done
+"""
+
+    assert _logic_flow_tokens(base_code) == _logic_flow_tokens(commented_code)
+    assert _logic_flow_similarity(base_code, commented_code) == 1.0
+
+
+def test_structure_sensitivity_floor_keeps_reorder_and_control_flow_matches() -> None:
+    """Strong structural evidence should survive stricter precision tuning."""
+    assert (
+        _apply_structure_sensitivity_floor(
+            score=0.68,
+            ast_score=0.95,
+            fingerprint_score=0.72,
+            logic_flow=0.94,
+        )
+        == 0.88
+    )
+    assert (
+        _apply_structure_sensitivity_floor(
+            score=0.68,
+            ast_score=0.95,
+            fingerprint_score=0.72,
+            logic_flow=0.84,
+        )
+        == 0.82
+    )
+    assert (
+        _apply_structure_sensitivity_floor(
+            score=0.68,
+            ast_score=0.95,
+            fingerprint_score=0.72,
+            logic_flow=0.62,
+        )
+        == 0.68
+    )
+
+
+def test_xiangtan_renamed_and_structured_pairs_remain_detectable(tmp_path) -> None:
+    """Type-2 rename gains should not come at the expense of Type-3 structure."""
+    submissions, pairs = server._load_xiangtan_pair_dataset(
+        server.BENCHMARK_DATA_DIR / "xiangtan", tmp_path
+    )
+    selected_pairs = [
+        pair
+        for pair in pairs
+        if pair["file_a"] in {"xiangtan_pos_00001_a.java", "xiangtan_pos_00002_a.java"}
+    ]
+
+    results = {
+        result.file_a: result
+        for result in BatchDetectionService(threshold=0.3).compare_pairs(
+            submissions, selected_pairs
+        )
+    }
+
+    assert results["xiangtan_pos_00001_a.java"].features["raw_score"] >= 0.88
+    assert results["xiangtan_pos_00002_a.java"].features["raw_score"] >= 0.82

@@ -2095,6 +2095,7 @@ def _load_xiangtan_pair_dataset(
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
     positive_originals: List[PathLib] = []
+    behavior_signatures: Dict[PathLib, str] = {}
 
     with pairs_csv.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -2110,17 +2111,20 @@ def _load_xiangtan_pair_dataset(
                 continue
 
             pair_id = f"xiangtan_pos_{idx:05d}"
+            source_a_code = source_a.read_text(encoding="utf-8", errors="ignore")
+            source_b_code = source_b.read_text(encoding="utf-8", errors="ignore")
+            behavior_signatures[source_a] = _java_behavior_signature(source_a_code)
             file_a = _write_pair_submission(
                 submissions,
                 target_dir,
                 f"{pair_id}_a.java",
-                source_a.read_text(encoding="utf-8", errors="ignore"),
+                source_a_code,
             )
             file_b = _write_pair_submission(
                 submissions,
                 target_dir,
                 f"{pair_id}_b.java",
-                source_b.read_text(encoding="utf-8", errors="ignore"),
+                source_b_code,
             )
             positive_originals.append(source_a)
             explicit_pairs.append(
@@ -2145,6 +2149,8 @@ def _load_xiangtan_pair_dataset(
             if source_a.stem.replace("_original", "") == source_b.stem.replace(
                 "_original", ""
             ):
+                continue
+            if behavior_signatures.get(source_a) == behavior_signatures.get(source_b):
                 continue
 
             pair_id = f"xiangtan_neg_{negative_count:05d}"
@@ -2172,6 +2178,77 @@ def _load_xiangtan_pair_dataset(
             negative_count += 1
 
     return submissions, explicit_pairs
+
+
+def _java_behavior_signature(code: str) -> str:
+    """Return a name-insensitive Java signature for avoiding mislabeled negatives."""
+    without_comments = re.sub(
+        r"/\*.*?\*/|//.*?$", "", code, flags=re.DOTALL | re.MULTILINE
+    )
+    tokens = re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\S", without_comments)
+    java_keywords = {
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
+    }
+    normalized = []
+    for token in tokens:
+        if re.fullmatch(r"\d+", token):
+            normalized.append("NUM")
+        elif token in {"for", "while", "do"}:
+            normalized.append("ITERATIVE_BLOCK")
+        elif re.fullmatch(r"[A-Za-z_]\w*", token) and token not in java_keywords:
+            normalized.append("ID")
+        else:
+            normalized.append(token)
+    return hashlib.sha256(" ".join(normalized).encode("utf-8")).hexdigest()
 
 
 def _load_codexglue_pair_dataset(
@@ -5774,7 +5851,7 @@ def _compute_evaluation_metrics(
     evaluation_scores_arr = scores_arr[evaluation_indices]
     evaluation_labels_arr = labels_arr[evaluation_indices]
 
-    fixed_threshold = 0.5
+    fixed_threshold = _coerce_float(settings.DEFAULT_THRESHOLD, 0.82)
     normalized_threshold_strategy = (
         "fixed_threshold"
         if threshold_strategy == "fixed_threshold"
@@ -5806,9 +5883,9 @@ def _compute_evaluation_metrics(
             )
             candidate_key = (
                 float(candidate["f1_score"]),
-                float(candidate["recall"]),
                 float(candidate["precision"]),
                 -float(candidate["false_positive_rate"]),
+                float(candidate["recall"]),
                 -float(threshold),
             )
             if best_candidate_key is None or candidate_key > best_candidate_key:
@@ -5866,7 +5943,7 @@ def _compute_evaluation_metrics(
     )
     score_diagnostics = _build_score_diagnostics(scores_arr, labels_arr)
     calibration_curve = _build_threshold_calibration_points(
-        scores_arr, labels_arr, [0.5, float(best_threshold), 0.75, 0.9]
+        scores_arr, labels_arr, [fixed_threshold, float(best_threshold), 0.75, 0.9]
     )
     metric_assumptions = {
         "span_level_scoring": False,
@@ -5876,6 +5953,10 @@ def _compute_evaluation_metrics(
         "weight_tuning_protocol": (
             "Regression uses a fixed threshold. Calibration selects a threshold on "
             "the calibration slice and reports headline metrics on the held-out slice."
+        ),
+        "ranking_objective": (
+            "Use PR-AUC, PlagDet, precision@20, and top-k recall to tune ranking; "
+            "do not optimize average similarity."
         ),
         "external_score_calibration": (
             "External tools are evaluated independently; normalize or calibrate "
@@ -7326,6 +7407,14 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "batch_size": settings.BATCH_SIZE,
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
     "max_files_per_job": settings.MAX_FILES_PER_JOB,
+    "professor_profile": {
+        "assignment_type": "auto_detect",
+        "sensitivity": "balanced",
+        "starter_code_handling": "student_written_only",
+        "previous_term_matching": "same_course_only",
+        "ai_rewrite_detection": "balanced",
+        "result_volume": "top_25",
+    },
 }
 
 SETTINGS_ATTR_MAP = {
@@ -7389,6 +7478,17 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     payload["anthropic_api_key_configured"] = bool(anthropic_key)
     payload["moss_user_id"] = ""
     payload["moss_user_id_configured"] = bool(moss_user_id)
+    from src.backend.engines.scoring.professor_profiles import (
+        apply_professor_profile,
+        professor_profile_catalog,
+    )
+
+    applied_professor_profile = apply_professor_profile(
+        payload.get("professor_profile")
+    )
+    payload["professor_profile_catalog"] = professor_profile_catalog()
+    payload["professor_profile"] = dict(applied_professor_profile.profile.__dict__)
+    payload["applied_professor_profile"] = applied_professor_profile.to_dict()
     return payload
 
 
@@ -7760,9 +7860,548 @@ async def download_benchmark_pdf(job_id: str):
         return response
 
 
+def _pdf_escape(value: Any) -> str:
+    """Escape text for a simple PDF content stream."""
+    return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _format_report_percent(value: Any, scale: bool = True) -> str:
+    """Format benchmark values as report-ready percentages."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if scale:
+        numeric *= 100
+    return f"{numeric:.1f}%"
+
+
+def _format_report_number(value: Any, digits: int = 3) -> str:
+    """Format numeric values for the benchmark report."""
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _benchmark_tool_display_name(tool_id: str) -> str:
+    """Return a stable human-readable benchmark tool name."""
+    metadata = BENCHMARK_TOOL_METADATA.get(str(tool_id).lower(), {})
+    return str(metadata.get("name") or tool_id)
+
+
+def _metric_action(metric: str, value: float) -> str:
+    """Return actionable guidance for a benchmark metric value."""
+    if metric == "precision":
+        if value < 0.85:
+            return (
+                "False positives are the priority. Raise the decision threshold, "
+                "suppress boilerplate/templates, and require agreement from at least "
+                "two independent engines before high-risk flags."
+            )
+        return "Precision is usable. Preserve current negative filters while tuning recall."
+    if metric == "recall":
+        if value < 0.85:
+            return (
+                "Known plagiarism is being missed. Lower candidate retrieval cutoffs, "
+                "strengthen renamed and structural clone handling, and rerank a wider "
+                "shortlist with heavier engines."
+            )
+        return "Recall is usable. Keep the broad candidate path while reducing noisy matches."
+    if metric == "f1_score":
+        if value < 0.85:
+            return (
+                "The precision/recall tradeoff is not calibrated. Run threshold sweeps "
+                "on the labeled holdout and optimize F1 and PlagDet together."
+            )
+        return "F1 is strong enough for a baseline. Validate again on harder negatives."
+    if metric == "false_positive_rate":
+        if value > 0.05:
+            return (
+                "False positive rate is above the preferred review threshold. Add starter-code "
+                "filters, common-library suppression, and stricter high-confidence gates."
+            )
+        return "False positive rate is controlled. Keep this guardrail in regression checks."
+    if metric == "auc_pr":
+        if value < 0.85:
+            return (
+                "Ranking quality is weak. Tune fusion weights with PR-AUC and add hard "
+                "negative pairs that look structurally similar but are independently written."
+            )
+        return "Ranking quality is good. Use PR-AUC as a regression metric."
+    if metric == "top_10_retrieval":
+        if value < 0.90:
+            return (
+                "True positives are not consistently near the top. Improve cheap lexical/AST "
+                "retrieval before expensive reranking."
+            )
+        return "Top-10 retrieval is healthy. Keep it as a candidate-stage acceptance check."
+    if metric == "granularity":
+        if value > 1.10:
+            return (
+                "Detections may be split into too many fragments. Merge adjacent or overlapping "
+                "evidence spans for the same file pair."
+            )
+        return (
+            "Granularity is close to ideal. Keep one coherent detection per true pair."
+        )
+    if metric == "avg_runtime_seconds":
+        if value > 0.5:
+            return (
+                "Runtime is expensive for iterative benchmarking. Cache parsing/tokenization and "
+                "run embeddings or execution checks only on shortlisted pairs."
+            )
+        return "Runtime is suitable for tight benchmark iteration."
+    return "Track this value across benchmark runs and investigate regressions."
+
+
+def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
+    """Build a detailed, professional benchmark report from a benchmark payload."""
+    pair_results = payload.get("pair_results") or []
+    summary = payload.get("summary") or {}
+    evaluation = payload.get("evaluation") or {}
+    tool_scores = payload.get("tool_scores") or {}
+    dataset_name = (
+        payload.get("datasetName") or summary.get("dataset_name") or "Benchmark"
+    )
+    generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
+    benchmark_type = payload.get("benchmark_type") or payload.get("benchmarkMode") or ""
+    requested_tools = payload.get("requested_tools") or list(tool_scores.keys())
+
+    valid_eval = {
+        tool: metrics
+        for tool, metrics in evaluation.items()
+        if isinstance(metrics, dict) and not metrics.get("error")
+    }
+    primary_tool = "integritydesk" if "integritydesk" in valid_eval else None
+    if not primary_tool and valid_eval:
+        primary_tool = next(iter(valid_eval.keys()))
+    primary_metrics = valid_eval.get(primary_tool or "", {})
+
+    lines: List[str] = [
+        f"IntegrityDesk Benchmark Report - {dataset_name}",
+        "",
+        "Executive Summary",
+        f"Generated: {generated_at}",
+        f"Benchmark type: {benchmark_type or 'tool comparison'}",
+        f"Dataset: {dataset_name}",
+        f"Pairs tested: {summary.get('pairs_tested', len(pair_results))}",
+        f"Tools completed: {summary.get('tools_compared', len(tool_scores))}",
+        f"Ground truth available: {'yes' if payload.get('has_ground_truth') else 'no'}",
+        "",
+    ]
+
+    if primary_metrics:
+        f1 = float(
+            primary_metrics.get("f1_score") or primary_metrics.get("best_f1") or 0
+        )
+        precision = float(primary_metrics.get("precision") or 0)
+        recall = float(primary_metrics.get("recall") or 0)
+        fpr = float(primary_metrics.get("false_positive_rate") or 0)
+        lines.extend(
+            [
+                "Primary Finding",
+                (
+                    f"{_benchmark_tool_display_name(primary_tool)} scored "
+                    f"{_format_report_percent(primary_metrics.get('plagdet', f1))} PlagDet, "
+                    f"{_format_report_percent(f1)} F1, "
+                    f"{_format_report_percent(precision)} precision, "
+                    f"{_format_report_percent(recall)} recall, and "
+                    f"{_format_report_percent(fpr)} false positive rate."
+                ),
+                "",
+            ]
+        )
+        if precision < 0.85:
+            lines.append(
+                "Main risk: false positives are too high for trusted review workflows."
+            )
+        elif recall < 0.85:
+            lines.append("Main risk: known plagiarism pairs are being missed.")
+        elif f1 < 0.85:
+            lines.append("Main risk: threshold calibration needs more work.")
+        else:
+            lines.append(
+                "Main result: the detector is suitable as a baseline for regression tracking."
+            )
+        lines.append("")
+
+        metric_integrity = primary_metrics.get("metric_integrity") or {}
+        split_protocol = primary_metrics.get("split_protocol") or {}
+        confidence_intervals = primary_metrics.get("confidence_intervals") or {}
+        heldout_confusion = metric_integrity.get("heldout_confusion_matrix") or {}
+        fixed_threshold_metrics = primary_metrics.get("fixed_threshold_metrics") or {}
+        trust_level = (
+            "strong"
+            if (
+                split_protocol.get("protocol")
+                == "deterministic_stratified_calibration_holdout"
+                and confidence_intervals.get("available")
+                and int(split_protocol.get("holdout_size") or 0) >= 20
+            )
+            else (
+                "moderate"
+                if split_protocol.get("protocol")
+                == "deterministic_stratified_calibration_holdout"
+                else "limited"
+            )
+        )
+        lines.extend(
+            [
+                "Score Trust and Error Audit",
+                f"Trust level: {trust_level}",
+                (
+                    "Protocol: "
+                    + (
+                        "stratified calibration/holdout"
+                        if split_protocol.get("protocol")
+                        == "deterministic_stratified_calibration_holdout"
+                        else "fallback evaluation without separate holdout"
+                    )
+                ),
+                (
+                    f"Held-out labels: {split_protocol.get('holdout_positive_pairs', 0)} "
+                    f"positive and {split_protocol.get('holdout_negative_pairs', 0)} negative pairs"
+                ),
+                f"Optimized threshold: {_format_report_number(primary_metrics.get('best_threshold'), 2)}",
+                (
+                    f"Held-out F1: {_format_report_number(metric_integrity.get('heldout_f1', f1), 3)}; "
+                    f"fixed {_format_report_number(primary_metrics.get('fixed_threshold'), 2)} F1: "
+                    f"{_format_report_number(metric_integrity.get('fixed_threshold_f1', fixed_threshold_metrics.get('f1_score')), 3)}"
+                ),
+                (
+                    "Held-out confusion matrix: "
+                    f"TP {heldout_confusion.get('tp', 0)}, FP {heldout_confusion.get('fp', 0)}, "
+                    f"TN {heldout_confusion.get('tn', 0)}, FN {heldout_confusion.get('fn', 0)}"
+                ),
+            ]
+        )
+        if confidence_intervals.get("available") and confidence_intervals.get("f1"):
+            f1_interval = confidence_intervals["f1"]
+            lines.append(
+                "95% bootstrap F1 confidence interval: "
+                f"{_format_report_number(f1_interval.get('ci_lower'), 3)}-"
+                f"{_format_report_number(f1_interval.get('ci_upper'), 3)}"
+            )
+        else:
+            lines.append(
+                "Confidence interval: unavailable; use a larger labeled holdout to "
+                "narrow uncertainty before making certification claims."
+            )
+        lines.append(
+            "Interpretation: precision drops when clean pairs are above threshold; "
+            "recall drops when labeled plagiarism pairs are below threshold."
+        )
+        lines.append("")
+
+    if requested_tools:
+        lines.extend(["Tool Coverage"])
+        for tool in requested_tools:
+            meta = tool_scores.get(tool, {})
+            status = "failed" if meta.get("error") else "completed"
+            runtime = _format_report_number(meta.get("runtime_seconds"), 3)
+            pairs = meta.get("pairs", 0)
+            lines.append(
+                f"- {_benchmark_tool_display_name(tool)}: {status}; {pairs} pairs; "
+                f"{runtime}s total runtime"
+            )
+            if meta.get("error"):
+                lines.append(f"  Error: {meta.get('error')}")
+        lines.append("")
+
+    if valid_eval:
+        lines.extend(["Metric Scorecard"])
+        for tool, metrics in valid_eval.items():
+            lines.append(f"{_benchmark_tool_display_name(tool)}")
+            score_rows = [
+                ("PlagDet", "plagdet", True),
+                ("Precision", "precision", True),
+                ("Recall", "recall", True),
+                ("F1 Score", "f1_score", True),
+                ("False Positive Rate", "false_positive_rate", True),
+                ("AUC-PR", "auc_pr", True),
+                ("Top-10 Retrieval", "top_10_retrieval", True),
+                ("Granularity", "granularity", False),
+                ("Avg Runtime Seconds", "avg_runtime_seconds", False),
+            ]
+            for label, key, as_percent in score_rows:
+                value = metrics.get(key)
+                if value is None and key == "f1_score":
+                    value = metrics.get("best_f1")
+                if value is None:
+                    continue
+                display = (
+                    _format_report_percent(value)
+                    if as_percent
+                    else _format_report_number(value, 3)
+                )
+                lines.append(f"- {label}: {display}")
+            lines.append("")
+
+    if primary_metrics:
+        lines.extend(["Detailed Improvement Guide"])
+        guide_metrics = [
+            ("precision", "Precision"),
+            ("recall", "Recall"),
+            ("f1_score", "F1 Score"),
+            ("false_positive_rate", "False Positive Rate"),
+            ("auc_pr", "AUC-PR"),
+            ("top_10_retrieval", "Top-10 Retrieval"),
+            ("granularity", "Granularity"),
+            ("avg_runtime_seconds", "Runtime"),
+        ]
+        for key, label in guide_metrics:
+            value = primary_metrics.get(key)
+            if value is None and key == "f1_score":
+                value = primary_metrics.get("best_f1")
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            lines.append(f"{label}: {_metric_action(key, numeric)}")
+        contribution = primary_metrics.get("engine_contribution") or {}
+        if contribution:
+            top_contributors = sorted(
+                contribution.items(), key=lambda item: float(item[1] or 0), reverse=True
+            )[:4]
+            rendered = ", ".join(
+                f"{name} {_format_report_percent(value)}"
+                for name, value in top_contributors
+            )
+            lines.append(f"Engine contribution focus: {rendered}.")
+        warnings = (primary_metrics.get("metric_integrity") or {}).get("warnings") or []
+        if warnings:
+            lines.append("Metric integrity warnings:")
+            lines.extend(f"- {warning}" for warning in warnings)
+        lines.append("")
+
+    if payload.get("benchmark_quality"):
+        quality = payload["benchmark_quality"]
+        lines.extend(
+            [
+                "Dataset Quality Notes",
+                f"Certification level: {quality.get('certification_level', 'unknown')}",
+                f"Quality score: {_format_report_percent(quality.get('score_percent'), scale=False)}",
+                f"Pair count: {quality.get('pair_count', 'N/A')}",
+                f"Positive pairs: {quality.get('positive_pairs', 'N/A')}",
+                f"Negative pairs: {quality.get('negative_pairs', 'N/A')}",
+                "",
+            ]
+        )
+
+    if primary_metrics and pair_results:
+        threshold = _coerce_float(primary_metrics.get("best_threshold"), 0.5)
+        labeled_rows = []
+        for pair in pair_results:
+            if pair.get("ground_truth_label") is None:
+                continue
+            tool_result = next(
+                (
+                    result
+                    for result in pair.get("tool_results") or []
+                    if result.get("tool") == primary_tool
+                ),
+                None,
+            )
+            if not tool_result:
+                continue
+            score = _coerce_float(tool_result.get("score"))
+            actual = int(pair.get("ground_truth_label") or 0) >= 2
+            predicted = score >= threshold
+            labeled_rows.append(
+                {
+                    "pair": pair,
+                    "score": score,
+                    "actual": actual,
+                    "predicted": predicted,
+                }
+            )
+
+        if labeled_rows:
+            false_positives = sorted(
+                [row for row in labeled_rows if not row["actual"] and row["predicted"]],
+                key=lambda row: row["score"],
+                reverse=True,
+            )[:5]
+            false_negatives = sorted(
+                [row for row in labeled_rows if row["actual"] and not row["predicted"]],
+                key=lambda row: row["score"],
+            )[:5]
+            lines.extend(["Error Examples"])
+            if false_positives:
+                lines.append("False positives: clean pairs above threshold.")
+                for row in false_positives:
+                    pair = row["pair"]
+                    lines.append(
+                        f"- {pair.get('label', 'Pair')}: {pair.get('file_a', '')} vs "
+                        f"{pair.get('file_b', '')}; score {_format_report_percent(row['score'])}"
+                    )
+            else:
+                lines.append("False positives: none in labeled pair rows.")
+            if false_negatives:
+                lines.append("False negatives: plagiarism pairs below threshold.")
+                for row in false_negatives:
+                    pair = row["pair"]
+                    lines.append(
+                        f"- {pair.get('label', 'Pair')}: {pair.get('file_a', '')} vs "
+                        f"{pair.get('file_b', '')}; score {_format_report_percent(row['score'])}"
+                    )
+            else:
+                lines.append("False negatives: none in labeled pair rows.")
+            lines.append("")
+
+    if pair_results:
+        lines.extend(["Pair-Level Appendix"])
+        for pair in pair_results[:80]:
+            label = pair.get("label") or "Pair"
+            ground_truth = pair.get("ground_truth_label")
+            lines.append(
+                f"{label}: {pair.get('file_a', '')} vs {pair.get('file_b', '')}"
+                + (
+                    f" | ground truth {ground_truth}"
+                    if ground_truth is not None
+                    else ""
+                )
+            )
+            for tool_result in pair.get("tool_results") or []:
+                tool = _benchmark_tool_display_name(tool_result.get("tool", "tool"))
+                score = _format_report_percent(tool_result.get("score"))
+                lines.append(f"- {tool}: {score}")
+            features = next(
+                (
+                    tr.get("features")
+                    for tr in pair.get("tool_results") or []
+                    if tr.get("tool") == "integritydesk" and tr.get("features")
+                ),
+                None,
+            )
+            if features:
+                top_features = sorted(
+                    features.items(), key=lambda item: float(item[1] or 0), reverse=True
+                )[:4]
+                rendered_features = ", ".join(
+                    f"{name} {_format_report_percent(value)}"
+                    for name, value in top_features
+                )
+                lines.append(f"  IntegrityDesk signal breakdown: {rendered_features}")
+        if len(pair_results) > 80:
+            lines.append(f"... {len(pair_results) - 80} additional pairs omitted.")
+    else:
+        lines.extend(
+            ["Pair-Level Appendix", "No pair-level rows were included in the result."]
+        )
+
+    return lines
+
+
+def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
+    """Generate a reliable multi-page text PDF without external PDF dependencies."""
+    import textwrap
+
+    page_width = 612
+    page_height = 792
+    margin_x = 42
+    start_y = 742
+    max_lines = 52
+    wrap_width = 92
+
+    rendered_lines: List[str] = []
+    for raw_line in lines:
+        line = str(raw_line).strip("\n")
+        if not line:
+            rendered_lines.append("")
+            continue
+        wrapped = textwrap.wrap(
+            line,
+            width=wrap_width,
+            break_long_words=False,
+            replace_whitespace=False,
+        )
+        rendered_lines.extend(wrapped or [""])
+
+    pages = [
+        rendered_lines[index : index + max_lines]
+        for index in range(0, len(rendered_lines), max_lines)
+    ] or [[title]]
+
+    objects: List[bytes] = []
+    page_object_ids: List[int] = []
+
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(b"")
+
+    font_id = 3 + (len(pages) * 2)
+    for page_index, page_lines in enumerate(pages):
+        page_id = 3 + (page_index * 2)
+        content_id = page_id + 1
+        page_object_ids.append(page_id)
+
+        page = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+            f"/Contents {content_id} 0 R /Resources << /Font << /F1 {font_id} 0 R >> >> >>"
+        )
+        objects.append(page.encode("utf-8"))
+
+        stream_lines = ["BT", "/F1 10 Tf", f"{margin_x} {start_y} Td", "14 TL"]
+        for idx, line in enumerate(page_lines):
+            if idx > 0:
+                stream_lines.append("T*")
+            stream_lines.append(f"({_pdf_escape(line)}) Tj")
+        stream_lines.append("ET")
+        stream = "\n".join(stream_lines).encode("utf-8")
+        objects.append(
+            b"<< /Length "
+            + str(len(stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
+        )
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_object_ids)
+    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode(
+        "utf-8"
+    )
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_id, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+
+    xref_start = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        (
+            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_start}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(output)
+
+
 @app.post("/api/benchmark/export-pdf")
 async def export_benchmark_pdf(request: Request):
     payload = await request.json()
+    dataset_name = (
+        payload.get("datasetName")
+        or (payload.get("summary") or {}).get("dataset_name")
+        or "Benchmark"
+    )
+    report_lines = _build_benchmark_report_lines(payload)
+    pdf = _simple_text_pdf_bytes(f"{dataset_name} Benchmark Report", report_lines)
+    response = Response(content=pdf, media_type="application/pdf")
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=benchmark_report.pdf"
+    )
+    return response
 
     pair_results = payload.get("pair_results") or []
     summary = payload.get("summary") or {}
@@ -8525,14 +9164,22 @@ async def update_settings(request: Request):
         env_updates: Dict[str, Any] = {}
 
         for key, value in data.items():
-            if key not in SETTINGS_ATTR_MAP:
+            if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
                 continue
             if key in SECRET_SETTING_KEYS and value == "":
                 continue
             if key == "engine_weights":
                 value = _normalize_engine_weights(value)
+            if key == "professor_profile":
+                from src.backend.engines.scoring.professor_profiles import (
+                    apply_professor_profile,
+                )
+
+                value = dict(apply_professor_profile(value).profile.__dict__)
             stored_settings[key] = value
             applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
+            if key == "professor_profile":
+                continue
             if key in SECRET_SETTING_KEYS and value:
                 env_updates[SETTINGS_ATTR_MAP[key]] = value
 
@@ -8564,6 +9211,17 @@ async def update_settings(request: Request):
         engine_config["weights"] = proposed_weights
         if governance_result.requires_validation and not governance_result.allowed:
             engine_config.setdefault("advanced", {})["weights_need_validation"] = True
+    elif "professor_profile" in data:
+        from src.backend.engines.scoring.professor_profiles import (
+            apply_professor_profile,
+            professor_profile_to_engine_weights,
+        )
+
+        applied_profile = apply_professor_profile(data.get("professor_profile"))
+        engine_config["weights"] = professor_profile_to_engine_weights(applied_profile)
+        engine_config.setdefault("professor_profile", {})[
+            "applied"
+        ] = applied_profile.to_dict()
     if "baseline_correction" in data:
         engine_config["baseline_correction"] = data["baseline_correction"]
 
