@@ -43,12 +43,6 @@ export default function Sidebar() {
       activeOn: ['/'],
     },
     {
-      href: '/courses',
-      label: 'Courses',
-      icon: BookOpen,
-      activeOn: ['/courses'],
-    },
-    {
       href: '/assignments',
       label: 'Assignments',
       icon: Upload,

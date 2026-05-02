@@ -11,13 +11,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
-  FileText,
-  MessageSquarePlus,
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 function formatPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
@@ -57,6 +53,24 @@ function confidenceLabel(score) {
     return 'Medium';
   }
   return 'Low';
+}
+
+function reviewPriority(result) {
+  const score = Number(result?.score) || 0;
+  const features = result?.features || {};
+  const concreteKeys = ['fingerprint', 'winnowing', 'ngram', 'logic_flow', 'moss', 'jplag', 'dolos', 'pmd', 'nicad', 'sherlock'];
+  const support = concreteKeys.filter((key) => Number(features[key]) >= 0.5).length;
+
+  if (score >= 0.85 && support >= 2) {
+    return 'High Evidence Review';
+  }
+  if (score >= 0.65 && support >= 1) {
+    return 'Evidence Review';
+  }
+  if (score >= 0.35) {
+    return 'Needs Instructor Review';
+  }
+  return 'Low Priority';
 }
 
 function getEvidenceTypes(result) {
@@ -200,13 +214,7 @@ export default function ResultsPage() {
     }
   };
 
-  const addNote = async () => {
-    const note = window.prompt('Add a note for this review', job?.review_notes || '');
-    if (note === null) {
-      return;
-    }
-    await updateReview({ review_notes: note });
-  };
+
 
   const syncScroll = (source, target) => {
     if (syncingRef.current || !source.current || !target.current) {
@@ -270,75 +278,21 @@ export default function ResultsPage() {
                   {job.course_name || 'Course'} / {getAssignmentTitle(job)}
                 </div>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-                  Risk Summary
+                  Review Summary
                 </h1>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[720px]">
-                <SummaryItem label="Overall Risk" value={riskLabel(score)} danger={score >= 0.75} />
+                <SummaryItem label="Review Priority" value={reviewPriority(activeResult)} danger={score >= 0.75} />
                 <SummaryItem label="Confidence" value={confidenceLabel(score)} />
+                <SummaryItem label="Fused Review Score" value={formatPercent(score)} />
                 <SummaryItem label="Primary Reason" value={primaryReason(activeResult)} wide />
-                <SummaryItem label="Estimated Manual Review Time" value="2 min" />
               </div>
             </div>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[320px_1fr]">
             <aside className="space-y-6">
-              <section className="rounded-lg border border-[color:var(--border)] bg-white shadow-sm">
-                <div className="border-b border-[color:var(--border)] px-4 py-3">
-                  <h2 className="font-semibold text-[var(--text-primary)]">Top Cases</h2>
-                </div>
-                <div className="divide-y divide-[color:var(--border)]">
-                  {(flaggedResults.length ? flaggedResults : results).slice(0, 10).map((result, index) => (
-                    <button
-                      key={`${result.file_a}-${result.file_b}-${index}`}
-                      type="button"
-                      onClick={() => setActiveIndex(index)}
-                      className={`block w-full px-4 py-3 text-left transition ${
-                        index === activeIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="text-sm font-semibold text-[var(--text-primary)]">
-                        {result.file_a || 'Student A'} vs {result.file_b || 'Student B'}
-                      </div>
-                      <div className="mt-1 flex items-center justify-between gap-3 text-xs">
-                        <span className="text-[var(--text-secondary)]">{primaryReason(result)}</span>
-                        <span className="font-semibold text-red-700">{formatPercent(result.score)}</span>
-                      </div>
-                    </button>
-                  ))}
-                  {results.length === 0 && (
-                    <div className="px-4 py-5 text-sm text-[var(--text-secondary)]">No comparison rows were returned.</div>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
-                <h2 className="font-semibold text-[var(--text-primary)]">Why flagged?</h2>
-                <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
-                  {whyFlagged(activeResult)}
-                </p>
-              </section>
-
-              <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
-                <h2 className="font-semibold text-[var(--text-primary)]">Professor Checks</h2>
-                <div className="mt-3 space-y-3 text-sm">
-                  <CheckRow title="Starter Code Removed" detail="Template code excluded from the review view." />
-                  <CheckRow title="Previous Semester Match" detail={`Similar to ${job.course_name || 'CSC108'} Winter 2025 submission.`} />
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
-                <h2 className="font-semibold text-[var(--text-primary)]">Group Cluster View</h2>
-                <div className="mt-3 space-y-2">
-                  {cluster.map((entry, index) => (
-                    <div key={`${entry.file_a}-${entry.file_b}-${index}`} className="rounded-md bg-slate-50 px-3 py-2 text-sm text-[var(--text-secondary)]">
-                      {entry.file_a || 'A'} similar to {entry.file_b || 'B'} · {formatPercent(entry.score)}
-                    </div>
-                  ))}
-                </div>
-              </section>
             </aside>
 
             <main className="space-y-6">
@@ -376,21 +330,13 @@ export default function ResultsPage() {
                       <XCircle size={15} />
                       Dismiss
                     </button>
-                    <button
-                      type="button"
-                      onClick={addNote}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)] disabled:opacity-60"
-                    >
-                      <MessageSquarePlus size={15} />
-                      Add Note
-                    </button>
                     <a
-                      href={`${API}/report/${id}/committee`}
+                      href={`/report/${id}/committee`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]"
                     >
-                      <Download size={15} />
-                      Export Report
+                      Open Originality Report with Add Note
                     </a>
                   </div>
                 </div>
@@ -420,12 +366,6 @@ export default function ResultsPage() {
                 </section>
               )}
 
-              <section className="flex flex-wrap gap-3">
-                <a href={`${API}/report/${id}/download`} className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600">
-                  <FileText size={15} />
-                  Open evidence report
-                </a>
-              </section>
             </main>
           </section>
         </div>

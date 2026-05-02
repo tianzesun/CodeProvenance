@@ -594,13 +594,7 @@ export default function UploadPage() {
             )}
           </div>
 
-          {files.length > 0 && (
-            <div className="grid gap-4 md:grid-cols-3">
-              <AutoStep icon={SearchCheck} title="Language detected automatically" detail="No manual engine setup required." />
-              <AutoStep icon={Shield} title="Starter code handled" detail="Shared templates are excluded from evidence." />
-              <AutoStep icon={Clock3} title="Estimated review time" detail="Top cases are ranked by instructor value." />
-            </div>
-          )}
+
 
           {/* Config */}
           <details className="rounded-2xl bg-white p-5" style={cardShadow}>
