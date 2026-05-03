@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -34,6 +34,11 @@ export default function Sidebar() {
   const [loggingOut, setLoggingOut] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-sidebar-collapsed', String(collapsed));
+    document.documentElement.style.setProperty('--sidebar-width', collapsed ? '80px' : '288px');
+  }, [collapsed]);
 
   const navItems = [
     {

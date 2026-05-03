@@ -54,7 +54,7 @@ export default function DashboardLayout({ children, requiredRole }: DashboardLay
 
        <Sidebar />
        
-       <main className="relative z-10 min-h-screen lg:ml-72 pt-6 pb-16 lg:pt-8 lg:pb-20 flex flex-col">
+        <main className="dashboard-main relative z-10 min-h-screen pt-6 pb-16 lg:pt-8 lg:pb-20 flex min-w-0 flex-col transition-all duration-300 ease-out">
          <div className="flex-grow">
            {children}
          </div>

@@ -176,18 +176,23 @@ const PRESET_DATASET_META = {
     order: 30, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
     eyebrow: 'Focused Java plagiarism cases', summary: 'Smaller Java plagiarism dataset for targeted checks',
   },
+  google_codejam: {
+    order: 35, presetCategory: 'Classroom-style', badgeLabel: 'Code Jam',
+    eyebrow: 'Google Code Jam competition submissions', summary: 'Python solutions with ground truth plagiarism labels for benchmarking',
+  },
+  xiangtan: {
+    order: 40, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
+    eyebrow: 'Xiangtan University plagiarism dataset', summary: 'Java code pairs with plagiarism annotations for academic integrity testing',
+  },
   human_eval: {
-    order: 40, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
+    order: 45, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
     eyebrow: 'Python code-task benchmark', summary: 'Task-based Python benchmark, not classroom submissions',
   },
   mbpp: {
     order: 50, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
     eyebrow: 'Short-form Python task coverage', summary: 'Python programming task benchmark, not classroom submissions',
   },
-  codesearchnet: {
-    order: 60, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus',
-    eyebrow: 'Large-scale mixed-language stress test', summary: 'Use for scale and variety rather than classroom realism',
-  },
+
   codexglue_clone: {
     order: 70, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
     eyebrow: 'Large labeled clone-pair benchmark', summary: 'Good for clone-pair stress testing in Java',
@@ -195,6 +200,10 @@ const PRESET_DATASET_META = {
   codexglue_defect: {
     order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
     eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like',
+  },
+  poolc_600k_python: {
+    order: 85, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus',
+    eyebrow: 'Large Python code collection', summary: '600k Python snippets for extensive similarity testing and scale evaluation',
   },
 };
 

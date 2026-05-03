@@ -291,11 +291,7 @@ export default function ResultsPage() {
             </div>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[320px_1fr]">
-            <aside className="space-y-6">
-            </aside>
-
-            <main className="space-y-6">
+          <main className="space-y-6">
               <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
@@ -336,7 +332,7 @@ export default function ResultsPage() {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]"
                     >
-                      Open Originality Report with Add Note
+                      Open Report
                     </a>
                   </div>
                 </div>
@@ -366,8 +362,7 @@ export default function ResultsPage() {
                 </section>
               )}
 
-            </main>
-          </section>
+          </main>
         </div>
       </div>
     </DashboardLayout>
@@ -401,7 +396,7 @@ const CodePanel = ({ title, code, highlights, panelRef, onScroll }) => (
     <div
       ref={panelRef}
       onScroll={onScroll}
-      className="max-h-[680px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
+      className="max-h-[1600px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
     >
       <pre className="min-w-full py-3 font-mono">
         {String(code || '').split('\n').map((line, index) => {

@@ -786,10 +786,61 @@ def _build_benchmark_dataset_readiness(
         return {
             "runnable": runnable,
             "status": "ready" if runnable else "missing_labeled_csv",
-            "reason": f"{positives} positive and {negatives} negative labeled pairs.",
+            "reason": f"Found {positives} positive and {negatives} negative pairs in CSV.",
             "pair_count": total,
             "positive_pairs": positives,
             "negative_pairs": negatives,
+        }
+
+    if dataset_id == "google_codejam":
+        gt_path = dataset_root / "ground_truth.json"
+        runnable = gt_path.exists()
+        if runnable:
+            try:
+                gt = json.loads(gt_path.read_text())
+                total = len(gt)
+                positives = sum(1 for v in gt.values() if v.get("plagiarism", False))
+                negatives = total - positives
+            except Exception:
+                runnable = False
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_ground_truth",
+            "reason": (
+                "Google Code Jam dataset with ground truth labels."
+                if runnable
+                else "Missing ground_truth.json file."
+            ),
+            "pair_count": total if runnable else 0,
+            "positive_pairs": positives if runnable else 0,
+            "negative_pairs": negatives if runnable else 0,
+        }
+
+    if dataset_id == "xiangtan":
+        pairs_path = dataset_root / "pairs.csv"
+        runnable = pairs_path.exists()
+        if runnable:
+            try:
+                import csv
+
+                with open(pairs_path, "r") as f:
+                    reader = csv.DictReader(f)
+                    total = sum(1 for row in reader)
+                positives = total  # assuming all pairs in csv are plagiarized
+                negatives = 0
+            except Exception:
+                runnable = False
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_pairs_csv",
+            "reason": (
+                "Xiangtan plagiarism dataset with pairs.csv."
+                if runnable
+                else "Missing pairs.csv file."
+            ),
+            "pair_count": total if runnable else 0,
+            "positive_pairs": positives if runnable else 0,
+            "negative_pairs": negatives if runnable else 0,
         }
 
     if dataset_id == "xiangtan":
@@ -1838,6 +1889,35 @@ def _merge_external_features_into_results(
             result.features[tool_id] = lookup.get(pair_key, 0.0)
 
 
+def _external_evidence_for_pair(
+    file_a: str,
+    file_b: str,
+    tool_results: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return external-tool evidence rows for one comparison pair."""
+    pair_key = _pair_key(file_a, file_b)
+    evidence: List[Dict[str, Any]] = []
+    for tool_id, data in tool_results.items():
+        if "pairs" not in data:
+            continue
+        for pair in data.get("pairs", []):
+            pair_file_a = str(pair.get("file_a") or "")
+            pair_file_b = str(pair.get("file_b") or "")
+            if _pair_key(pair_file_a, pair_file_b) != pair_key:
+                continue
+            evidence.append(
+                {
+                    "tool": tool_id,
+                    "score": _coerce_float(pair.get("score")),
+                    "file_a_percent": pair.get("file_a_percent"),
+                    "file_b_percent": pair.get("file_b_percent"),
+                    "report_url": pair.get("report_url") or data.get("report_url"),
+                }
+            )
+            break
+    return evidence
+
+
 def _run_selected_external_tools(
     selected_tool_ids: List[str],
     submissions: Dict[str, str],
@@ -1996,6 +2076,8 @@ def _load_pair_labeled_benchmark_dataset(
         return _load_poj104_pair_dataset(dataset_root, target_dir)
     if dataset_id == "poolc_600k_python":
         return _load_poolc_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "google_codejam":
+        return _load_google_codejam_pair_dataset(dataset_root, target_dir)
     return {}, []
 
 
@@ -2079,6 +2161,65 @@ def _load_kaggle_pair_dataset(
                     "label": _label_to_clone_grade(row.get("Label", 0)),
                 }
             )
+
+    return submissions, explicit_pairs
+
+
+def _load_google_codejam_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load Google Code Jam pairs from ground_truth.json."""
+    gt_path = dataset_root / "ground_truth.json"
+    submissions_dir = dataset_root / "submissions"
+    if not gt_path.exists() or not submissions_dir.exists():
+        return {}, []
+
+    try:
+        gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+    except:
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+
+    for pair_key, info in gt_data.items():
+        if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
+            break
+        # Parse pair_key like "A_0_1" -> problem A, solutions 0 and 1
+        parts = pair_key.split("_")
+        if len(parts) != 3:
+            continue
+        problem, sol_a, sol_b = parts
+        problem_dir = submissions_dir / f"problem_{problem}" / "python"
+        source_a = problem_dir / f"solution_{sol_a}.py"
+        source_b = problem_dir / f"solution_{sol_b}.py"
+        if not source_a.exists() or not source_b.exists():
+            continue
+
+        plagiarism = info.get("plagiarism", False)
+        pair_id = f"codejam_{problem}_{sol_a}_{sol_b}"
+        source_a_code = source_a.read_text(encoding="utf-8", errors="ignore")
+        source_b_code = source_b.read_text(encoding="utf-8", errors="ignore")
+        file_a = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_a.py",
+            source_a_code,
+        )
+        file_b = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_b.py",
+            source_b_code,
+        )
+        explicit_pairs.append(
+            {
+                "file_a": file_a,
+                "file_b": file_b,
+                "label": _label_to_clone_grade(1 if plagiarism else 0),
+                "case_category": "true_positive" if plagiarism else "true_negative",
+            }
+        )
 
     return submissions, explicit_pairs
 
@@ -4670,6 +4811,11 @@ async def _run_analysis(
                 "risk_level": r.risk_level,
                 "engine_scores": r.features,
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
+                "code_a": submissions.get(r.file_a, ""),
+                "code_b": submissions.get(r.file_b, ""),
+                "external_evidence": _external_evidence_for_pair(
+                    r.file_a, r.file_b, external_tool_results
+                ),
             }
             for r in results
         ]
@@ -6548,6 +6694,7 @@ def _run_moss_cli(submissions, pairs):
 
     groups: Dict[str, Dict[str, str]] = {}
     score_by_pair: Dict[str, float] = {}
+    detail_by_pair: Dict[str, Dict[str, Any]] = {}
     language_map = {
         "python": "python",
         "java": "java",
@@ -6653,12 +6800,35 @@ def _run_moss_cli(submissions, pairs):
                     score_by_pair.get(pair_key, 0.0),
                     max(0.0, min(1.0, similarity)),
                 )
+                detail_by_pair[pair_key] = {
+                    "file_a_percent": left_pct_val / 100.0,
+                    "file_b_percent": right_pct_val / 100.0,
+                    "report_url": report_url,
+                }
 
     results = []
     for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
+        pair_key = _pair_key(fa, fb)
+        score = score_by_pair.get(pair_key, 0.0)
+        results.append(
+            {
+                "file_a": fa,
+                "file_b": fb,
+                "score": score,
+                **detail_by_pair.get(pair_key, {}),
+            }
+        )
+    report_urls = sorted(
+        {
+            str(detail.get("report_url"))
+            for detail in detail_by_pair.values()
+            if detail.get("report_url")
+        }
+    )
+    payload = {"pairs": results}
+    if report_urls:
+        payload["report_url"] = report_urls[0]
+    return payload
 
 
 def _run_jplag_cli(submissions, pairs):
@@ -7271,6 +7441,34 @@ def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> P
     return REPORTS_DIR / job_id / fallback_filename
 
 
+def _refresh_html_report_from_json(job_id: str) -> None:
+    """Regenerate the browsable HTML report from the stored JSON payload."""
+    report_json_path = _resolve_report_path(job_id, "report_json_path", "report.json")
+    report_html_path = _resolve_report_path(job_id, "report_path", "report.html")
+    if not report_json_path.exists():
+        return
+
+    try:
+        report_payload = json.loads(report_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("Failed to read stored report JSON for %s", job_id)
+        return
+
+    institution_name = str(
+        report_payload.get("metadata", {}).get("institution")
+        or report_payload.get("course_name")
+        or "Course"
+    )
+    report_html_path.parent.mkdir(parents=True, exist_ok=True)
+    report_html_path.write_text(
+        ReportGenerator(
+            institution_name=institution_name,
+            branding_color="#2563eb",
+        ).generate_html_report(report_payload),
+        encoding="utf-8",
+    )
+
+
 def _format_env_value(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -7654,11 +7852,16 @@ async def dashboard_auth_middleware(request: Request, call_next):
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
 async def download_report_html(request: Request, job_id: str):
     _require_job_access(job_id, request)
+    _refresh_html_report_from_json(job_id)
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(
-        str(rp), media_type="text/html", filename=f"integritydesk_report_{job_id}.html"
+        str(rp),
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f'inline; filename="integritydesk_report_{job_id}.html"'
+        },
     )
 
 
@@ -7678,13 +7881,18 @@ async def download_report_json(job_id: str, request: Request):
 @app.get("/report/{job_id}/committee", response_class=HTMLResponse)
 async def download_committee_report(request: Request, job_id: str):
     _require_job_access(job_id, request)
-    rp = _resolve_report_path(job_id, "committee_report_path", "committee_report.html")
+    _refresh_html_report_from_json(job_id)
+    rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
-        raise HTTPException(status_code=404, detail="Committee report file not found")
+        raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(
         str(rp),
         media_type="text/html",
-        filename=f"integritydesk_committee_report_{job_id}.html",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="integritydesk_originality_report_{job_id}.html"'
+            )
+        },
     )
 
 
@@ -8766,7 +8974,7 @@ def _render_code_table(code, max_lines=80):
         rows.append(
             f'<tr><td class="line-num">{i}</td><td class="line-code">{escaped}</td></tr>'
         )
-    if len(code or "") > sum(len(l) for l in lines):
+    if len(code or "") > sum(len(line) for line in lines):
         rows.append(
             f'<tr><td class="line-num"></td><td class="line-code" style="color:#6b7280;">// ... truncated ({len(code.split(chr(10)))-max_lines} more lines)</td></tr>'
         )
@@ -8805,78 +9013,84 @@ def _generate_committee_report(
     student_info = {fn: _extract_student_info(fn) for fn in students_involved}
 
     css = """
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #f5f5f5; color: #333; line-height: 1.5; }
-    .report-container { max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .report-header { background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%); color: #fff; padding: 24px 32px; display: flex; align-items: center; justify-content: space-between; }
-    .report-header-left { display: flex; align-items: center; gap: 16px; }
-    .report-logo { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-    .report-title { font-size: 18px; font-weight: 600; }
-    .report-subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
-    .report-header-right { text-align: right; font-size: 11px; opacity: 0.8; }
-    .report-meta { padding: 20px 32px; border-bottom: 1px solid #e0e0e0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 13px; }
-    .meta-item { }
-    .meta-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; }
-    .meta-value { font-size: 14px; font-weight: 500; color: #333; }
-    .similarity-overview { padding: 32px; text-align: center; border-bottom: 1px solid #e0e0e0; }
-    .similarity-circle { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; color: #fff; position: relative; }
-    .similarity-circle::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: #fff; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; }
+    .report-container { max-width: 1000px; margin: 0 auto; background: #ffffff; box-shadow: 0 10px 25px rgba(0,0,0,0.1), 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+    .conf-banner { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #ffffff; text-align: center; padding: 12px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; border-bottom: 1px solid #475569; }
+    .report-header { background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); color: #ffffff; padding: 32px 40px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .report-header-left { display: flex; align-items: center; gap: 20px; }
+    .report-logo { width: 50px; height: 50px; background: rgba(255,255,255,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .report-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .report-subtitle { font-size: 14px; opacity: 0.9; margin-top: 4px; font-weight: 500; }
+    .report-header-right { text-align: right; font-size: 12px; opacity: 0.9; font-weight: 500; }
+    .report-meta { padding: 28px 40px; border-bottom: 2px solid #e2e8f0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; font-size: 14px; background: #f8fafc; }
+    .meta-item { background: #ffffff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .meta-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 6px; }
+    .meta-value { font-size: 15px; font-weight: 600; color: #1e293b; }
+    .similarity-overview { padding: 40px; text-align: center; border-bottom: 2px solid #e2e8f0; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); }
+    .similarity-circle { width: 140px; height: 140px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 800; color: #ffffff; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .similarity-circle::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: #ffffff; }
     .similarity-circle span { position: relative; z-index: 1; }
-    .similarity-label { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 4px; }
-    .similarity-desc { font-size: 12px; color: #666; }
-    .color-legend { display: flex; justify-content: center; gap: 20px; margin-top: 16px; }
-    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666; }
-    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .sources-section { padding: 24px 32px; }
-    .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a73e8; }
-    .sources-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .sources-table th { background: #f8f9fa; padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 2px solid #e0e0e0; }
-    .sources-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
-    .sources-table tr:hover td { background: #fafbfc; }
-    .similarity-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
-    .sim-high { background: #dc3545; }
-    .sim-medium { background: #fd7e14; }
-    .sim-low { background: #ffc107; color: #333; }
-    .sim-none { background: #28a745; }
-    .findings-section { padding: 24px 32px; }
-    .finding-card { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
-    .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; }
-    .finding-title { font-size: 14px; font-weight: 600; color: #333; }
-    .finding-body { padding: 18px; }
-    .finding-summary { font-size: 13px; color: #555; margin-bottom: 12px; }
-    .engine-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
-    .engine-item { text-align: center; padding: 8px; background: #f8f9fa; border-radius: 6px; }
-    .engine-name { font-size: 9px; font-weight: 600; text-transform: uppercase; color: #666; margin-bottom: 4px; }
-    .engine-score { font-size: 16px; font-weight: 700; }
-    .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; margin-top: 12px; }
-    .code-panel { }
-    .code-panel-header { padding: 8px 12px; background: #f8f9fa; font-size: 11px; font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
-    .code-table { width: 100%; border-collapse: collapse; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; line-height: 1.6; }
+    .similarity-label { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+    .similarity-desc { font-size: 14px; color: #64748b; font-weight: 500; }
+    .color-legend { display: flex; justify-content: center; gap: 24px; margin-top: 20px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569; font-weight: 600; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .sources-section { padding: 32px 40px; border-bottom: 1px solid #e2e8f0; }
+    .section-title { font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #1e40af; letter-spacing: -0.01em; }
+    .sources-table { width: 100%; border-collapse: collapse; font-size: 14px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .sources-table th { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 14px 16px; text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; border-bottom: 2px solid #cbd5e1; }
+    .sources-table td { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
+    .sources-table tr:hover td { background: #f8fafc; transition: background-color 0.2s; }
+    .similarity-badge { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .sim-high { background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); }
+    .sim-medium { background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%); }
+    .sim-low { background: linear-gradient(135deg, #ca8a04 0%, #a16207 100%); color: #ffffff; }
+    .sim-none { background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); }
+    .findings-section { padding: 32px 40px; }
+    .finding-card { border: 2px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); background: #ffffff; }
+    .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-bottom: 2px solid #cbd5e1; }
+    .finding-title { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .finding-body { padding: 24px; }
+    .finding-summary { font-size: 14px; color: #475569; margin-bottom: 16px; line-height: 1.7; }
+    .engine-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+    .engine-item { text-align: center; padding: 12px; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-radius: 8px; border: 1px solid #cbd5e1; }
+    .engine-name { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 6px; letter-spacing: 0.05em; }
+    .engine-score { font-size: 18px; font-weight: 800; }
+    .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 2px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .code-panel { background: #0f172a; }
+    .code-panel-header { padding: 12px 16px; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #e2e8f0; font-size: 13px; font-weight: 700; border-bottom: 1px solid #475569; }
+    .code-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
     .code-table td { padding: 0; vertical-align: top; }
-    .code-table .line-num { width: 40px; text-align: right; padding: 0 8px 0 4px; color: #6b7280; background: #f3f4f6; border-right: 1px solid #e5e7eb; user-select: none; font-size: 10px; white-space: nowrap; }
-    .code-table .line-code { padding: 0 12px; white-space: pre; color: #d1d5db; }
+    .code-table .line-num { width: 50px; text-align: right; padding: 0 10px 0 6px; color: #94a3b8; background: #1e293b; border-right: 1px solid #475569; user-select: none; font-size: 11px; white-space: nowrap; }
+    .code-table .line-code { padding: 0 16px; white-space: pre; color: #cbd5e1; }
     .code-table tr.matched { background: rgba(250, 204, 21, 0.15); }
     .code-table tr.matched .line-num { background: #fef3c7; color: #92400e; }
     .code-table tr.matched .line-code { color: #fef08a; }
     .code-table tr.highlight { background: rgba(239, 68, 68, 0.2); }
     .code-table tr.highlight .line-num { background: #fecaca; color: #991b1b; }
     .code-table tr.highlight .line-code { color: #fca5a5; }
-    .code-scroll { max-height: 400px; overflow-y: auto; }
-    .code-scroll::-webkit-scrollbar { width: 6px; }
-    .code-scroll::-webkit-scrollbar-track { background: #1e1e1e; }
-    .code-scroll::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
-    .match-legend { display: flex; gap: 16px; margin-top: 8px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px; font-size: 10px; color: #666; }
-    .match-legend-item { display: flex; align-items: center; gap: 4px; }
-    .match-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
-    .tool-chip { display: inline-flex; margin: 3px 4px 3px 0; padding: 4px 8px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 600; }
-    .policy-list { margin-top: 8px; padding-left: 18px; font-size: 12px; color: #555; line-height: 1.6; }
-    .methodology { padding: 24px 32px; border-top: 1px solid #e0e0e0; }
-    .methodology p { font-size: 12px; color: #555; line-height: 1.6; }
-    .footer { padding: 20px 32px; border-top: 1px solid #e0e0e0; text-align: center; font-size: 11px; color: #888; }
-    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 20px; }
-    .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color: #333; }
-    .conf-banner { background: #333; color: #fff; text-align: center; padding: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
-    @media print { body { background: #fff; } .report-container { box-shadow: none; } .no-print { display: none; } }
+    .code-scroll { max-height: 500px; overflow-y: auto; }
+    .code-scroll::-webkit-scrollbar { width: 8px; }
+    .code-scroll::-webkit-scrollbar-track { background: #1e293b; }
+    .code-scroll::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
+    .code-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .match-legend { display: flex; gap: 20px; margin-top: 12px; padding: 12px 16px; background: #f8fafc; border-radius: 6px; font-size: 11px; color: #64748b; border: 1px solid #e2e8f0; }
+    .match-legend-item { display: flex; align-items: center; gap: 6px; }
+    .match-legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+    .tool-chip { display: inline-flex; margin: 4px 6px 4px 0; padding: 6px 12px; border-radius: 20px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; font-size: 12px; font-weight: 700; border: 1px solid #93c5fd; }
+    .policy-list { margin-top: 12px; padding-left: 24px; font-size: 13px; color: #475569; line-height: 1.7; }
+    .policy-list li { margin-bottom: 6px; }
+    .methodology { padding: 32px 40px; border-top: 2px solid #e2e8f0; background: #f8fafc; }
+    .methodology p { font-size: 14px; color: #475569; line-height: 1.7; margin-bottom: 12px; }
+    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
+    .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+    .footer { padding: 28px 40px; border-top: 2px solid #e2e8f0; text-align: center; font-size: 12px; color: #64748b; background: #f1f5f9; }
+    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
+    .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+    @media print { body { background: #ffffff; } .report-container { box-shadow: none; border: none; } .no-print { display: none; } page-break-before: always; }
+    @page { margin: 1in; size: letter; }
     """
 
     now = datetime.now()

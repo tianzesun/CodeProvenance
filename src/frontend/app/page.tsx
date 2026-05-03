@@ -825,22 +825,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      <div className="flex flex-wrap gap-3">
-                        <Link
-                          href={`/results/${latestCompleted.id}`}
-                          className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                        >
-                          <FileSearch size={16} />
-                          Open Result
-                        </Link>
-                        <Link
-                          href="/upload"
-                          className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                        >
-                          <Upload size={16} />
-                          Start New Check
-                        </Link>
-                      </div>
+
                     </div>
                   )}
                 </div>

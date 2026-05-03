@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, ChevronDown, Save, Shield, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, SlidersHorizontal, Zap } from 'lucide-react';
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
@@ -16,13 +16,16 @@ const DEFAULT_PROFILE = {
   result_volume: 'top_25',
 };
 
-const ADVANCED_TABS = ['Engine weights', 'Integrations', 'Performance'];
+const TABS = [
+  { id: 'profile', label: 'Profile', icon: Shield },
+  { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal },
+  { id: 'integrations', label: 'Integrations', icon: Zap },
+];
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState(null);
-  const [activeAdvanced, setActiveAdvanced] = useState('Engine weights');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('profile');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -102,6 +105,7 @@ export default function SettingsPage() {
   return (
     <DashboardLayout requiredRole="admin">
       <div className="max-w-none space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* Header */}
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -123,128 +127,120 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        {/* Notifications */}
         {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
         {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
 
-        <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
-          <div className="space-y-6">
-            <SettingsGroup
-              title="Detection Profile"
-              description="Auto Detect is recommended. It chooses the right assignment profile from language, file count, code shape, notebooks, starter code, and tests."
+        {/* Tab Navigation */}
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${activeTab === tab.id
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/15'
+                : 'text-slate-600 hover:bg-slate-50'
+                }`}
             >
-              <OptionGrid
-                options={catalog.assignment_types || []}
-                value={profile.assignment_type}
-                onChange={(value) => updateProfile('assignment_type', value)}
-              />
-            </SettingsGroup>
+              <tab.icon size={16} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-            <SettingsGroup
-              title="Review Mode"
-              description="Use Conservative for formal investigations, Balanced for everyday review, and Strict for broader triage."
-            >
-              <SegmentedOptions
-                options={catalog.review_modes || catalog.sensitivities || []}
-                value={profile.sensitivity}
-                onChange={(value) => updateProfile('sensitivity', value)}
-              />
-            </SettingsGroup>
+        {/* Tab Content */}
+        <div className="space-y-6">
+          {/* Profile Tab */}
+          {activeTab === 'profile' && (
+            <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+              <div className="space-y-6">
+                <SettingsGroup
+                  title="Detection Profile"
+                  description="Auto Detect is recommended. It chooses the right assignment profile from language, file count, code shape, notebooks, starter code, and tests."
+                >
+                  <OptionGrid
+                    options={catalog.assignment_types || []}
+                    value={profile.assignment_type}
+                    onChange={(value) => updateProfile('assignment_type', value)}
+                  />
+                </SettingsGroup>
 
-            <SettingsGroup title="Result Size" description="Top 25 is the recommended review queue size for most assignments.">
-              <SegmentedOptions
-                options={catalog.result_volume || []}
-                value={profile.result_volume}
-                onChange={(value) => updateProfile('result_volume', value)}
-              />
-            </SettingsGroup>
-          </div>
+                <SettingsGroup
+                  title="Review Mode"
+                  description="Use Conservative for formal investigations, Balanced for everyday review, and Strict for broader triage."
+                >
+                  <SegmentedOptions
+                    options={catalog.review_modes || catalog.sensitivities || []}
+                    value={profile.sensitivity}
+                    onChange={(value) => updateProfile('sensitivity', value)}
+                  />
+                </SettingsGroup>
 
-          <aside className="space-y-6">
-            <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-              <div className="text-sm font-semibold text-blue-950">Recommended profile applied</div>
-              <p className="mt-3 text-sm leading-6 text-blue-800">{applied.recommendation}</p>
-              <div className="mt-4 rounded-lg bg-white/70 p-3 text-sm font-medium text-blue-950">
-                {applied.summary}
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm font-semibold text-slate-950">Automatically handled</div>
-              <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
-                <div>Starter code removed before comparison.</div>
-                <div>Previous-term matching enabled when history is available.</div>
-                <div>Runtime behavior and same wrong answers compared.</div>
-                <div>Thresholds calibrated per assignment using outliers, score gaps, and rare evidence.</div>
-              </div>
-            </section>
-
-            {applied.warnings?.length > 0 && (
-              <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-                {applied.warnings.map((warning) => <div key={warning}>{warning}</div>)}
-              </section>
-            )}
-          </aside>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((value) => !value)}
-            className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
-          >
-            <span className="inline-flex items-center gap-3 text-lg font-semibold text-slate-950">
-              <SlidersHorizontal size={18} />
-              Advanced Settings
-            </span>
-            <ChevronDown size={18} className={`transition ${advancedOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {advancedOpen && (
-            <div className="border-t border-slate-200 p-5">
-              <div className="mb-5 flex flex-wrap gap-2">
-                {ADVANCED_TABS.map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveAdvanced(tab)}
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                      activeAdvanced === tab ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ))}
+                <SettingsGroup title="Result Size" description="Top 25 is the recommended review queue size for most assignments.">
+                  <SegmentedOptions
+                    options={catalog.result_volume || []}
+                    value={profile.result_volume}
+                    onChange={(value) => updateProfile('result_volume', value)}
+                  />
+                </SettingsGroup>
               </div>
 
-              {activeAdvanced === 'Engine weights' && (
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                    Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above.
+              <aside className="space-y-6">
+                <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+                  <div className="text-sm font-semibold text-blue-950">Recommended profile applied</div>
+                  <p className="mt-3 text-sm leading-6 text-blue-800">{applied.recommendation}</p>
+                  <div className="mt-4 rounded-lg bg-white/70 p-3 text-sm font-medium text-blue-950">
+                    {applied.summary}
                   </div>
-                  <div className="text-sm font-semibold text-slate-950">Total: {(engineWeightTotal * 100).toFixed(0)}%</div>
-                  {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
-                    <AdvancedSlider
-                      key={key}
-                      label={key}
-                      value={Number(value || 0)}
-                      onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
-                    />
-                  ))}
-                </div>
-              )}
+                </section>
 
-              {activeAdvanced === 'Integrations' && (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <TextInput label="OpenAI API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
-                  <TextInput label="OpenAI Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
-                  <TextInput label="OpenAI Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
-                  <TextInput label="Anthropic API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
-                  <TextInput label="Anthropic Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
-                  <TextInput label="MOSS User ID" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
-                </div>
-              )}
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-950">Automatically handled</div>
+                  <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                    <div>Starter code removed before comparison.</div>
+                    <div>Previous-term matching enabled when history is available.</div>
+                    <div>Runtime behavior and same wrong answers compared.</div>
+                    <div>Thresholds calibrated per assignment using outliers, score gaps, and rare evidence.</div>
+                  </div>
+                </section>
 
-              {activeAdvanced === 'Performance' && (
+                {applied.warnings?.length > 0 && (
+                  <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+                    {applied.warnings.map((warning) => <div key={warning}>{warning}</div>)}
+                  </section>
+                )}
+              </aside>
+            </div>
+          )}
+
+          {/* Advanced Tab */}
+          {activeTab === 'advanced' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Engine Weights"
+                description="Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above."
+                icon={Cpu}
+              >
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4">
+                  Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above.
+                </div>
+                <div className="text-sm font-semibold text-slate-950 mb-4">Total: {(engineWeightTotal * 100).toFixed(0)}%</div>
+                {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
+                  <AdvancedSlider
+                    key={key}
+                    label={key}
+                    value={Number(value || 0)}
+                    onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
+                  />
+                ))}
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Performance Settings"
+                description="Configure processing performance and resource limits."
+                icon={Database}
+              >
                 <div className="grid gap-4 md:grid-cols-3">
                   <SelectInput label="Embedding Runtime" value={settings.embedding_runtime} options={[['local_unixcoder', 'Local UniXcoder'], ['remote_openai_compatible', 'Remote OpenAI-Compatible Server']]} onChange={(value) => updateSetting('embedding_runtime', value)} />
                   <SelectInput label="Embedding Device" value={settings.embedding_device} options={[['auto', 'Auto'], ['cuda', 'CUDA / GPU'], ['cpu', 'CPU']]} onChange={(value) => updateSetting('embedding_device', value)} />
@@ -253,20 +249,54 @@ export default function SettingsPage() {
                   <TextInput label="Maximum Files Per Job" type="number" value={settings.max_files_per_job} onChange={(value) => updateSetting('max_files_per_job', Number(value))} />
                   <TextInput label="Processing Batch Size" type="number" value={settings.batch_size} onChange={(value) => updateSetting('batch_size', Number(value))} />
                 </div>
-              )}
+              </SettingsGroup>
             </div>
           )}
-        </section>
+
+          {/* Integrations Tab */}
+          {activeTab === 'integrations' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="AI Services"
+                description="Configure AI services for advanced detection features."
+                icon={Zap}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextInput label="OpenAI API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
+                  <TextInput label="OpenAI Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
+                  <TextInput label="OpenAI Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
+                  <TextInput label="Anthropic API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
+                  <TextInput label="Anthropic Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
+                </div>
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="External Tools"
+                description="Configure external plagiarism detection tools."
+                icon={Shield}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextInput label="MOSS User ID" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
+                </div>
+              </SettingsGroup>
+            </div>
+          )}
+        </div>
       </div>
     </DashboardLayout>
   );
 }
 
-function SettingsGroup({ title, description, children }) {
+function SettingsGroup({ title, description, children, icon: Icon }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-      <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+      <div className="flex items-start gap-3">
+        {Icon && <Icon size={20} className="mt-0.5 shrink-0 text-slate-600" />}
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+        </div>
+      </div>
       <div className="mt-4">{children}</div>
     </section>
   );
@@ -280,9 +310,8 @@ function OptionGrid({ options, value, onChange }) {
           key={option.id}
           type="button"
           onClick={() => onChange(option.id)}
-          className={`rounded-xl border p-4 text-left transition ${
-            value === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
-          }`}
+          className={`rounded-xl border p-4 text-left transition ${value === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+            }`}
         >
           <div className="text-sm font-semibold text-slate-950">{option.label}</div>
           <div className="mt-1 text-sm leading-5 text-slate-500">{option.description}</div>
@@ -300,9 +329,8 @@ function SegmentedOptions({ options, value, onChange }) {
           key={option.id}
           type="button"
           onClick={() => onChange(option.id)}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-            value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-          }`}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
         >
           {option.label}
         </button>
