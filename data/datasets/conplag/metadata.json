@@ -1,0 +1,11 @@
+{
+  "name": "CONPLAG Classroom Java",
+  "description": "Contest plagiarism dataset with 911 labeled pairs of Java submissions from programming contests, including both plagiarized and non-plagiarized pairs for classroom-style benchmark evaluation.",
+  "language": "java",
+  "size": "911 labeled pairs",
+  "created_by": "Research Community",
+  "created": "2018-01-01",
+  "source": "CONPLAG research dataset",
+  "license": "Academic/Research",
+  "citation": "CONPLAG: A Dataset of Plagiarism in Programming Assignments"
+}
