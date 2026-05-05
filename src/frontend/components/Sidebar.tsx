@@ -40,62 +40,84 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-width', collapsed ? '80px' : '288px');
   }, [collapsed]);
 
-  const navItems = [
+  const navGroups = [
     {
-      href: '/',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      activeOn: ['/'],
-    },
-    {
-      href: '/assignments',
-      label: 'Assignments',
-      icon: Upload,
-      activeOn: ['/assignments'],
-    },
-    {
-      href: '/cases',
-      label: 'Cases',
-      icon: SearchCheck,
-      activeOn: ['/cases', '/results'],
-    },
-    {
-      href: '/reports',
-      label: 'Reports',
-      icon: FileText,
-      activeOn: ['/reports'],
-    },
-    {
-      href: '/analytics',
-      label: 'Analytics',
-      icon: BarChart3,
-      activeOn: ['/analytics'],
-    },
-    {
-      href: '/settings',
-      label: 'Settings',
-      icon: Settings,
-      activeOn: ['/settings'],
-    },
-    ...(user?.role === 'admin'
-      ? [
+      title: 'ACADEMIC',
+      items: [
         {
-          href: '/benchmark',
-          label: 'Benchmark',
-          icon: ClipboardList,
+          href: '/',
+          label: 'Dashboard',
+          icon: LayoutDashboard,
+          activeOn: ['/'],
         },
         {
-          href: '/datasets',
-          label: 'Datasets',
-          icon: ClipboardList,
+          href: '/assignments',
+          label: 'Assignments',
+          icon: Upload,
+          activeOn: ['/assignments'],
         },
         {
-          href: '/admin',
-          label: 'Users',
-          icon: Shield,
+          href: '/cases',
+          label: 'Cases',
+          icon: SearchCheck,
+          activeOn: ['/cases', '/results'],
         },
-      ]
-      : []),
+      ],
+    },
+    {
+      title: 'ENGINE & R&D',
+      items: [
+        ...(user?.role === 'admin'
+          ? [
+            {
+              href: '/benchmark',
+              label: 'Benchmark',
+              icon: ClipboardList,
+              activeOn: ['/benchmark'],
+            },
+            {
+              href: '/datasets',
+              label: 'Datasets',
+              icon: BookOpen,
+              activeOn: ['/datasets'],
+            },
+          ]
+          : []),
+        {
+          href: '/analytics',
+          label: 'Analytics',
+          icon: BarChart3,
+          activeOn: ['/analytics'],
+        },
+      ],
+    },
+    {
+      title: 'MANAGEMENT',
+      items: [
+        {
+          href: '/reports',
+          label: 'Reports',
+          icon: FileText,
+          activeOn: ['/reports'],
+        },
+        {
+          href: '/settings',
+          label: 'Settings',
+          icon: Settings,
+          activeOn: ['/settings'],
+        },
+        ...(user?.role === 'admin'
+          ? [
+            {
+              href: '/admin',
+              label: 'Users',
+              icon: Shield,
+              activeOn: ['/admin'],
+            },
+          ]
+          : []),
+      ],
+    },
   ];
 
   const handleLogout = async () => {
@@ -155,37 +177,46 @@ export default function Sidebar() {
         </div>
 
         <nav className={`scrollbar-thin flex-1 overflow-y-auto py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}>
-          <div className={`space-y-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
-            {navItems.map((item) => {
-              const active = item.activeOn?.some((path) => path === pathname || (path !== '/' && pathname?.startsWith(path)));
+          <div className={`space-y-6 ${collapsed ? 'flex flex-col items-center' : ''}`}>
+            {navGroups.map((group) => (
+              <div key={group.title} className="space-y-2">
+                {!collapsed && (
+                  <div className="px-3">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">{group.title}</span>
+                  </div>
+                )}
+                {group.items.map((item) => {
+                  const active = item.activeOn?.some((path) => path === pathname || (path !== '/' && pathname?.startsWith(path)));
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${active
-                    ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
-                    : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
-                    }`}
-                >
-                  <span
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${active
-                      ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
-                      : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
-                      }`}
-                  >
-                    <item.icon size={17} />
-                  </span>
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={`group flex items-center gap-3 rounded-2xl border px-3 py-3 transition ${active
+                        ? 'border-blue-600/20 bg-blue-600/[0.08] text-[var(--text-primary)]'
+                        : 'border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border)] hover:bg-[var(--surface-muted)]'
+                        }`}
+                    >
+                      <span
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${active
+                          ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
+                          : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+                          }`}
+                      >
+                        <item.icon size={17} />
+                      </span>
 
-                  {!collapsed && (
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.label}</span>
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+                      {!collapsed && (
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{item.label}</span>
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </nav>
 

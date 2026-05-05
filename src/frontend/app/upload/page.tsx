@@ -33,6 +33,45 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'gst', label: 'GST' },
   { key: 'semantic', label: 'Semantic' },
 ];
+
+const ASSIGNMENT_TYPE_OPTIONS = [
+  {
+    id: 'auto_detect',
+    label: 'Auto Detect',
+    eyebrow: 'Recommended',
+    description: 'AI automatically chooses the best detection strategy based on your files',
+  },
+  {
+    id: 'intro_programming',
+    label: 'Intro Programming',
+    eyebrow: 'Python/Java/C Basics',
+    description: 'Loops, functions, arrays. Students share similar answers with template code. Strong rename/copy detection needed.',
+  },
+  {
+    id: 'data_structures_oop',
+    label: 'Data Structures / OOP',
+    eyebrow: 'Linked List, Tree, Classes',
+    description: 'Structure matters most. Students rename and reorder code. Focus on AST and control flow analysis.',
+  },
+  {
+    id: 'algorithms_advanced_logic',
+    label: 'Algorithms / Advanced Logic',
+    eyebrow: 'Recursion, DP, Graph',
+    description: 'Logic similarity hidden behind different implementations. Deep semantic and behavioral analysis required.',
+  },
+  {
+    id: 'project_software_engineering',
+    label: 'Project / Software Engineering',
+    eyebrow: 'Web Apps, Team Projects',
+    description: 'Multi-file projects with shared frameworks. Focus on history and module-level comparisons.',
+  },
+  {
+    id: 'notebook_data_analysis_ai',
+    label: 'Notebook / Data Analysis / AI',
+    eyebrow: 'Jupyter, Pandas, ML',
+    description: 'Notebook cells with common imports and boilerplate. Compare custom logic only, ignore standard libraries.',
+  },
+];
 const FALLBACK_TOOL_OPTIONS = [
   {
     id: 'integritydesk',
@@ -156,31 +195,32 @@ export default function UploadPage() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const starterFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [starterFiles, setStarterFiles] = useState<File[]>([]);
+  const [isStarterDragOver, setIsStarterDragOver] = useState(false);
   const [courseName, setCourseName] = useState('');
   const [assignmentName, setAssignmentName] = useState('');
-  const [threshold, setThreshold] = useState(0.5);
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
   const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
   const [modeSuggestion, setModeSuggestion] = useState<ModeSuggestion | null>(null);
   const [modeSuggesting, setModeSuggesting] = useState(false);
   const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
-  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [thresholdLoading, setThresholdLoading] = useState(true);
   const [modesLoading, setModesLoading] = useState(true);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
-  const [isDragOver, setIsDragOver] = useState(false);
   const [progress, setProgress] = useState(0);
   const [scanIndex, setScanIndex] = useState(0);
   const [animateFiles, setAnimateFiles] = useState(false);
   const [dragCount, setDragCount] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [starterFile, setStarterFile] = useState<File | null>(null);
-  const starterFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
@@ -296,6 +336,12 @@ export default function UploadPage() {
     if (f.length) setFiles(f);
   }, []);
 
+  const handleStarterDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault(); setIsStarterDragOver(false);
+    const f = Array.from(e.dataTransfer.files);
+    if (f.length) setStarterFiles(f);
+  }, []);
+
   const handleSubmit = async () => {
     setError('');
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
@@ -306,6 +352,7 @@ export default function UploadPage() {
     setProgress(0.18);
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
+    starterFiles.forEach((f) => fd.append('starter_files', f));
     fd.append('course_name', courseName || assignmentName || 'Assignment Check');
     fd.append('assignment_name', assignmentName || courseName || 'Assignment Check');
     fd.append('assignment_mode', selectedAssignmentModeId);
@@ -421,8 +468,10 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* Upload Card */}
-          <div className="rounded-2xl bg-white mb-4 overflow-hidden relative transition-all duration-300" style={cardShadow}>
+          {/* Upload Cards */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {/* Upload Card */}
+            <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
             <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -594,7 +643,135 @@ export default function UploadPage() {
             )}
           </div>
 
+          {/* Starter Code Upload */}
+          <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
+            <div
+              onDrop={handleStarterDrop}
+              onDragOver={(e) => { e.preventDefault(); setIsStarterDragOver(true); }}
+              onDragLeave={() => setIsStarterDragOver(false)}
+              className="relative"
+            >
+              {/* Dot-grid bg */}
+              {starterFiles.length === 0 && (
+                <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
+              )}
 
+              {/* Drag ring */}
+              {isStarterDragOver && (
+                <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
+                  style={{ boxShadow: 'inset 0 0 0 2px #10b981', background: 'rgba(239,246,255,0.5)' }} />
+              )}
+
+              {starterFiles.length === 0 ? (
+                /* Empty drop zone */
+                <div
+                  className="relative flex flex-col items-center justify-center text-center px-8 py-16 cursor-pointer"
+                  onClick={() => starterFileInputRef.current?.click()}
+                >
+                  <div
+                    className="w-[60px] h-[60px] rounded-[16px] flex items-center justify-center mb-4 transition-all duration-300"
+                    style={{
+                      background: isStarterDragOver ? '#d1fae5' : '#f8fafc',
+                      boxShadow: isStarterDragOver
+                        ? '0 0 0 8px rgba(16,185,129,0.08), 0 1px 3px rgba(0,0,0,0.06)'
+                        : '0 0 0 8px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
+                      transform: isStarterDragOver ? 'scale(1.05)' : 'scale(1)',
+                    }}
+                  >
+                    <Layers3 size={24} style={{ color: isStarterDragOver ? '#10b981' : '#94a3b8', transition: 'color 0.2s' }} />
+                  </div>
+                  <h3 className="text-sm font-semibold text-slate-800 mb-1">
+                    {isStarterDragOver ? 'Release to upload starter code' : 'Starter Code (Optional)'}
+                  </h3>
+                  <p className="text-xs text-slate-400 mb-4 max-w-xs leading-relaxed">
+                    Upload template files, boilerplate code, or reference implementations that should be ignored during comparison.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); starterFileInputRef.current?.click(); }}
+                    className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-200 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-600"
+                    style={{ borderColor: '#e2e8f0', color: '#475569' }}
+                  >
+                    <FileUp size={11} />Browse files
+                  </button>
+                  <p className="mt-3 text-[10px] text-slate-300 font-medium">
+                    .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift
+                  </p>
+                </div>
+              ) : (
+                /* File list */
+                <div className="px-5 pt-5 pb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#10b981' }}>
+                        {starterFiles.length}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-700">
+                        Starter file{starterFiles.length === 1 ? '' : 's'} uploaded
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => starterFileInputRef.current?.click()} className="text-xs font-medium text-emerald-600 hover:text-emerald-700 transition-colors">
+                        Add more
+                      </button>
+                      <button onClick={() => setStarterFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
+                        Clear all
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-1.5 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                    {starterFiles.map((f, i) => {
+                      const c = getExtColor(f.name);
+                      return (
+                        <div
+                          key={i}
+                          className="flex items-center gap-3 rounded-xl border px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200"
+                          style={{ borderColor: '#f1f5f9', background: '#f8fafc' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#ffffff'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                        >
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
+                            style={{ background: c.bg, color: c.text }}>
+                            {getExt(f.name)}
+                          </div>
+                          <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
+                          <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setStarterFiles(starterFiles.filter((_, j) => j !== i)); }}
+                            className="opacity-0 group-hover/row:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50"
+                            style={{ color: '#cbd5e1' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = '#cbd5e1'; }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={starterFileInputRef}
+              type="file"
+              multiple
+              accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
+              className="hidden"
+              onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setStarterFiles(f); }}
+            />
+
+            {error && starterFiles.length > 0 && (
+              <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
+                <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-red-700 flex-1">{error}</p>
+                <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+              </div>
+            )}
+          </div>
+          </div>
 
           {/* Config */}
           <details className="rounded-2xl bg-white p-5" style={cardShadow}>
@@ -680,7 +857,7 @@ export default function UploadPage() {
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
                       <Layers3 size={13} style={{ color: '#64748b' }} />
                     </div>
-                    <span className="text-sm font-semibold text-slate-800">Detection Mode</span>
+                    <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
                   </div>
                   {selectedAssignmentMode?.version && (
                     <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5" style={{ background: '#f1f5f9', color: '#94a3b8' }}>
@@ -689,33 +866,21 @@ export default function UploadPage() {
                   )}
                 </div>
 
-                {modesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-400 py-3">
-                    <Loader2 size={13} className="animate-spin" /> Loading…
-                  </div>
-                ) : assignmentModes.length > 0 ? (
-                  <select
-                    value={selectedAssignmentModeId || ''}
-                    onChange={(e) => setSelectedAssignmentModeId(e.target.value)}
-                    className="w-full h-11 px-3.5 rounded-xl border text-sm font-medium text-slate-800 outline-none transition-all duration-200 focus:ring-2 focus:ring-blue-400/15"
-                    style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-                  >
-                    {assignmentModes.map((mode) => {
-                      const adv = mode.access === 'advanced';
-                      const label = mode.overlay ? 'Overlay' : adv ? 'Advanced' : mode.category || 'Mode';
-                      return (
-                        <option key={mode.id} value={mode.id}>
-                          {mode.name} ({label}){mode.pipelines?.length ? ` · ${mode.pipelines.join(' + ')}` : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                ) : (
-                  <div className="h-11 flex items-center px-3.5 rounded-xl border text-sm text-slate-400"
-                    style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}>
-                    Mode catalog unavailable
-                  </div>
-                )}
+                <div className="grid gap-3">
+                  {ASSIGNMENT_TYPE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setSelectedAssignmentModeId(option.id)}
+                      className={`rounded-xl border p-4 text-left transition ${selectedAssignmentModeId === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                      <div className="text-sm font-semibold text-slate-950">{option.label}</div>
+                      <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] mb-1 ${selectedAssignmentModeId === option.id ? 'text-blue-600' : 'text-slate-400'}`}>{option.eyebrow}</div>
+                      <div className="text-sm leading-6 text-slate-500">{option.description}</div>
+                    </button>
+                  ))}
+                </div>
 
                 {selectedAssignmentMode?.context && (
                   <p className="mt-2.5 text-xs text-slate-500 leading-relaxed">{selectedAssignmentMode.context}</p>

@@ -104,5 +104,15 @@ class AppSettings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 10
     MAX_FILES_PER_JOB: int = 500
 
+    # Integrations
+    WEBHOOK_URL: str = ""
+
+    # Audit & Compliance
+    AUDIT_LOG_LEVEL: str = "INFO"
+    AUDIT_RETENTION_DAYS: int = 365
+
+    # Expert
+    DEBUG_MODE: bool = False
+
 
 settings = AppSettings()

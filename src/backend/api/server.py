@@ -4848,6 +4848,7 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 async def upload_files(
     request: Request,
     files: List[UploadFile] = File(...),
+    starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     assignment_mode: str = Form(default=""),
@@ -4868,6 +4869,17 @@ async def upload_files(
             target.write_bytes(content)
             saved_files.append(f.filename)
 
+    starter_dir = job_dir / 'starter'
+    starter_sources = []
+    if starter_files:
+        starter_dir.mkdir(exist_ok=True)
+        for f in starter_files:
+            if f.filename and _is_code_file(f.filename):
+                target = starter_dir / f.filename
+                content = await f.read()
+                target.write_bytes(content)
+                starter_sources.append(content.decode('utf-8', errors='ignore'))
+
     if len(saved_files) < 2:
         return JSONResponse(
             status_code=400, content={"error": "At least 2 code files are required"}
@@ -4883,6 +4895,7 @@ async def upload_files(
         current_user,
         engine_keys,
         tool_ids,
+        starter_sources,
     )
 
 
@@ -4890,6 +4903,7 @@ async def upload_files(
 async def upload_zip(
     request: Request,
     file: UploadFile = File(...),
+    starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     assignment_mode: str = Form(default=""),
@@ -4918,6 +4932,17 @@ async def upload_zip(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
 
+    starter_dir = job_dir / 'starter'
+    starter_sources = []
+    if starter_files:
+        starter_dir.mkdir(exist_ok=True)
+        for f in starter_files:
+            if f.filename and _is_code_file(f.filename):
+                target = starter_dir / f.filename
+                content = await f.read()
+                target.write_bytes(content)
+                starter_sources.append(content.decode('utf-8', errors='ignore'))
+
     return await _run_analysis(
         job_id,
         job_dir,
@@ -4928,6 +4953,7 @@ async def upload_zip(
         current_user,
         engine_keys,
         tool_ids,
+        starter_sources,
     )
 
 
@@ -4941,6 +4967,7 @@ async def _run_analysis(
     current_user: Dict[str, Any],
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
+    starter_sources: List[str] = None,
 ):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
 
@@ -4980,6 +5007,7 @@ async def _run_analysis(
             "calibration": mode.calibration,
         },
         "threshold": threshold,
+        "starter_sources": starter_sources or [],
         "status": "processing",
         "created_at": datetime.now().isoformat(),
         "file_count": 0,
@@ -5030,7 +5058,7 @@ async def _run_analysis(
 
         if "integritydesk" in selected_tool_ids:
             service = BatchDetectionService(
-                threshold=threshold, weights=fusion_weights or None
+                threshold=threshold, weights=fusion_weights or None, starter_sources=starter_sources
             )
             results = service.compare_all_pairs(submissions)
             _merge_external_features_into_results(results, external_tool_results)
@@ -8657,6 +8685,10 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "batch_size": settings.BATCH_SIZE,
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
     "max_files_per_job": settings.MAX_FILES_PER_JOB,
+    "webhook_url": "",
+    "audit_log_level": "INFO",
+    "audit_retention_days": 365,
+    "debug_mode": False,
     "professor_profile": {
         "assignment_type": "auto_detect",
         "sensitivity": "balanced",
@@ -8686,6 +8718,10 @@ SETTINGS_ATTR_MAP = {
     "batch_size": "BATCH_SIZE",
     "max_file_size_mb": "MAX_FILE_SIZE_MB",
     "max_files_per_job": "MAX_FILES_PER_JOB",
+    "webhook_url": "WEBHOOK_URL",
+    "audit_log_level": "AUDIT_LOG_LEVEL",
+    "audit_retention_days": "AUDIT_RETENTION_DAYS",
+    "debug_mode": "DEBUG_MODE",
 }
 
 SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key", "moss_user_id"}

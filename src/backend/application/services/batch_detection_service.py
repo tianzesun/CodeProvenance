@@ -156,7 +156,7 @@ class BatchDetectionService:
     """Process entire folders of student submissions."""
 
     def __init__(
-        self, threshold: float = 0.5, weights: Optional[Dict[str, float]] = None
+        self, threshold: float = 0.5, weights: Optional[Dict[str, float]] = None, starter_sources: Optional[List[str]] = None
     ):
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
@@ -167,6 +167,10 @@ class BatchDetectionService:
         self.decision = DecisionEngine(threshold)
         self.threshold = threshold
         self.weights = weights
+        self.starter_remover = None
+        if starter_sources:
+            from src.backend.engines.mvp.starter_code import StarterCodeRemover
+            self.starter_remover = StarterCodeRemover(starter_sources)
 
     def ingest_folder(self, folder: Path) -> Dict[str, str]:
         """Read all code files from a folder.
@@ -186,7 +190,10 @@ class BatchDetectionService:
         for ext in ext_map:
             for f in folder.rglob(f"*{ext}"):
                 try:
-                    submissions[f.name] = f.read_text(encoding="utf-8")
+                    content = f.read_text(encoding="utf-8")
+                    if self.starter_remover:
+                        content = self.starter_remover.remove(content).clean_source
+                    submissions[f.name] = content
                 except UnicodeDecodeError as exc:
                     logger.warning("Skipping file %s: encoding error: %s", f.name, exc)
                 except OSError as exc:
