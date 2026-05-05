@@ -43,5 +43,6 @@
     "data/datasets/bigclonebench/**": true,
     "data/datasets/codexglue_clone/**": true,
     "tools/JPlag/languages/**": true
-  }
+  },
+  "git.ignoreLimitWarning": true
 }

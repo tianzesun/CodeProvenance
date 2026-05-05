@@ -19,7 +19,6 @@ src/backend/
   infrastructure/     # DB, reporting, indexing, email, parsing
   config/             # Settings and environment wiring
   models/             # Persistence models
-  backend/            # Compatibility namespace for legacy imports
 
 benchmark/            # Offline benchmark harness and datasets
 evaluation/           # Offline comparative and statistical evaluation
@@ -30,7 +29,7 @@ tests/                # Unit and integration tests
 
 ## Migration Rules
 
-1. No import path should break during the first cleanup phase.
+1. Do not reintroduce the removed `src.backend.backend.*` legacy namespace.
 2. Runtime API code must not depend on deprecated or quarantined modules.
 3. Benchmark and evaluation moves should happen behind shims or import rewrites.
 4. Duplicate filenames should be reduced gradually, starting with the most
@@ -38,8 +37,8 @@ tests/                # Unit and integration tests
 
 ## Phase 1 Implemented Here
 
-1. Added `src/backend/backend/` as a compatibility namespace so legacy imports
-   resolve without copying code.
+1. Removed the obsolete `src/backend/backend/` compatibility namespace after
+   confirming no runtime imports depend on it.
 2. Added a structural audit script to expose duplicate basenames and legacy
    directories.
 3. Documented the split between runtime code, offline benchmark code, and
@@ -47,7 +46,7 @@ tests/                # Unit and integration tests
 
 ## Recommended Next Moves
 
-1. Rewrite imports from `src.backend.backend.*` to `src.backend.*`.
+1. Keep imports on the normalized `src.backend.*` package path.
 2. Freeze `bootstrap_disabled/` as legacy-only and remove any accidental new
    imports.
 3. Create a dedicated top-level home for benchmark and evaluation code, then

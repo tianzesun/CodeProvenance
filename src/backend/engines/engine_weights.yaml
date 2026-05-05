@@ -1,12 +1,12 @@
 weights:
-  token: 0.1132
-  ngram: 0.0755
-  winnowing: 0.0755
-  ast: 0.283
-  graph: 0.0943
-  execution: 0.1321
-  embedding: 0.1509
-  llm: 0.0755
+  token: 0.1651
+  ngram: 0.0573
+  winnowing: 0.2447
+  ast: 0.154
+  graph: 0.0715
+  execution: 0.2501
+  embedding: 0.0
+  llm: 0.0573
 baseline_correction:
   baselines:
     winnowing: 0.35
@@ -20,12 +20,12 @@ precision_guard:
   extreme_score_floor: 0.85
   evidence_threshold: 0.4
   lexical_threshold: 0.42
-  minimum_concrete_engines: 3
+  minimum_concrete_engines: 5
   minimum_concrete_engines_high_score: 2
   minimum_lexical_engines: 1
   minimum_lexical_engines_high_score: 1
-  penalty_multiplier: 0.8
-  semantic_only_cap: 0.38
+  penalty_multiplier: 0.55
+  semantic_only_cap: 0.25
   cfg_high_score_bypass: false
   ast_bypass_threshold: 0.88
 arbitration:
@@ -34,23 +34,23 @@ arbitration:
   minimum_agreement: 0.3
 ast_boost:
   enabled: true
-  threshold: 0.86
-  minimum_guaranteed_score: 0.68
+  threshold: 0.95
+  minimum_guaranteed_score: 0.55
   bypass_precision_guards: false
 deep_verify:
   tree_kernel_min: 0.6
   ast_normalized_min: 0.45
   cfg_similarity_min: 0.5
-  minimum_agreeing_engines: 3
+  minimum_agreeing_engines: 5
   minimum_agreeing_engines_high_score: 2
   final_confidence_floor: 0.65
   false_positive_safety_cap: 0.58
   cfg_bypass_enabled: true
   cfg_bypass_threshold: 0.8
 decision:
-  default_threshold: 0.82
+  default_threshold: 0.95
   minimum_confidence: 0.4
-  minimum_engine_agreement: 3
+  minimum_engine_agreement: 5
   uncertainty_review_threshold: 0.75
   false_positive_bias: 1.5
   precision_target: 0.95
