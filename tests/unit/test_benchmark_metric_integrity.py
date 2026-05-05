@@ -91,6 +91,160 @@ def test_fixed_threshold_strategy_does_not_optimize_regression_threshold() -> No
     assert metrics["metric_integrity"]["calibration_bias_warning"] is False
 
 
+def test_engine_tuning_recommendations_include_yaml_config_changes(monkeypatch) -> None:
+    """Benchmark feedback should include concrete engine_weights.yaml edits."""
+    from src.backend.engines.scoring import fusion_engine
+
+    monkeypatch.setattr(
+        fusion_engine,
+        "load_engine_config",
+        lambda: {
+            "weights": {
+                "token": 0.16,
+                "ngram": 0.08,
+                "winnowing": 0.18,
+                "ast": 0.22,
+                "graph": 0.08,
+                "execution": 0.18,
+                "embedding": 0.06,
+                "llm": 0.04,
+            },
+            "decision": {
+                "default_threshold": 0.82,
+                "minimum_engine_agreement": 3,
+            },
+            "precision_guard": {
+                "minimum_concrete_engines": 3,
+                "semantic_only_cap": 0.38,
+                "penalty_multiplier": 0.8,
+            },
+            "ast_boost": {
+                "minimum_guaranteed_score": 0.68,
+                "threshold": 0.86,
+            },
+            "deep_verify": {
+                "minimum_agreeing_engines": 3,
+            },
+        },
+    )
+
+    metrics = server._compute_evaluation_metrics(
+        scores=[0.95, 0.92, 0.88, 0.87, 0.30, 0.25],
+        labels=[3, 0, 0, 0, 2, 2],
+        tool_name="integritydesk",
+        dataset_name="unit",
+        engine_contribution={"ast": 0.55, "embedding": 0.22, "fingerprint": 0.22},
+    )
+
+    recommendations = metrics["tuning_recommendations"]
+    changed_paths = {change["path"] for change in recommendations["config_changes"]}
+
+    assert recommendations["available"] is True
+    assert recommendations["config_file"] == "src/backend/engines/engine_weights.yaml"
+    assert recommendations["mode"] == "precision_first"
+    assert "decision.default_threshold" in changed_paths
+    assert "precision_guard.semantic_only_cap" in changed_paths
+    assert "weights.ast" in changed_paths
+    ast_reason = next(
+        change["reason"]
+        for change in recommendations["config_changes"]
+        if change["path"] == "weights.ast"
+    )
+    token_reason = next(
+        change["reason"]
+        for change in recommendations["config_changes"]
+        if change["path"] == "weights.token"
+    )
+    assert ast_reason != token_reason
+    assert "dominant contributor" in ast_reason
+
+
+def test_engine_tuning_does_not_stack_weight_changes_when_validation_pending(
+    monkeypatch,
+) -> None:
+    """A failed rerun after Apply should not keep producing more weight churn."""
+    from src.backend.engines.scoring import fusion_engine
+
+    monkeypatch.setattr(
+        fusion_engine,
+        "load_engine_config",
+        lambda: {
+            "weights": {
+                "token": 0.1651,
+                "ngram": 0.0573,
+                "winnowing": 0.2447,
+                "ast": 0.154,
+                "graph": 0.0715,
+                "execution": 0.2501,
+                "embedding": 0.0,
+                "llm": 0.0573,
+            },
+            "decision": {
+                "default_threshold": 0.95,
+                "minimum_engine_agreement": 5,
+            },
+            "precision_guard": {
+                "minimum_concrete_engines": 5,
+                "semantic_only_cap": 0.25,
+                "penalty_multiplier": 0.55,
+            },
+            "ast_boost": {
+                "minimum_guaranteed_score": 0.55,
+                "threshold": 0.95,
+            },
+            "deep_verify": {
+                "minimum_agreeing_engines": 5,
+            },
+            "advanced": {"weights_need_validation": True},
+        },
+    )
+
+    metrics = server._compute_evaluation_metrics(
+        scores=[0.95, 0.92, 0.88, 0.87, 0.30, 0.25],
+        labels=[3, 0, 0, 0, 2, 2],
+        tool_name="integritydesk",
+        dataset_name="unit",
+        engine_contribution={"ast": 0.55, "embedding": 0.22, "fingerprint": 0.22},
+    )
+
+    recommendations = metrics["tuning_recommendations"]
+    changed_paths = {change["path"] for change in recommendations["config_changes"]}
+    manual_options = recommendations["manual_config_options"]
+
+    assert not any(path.startswith("weights.") for path in changed_paths)
+    assert manual_options
+    assert all(option["current"] != option["proposed"] for option in manual_options)
+    assert any(
+        action["title"] == "Do not stack another weight candidate yet"
+        for action in recommendations["actions"]
+    )
+
+
+def test_apply_engine_optimization_changes_updates_allowed_paths() -> None:
+    """Apply button payloads should update only vetted engine config paths."""
+    result = server._apply_engine_optimization_changes(
+        {
+            "weights": {"ast": 0.5, "token": 0.5},
+            "decision": {"default_threshold": 0.82},
+            "advanced": {},
+        },
+        [
+            {"path": "decision.default_threshold", "proposed": 0.86},
+            {"path": "decision.minimum_engine_agreement", "proposed": 4},
+            {"path": "weights.ast", "proposed": 0.4},
+            {"path": "weights.token", "proposed": 0.6},
+        ],
+    )
+
+    config = result["config"]
+
+    assert config["decision"]["default_threshold"] == 0.86
+    assert config["decision"]["minimum_engine_agreement"] == 4
+    assert config["weights"] == {"ast": 0.4, "token": 0.6}
+    assert config["advanced"]["weights_need_validation"] is True
+    assert len(result["applied_changes"]) == 4
+
+
 def test_regression_quality_gates_fail_on_low_precision() -> None:
     """Regression quality gates should fail metrics below configured thresholds."""
     gates = server._build_regression_quality_gates(

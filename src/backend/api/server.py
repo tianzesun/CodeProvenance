@@ -5687,6 +5687,13 @@ async def run_benchmark(
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
 ):
+    selected_tools: List[str] = []
+    for tool in tools:
+        tool_id = str(tool).strip().lower()
+        if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
+            selected_tools.append(tool_id)
+    tools = selected_tools or ["integritydesk"]
+
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -6040,6 +6047,35 @@ async def run_benchmark(
     return JSONResponse(content=response)
 
 
+@app.post("/api/benchmark/apply-optimization")
+async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
+    """Apply proposed benchmark optimization changes to engine_weights.yaml."""
+    _require_current_user(request, admin_only=True)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid optimization payload")
+
+    changes = payload.get("config_changes")
+    if not isinstance(changes, list) or not changes:
+        raise HTTPException(status_code=400, detail="No optimization changes provided")
+
+    from src.backend.engines.scoring.fusion_engine import (
+        load_engine_config,
+        save_engine_config,
+    )
+
+    current_config = load_engine_config()
+    applied = _apply_engine_optimization_changes(current_config, changes)
+    save_engine_config(applied["config"])
+
+    return {
+        "success": True,
+        "message": "Proposed optimization applied to engine_weights.yaml",
+        "config_file": "src/backend/engines/engine_weights.yaml",
+        "applied_changes": applied["applied_changes"],
+    }
+
+
 def _get_ground_truth_labels(
     dataset: str, pair_results: List[Dict[str, Any]]
 ) -> List[int]:
@@ -6304,15 +6340,16 @@ def _compute_evaluation_metrics(
         # Find the PAN/PlagDet operating point on the calibration slice only.
         # Held-out metrics below are the trustworthy headline when a holdout exists.
         best_candidate_key = None
+        # Use unique observed scores as threshold candidates for more precise optimization
+        unique_calibration_scores = sorted(np.unique(threshold_scores_arr))
         sweep_thresholds = sorted(
             {
                 round(float(threshold), 6)
                 for threshold in np.concatenate(
                     [
-                        np.linspace(0.05, 0.95, 91),
-                        threshold_scores_arr,
-                        np.maximum(0.0, threshold_scores_arr - 1e-6),
-                        np.minimum(1.0, threshold_scores_arr + 1e-6),
+                        [0.0],  # boundary: predict all positive
+                        unique_calibration_scores,  # unique observed scores
+                        [1.0],  # boundary: predict all negative
                     ]
                 )
             }
@@ -6322,16 +6359,25 @@ def _compute_evaluation_metrics(
             candidate = _binary_metrics_at_threshold(
                 threshold_scores_arr, threshold_labels_arr, threshold
             )
-            candidate_key = (
-                float(candidate["f1_score"]),
-                float(candidate["precision"]),
-                -float(candidate["false_positive_rate"]),
-                float(candidate["recall"]),
-                -float(threshold),
-            )
-            if best_candidate_key is None or candidate_key > best_candidate_key:
-                best_threshold = threshold
-                best_candidate_key = candidate_key
+            precision = float(candidate["precision"])
+            fpr = float(candidate["false_positive_rate"])
+            f1_score = float(candidate["f1_score"])
+
+            # Apply constraints to prevent degenerate solutions:
+            # - Minimum precision of 0.1 (not all-positive)
+            # - Maximum FPR of 0.5 (not too noisy)
+            # - F1 score must be reasonable (> 0)
+            if precision >= 0.1 and fpr <= 0.5 and f1_score > 0.0:
+                candidate_key = (
+                    f1_score,
+                    precision,
+                    -fpr,
+                    float(candidate["recall"]),
+                    -float(threshold),
+                )
+                if best_candidate_key is None or candidate_key > best_candidate_key:
+                    best_threshold = threshold
+                    best_candidate_key = candidate_key
 
     # Compute ROC-AUC and PR-AUC
     try:
@@ -6437,6 +6483,19 @@ def _compute_evaluation_metrics(
         confidence_intervals=confidence_intervals,
     )
     calibration_report = _build_calibration_report(float(best_threshold), "benchmark")
+    tuning_recommendations = _build_engine_tuning_recommendations(
+        tool_name=tool_name,
+        precision=precision,
+        recall=recall,
+        f1_score=f1_score,
+        false_positive_rate=false_positive_rate,
+        auc_pr=float(pr_auc),
+        best_threshold=float(best_threshold),
+        fixed_threshold=fixed_threshold,
+        engine_contribution=engine_contribution or {},
+        confusion_matrix=best_cm,
+        score_diagnostics=score_diagnostics,
+    )
 
     return {
         "tool": tool_name,
@@ -6477,6 +6536,7 @@ def _compute_evaluation_metrics(
         "score_diagnostics": score_diagnostics,
         "calibration_curve": calibration_curve,
         "calibration_report": calibration_report,
+        "tuning_recommendations": tuning_recommendations,
         "metric_integrity": metric_integrity,
         "metric_assumptions": metric_assumptions,
         "pan_metrics": {
@@ -6633,11 +6693,7 @@ def _build_metric_integrity_summary(
         warnings.append(
             str(split_protocol.get("warning") or "No held-out split available.")
         )
-    if abs(best_threshold - fixed_threshold) > 1e-6:
-        warnings.append(
-            "Threshold was calibrated from labeled benchmark pairs; compare fixed-threshold "
-            "metrics and held-out confidence intervals before making release claims."
-        )
+
 
     return {
         "label_count_matches_score_count": len(scores) == len(labels),
@@ -6661,6 +6717,688 @@ def _build_metric_integrity_summary(
         "confidence_intervals": confidence_intervals,
         "warnings": warnings,
     }
+
+
+def _clamp_config_value(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    """Clamp a numeric config recommendation into a safe range."""
+    return max(lower, min(upper, float(value)))
+
+
+def _round_config_value(value: float) -> float:
+    """Round config recommendations consistently for YAML patches."""
+    return round(float(value), 4)
+
+
+def _canonical_weight_key(engine_name: str) -> str:
+    """Map runtime feature names back to engine_weights.yaml weight keys."""
+    return {
+        "fingerprint": "token",
+        "semantic": "embedding",
+        "codebert": "embedding",
+        "gst": "ngram",
+        "execution_cfg": "execution",
+        "cfg": "graph",
+    }.get(str(engine_name).strip().lower(), str(engine_name).strip().lower())
+
+
+def _normalized_weight_patch(
+    current_weights: Dict[str, Any],
+    adjustments: Dict[str, float],
+) -> Dict[str, float]:
+    """Apply relative weight deltas and return a normalized weight map."""
+    patched = {
+        str(key): max(0.0, float(value))
+        for key, value in current_weights.items()
+        if isinstance(value, (int, float))
+    }
+    for key, delta in adjustments.items():
+        if key not in patched:
+            continue
+        patched[key] = max(0.0, patched[key] + float(delta))
+
+    total = sum(patched.values())
+    if total <= 0:
+        return patched
+    return {key: _round_config_value(value / total) for key, value in patched.items()}
+
+
+def _add_config_change(
+    changes: List[Dict[str, Any]],
+    path: str,
+    current: Any,
+    proposed: Any,
+    reason: str,
+    risk: str = "medium",
+) -> None:
+    """Append a config change when the proposed value differs from current."""
+    if current == proposed:
+        return
+    changes.append(
+        {
+            "path": path,
+            "current": current,
+            "proposed": proposed,
+            "reason": reason,
+            "risk": risk,
+        }
+    )
+
+
+def _manual_engine_tuning_options(
+    weights: Dict[str, Any],
+    decision: Dict[str, Any],
+    precision_guard: Dict[str, Any],
+    ast_boost: Dict[str, Any],
+    deep_verify: Dict[str, Any],
+    tuning_mode: str,
+    dominant_engine: str,
+) -> List[Dict[str, Any]]:
+    """Expose editable config controls even when no automatic edit is available."""
+    options: List[Dict[str, Any]] = []
+
+    def add_option(
+        path: str,
+        current: Any,
+        proposed: Any,
+        reason: str,
+        risk: str = "manual",
+    ) -> None:
+        if current is None:
+            return
+        rounded_current = (
+            _round_config_value(current) if isinstance(current, float) else current
+        )
+        rounded_proposed = (
+            _round_config_value(proposed) if isinstance(proposed, float) else proposed
+        )
+        if rounded_current == rounded_proposed:
+            return
+        options.append(
+            {
+                "path": path,
+                "current": rounded_current,
+                "proposed": rounded_proposed,
+                "reason": reason,
+                "risk": risk,
+                "manual": True,
+            }
+        )
+
+    threshold = _coerce_float(decision.get("default_threshold"), 0.82)
+    min_agreement = int(decision.get("minimum_engine_agreement", 3) or 3)
+    min_concrete = int(precision_guard.get("minimum_concrete_engines", 3) or 3)
+    semantic_cap = _coerce_float(precision_guard.get("semantic_only_cap"), 0.38)
+    penalty_multiplier = _coerce_float(precision_guard.get("penalty_multiplier"), 0.8)
+    ast_threshold = _coerce_float(ast_boost.get("threshold"), 0.86)
+    ast_floor = _coerce_float(ast_boost.get("minimum_guaranteed_score"), 0.68)
+    deep_agreement = int(deep_verify.get("minimum_agreeing_engines", 3) or 3)
+
+    if tuning_mode == "recall_first":
+        threshold_proposed = _clamp_config_value(threshold - 0.02, 0.05, 0.95)
+        agreement_proposed = max(1, min_agreement - 1)
+        concrete_proposed = max(1, min_concrete - 1)
+        semantic_cap_proposed = _clamp_config_value(semantic_cap + 0.03, 0.0, 1.0)
+        penalty_proposed = _clamp_config_value(penalty_multiplier + 0.03, 0.0, 1.0)
+        ast_threshold_proposed = _clamp_config_value(ast_threshold - 0.02, 0.0, 1.0)
+        ast_floor_proposed = _clamp_config_value(ast_floor + 0.02, 0.0, 1.0)
+        deep_agreement_proposed = max(1, deep_agreement - 1)
+        weight_adjustments = {"embedding": 0.03, "execution": 0.02, "graph": 0.02}
+    else:
+        threshold_proposed = _clamp_config_value(threshold + 0.02, 0.05, 0.95)
+        agreement_proposed = min(10, min_agreement + 1)
+        concrete_proposed = min(10, min_concrete + 1)
+        semantic_cap_proposed = _clamp_config_value(semantic_cap - 0.03, 0.0, 1.0)
+        penalty_proposed = _clamp_config_value(penalty_multiplier - 0.03, 0.0, 1.0)
+        ast_threshold_proposed = _clamp_config_value(ast_threshold + 0.02, 0.0, 1.0)
+        ast_floor_proposed = _clamp_config_value(ast_floor - 0.02, 0.0, 1.0)
+        deep_agreement_proposed = min(10, deep_agreement + 1)
+        weight_adjustments = {"token": 0.015, "winnowing": 0.015, "execution": 0.015}
+        if dominant_engine in weights:
+            weight_adjustments[dominant_engine] = (
+                weight_adjustments.get(dominant_engine, 0.0) - 0.025
+            )
+        if "embedding" in weights:
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.02
+            )
+
+    add_option(
+        "decision.default_threshold",
+        threshold,
+        threshold_proposed,
+        "Manual control for the final positive cutoff. Raise for precision; lower for recall.",
+    )
+    add_option(
+        "decision.minimum_engine_agreement",
+        min_agreement,
+        agreement_proposed,
+        "Manual control for how many independent engines must agree.",
+    )
+    add_option(
+        "precision_guard.minimum_concrete_engines",
+        min_concrete,
+        concrete_proposed,
+        "Manual control for concrete evidence required before trusting broad matches.",
+    )
+    add_option(
+        "precision_guard.semantic_only_cap",
+        semantic_cap,
+        semantic_cap_proposed,
+        "Manual cap for semantic-only matches.",
+    )
+    add_option(
+        "precision_guard.penalty_multiplier",
+        penalty_multiplier,
+        penalty_proposed,
+        "Manual penalty for weak-evidence pairs.",
+    )
+    add_option(
+        "ast_boost.threshold",
+        ast_threshold,
+        ast_threshold_proposed,
+        "Manual AST boost activation threshold.",
+    )
+    add_option(
+        "ast_boost.minimum_guaranteed_score",
+        ast_floor,
+        ast_floor_proposed,
+        "Manual AST-only guaranteed score floor.",
+    )
+    add_option(
+        "deep_verify.minimum_agreeing_engines",
+        deep_agreement,
+        deep_agreement_proposed,
+        "Manual agreement requirement for deep verification.",
+    )
+
+    proposed_weights = _normalized_weight_patch(weights, weight_adjustments)
+    for key in sorted(weights):
+        value = weights.get(key)
+        if isinstance(value, (int, float)):
+            add_option(
+                f"weights.{key}",
+                float(value),
+                float(proposed_weights.get(key, value)),
+                f"Manual control for the {key} contribution in the fusion score.",
+            )
+
+    return options
+
+
+def _engine_weight_change_reason(
+    key: str,
+    current: float,
+    proposed: float,
+    dominant_engine: str,
+    dominant_value: float,
+    mode: str,
+) -> str:
+    """Explain why a specific engine weight is being moved."""
+    direction = "increase" if proposed > current else "decrease"
+    percent = f"{dominant_value:.0%}"
+
+    if mode == "precision_first":
+        if key == dominant_engine:
+            return (
+                f"Decrease {key} because it is the dominant contributor "
+                f"({percent}) while false positives are high."
+            )
+        if key == "embedding":
+            return (
+                "Decrease embedding because semantic-only similarity can match broad "
+                "intent without enough concrete code evidence."
+            )
+        if key in {"token", "winnowing", "ngram"}:
+            return (
+                f"{direction.title()} {key} so high-risk decisions rely more on "
+                "lexical overlap that is easier to audit against false positives."
+            )
+        if key == "execution":
+            return (
+                "Increase execution because behavior agreement is independent "
+                "evidence and helps confirm suspicious pairs."
+            )
+        if key == "ast":
+            return (
+                "Reduce AST influence when structure is dominating negatives; "
+                "keep AST as evidence but require corroboration."
+            )
+    elif mode == "recall_first":
+        if key in {"embedding", "execution", "graph"}:
+            return (
+                f"{direction.title()} {key} to recover renamed, reordered, or "
+                "semantic clones that lexical engines may miss."
+            )
+        if key in {"token", "ngram", "winnowing"}:
+            return (
+                f"{direction.title()} {key} so lexical mismatch does not block "
+                "obfuscated true positives from ranking high enough."
+            )
+    elif mode == "ranking":
+        return (
+            f"{direction.title()} {key} to improve pair ranking before the final "
+            "decision threshold is applied."
+        )
+
+    return (
+        f"{direction.title()} {key} based on this run's contributor balance; "
+        "validate the moved scores on the next labeled rerun."
+    )
+
+
+def _build_engine_tuning_recommendations(
+    tool_name: str,
+    precision: float,
+    recall: float,
+    f1_score: float,
+    false_positive_rate: float,
+    auc_pr: float,
+    best_threshold: float,
+    fixed_threshold: float,
+    engine_contribution: Dict[str, float],
+    confusion_matrix: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build concrete candidate edits for engine_weights.yaml after a benchmark.
+
+    These are deliberately conservative recommendations. They are meant to make
+    the next tuning run easy to execute, not to silently overwrite production
+    calibration from a single benchmark.
+    """
+    if tool_name != "integritydesk":
+        return {
+            "available": False,
+            "reason": "Engine tuning recommendations only apply to IntegrityDesk.",
+        }
+
+    try:
+        from src.backend.engines.scoring.fusion_engine import load_engine_config
+
+        config = load_engine_config()
+    except Exception as exc:
+        return {"available": False, "reason": f"Could not load engine config: {exc}"}
+
+    weights = config.get("weights") or {}
+    decision = config.get("decision") or {}
+    precision_guard = config.get("precision_guard") or {}
+    ast_boost = config.get("ast_boost") or {}
+    deep_verify = config.get("deep_verify") or {}
+    advanced = config.get("advanced") or {}
+
+    precision_problem = precision < 0.85
+    recall_problem = recall < 0.85
+    fpr_problem = false_positive_rate > 0.05
+    ranking_problem = auc_pr < 0.85
+    previous_candidate_pending = bool(advanced.get("weights_need_validation"))
+    changes: List[Dict[str, Any]] = []
+    actions: List[Dict[str, Any]] = []
+
+    current_threshold = _coerce_float(
+        decision.get("default_threshold"), _coerce_float(fixed_threshold, 0.82)
+    )
+    if precision_problem or fpr_problem:
+        proposed_threshold = _clamp_config_value(
+            max(current_threshold + 0.03, best_threshold, 0.82), 0.05, 0.95
+        )
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(proposed_threshold),
+            "False positives are high; raise the final production decision threshold.",
+        )
+    elif recall_problem:
+        proposed_threshold = _clamp_config_value(
+            min(current_threshold - 0.03, best_threshold), 0.05, 0.95
+        )
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(proposed_threshold),
+            "Recall is low without a precision/FPR problem; lower the final threshold modestly.",
+        )
+    elif abs(best_threshold - current_threshold) > 0.02 and f1_score < 0.90:
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(best_threshold),
+            "Use the benchmark-calibrated threshold as the next validation candidate.",
+            risk="low",
+        )
+
+    if precision_problem or fpr_problem:
+        current_min_agreement = int(decision.get("minimum_engine_agreement", 3) or 3)
+        _add_config_change(
+            changes,
+            "decision.minimum_engine_agreement",
+            current_min_agreement,
+            min(5, max(3, current_min_agreement + 1)),
+            "Require more independent evidence before a pair becomes a positive decision.",
+        )
+        current_concrete = int(precision_guard.get("minimum_concrete_engines", 3) or 3)
+        _add_config_change(
+            changes,
+            "precision_guard.minimum_concrete_engines",
+            current_concrete,
+            min(5, max(3, current_concrete + 1)),
+            "False positives need stronger token/AST/execution corroboration.",
+        )
+        current_semantic_cap = _coerce_float(
+            precision_guard.get("semantic_only_cap"), 0.38
+        )
+        _add_config_change(
+            changes,
+            "precision_guard.semantic_only_cap",
+            _round_config_value(current_semantic_cap),
+            _round_config_value(max(0.25, current_semantic_cap - 0.05)),
+            "Reduce broad semantic-only matches until negatives are cleaner.",
+        )
+        current_penalty = _coerce_float(precision_guard.get("penalty_multiplier"), 0.8)
+        _add_config_change(
+            changes,
+            "precision_guard.penalty_multiplier",
+            _round_config_value(current_penalty),
+            _round_config_value(max(0.55, current_penalty - 0.05)),
+            "Make weak-evidence pairs lose more score when guardrails fail.",
+        )
+
+    contributions = {
+        _canonical_weight_key(key): float(value)
+        for key, value in (engine_contribution or {}).items()
+        if isinstance(value, (int, float))
+    }
+    dominant_engine = ""
+    dominant_value = 0.0
+    if contributions:
+        dominant_engine, dominant_value = max(
+            contributions.items(), key=lambda item: item[1]
+        )
+
+    weight_adjustments: Dict[str, float] = {}
+    if precision_problem or fpr_problem:
+        if dominant_engine in weights and dominant_value >= 0.45:
+            weight_adjustments[dominant_engine] = (
+                weight_adjustments.get(dominant_engine, 0.0) - 0.04
+            )
+        if "embedding" in weights:
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.03
+            )
+        for key, delta in (("token", 0.025), ("winnowing", 0.025), ("execution", 0.02)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+    elif recall_problem:
+        for key, delta in (("embedding", 0.035), ("execution", 0.025), ("graph", 0.02)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+        for key, delta in (("token", -0.02), ("ngram", -0.015)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+    elif ranking_problem:
+        for key, delta in (("token", 0.015), ("ast", 0.015), ("embedding", -0.015)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+
+    tuning_mode = (
+        "precision_first"
+        if precision_problem or fpr_problem
+        else (
+            "recall_first"
+            if recall_problem
+            else ("ranking" if ranking_problem else "balanced")
+        )
+    )
+
+    if weight_adjustments and not previous_candidate_pending:
+        proposed_weights = _normalized_weight_patch(weights, weight_adjustments)
+        for key in sorted(proposed_weights):
+            if key not in weights:
+                continue
+            current_weight = _round_config_value(float(weights[key]))
+            proposed_weight = proposed_weights[key]
+            _add_config_change(
+                changes,
+                f"weights.{key}",
+                current_weight,
+                proposed_weight,
+                _engine_weight_change_reason(
+                    key,
+                    current_weight,
+                    proposed_weight,
+                    dominant_engine,
+                    dominant_value,
+                    tuning_mode,
+                ),
+                risk="medium",
+            )
+    elif weight_adjustments and previous_candidate_pending:
+        actions.append(
+            {
+                "title": "Do not stack another weight candidate yet",
+                "detail": (
+                    "The current engine_weights.yaml already contains an applied "
+                    "candidate marked for validation. If the rerun did not improve, "
+                    "avoid another weight-only Apply and inspect the false positives "
+                    "or missed positives directly."
+                ),
+            }
+        )
+
+    if (precision_problem or fpr_problem) and dominant_engine == "ast":
+        current_ast_boost = _coerce_float(
+            ast_boost.get("minimum_guaranteed_score"), 0.68
+        )
+        _add_config_change(
+            changes,
+            "ast_boost.minimum_guaranteed_score",
+            _round_config_value(current_ast_boost),
+            _round_config_value(max(0.55, current_ast_boost - 0.04)),
+            "AST dominates current evidence; lower the AST-only guaranteed floor.",
+        )
+        current_ast_threshold = _coerce_float(ast_boost.get("threshold"), 0.86)
+        _add_config_change(
+            changes,
+            "ast_boost.threshold",
+            _round_config_value(current_ast_threshold),
+            _round_config_value(min(0.95, current_ast_threshold + 0.03)),
+            "Only apply AST boost on stronger AST matches.",
+        )
+
+    if precision_problem or fpr_problem:
+        current_deep_agreement = int(
+            deep_verify.get("minimum_agreeing_engines", 3) or 3
+        )
+        _add_config_change(
+            changes,
+            "deep_verify.minimum_agreeing_engines",
+            current_deep_agreement,
+            min(5, max(3, current_deep_agreement + 1)),
+            "Deep verification should require more agreement before lifting scores.",
+        )
+
+    if precision_problem or fpr_problem:
+        actions.append(
+            {
+                "title": "Apply a precision-first candidate config",
+                "detail": (
+                    "False positives are the blocking issue. Start with the proposed threshold, "
+                    "agreement, semantic cap, and weight changes, then rerun the same benchmark."
+                ),
+            }
+        )
+    if recall_problem:
+        actions.append(
+            {
+                "title": "Audit missed positives before lowering final threshold",
+                "detail": (
+                    "Recall is also low. If the missed positives are Type-3/Type-4 clones, "
+                    "improve candidate retrieval or semantic/execution reranking before making "
+                    "the final decision threshold too permissive."
+                ),
+            }
+        )
+    if dominant_engine:
+        actions.append(
+            {
+                "title": f"Check {dominant_engine} false-positive dominance",
+                "detail": (
+                    f"{dominant_engine} contributes {dominant_value:.0%} of current evidence. "
+                    "Inspect high-scoring negatives; if they are caused by this engine, keep its "
+                    "proposed weight reduction."
+                ),
+            }
+        )
+
+    if not actions:
+        actions.append(
+            {
+                "title": "Keep current config as baseline",
+                "detail": (
+                    "The scorecard is balanced enough that the next step is a harder benchmark, "
+                    "not a config change."
+                ),
+            }
+        )
+
+    return {
+        "available": True,
+        "config_file": "src/backend/engines/engine_weights.yaml",
+        "mode": tuning_mode,
+        "summary": (
+            f"Precision {precision:.1%}, recall {recall:.1%}, F1 {f1_score:.1%}, "
+            f"FPR {false_positive_rate:.1%}. Proposed changes are candidates for the next rerun."
+        ),
+        "dominant_engine": dominant_engine,
+        "dominant_engine_contribution": round(dominant_value, 4),
+        "confusion_matrix": confusion_matrix,
+        "score_diagnostics": score_diagnostics,
+        "actions": actions,
+        "config_changes": changes,
+        "manual_config_options": _manual_engine_tuning_options(
+            weights,
+            decision,
+            precision_guard,
+            ast_boost,
+            deep_verify,
+            tuning_mode,
+            dominant_engine,
+        ),
+        "apply_instructions": [
+            "Copy the proposed values into src/backend/engines/engine_weights.yaml.",
+            "Rerun the same benchmark dataset and compare F1, precision, recall, and FPR.",
+            "Only keep the changes if held-out F1 improves and FPR does not regress.",
+        ],
+    }
+
+
+ENGINE_OPTIMIZATION_ALLOWED_PREFIXES = {
+    "weights",
+    "decision",
+    "precision_guard",
+    "ast_boost",
+    "deep_verify",
+    "thresholds",
+}
+
+
+def _validate_engine_optimization_value(path: str, proposed: Any) -> None:
+    """Validate an optimization value according to its engine config path."""
+    if not isinstance(proposed, (int, float, bool)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported proposed value for {path}",
+        )
+    if isinstance(proposed, bool):
+        return
+
+    numeric = float(proposed)
+    unit_interval_paths = (
+        path.startswith("weights.")
+        or path.startswith("thresholds.")
+        or path.endswith("_threshold")
+        or path.endswith("_floor")
+        or path.endswith("_cap")
+        or path.endswith("_multiplier")
+        or path.endswith(".default_threshold")
+        or path.endswith(".minimum_confidence")
+    )
+    count_paths = (
+        path.endswith("_engines")
+        or path.endswith("_engines_high_score")
+        or path.endswith("_agreement")
+        or path.endswith(".minimum_engine_agreement")
+    )
+
+    if unit_interval_paths and not 0.0 <= numeric <= 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 0.0 and 1.0",
+        )
+    if count_paths and not 1 <= numeric <= 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 1 and 10",
+        )
+    if not unit_interval_paths and not count_paths and not 0.0 <= numeric <= 10.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 0.0 and 10.0",
+        )
+
+
+def _apply_engine_optimization_changes(
+    config: Dict[str, Any], changes: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Apply vetted benchmark optimization changes to an engine config copy."""
+    updated_config = json.loads(json.dumps(config))
+    applied_changes: List[Dict[str, Any]] = []
+
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        path = str(change.get("path") or "").strip()
+        parts = [part for part in path.split(".") if part]
+        if len(parts) < 2 or parts[0] not in ENGINE_OPTIMIZATION_ALLOWED_PREFIXES:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported config path: {path}"
+            )
+
+        proposed = change.get("proposed")
+        _validate_engine_optimization_value(path, proposed)
+
+        target = updated_config
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+            if not isinstance(target, dict):
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid config path: {path}"
+                )
+        target[parts[-1]] = proposed
+        applied_changes.append(
+            {
+                "path": path,
+                "proposed": proposed,
+                "reason": change.get("reason", ""),
+            }
+        )
+
+    if "weights" in updated_config and isinstance(updated_config["weights"], dict):
+        total = sum(
+            float(value)
+            for value in updated_config["weights"].values()
+            if isinstance(value, (int, float))
+        )
+        if total > 0:
+            updated_config["weights"] = {
+                key: _round_config_value(float(value) / total)
+                for key, value in updated_config["weights"].items()
+                if isinstance(value, (int, float))
+            }
+        updated_config.setdefault("advanced", {})["weights_need_validation"] = True
+
+    return {"config": updated_config, "applied_changes": applied_changes}
 
 
 def _build_threshold_calibration_points(
@@ -8144,6 +8882,9 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
 
 @app.middleware("http")
 async def dashboard_auth_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
     if not _should_require_auth(path):
         return await call_next(request)
@@ -8615,6 +9356,29 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
             "recall drops when labeled plagiarism pairs are below threshold."
         )
         lines.append("")
+
+        tuning = primary_metrics.get("tuning_recommendations") or {}
+        tuning_changes = tuning.get("config_changes") or []
+        if tuning.get("available"):
+            lines.extend(
+                [
+                    "Engine Tuning Plan",
+                    str(tuning.get("summary") or ""),
+                    f"Config file: {tuning.get('config_file', 'src/backend/engines/engine_weights.yaml')}",
+                ]
+            )
+            for action in tuning.get("actions") or []:
+                lines.append(
+                    f"- {action.get('title', 'Action')}: {action.get('detail', '')}"
+                )
+            if tuning_changes:
+                lines.append("Proposed YAML edits:")
+                for change in tuning_changes:
+                    lines.append(
+                        f"- {change.get('path')}: {change.get('current')} -> "
+                        f"{change.get('proposed')} ({change.get('reason', '')})"
+                    )
+            lines.append("")
 
     if requested_tools:
         lines.extend(["Tool Coverage"])

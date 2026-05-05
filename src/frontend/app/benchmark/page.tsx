@@ -10,7 +10,7 @@ import {
   Zap, Target, Layers, TrendingUp, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, Square, Check,
   ChevronRight, UploadCloud, Database, Settings2, ClipboardList, Plus,
-  GitCompare,
+  GitCompare, Eye,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -19,108 +19,67 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 
-// ── Tool definitions with full UI metadata ──────────────────────────────
+// ── Tool definitions ──────────────────────────────────────────────────────
 const TOOLS = [
   {
-    id: 'integritydesk',
-    name: 'IntegrityDesk',
-    color: '#7C3AED',
-    bgLight: 'bg-violet-50',
-    textColor: 'text-violet-700',
-    ring: 'ring-violet-500',
+    id: 'integritydesk', name: 'IntegrityDesk', color: '#7C3AED',
+    bgLight: 'bg-violet-50', textColor: 'text-violet-700', ring: 'ring-violet-500',
     gradient: 'from-violet-500 to-violet-700',
     engines: ['AST', 'Embedding', 'Execution', 'Fingerprint', 'N-gram'],
     desc: 'Full multi-engine fusion: AST, UniXcoder embeddings, execution similarity, and winnowing.',
     status: 'Ready to run',
   },
   {
-    id: 'moss',
-    name: 'MOSS',
-    color: '#0369A1',
-    bgLight: 'bg-sky-50',
-    textColor: 'text-sky-700',
-    ring: 'ring-sky-500',
-    gradient: 'from-sky-500 to-sky-700',
-    engines: ['Fingerprint', 'Token'],
+    id: 'moss', name: 'MOSS', color: '#0369A1',
+    bgLight: 'bg-sky-50', textColor: 'text-sky-700', ring: 'ring-sky-500',
+    gradient: 'from-sky-500 to-sky-700', engines: ['Fingerprint', 'Token'],
     desc: "Stanford's canonical academic plagiarism detector using k-gram fingerprinting.",
     status: 'Ready to run',
   },
   {
-    id: 'jplag',
-    name: 'JPlag',
-    color: '#B45309',
-    bgLight: 'bg-amber-50',
-    textColor: 'text-amber-700',
-    ring: 'ring-amber-500',
-    gradient: 'from-amber-500 to-amber-700',
-    engines: ['Token', 'AST'],
+    id: 'jplag', name: 'JPlag', color: '#B45309',
+    bgLight: 'bg-amber-50', textColor: 'text-amber-700', ring: 'ring-amber-500',
+    gradient: 'from-amber-500 to-amber-700', engines: ['Token', 'AST'],
     desc: 'AST-based plagiarism detector widely used in academic settings. Supports 10+ languages.',
     status: 'Ready to run',
   },
   {
-    id: 'dolos',
-    name: 'Dolos',
-    color: '#047857',
-    bgLight: 'bg-emerald-50',
-    textColor: 'text-emerald-700',
-    ring: 'ring-emerald-500',
-    gradient: 'from-emerald-500 to-emerald-700',
-    engines: ['AST', 'Fingerprint'],
+    id: 'dolos', name: 'Dolos', color: '#047857',
+    bgLight: 'bg-emerald-50', textColor: 'text-emerald-700', ring: 'ring-emerald-500',
+    gradient: 'from-emerald-500 to-emerald-700', engines: ['AST', 'Fingerprint'],
     desc: 'Modern AST + fingerprint tool from University of Ghent. Produces a pairwise similarity matrix.',
     status: 'Ready to run',
   },
   {
-    id: 'nicad',
-    name: 'NiCad',
-    color: '#9D174D',
-    bgLight: 'bg-pink-50',
-    textColor: 'text-pink-700',
-    ring: 'ring-pink-500',
-    gradient: 'from-pink-500 to-pink-700',
-    engines: ['Clone', 'Text'],
+    id: 'nicad', name: 'NiCad', color: '#9D174D',
+    bgLight: 'bg-pink-50', textColor: 'text-pink-700', ring: 'ring-pink-500',
+    gradient: 'from-pink-500 to-pink-700', engines: ['Clone', 'Text'],
     desc: 'Clone detector using text normalisation and differencing. Strong on near-miss (Type 3) clones.',
     status: 'Ready to run',
   },
   {
-    id: 'pmd',
-    name: 'PMD-CPD',
-    color: '#374151',
-    bgLight: 'bg-slate-50',
-    textColor: 'text-slate-700',
-    ring: 'ring-slate-500',
-    gradient: 'from-slate-500 to-slate-700',
-    engines: ['Token', 'Duplication'],
+    id: 'pmd', name: 'PMD-CPD', color: '#374151',
+    bgLight: 'bg-slate-50', textColor: 'text-slate-700', ring: 'ring-slate-500',
+    gradient: 'from-slate-500 to-slate-700', engines: ['Token', 'Duplication'],
     desc: 'Copy-Paste Detector from the PMD project. Fast token-based duplication finder.',
     status: 'Ready to run',
   },
   {
-    id: 'sherlock',
-    name: 'Sherlock',
-    color: '#065F46',
-    bgLight: 'bg-teal-50',
-    textColor: 'text-teal-700',
-    ring: 'ring-teal-500',
-    gradient: 'from-teal-500 to-teal-700',
-    engines: ['Token'],
+    id: 'sherlock', name: 'Sherlock', color: '#065F46',
+    bgLight: 'bg-teal-50', textColor: 'text-teal-700', ring: 'ring-teal-500',
+    gradient: 'from-teal-500 to-teal-700', engines: ['Token'],
     desc: 'Classical token-based plagiarism detector from University of Sydney.',
-    status: 'Setup needed',
-    runnable: false,
+    status: 'Setup needed', runnable: false,
   },
   {
-    id: 'sim',
-    name: 'SIM',
-    color: '#6B21A8',
-    bgLight: 'bg-purple-50',
-    textColor: 'text-purple-700',
-    ring: 'ring-purple-500',
-    gradient: 'from-purple-500 to-purple-700',
-    engines: ['Text'],
+    id: 'sim', name: 'SIM', color: '#6B21A8',
+    bgLight: 'bg-purple-50', textColor: 'text-purple-700', ring: 'ring-purple-500',
+    gradient: 'from-purple-500 to-purple-700', engines: ['Text'],
     desc: 'Classical similarity detector by Dick Grune. Historical baseline for multi-language comparison.',
     status: 'Ready to run',
   },
 ];
 
-// ── FIX #1: Merge API availability data with full TOOLS metadata ──────────
 function mergeToolsWithAvailability(apiTools = []) {
   if (!apiTools.length) return TOOLS;
   return TOOLS.map(toolDef => {
@@ -130,81 +89,37 @@ function mergeToolsWithAvailability(apiTools = []) {
   });
 }
 
-// ── Dataset category metadata ──────────────────────────────────────────────
+// ── Dataset metadata ───────────────────────────────────────────────────────
 const DATASET_CATEGORY_META = {
   guided: {
-    label: 'Quick Check',
-    eyebrow: 'Fastest way to validate tools',
-    badgeClass: 'bg-violet-100 text-violet-700',
-    accentClass: 'text-violet-600',
-    panelClass: 'border-violet-200 bg-violet-50/70',
-    summaryLabel: 'Quick check',
+    label: 'Quick Check', eyebrow: 'Fastest way to validate tools',
+    badgeClass: 'bg-violet-100 text-violet-700', accentClass: 'text-violet-600',
+    panelClass: 'border-violet-200 bg-violet-50/70', summaryLabel: 'Quick check',
   },
   preset: {
-    label: 'Preset Dataset',
-    eyebrow: 'Standardized benchmark data',
-    badgeClass: 'bg-emerald-100 text-emerald-700',
-    accentClass: 'text-emerald-600',
-    panelClass: 'border-emerald-200 bg-emerald-50/70',
-    summaryLabel: 'Preset dataset',
+    label: 'Preset Dataset', eyebrow: 'Standardized benchmark data',
+    badgeClass: 'bg-emerald-100 text-emerald-700', accentClass: 'text-emerald-600',
+    panelClass: 'border-emerald-200 bg-emerald-50/70', summaryLabel: 'Preset dataset',
   },
   demo: {
-    label: 'Demo Dataset',
-    eyebrow: 'Reusable classroom-style demo',
-    badgeClass: 'bg-blue-100 text-blue-700',
-    accentClass: 'text-blue-600',
-    panelClass: 'border-blue-200 bg-blue-50/70',
-    summaryLabel: 'Demo dataset',
+    label: 'Demo Dataset', eyebrow: 'Reusable classroom-style demo',
+    badgeClass: 'bg-blue-100 text-blue-700', accentClass: 'text-blue-600',
+    panelClass: 'border-blue-200 bg-blue-50/70', summaryLabel: 'Demo dataset',
   },
 };
 
 const PRESET_DATASET_META = {
-  clough_stevenson_style: {
-    order: 5, presetCategory: 'Controlled plagiarism corpus', badgeLabel: 'Gold Standard',
-    eyebrow: 'Controlled original-vs-plagiarized benchmark',
-    summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs',
-  },
-  conplag_classroom_java: {
-    order: 10, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Java',
-    eyebrow: 'Best Java submission corpus', summary: 'Assignment-grouped Java submissions with labels',
-  },
-  kaggle_student_code: {
-    order: 20, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Python',
-    eyebrow: 'Best Python submission smoke test', summary: 'Lightweight student-style Python submission set',
-  },
-  'IR-Plag-Dataset': {
-    order: 30, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'Focused Java plagiarism cases', summary: 'Smaller Java plagiarism dataset for targeted checks',
-  },
-  google_codejam: {
-    order: 35, presetCategory: 'Classroom-style', badgeLabel: 'Code Jam',
-    eyebrow: 'Google Code Jam competition submissions', summary: 'Python solutions with ground truth plagiarism labels for benchmarking',
-  },
-  xiangtan: {
-    order: 40, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'Xiangtan University plagiarism dataset', summary: 'Java code pairs with plagiarism annotations for academic integrity testing',
-  },
-  human_eval: {
-    order: 45, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
-    eyebrow: 'Python code-task benchmark', summary: 'Task-based Python benchmark, not classroom submissions',
-  },
-  mbpp: {
-    order: 50, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
-    eyebrow: 'Short-form Python task coverage', summary: 'Python programming task benchmark, not classroom submissions',
-  },
-
-  codexglue_clone: {
-    order: 70, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'Large labeled clone-pair benchmark', summary: 'Good for clone-pair stress testing in Java',
-  },
-  codexglue_defect: {
-    order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like',
-  },
-  poolc_600k_python: {
-    order: 85, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus',
-    eyebrow: 'Large Python code collection', summary: '600k Python snippets for extensive similarity testing and scale evaluation',
-  },
+  clough_stevenson_style: { order: 5, presetCategory: 'Controlled plagiarism corpus', badgeLabel: 'Gold Standard', eyebrow: 'Controlled original-vs-plagiarized benchmark', summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs' },
+  conplag_classroom_java: { order: 10, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Java', eyebrow: 'Best Java submission corpus', summary: 'Assignment-grouped Java submissions with labels' },
+  kaggle_student_code: { order: 20, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Python', eyebrow: 'Best Python submission smoke test', summary: 'Lightweight student-style Python submission set' },
+  'IR-Plag-Dataset': { order: 30, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Focused Java plagiarism cases', summary: 'Smaller Java plagiarism dataset for targeted checks' },
+  google_codejam: { order: 35, presetCategory: 'Classroom-style', badgeLabel: 'Code Jam', eyebrow: 'Google Code Jam competition submissions', summary: 'Python solutions with ground truth plagiarism labels for benchmarking' },
+  xiangtan: { order: 40, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Xiangtan University plagiarism dataset', summary: 'Java code pairs with plagiarism annotations for academic integrity testing' },
+  human_eval: { order: 45, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks', eyebrow: 'Python code-task benchmark', summary: 'Task-based Python benchmark, not classroom submissions' },
+  mbpp: { order: 50, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks', eyebrow: 'Short-form Python task coverage', summary: 'Python programming task benchmark, not classroom submissions' },
+  codexglue_clone: { order: 70, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Large labeled clone-pair benchmark', summary: 'Good for clone-pair stress testing in Java' },
+  codexglue_defect: { order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like' },
+  poolc_600k_python: { order: 85, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus', eyebrow: 'Large Python code collection', summary: '600k Python snippets for extensive similarity testing and scale evaluation' },
 };
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
@@ -247,15 +162,7 @@ function summarizeDataset(dataset) {
   return `${languageLabel} • ${sizeLabel}`;
 }
 
-function formatBenchmarkQuality(quality) {
-  if (!quality) return null;
-  const level = ['gold_standard', 'controlled_gold_standard', 'gold_standard_external'].includes(quality.certification_level)
-    ? 'Gold-standard controlled benchmark'
-    : quality.certification_level === 'controlled_internal_ready'
-      ? 'Controlled internal benchmark'
-      : 'Labeled benchmark';
-  return `${level} • ${Number(quality.score_percent || 0).toFixed(0)}% quality gates`;
-}
+
 
 function sortDatasets(datasets, demo = false) {
   const items = [...datasets];
@@ -289,6 +196,7 @@ function deltaTone(value, lowerIsBetter = false) {
 }
 
 function formatChartPercent(value) { return `${Number(value || 0).toFixed(1)}%`; }
+
 function formatMetric(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   return Number(value).toFixed(3);
@@ -306,6 +214,13 @@ function formatPanMetricValue(metric) {
   if (metric.format === 'seconds') return `${Number(metric.value).toFixed(3)}s`;
   if (metric.format === 'plain') return Number(metric.value).toFixed(3);
   return `${(Number(metric.value) * 100).toFixed(1)}%`;
+}
+
+function apiErrorMessage(err, fallback) {
+  const detail = err?.response?.data?.detail ?? err?.response?.data?.error;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
+  return err?.message || fallback;
 }
 
 function metricBarWidth(metric) {
@@ -332,8 +247,58 @@ function metricToneClasses(tone) {
   return { border: 'border-red-200', bg: 'bg-red-50', text: 'text-red-700', bar: 'bg-red-500', badge: 'bg-red-100 text-red-700', label: 'Optimization priority' };
 }
 
+function configPathEffect(path) {
+  if (!path) return 'Controls one part of the IntegrityDesk score pipeline.';
+  if (path === 'decision.default_threshold') return 'Final cutoff: higher values reduce positives, usually improving precision but lowering recall.';
+  if (path === 'decision.minimum_engine_agreement') return 'Minimum number of engines that must agree before a high-risk decision is allowed.';
+  if (path === 'precision_guard.minimum_concrete_engines') return 'Requires concrete code evidence from token, AST, execution, or similar engines before trusting broad matches.';
+  if (path === 'precision_guard.semantic_only_cap') return 'Caps pairs supported mostly by semantic similarity, reducing broad intent-only false positives.';
+  if (path === 'precision_guard.penalty_multiplier') return 'Penalty applied when precision guardrails fail; lower values reduce weak-evidence scores more aggressively.';
+  if (path === 'ast_boost.minimum_guaranteed_score') return 'Score floor granted by strong AST matches; lowering it prevents AST-only evidence from forcing high scores.';
+  if (path === 'ast_boost.threshold') return 'AST similarity required before AST boost activates; higher values make structural boost stricter.';
+  if (path === 'deep_verify.minimum_agreeing_engines') return 'Agreement needed in deep verification before it can lift a pair score.';
+  if (path.startsWith('weights.')) {
+    const engine = path.split('.')[1] || 'engine';
+    const effects = {
+      ast: 'AST structure weight: changes influence from syntax-tree similarity and structural clones.',
+      token: 'Token weight: changes influence from exact lexical overlap and renamed-code evidence.',
+      winnowing: 'Fingerprint weight: changes influence from local k-gram matches used for copied fragments.',
+      ngram: 'N-gram weight: changes influence from token-sequence overlap.',
+      graph: 'Control-flow graph weight: changes influence from similar execution structure.',
+      execution: 'Execution behavior weight: changes influence from runtime/output agreement.',
+      embedding: 'Semantic embedding weight: changes influence from broad meaning similarity.',
+      llm: 'LLM-derived signal weight: changes influence from model-based similarity evidence.',
+    };
+    return effects[engine] || `${engine} weight: changes how much this engine contributes to the fused similarity score.`;
+  }
+  if (path.startsWith('thresholds.')) return 'Classification threshold used by one similarity tier or report category.';
+  return 'Affects how raw engine evidence is converted into the final fused score.';
+}
+
+function optimizationControlSpec(path, current, proposed) {
+  const values = [Number(current), Number(proposed)].filter(Number.isFinite);
+  const maxObserved = values.length ? Math.max(...values) : 1;
+  const isCount = path?.endsWith('_engines') || path?.endsWith('_agreement') || path?.endsWith('.minimum_engine_agreement');
+  if (isCount) return { min: 1, max: 10, step: 1 };
+  if (path?.startsWith('weights.') || path?.startsWith('thresholds.') || path?.includes('threshold') || path?.includes('floor') || path?.includes('cap') || path?.includes('multiplier')) {
+    return { min: 0, max: Math.max(1, maxObserved), step: 0.01 };
+  }
+  return { min: 0, max: Math.max(10, maxObserved), step: 0.1 };
+}
+
+function normalizeOptimizationValue(value, spec) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return spec.min;
+  const clamped = Math.max(spec.min, Math.min(spec.max, numeric));
+  if (spec.step === 1) return Math.round(clamped);
+  return Math.round(clamped * 10000) / 10000;
+}
+
 function buildPanFeedback(row) {
   if (!row) return [];
+  if (row.tuningRecommendations?.available && row.tuningRecommendations.actions?.length) {
+    return row.tuningRecommendations.actions;
+  }
   const suggestions = [];
   if (row.precision < 0.85) suggestions.push({ title: 'Precision is the main problem', detail: 'False positives are too high. Raise the final decision threshold, increase weight on exact/token/AST agreement, and reduce broad semantic-only matches until negatives are cleaner.' });
   if (row.recall < 0.85) suggestions.push({ title: 'Recall is missing true plagiarism', detail: 'Lower the candidate threshold, enable semantic or embedding retrieval for obfuscated clones, and make sure renamed/type-3/type-4 pairs enter the candidate pool before reranking.' });
@@ -367,7 +332,7 @@ function buildPanMetricDiagnostics(row) {
   return metrics.map(metric => ({ ...metric, tone: metricTone(Number(metric.value || 0), metric.mode) }));
 }
 
-// ── ToolBadge ──────────────────────────────────────────────────────────────
+// ── Shared UI atoms ────────────────────────────────────────────────────────
 function ToolBadge({ toolId, compact = false }) {
   const tool = TOOLS.find(t => t.id === toolId);
   if (!tool) return (
@@ -418,7 +383,7 @@ function LeaderboardTooltip({ active, payload }) {
       </div>
       {tool?.desc && <div className="mt-2 text-xs leading-5 text-slate-500">{tool.desc}</div>}
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        {[['Average', row.average], ['Peak', row.peak], ['Lowest', row.minimum], ['Spread', row.spread]].map(([lbl, val]) => (
+        {[['F1 Score', row.f1Score], ['Precision', row.precision], ['Recall', row.recall], ['FPR', row.fpr]].map(([lbl, val]) => (
           <div key={lbl} className="rounded-xl bg-slate-50 px-3 py-2">
             <div className="text-slate-400">{lbl}</div>
             <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(val)}</div>
@@ -458,14 +423,14 @@ function StepIndicator({ steps, currentStep, completedSteps }) {
   );
 }
 
-// ── RunConfigBar — sticky summary shown during step 2+ ─────────────────────
+// ── RunConfigBar ───────────────────────────────────────────────────────────
 function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, modeName, modeColor }) {
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const toolNames = selectedTools.slice(0, 3).map(id => TOOLS.find(t => t.id === id)?.name || id);
   const extraTools = selectedTools.length - 3;
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm text-sm">
+    <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${modeColor}`}>{modeName}</span>
       <div className="flex items-center gap-1.5 text-slate-600">
         <Settings2 size={13} className="text-slate-400" />
@@ -476,6 +441,53 @@ function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, bench
         <Database size={13} className="text-slate-400" />
         <span className="font-medium">{uploadMode === 'builtin' ? (activeDataset?.name || 'No dataset') : `${files.length} file${files.length !== 1 ? 's' : ''}`}</span>
       </div>
+    </div>
+  );
+}
+
+// ── ToolGrid — shared tool card grid (eliminates duplication) ──────────────
+function ToolGrid({ tools, selectedTools, onToggle }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
+      {tools.map(tool => {
+        const isSelected = selectedTools.includes(tool.id);
+        const canRun = tool.available !== false && tool.runnable !== false;
+        return (
+          <button
+            key={tool.id}
+            onClick={() => onToggle(tool)}
+            disabled={!canRun}
+            className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group
+              ${!canRun
+                ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                : isSelected
+                  ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]`
+                  : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'
+              }`}
+          >
+            {isSelected && (
+              <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150">
+                <CheckCircle2 size={16} className={tool.textColor} />
+              </div>
+            )}
+            <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
+              <Zap size={16} className="text-white" />
+            </div>
+            <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
+            <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {tool.status || (canRun ? 'Ready to run' : 'Setup needed')}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {(tool.engines || []).slice(0, 3).map(engine => (
+                <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                  {engine}
+                </span>
+              ))}
+            </div>
+            <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -499,6 +511,55 @@ function ToolSkeleton() {
   );
 }
 
+// ── Step 1: Tool Selection (unified — no duplicate render path) ────────────
+function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error, benchmarkMode }) {
+  const runnableTools = tools.filter(t => t.available !== false && t.runnable !== false);
+
+  const toggleTool = useCallback((tool) => {
+    if (tool.available === false || tool.runnable === false) return;
+    setSelectedTools(prev =>
+      prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]
+    );
+  }, [setSelectedTools]);
+
+  return (
+    <div>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+          <Settings2 size={18} className="text-violet-500" />Select Detection Tools
+        </h2>
+        <div className="flex items-center gap-3">
+          {benchmarkMode === 'comparison' && (
+            <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
+              {selectedTools.length} / {runnableTools.length} selected
+            </span>
+          )}
+          <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
+          <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
+          <AlertCircle size={14} className="shrink-0" />{error}
+        </div>
+      )}
+
+      {loading ? <ToolSkeleton /> : <ToolGrid tools={tools} selectedTools={selectedTools} onToggle={toggleTool} />}
+
+      <div className="flex justify-end mt-6">
+        <button
+          onClick={onNext}
+          disabled={selectedTools.length === 0}
+          className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none"
+        >
+          Continue to Dataset <ChevronRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── DatasetCard ────────────────────────────────────────────────────────────
 function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const categoryMeta = getDatasetCategoryMeta(dataset);
@@ -506,7 +567,6 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const badgeLabel = presetMeta?.badgeLabel || categoryMeta?.label;
   const eyebrow = presetMeta?.eyebrow || categoryMeta?.eyebrow;
   const secondarySummary = presetMeta?.summary;
-  const qualityLabel = formatBenchmarkQuality(dataset.benchmark_quality);
   return (
     <button
       disabled={disabled}
@@ -522,232 +582,12 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
       <div className={`mt-2 text-base font-semibold ${isActive ? 'text-white' : 'text-slate-900'}`}>{dataset.name}</div>
       <div className={`mt-2 text-sm leading-6 ${isActive ? 'text-slate-200' : 'text-slate-500'}`}>{dataset.desc}</div>
       {secondarySummary && <div className={`mt-2 text-xs leading-5 ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>{secondarySummary}</div>}
-      {qualityLabel && (
-        <div className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${isActive ? 'bg-white/10 text-slate-100' : 'bg-emerald-50 text-emerald-700'}`}>
-          <ClipboardList size={14} className="mt-0.5 shrink-0" /><span>{qualityLabel}</span>
-        </div>
-      )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{summarizeDataset(dataset)}</span>
         {dataset.created_by && <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{dataset.created_by}</span>}
         {dataset.has_ground_truth && <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isActive ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700'}`}>Labeled</span>}
       </div>
     </button>
-  );
-}
-
-// ── Step 1: Tool Selection ─────────────────────────────────────────────────
-function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error, benchmarkMode }) {
-  const runnableTools = tools.filter(t => t.available !== false && t.runnable !== false);
-  const integrityDeskTool = tools.find(t => t.id === 'integritydesk');
-  const isImproveMode = benchmarkMode === 'development';
-  const integrityDeskReady = Boolean(integrityDeskTool && integrityDeskTool.available !== false && integrityDeskTool.runnable !== false);
-
-  useEffect(() => {
-    if (!isImproveMode) return;
-    if (!integrityDeskReady) return;
-    if (selectedTools.length === 1 && selectedTools[0] === 'integritydesk') return;
-    setSelectedTools(['integritydesk']);
-  }, [integrityDeskReady, isImproveMode, selectedTools, setSelectedTools]);
-
-  const toggleTool = (tool) => {
-    if (tool.available === false || tool.runnable === false) return;
-    setSelectedTools(prev => prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]);
-  };
-
-  if (benchmarkMode === 'comparison') {
-    return (
-      <div>
-        <div className="mb-6">
-          <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-            <Settings2 size={18} className="text-violet-500" />Select Detection Tools
-          </h2>
-          <div className="flex items-center gap-3 mt-3">
-            <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
-              {selectedTools.length} / {runnableTools.length} selected
-            </span>
-            <div className="flex gap-1">
-              <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
-              <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          {error && (
-            <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
-              <AlertCircle size={14} className="shrink-0" />{error}
-            </div>
-          )}
-
-          {loading ? <ToolSkeleton /> : (
-            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {tools.map(tool => {
-                const isSelected = selectedTools.includes(tool.id);
-                const canRun = tool.available !== false && tool.runnable !== false;
-                return (
-                  <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
-                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed' : isSelected ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]` : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'}`}>
-                    {isSelected && <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150"><CheckCircle2 size={16} className={tool.textColor} /></div>}
-                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
-                      <Zap size={16} className="text-white" />
-                    </div>
-                    <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                    <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>{tool.status || (canRun ? 'Ready to run' : 'Setup needed')}</div>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {(tool.engines || []).slice(0, 3).map(engine => (
-                        <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{engine}</span>
-                      ))}
-                    </div>
-                    <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="flex justify-end mt-6">
-            <button onClick={onNext} disabled={selectedTools.length === 0 || (isImproveMode && !integrityDeskReady)}
-              className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-              Continue to Dataset <ChevronRight size={18} />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-          <Settings2 size={18} className="text-violet-500" />{isImproveMode ? 'IntegrityDesk Benchmark Setup' : 'Select Detection Tools'}
-        </h2>
-        <div className="flex items-center gap-3">
-          <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
-            {selectedTools.length} / {runnableTools.length} selected
-          </span>
-          {!isImproveMode && (
-            <div className="flex gap-1">
-              <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
-              <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-6">
-        {error && (
-          <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
-            <AlertCircle size={14} className="shrink-0" />{error}
-          </div>
-        )}
-
-        {loading ? <ToolSkeleton /> : isImproveMode ? (
-          <div className="overflow-hidden rounded-[28px] border border-violet-200 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-rose-50 shadow-[0_24px_80px_-48px_rgba(124,58,237,0.45)]">
-            <div className="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_320px]">
-              <div className="p-6 lg:p-7">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-700 shadow-sm">
-                      <Zap size={12} />
-                      IntegrityDesk Optimization Path
-                    </div>
-                    <h3 className="mt-4 text-2xl font-bold tracking-tight text-slate-950">IntegrityDesk is the only tool used in this workflow</h3>
-                    <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-700">
-                      Improve IntegrityDesk is a focused benchmark loop for your own detector. Run labeled tests,
-                      inspect per-run F1 / Precision / Recall / FPR, and use the threshold and error analysis to decide what to change next.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-white/85 px-4 py-3 text-right shadow-sm">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Workflow scope</div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">Locked to IntegrityDesk</div>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-3 md:grid-cols-3">
-                  {[
-                    'Get per-run F1, Precision, Recall, and False Positive Rate',
-                    'Tune the operating threshold on labeled benchmark data',
-                    'Review the misses and false alarms blocking improvement',
-                  ].map(item => (
-                    <div key={item} className="rounded-2xl border border-white/70 bg-white/80 px-4 py-4 text-sm font-medium leading-6 text-slate-700 shadow-sm">
-                      {item}
-                    </div>
-                  ))}
-                </div>
-
-                {!integrityDeskReady && (
-                  <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
-                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                    IntegrityDesk is not currently available in this environment, so this workflow cannot run yet.
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-violet-100/80 bg-slate-950 px-6 py-6 text-slate-100 lg:border-l lg:border-t-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Selected engine</div>
-                <div className="mt-4 rounded-[24px] border border-white/10 bg-white/5 p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-900/30">
-                      <Zap size={18} className="text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold text-white">IntegrityDesk</div>
-                      <div className="mt-1 text-sm leading-6 text-slate-300">
-                        {integrityDeskTool?.desc || 'Multi-engine internal detector'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {(integrityDeskTool?.engines || ['AST', 'Embedding', 'Execution']).slice(0, 5).map(engine => (
-                      <span key={engine} className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-200">
-                        {engine}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="mt-4 rounded-2xl bg-white/5 px-4 py-4 text-sm leading-6 text-slate-300">
-                  External tools like MOSS, JPlag, and Dolos are still useful in <span className="font-semibold text-white">Compare Against Other Tools</span>,
-                  but they are not part of the IntegrityDesk improvement loop.
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-            {tools.map(tool => {
-              const isSelected = selectedTools.includes(tool.id);
-              const canRun = tool.available !== false && tool.runnable !== false;
-              return (
-                <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed' : isSelected ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]` : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'}`}>
-                  {isSelected && <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150"><CheckCircle2 size={16} className={tool.textColor} /></div>}
-                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
-                    <Zap size={16} className="text-white" />
-                  </div>
-                  <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                  <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>{tool.status || (canRun ? 'Ready to run' : 'Setup needed')}</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {(tool.engines || []).slice(0, 3).map(engine => (
-                      <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{engine}</span>
-                    ))}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="px-6 pb-6 flex justify-end">
-        <button onClick={onNext} disabled={selectedTools.length === 0 || (isImproveMode && !integrityDeskReady)}
-          className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-          Continue to Dataset <ChevronRight size={18} />
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -777,7 +617,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     }
   };
 
-  const closeModal = () => { setShowCreateModal(false); setCreateError(''); setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' }); };
+  const closeModal = () => {
+    setShowCreateModal(false);
+    setCreateError('');
+    setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
+  };
+
   const handleDrop = useCallback(e => { e.preventDefault(); setFiles(Array.from(e.dataTransfer.files)); }, [setFiles]);
 
   const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
@@ -803,170 +648,153 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   return (
     <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100">
+      <div>
+        <div className="mb-4">
           <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Database size={18} className="text-violet-500" />Choose What To Benchmark</h2>
           <p className="text-sm text-slate-500 mt-0.5">Select a reusable dataset for tool comparison, or upload your own files.</p>
         </div>
 
-        <div className="flex border-b border-slate-100">
+        <div className="flex border-b border-slate-200 mb-5">
           {[{ id: 'builtin', label: 'Dataset Library', icon: FlaskConical }, { id: 'upload', label: 'Upload Files or ZIP', icon: FileUp }].map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => { setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               <Icon size={15} />{label}
             </button>
           ))}
         </div>
 
-        <div className="p-6">
-          {uploadMode === 'builtin' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                  <div className="flex items-center gap-1">
-                    {[{ id: 'all', label: 'All', count: allDatasets.length }, { id: 'preset', label: 'Preset', count: presetDatasets.length }, { id: 'demo', label: 'Demo', count: demoDatasets.length }].map(filter => (
-                      <button key={filter.id} onClick={() => setLibraryFilter(filter.id)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
-                        {filter.label} ({filter.count})
-                      </button>
-                    ))}
-                  </div>
-                  {availableLanguages.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <button onClick={() => setLanguageFilter('all')} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${languageFilter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>All Languages</button>
-                      {availableLanguages.map(lang => (
-                        <button key={lang} onClick={() => setLanguageFilter(lang)} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition capitalize ${languageFilter === lang ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>{lang}</button>
-                      ))}
-                    </div>
-                  )}
+        {uploadMode === 'builtin' && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <div className="flex items-center gap-1">
+                  {[{ id: 'all', label: 'All', count: allDatasets.length }, { id: 'preset', label: 'Preset', count: presetDatasets.length }, { id: 'demo', label: 'Demo', count: demoDatasets.length }].map(filter => (
+                    <button key={filter.id} onClick={() => setLibraryFilter(filter.id)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                      {filter.label} ({filter.count})
+                    </button>
+                  ))}
                 </div>
-                {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
-                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-                    {visibleLibraryDatasets.map(dataset => (
-                      <DatasetCard key={dataset.id} dataset={dataset} isActive={selectedDataset === dataset.id} onSelect={setSelectedDataset} />
+                {availableLanguages.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button onClick={() => setLanguageFilter('all')} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${languageFilter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>All Languages</button>
+                    {availableLanguages.map(lang => (
+                      <button key={lang} onClick={() => setLanguageFilter(lang)} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition capitalize ${languageFilter === lang ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>{lang}</button>
                     ))}
-                    {canManageDemoDatasets && libraryFilter !== 'preset' && (
-                      <button onClick={() => setShowCreateModal(true)}
-                        className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3"><Plus size={24} className="text-blue-600" /></div>
-                        <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
-                        <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
-                    <div className="text-sm font-semibold text-slate-900">{libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}</div>
-                    <div className="mt-2 text-sm leading-6 text-slate-500">{libraryFilter === 'demo' ? 'Preset datasets are ready to use now.' : 'Try another filter or switch to Upload Your Own.'}</div>
                   </div>
                 )}
               </div>
-
-              {activeDataset && activeDatasetMeta && (
-                <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Selected dataset</p>
-                      <div className="mt-2 flex items-center gap-3">
-                        <span className="text-2xl">{activeDataset.icon}</span>
-                        <div>
-                          <div className="text-lg font-semibold text-slate-900">{activeDataset.name}</div>
-                          <div className="text-sm text-slate-600">{activePresetMeta?.presetCategory || activeDatasetMeta.label}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeDatasetMeta.badgeClass}`}>{activePresetMeta?.badgeLabel || activeDatasetMeta.summaryLabel}</span>
-                  </div>
-                  <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
-                  {activePresetMeta?.summary && <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>}
-
-                  {activeDataset.benchmark_quality && (
-                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Benchmark Quality Certificate</div>
-                          <div className="mt-2 text-sm leading-6 text-slate-600">{activeDataset.benchmark_quality.pair_count} labeled pairs, {activeDataset.benchmark_quality.positive_pairs} positives, {activeDataset.benchmark_quality.negative_pairs} negatives, {activeDataset.benchmark_quality.hard_negative_pairs} hard negatives.</div>
-                        </div>
-                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{Number(activeDataset.benchmark_quality.score_percent || 0).toFixed(0)}% gates passed</span>
-                      </div>
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
-                        {(activeDataset.benchmark_quality.gates || []).map(gate => (
-                          <div key={gate.id} className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
-                            <CheckCircle2 size={15} className={gate.passed ? 'mt-0.5 shrink-0 text-emerald-600' : 'mt-0.5 shrink-0 text-amber-600'} />
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold text-slate-800">{gate.label}</div>
-                              <div className="text-xs leading-5 text-slate-500">{gate.value} · {gate.target}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {activeDataset.cases ? (
-                    <div className="mt-5 grid md:grid-cols-3 gap-2">
-                      {activeDataset.cases.map(tc => (
-                        <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
-                            <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {[
-                        { label: 'Language', value: activeDataset.language || 'Mixed' },
-                        { label: activeDataset.is_demo ? 'Files' : 'Size', value: activeDataset.size || 'Unknown' },
-                        { label: activeDataset.is_demo ? 'Created' : 'Use', value: activeDataset.is_demo ? formatDatasetDate(activeDataset.created_at) : (activePresetMeta?.presetCategory || activeDataset.similarity_type || 'Standard') },
-                        { label: activeDataset.is_demo ? 'Created By' : 'Source', value: activeDataset.created_by || 'System' },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{value}</div>
-                          <div className="text-xs text-slate-500">{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {uploadMode === 'upload' && (
-            <div>
-              <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => document.getElementById('file-input').click()}
-                className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all group">
-                <input id="file-input" type="file" className="hidden" multiple
-                  accept=".zip,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
-                  onChange={e => setFiles(Array.from(e.target.files))} />
-                <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
-                <p className="font-semibold text-slate-600 mb-1">Drop source files or a ZIP archive here</p>
-                <p className="text-sm text-slate-400">Upload 2 or more source files, or a single ZIP for one-off comparison</p>
-                <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
-                  <FileUp size={14} />Browse files
-                </div>
-              </div>
-              {files.length > 0 && (
-                <div className="mt-4 bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-                  {files.map((f, i) => (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5 group/file hover:bg-white transition-colors">
-                      <div className="w-6 h-6 rounded-md bg-emerald-100 flex items-center justify-center shrink-0"><FileUp size={12} className="text-emerald-600" /></div>
-                      <span className="text-sm font-medium text-slate-700 truncate flex-1">{f.name}</span>
-                      <span className="text-xs text-slate-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
-                      <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="opacity-0 group-hover/file:opacity-100 text-slate-300 hover:text-red-500 transition-all"><X size={14} /></button>
-                    </div>
+              {visibleLibraryDatasets.length > 0 || (libraryFilter !== 'preset' && canManageDemoDatasets) ? (
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleLibraryDatasets.map(dataset => (
+                    <DatasetCard key={dataset.id} dataset={dataset} isActive={selectedDataset === dataset.id} onSelect={setSelectedDataset} />
                   ))}
+                  {canManageDemoDatasets && libraryFilter !== 'preset' && (
+                    <button onClick={() => setShowCreateModal(true)}
+                      className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]">
+                      <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3"><Plus size={24} className="text-blue-600" /></div>
+                      <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
+                      <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                  <div className="text-sm font-semibold text-slate-900">{libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">{libraryFilter === 'demo' ? 'Preset datasets are ready to use now.' : 'Try another filter or switch to Upload Your Own.'}</div>
                 </div>
               )}
-              {files.length === 1 && !hasZipUpload && (
-                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive</p>
-              )}
             </div>
-          )}
-        </div>
+
+            {activeDataset && activeDatasetMeta && (
+              <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Selected dataset</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className="text-2xl">{activeDataset.icon}</span>
+                      <div>
+                        <div className="text-lg font-semibold text-slate-900">{activeDataset.name}</div>
+                        <div className="text-sm text-slate-600">{activePresetMeta?.presetCategory || activeDatasetMeta.label}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeDatasetMeta.badgeClass}`}>{activePresetMeta?.badgeLabel || activeDatasetMeta.summaryLabel}</span>
+                </div>
+                <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
+                {activePresetMeta?.summary && <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>}
+
+
+
+                {activeDataset.cases ? (
+                  <div className="mt-5 grid md:grid-cols-3 gap-2">
+                    {activeDataset.cases.map(tc => (
+                      <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
+                          <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Language', value: activeDataset.language || 'Mixed' },
+                      { label: activeDataset.is_demo ? 'Files' : 'Size', value: activeDataset.size || 'Unknown' },
+                      { label: activeDataset.is_demo ? 'Created' : 'Use', value: activeDataset.is_demo ? formatDatasetDate(activeDataset.created_at) : (activePresetMeta?.presetCategory || activeDataset.similarity_type || 'Standard') },
+                      { label: activeDataset.is_demo ? 'Created By' : 'Source', value: activeDataset.created_by || 'System' },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                        <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{value}</div>
+                        <div className="text-xs text-slate-500">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {uploadMode === 'upload' && (
+          <div>
+            <div
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+              onClick={() => document.getElementById('file-input').click()}
+              className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all group"
+            >
+              <input
+                id="file-input" type="file" className="hidden" multiple
+                accept=".zip,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
+                onChange={e => setFiles(Array.from(e.target.files))}
+              />
+              <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
+              <p className="font-semibold text-slate-600 mb-1">Drop source files or a ZIP archive here</p>
+              <p className="text-sm text-slate-400">Upload 2 or more source files, or a single ZIP for one-off comparison</p>
+              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
+                <FileUp size={14} />Browse files
+              </div>
+            </div>
+            {files.length > 0 && (
+              <div className="mt-4 bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {files.map((f, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5 group/file hover:bg-white transition-colors">
+                    <div className="w-6 h-6 rounded-md bg-emerald-100 flex items-center justify-center shrink-0"><FileUp size={12} className="text-emerald-600" /></div>
+                    <span className="text-sm font-medium text-slate-700 truncate flex-1">{f.name}</span>
+                    <span className="text-xs text-slate-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
+                    <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="opacity-0 group-hover/file:opacity-100 text-slate-300 hover:text-red-500 transition-all"><X size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {files.length === 1 && !hasZipUpload && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between">
@@ -1061,6 +889,9 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [progress, setProgress] = useState('');
   const [progressPct, setProgressPct] = useState(0);
   const [error, setError] = useState('');
+
+  // Use a ref to hold the run function so the autoStart effect always calls the latest version
+  const runRef = useRef(null);
   const requestControllerRef = useRef(null);
   const autoStartedRef = useRef(false);
 
@@ -1072,7 +903,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     ? 'pan_optimization'
     : 'tool_comparison';
 
-  const run = async () => {
+  const run = useCallback(async () => {
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
@@ -1097,7 +928,9 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             try {
               const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
               allResults.push({ testCase: tc, ...res.data });
-            } catch (err) { if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break; }
+            } catch (err) {
+              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
+            }
           }
           if (allResults.length > 0) {
             setProgressPct(100); setProgress('Complete!');
@@ -1137,12 +970,15 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
       setRunning(false);
     }
-  };
+  }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
+
+  // Keep ref current so autoStart fires the latest version
+  runRef.current = run;
 
   useEffect(() => {
     if (!autoStart || autoStartedRef.current) return;
     autoStartedRef.current = true;
-    const timer = window.setTimeout(() => run(), 0);
+    const timer = window.setTimeout(() => runRef.current?.(), 0);
     return () => window.clearTimeout(timer);
   }, [autoStart]);
 
@@ -1150,11 +986,16 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     return () => requestControllerRef.current?.abort();
   }, []);
 
-  const stop = () => { requestControllerRef.current?.abort(); setRunning(false); setProgress('Cancelling run…'); setProgressPct(0); };
+  const stop = () => {
+    requestControllerRef.current?.abort();
+    setRunning(false);
+    setProgress('Cancelling run…');
+    setProgressPct(0);
+  };
 
   return (
     <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div>
         <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-5"><ClipboardList size={18} className="text-violet-500" />Benchmark Configuration</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
@@ -1175,7 +1016,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div>
         {error && (
           <div className="mb-4 flex items-start gap-3 p-4 bg-red-50 border border-red-100 rounded-xl">
             <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
@@ -1213,12 +1054,111 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   );
 }
 
+// ── PanLeaderboard — multi-tool ranked comparison table ────────────────────
+function PanLeaderboard({ rows }) {
+  if (!rows || rows.length < 2) return null;
+
+  const leaderboardChartData = rows.map(row => ({
+    id: row.toolId,
+    name: row.name,
+    color: TOOLS.find(t => t.id === row.toolId)?.color ?? '#94a3b8',
+    plagdet: Number((row.plagdet * 100).toFixed(1)),
+    f1Score: Number((row.f1Score * 100).toFixed(1)),
+    precision: Number((row.precision * 100).toFixed(1)),
+    recall: Number((row.recall * 100).toFixed(1)),
+    fpr: Number((row.falsePositiveRate * 100).toFixed(1)),
+  }));
+
+  const medals = ['🥇', '🥈', '🥉'];
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-2">
+        <Trophy size={18} className="text-amber-500" />
+        <div>
+          <h2 className="font-semibold text-slate-900">Tool Leaderboard</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Ranked by PlagDet score on the same labeled benchmark.</p>
+        </div>
+      </div>
+
+      {/* Horizontal bar chart */}
+      <div className="px-6 pt-5 h-56">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={leaderboardChartData} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#1e293b', fontWeight: 600 }} width={100} />
+            <Tooltip content={<LeaderboardTooltip />} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
+            <Bar dataKey="plagdet" radius={[0, 6, 6, 0]} name="PlagDet">
+              {leaderboardChartData.map(entry => (
+                <Cell key={entry.id} fill={entry.color} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Ranked table */}
+      <div className="px-6 pb-6 mt-4">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                {['Rank', 'Tool', 'PlagDet', 'F1', 'Precision', 'Recall', 'FPR', 'Runtime'].map(h => (
+                  <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {rows.map((row, i) => {
+                const toolInfo = TOOLS.find(t => t.id === row.toolId);
+                const isWinner = i === 0;
+                return (
+                  <tr key={row.toolId} className={`transition-colors ${isWinner ? 'bg-amber-50/50' : 'hover:bg-slate-50/60'}`}>
+                    <td className="px-3 py-3 text-lg">{medals[i] || `#${i + 1}`}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: toolInfo?.color ?? '#94a3b8' }} />
+                        <span className={`font-semibold ${isWinner ? 'text-amber-800' : 'text-slate-900'}`}>{row.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`font-bold ${row.plagdet >= 0.9 ? 'text-emerald-600' : row.plagdet >= 0.75 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {(row.plagdet * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.f1Score * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.precision * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.recall * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-3">
+                      <span className={row.falsePositiveRate > 0.1 ? 'text-red-600 font-medium' : 'text-slate-700 font-medium'}>
+                        {(row.falsePositiveRate * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-500 text-xs">
+                      {row.avgRuntimeSeconds ? `${row.avgRuntimeSeconds.toFixed(2)}s` : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Step 4: Report ─────────────────────────────────────────────────────────
-function ReportStep({ results, onRestart, benchmarkMode }) {
+function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const [expandedPairs, setExpandedPairs] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState('');
+  const [applyingOptimization, setApplyingOptimization] = useState(false);
+  const [optimizationMessage, setOptimizationMessage] = useState('');
+  const [optimizationError, setOptimizationError] = useState('');
+  const [editableOptimizationChanges, setEditableOptimizationChanges] = useState([]);
 
   const { tool_scores, pair_results } = results;
   const itemsPerPage = 50;
@@ -1260,6 +1200,7 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
         fixedThreshold: metrics.fixed_threshold, fixedThresholdMetrics: metrics.fixed_threshold_metrics || {},
         confidenceIntervals: metrics.confidence_intervals || {}, splitProtocol: metrics.split_protocol || {},
         metricIntegrity: metrics.metric_integrity || {},
+        tuningRecommendations: metrics.tuning_recommendations || null,
       };
     }).sort((a, b) => b.plagdet - a.plagdet);
 
@@ -1272,8 +1213,12 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
   const isRegressionReport = benchmarkMode === 'release' || benchmarkMode === 'regression' || results.protocol === 'release_check' || results.benchmark_type === 'regression_test' || results.benchmark_goal === 'locked_regression_test';
   const isFocusedMetricReport = isCalibrationReport || isRegressionReport;
   const isComparisonReport = !isFocusedMetricReport;
+  const hasMultiToolPanResults = panEvaluationRows.length >= 2;
 
-  const toolFailureRows = Object.entries(results.tool_scores || {}).filter(([, meta]) => meta?.error).map(([toolId, meta]) => ({ toolId, name: TOOLS.find(t => t.id === toolId)?.name || toolId, error: String(meta.error || 'Tool did not return scores.') }));
+  // All-modes tool failure warnings
+  const toolFailureRows = Object.entries(results.tool_scores || {})
+    .filter(([, meta]) => meta?.error)
+    .map(([toolId, meta]) => ({ toolId, name: TOOLS.find(t => t.id === toolId)?.name || toolId, error: String(meta.error || 'Tool did not return scores.') }));
 
   const comparison = results.comparison || {};
   const comparisonDeltas = comparison.metrics || {};
@@ -1312,12 +1257,89 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     finally { setPdfDownloading(false); }
   };
 
+  const applyOptimization = async () => {
+    if (!tuningConfigChanges.length) return;
+    setApplyingOptimization(true);
+    setOptimizationMessage('');
+    setOptimizationError('');
+
+    // Check if user has admin privileges
+    const hasAdminAccess = user?.role === 'admin';
+    const jobId = results.job_id || results.id || results.report_id;
+
+    if (!hasAdminAccess) {
+      setOptimizationError('Admin access required. Please log in as an administrator to apply optimizations.');
+      return;
+    }
+
+    if (!jobId) {
+      setOptimizationError('Job ID not found in results. Cannot apply optimization without a valid job reference.');
+      return;
+    }
+
+    try {
+      console.log('Applying optimization with changes:', tuningConfigChanges);
+      console.log('Using job ID:', jobId);
+
+      const res = await axios.post(`${API}/api/benchmark/apply-optimization`, {
+        config_changes: tuningConfigChanges,
+        source_job_id: jobId,
+      }, { withCredentials: true });
+
+      setOptimizationMessage(res.data?.message || 'Proposed optimization applied.');
+    } catch (err) {
+      console.error('Optimization application failed:', err.response?.data || err.message);
+
+      let errorMsg = 'Could not apply proposed optimization.';
+
+      if (err.response?.status === 401) {
+        errorMsg = 'Admin access required. Please log in as an administrator to apply optimizations.';
+      } else if (err.response?.status === 403) {
+        errorMsg = 'Insufficient permissions. Admin privileges are required to modify system configuration.';
+      } else if (err.response?.data?.detail) {
+        errorMsg = `Server error: ${err.response.data.detail}`;
+      } else if (err.response?.data?.error) {
+        errorMsg = `Error: ${err.response.data.error}`;
+      } else if (err.message) {
+        errorMsg = `Network error: ${err.message}`;
+      }
+
+      setOptimizationError(errorMsg);
+    } finally {
+      setApplyingOptimization(false);
+    }
+  };
+
   const metricIntegrity = productPanResult?.metricIntegrity || {};
+  const tuningRecommendations = productPanResult?.tuningRecommendations || null;
+  const automaticConfigChanges = tuningRecommendations?.config_changes || [];
+  const manualConfigOptions = tuningRecommendations?.manual_config_options || [];
+  const showingManualConfigOptions = automaticConfigChanges.length === 0 && manualConfigOptions.length > 0;
+  const tuningConfigSource = automaticConfigChanges.length ? automaticConfigChanges : manualConfigOptions;
+  const tuningConfigSourceKey = JSON.stringify(tuningConfigSource);
+
+  useEffect(() => {
+    setEditableOptimizationChanges(
+      tuningConfigSource.map(change => ({
+        ...change,
+        proposed: normalizeOptimizationValue(
+          change.proposed,
+          optimizationControlSpec(change.path, change.current, change.proposed)
+        ),
+      }))
+    );
+    setOptimizationMessage('');
+    setOptimizationError('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tuningConfigSourceKey]);
+
+  const tuningConfigChanges = editableOptimizationChanges;
   const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
   const confidenceIntervals = productPanResult?.confidenceIntervals || {};
   const splitProtocol = productPanResult?.splitProtocol || {};
   const metricWarnings = metricIntegrity.warnings || [];
   const decisionThreshold = Number(productPanResult?.threshold ?? productPanResult?.fixedThreshold ?? 0.5);
+
   const labeledPairAudit = (pair_results || [])
     .map((pair) => {
       if (pair.ground_truth_label === undefined || pair.ground_truth_label === null) return null;
@@ -1328,6 +1350,7 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
       return { ...pair, score: Number(toolResult.score), actual, predicted };
     })
     .filter(Boolean);
+
   const localConfusion = labeledPairAudit.reduce((acc, pair) => {
     if (pair.actual && pair.predicted) acc.tp += 1;
     else if (!pair.actual && pair.predicted) acc.fp += 1;
@@ -1335,18 +1358,19 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     else acc.fn += 1;
     return acc;
   }, { tp: 0, fp: 0, tn: 0, fn: 0 });
+
   const heldoutConfusion = metricIntegrity.heldout_confusion_matrix || {};
   const confusion = labeledPairAudit.length ? localConfusion : {
-    tp: Number(heldoutConfusion.tp || 0),
-    fp: Number(heldoutConfusion.fp || 0),
-    tn: Number(heldoutConfusion.tn || 0),
-    fn: Number(heldoutConfusion.fn || 0),
+    tp: Number(heldoutConfusion.tp || 0), fp: Number(heldoutConfusion.fp || 0),
+    tn: Number(heldoutConfusion.tn || 0), fn: Number(heldoutConfusion.fn || 0),
   };
+
   const falsePositiveExamples = labeledPairAudit.filter(pair => !pair.actual && pair.predicted).sort((a, b) => b.score - a.score).slice(0, 3);
   const falseNegativeExamples = labeledPairAudit.filter(pair => pair.actual && !pair.predicted).sort((a, b) => a.score - b.score).slice(0, 3);
   const heldoutSize = Number(splitProtocol.holdout_size || 0);
   const hasHoldout = splitProtocol.protocol === 'deterministic_stratified_calibration_holdout';
   const hasConfidenceInterval = Boolean(confidenceIntervals.available && confidenceIntervals.f1);
+
   const trustLevel = hasHoldout && hasConfidenceInterval && heldoutSize >= 20
     ? { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Held-out labels and confidence intervals are available.' }
     : hasHoldout
@@ -1369,40 +1393,29 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
             className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 disabled:bg-white/50 text-slate-900 font-semibold rounded-xl transition-all text-sm">
             <Download size={15} />{pdfDownloading ? 'Preparing…' : 'PDF'}
           </button>
-          <button onClick={downloadCSV} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />CSV</button>
-          <button onClick={downloadJSON} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />JSON</button>
+          {isComparisonReport && (
+            <>
+              <button onClick={downloadCSV} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />CSV</button>
+              <button onClick={downloadJSON} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />JSON</button>
+            </>
+          )}
+          <a href="/error-analysis" className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 border border-violet-500 text-white font-semibold rounded-xl transition-all text-sm"><Eye size={15} />Error Analysis</a>
+          <button onClick={onRerun} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Play size={15} />Re-run Benchmark</button>
           <button onClick={onRestart} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm">New Benchmark</button>
         </div>
       </div>
 
       {pdfError && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2"><AlertCircle size={14} className="shrink-0" />{pdfError}</div>}
 
-      {/* Comparison delta banner */}
-      {false && comparison.has_previous && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Compared With Previous Run</div>
-              <div className="mt-1 text-sm text-slate-600">Previous job {comparison.previous_job_id} · {comparison.previous_run_at ? new Date(comparison.previous_run_at).toLocaleString() : 'earlier run'}</div>
-            </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Same workflow/dataset</span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[['Precision', 'precision', false], ['F1 Score', 'f1_score', false], ['PlagDet', 'plagdet', false], ['False Positive Rate', 'false_positive_rate', true]].map(([label, key, lowerIsBetter]) => (
-              <div key={key} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-                <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-sm font-bold ${deltaTone(comparisonDeltas[key], lowerIsBetter)}`}>{formatDelta(comparisonDeltas[key], lowerIsBetter)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* Tool failure warnings */}
-      {!isComparisonReport && toolFailureRows.length > 0 && (
+
+      {/* ── FIX: Tool failures shown in all modes ── */}
+      {toolFailureRows.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
-          <div className="font-semibold text-amber-900 mb-2">Some tools did not return scores:</div>
-          {toolFailureRows.map(f => <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>)}
+          <div className="font-semibold text-amber-900 mb-2 flex items-center gap-2"><AlertCircle size={15} className="shrink-0" />Some tools did not return scores:</div>
+          <div className="space-y-1">
+            {toolFailureRows.map(f => <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>)}
+          </div>
         </div>
       )}
 
@@ -1431,103 +1444,13 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
         </div>
       )}
 
+      {/* ── FIX: Multi-tool PAN leaderboard in comparison mode with evaluation data ── */}
+      {hasMultiToolPanResults && <PanLeaderboard rows={panEvaluationRows} />}
+
       {/* PAN scorecard */}
       {isFocusedMetricReport && productPanResult && (
         <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-100">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="font-semibold text-slate-900">Score Trust & Error Audit</h2>
-                  <p className="text-sm text-slate-500 mt-0.5">Why the PAN numbers are credible, and where they should not be overclaimed.</p>
-                </div>
-                <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${trustLevel.className}`}>{trustLevel.label} trust</span>
-              </div>
-            </div>
-            <div className="grid gap-4 p-6 lg:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Protocol</div>
-                <div className="mt-3 text-sm font-semibold text-slate-900">{hasHoldout ? 'Stratified holdout' : 'Fallback evaluation'}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{trustLevel.description}</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Held-Out Labels</div>
-                <div className="mt-3 text-sm leading-6 text-slate-600">{splitProtocol.holdout_positive_pairs ?? metricIntegrity.positive_pairs ?? productPanResult.nPositives ?? 0} positive pairs and {splitProtocol.holdout_negative_pairs ?? metricIntegrity.negative_pairs ?? productPanResult.nNegatives ?? 0} negative pairs.</div>
-                <div className="mt-2 text-xs font-semibold text-slate-500">Total evaluated: {heldoutSize || ((confusion.tp || 0) + (confusion.fp || 0) + (confusion.tn || 0) + (confusion.fn || 0))}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold</div>
-                <div className="mt-3 text-2xl font-bold text-slate-900">{Number.isFinite(decisionThreshold) ? decisionThreshold.toFixed(2) : 'N/A'}</div>
-                <div className="mt-2 text-xs leading-5 text-slate-500">Fixed {formatMetric(productPanResult.fixedThreshold ?? productPanResult.fixed_threshold ?? 0.82)} F1: {formatMetric(metricIntegrity.fixed_threshold_f1 ?? fixedThresholdMetrics.f1_score)}. Held-out F1: {formatMetric(metricIntegrity.heldout_f1 ?? productPanResult.f1Score)}.</div>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Confidence</div>
-                <div className="mt-3 text-sm font-semibold text-slate-900">{hasConfidenceInterval ? 'Bootstrap CI available' : 'CI unavailable'}</div>
-                <div className="mt-2 text-xs leading-5 text-slate-500">{hasConfidenceInterval ? `95% F1 CI: ${formatMetric(confidenceIntervals.f1.ci_lower)}-${formatMetric(confidenceIntervals.f1.ci_upper)}.` : 'Use a larger labeled holdout to narrow uncertainty.'}</div>
-              </div>
-            </div>
 
-            <div className="border-t border-slate-100 px-6 py-5">
-              <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-                <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                  <div className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <div className="p-3 border-r border-slate-200">Actual Positive</div>
-                    <div className="p-3">Actual Negative</div>
-                  </div>
-                  <div className="grid grid-cols-2 text-center">
-                    <div className="p-4 border-r border-b border-slate-200">
-                      <div className="text-xs text-slate-500">True Positives</div>
-                      <div className="mt-1 text-2xl font-bold text-emerald-600">{confusion.tp || 0}</div>
-                    </div>
-                    <div className="p-4 border-b border-slate-200">
-                      <div className="text-xs text-slate-500">False Positives</div>
-                      <div className="mt-1 text-2xl font-bold text-rose-600">{confusion.fp || 0}</div>
-                    </div>
-                    <div className="p-4 border-r border-slate-200">
-                      <div className="text-xs text-slate-500">False Negatives</div>
-                      <div className="mt-1 text-2xl font-bold text-amber-600">{confusion.fn || 0}</div>
-                    </div>
-                    <div className="p-4">
-                      <div className="text-xs text-slate-500">True Negatives</div>
-                      <div className="mt-1 text-2xl font-bold text-slate-700">{confusion.tn || 0}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
-                    <div className="font-semibold text-rose-900">False positives to inspect</div>
-                    <p className="mt-1 text-xs leading-5 text-rose-700">Clean pairs scoring above threshold reduce precision.</p>
-                    <div className="mt-3 space-y-2">
-                      {falsePositiveExamples.length ? falsePositiveExamples.map(pair => (
-                        <div key={`${pair.file_a}-${pair.file_b}`} className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-700">
-                          <div className="font-semibold text-slate-900">{pair.label}</div>
-                          <div>{pair.file_a} vs {pair.file_b}</div>
-                          <div className="mt-1 font-semibold text-rose-700">Score {(pair.score * 100).toFixed(1)}%</div>
-                        </div>
-                      )) : <div className="text-sm text-rose-700">{labeledPairAudit.length ? 'No false positives at this threshold.' : 'Pair-level labels are not attached to rows, so examples are unavailable.'}</div>}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-                    <div className="font-semibold text-amber-900">False negatives to inspect</div>
-                    <p className="mt-1 text-xs leading-5 text-amber-700">Plagiarized pairs scoring below threshold reduce recall.</p>
-                    <div className="mt-3 space-y-2">
-                      {falseNegativeExamples.length ? falseNegativeExamples.map(pair => (
-                        <div key={`${pair.file_a}-${pair.file_b}`} className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-700">
-                          <div className="font-semibold text-slate-900">{pair.label}</div>
-                          <div>{pair.file_a} vs {pair.file_b}</div>
-                          <div className="mt-1 font-semibold text-amber-700">Score {(pair.score * 100).toFixed(1)}%</div>
-                        </div>
-                      )) : <div className="text-sm text-amber-700">{labeledPairAudit.length ? 'No false negatives at this threshold.' : 'Pair-level labels are not attached to rows, so examples are unavailable.'}</div>}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {metricWarnings.length > 0 && (
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">{metricWarnings.map(warning => <div key={warning}>{warning}</div>)}</div>
-              )}
-            </div>
-          </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
@@ -1561,8 +1484,28 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Concrete optimization guidance for the next source-code iteration.</p>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {tuningRecommendations?.available
+                  ? `Candidate edits for ${tuningRecommendations.config_file}. Rerun the benchmark before keeping them.`
+                  : 'Concrete optimization guidance for the next source-code iteration.'}
+              </p>
             </div>
+            {tuningRecommendations?.available && (
+              <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recommended tuning mode</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{String(tuningRecommendations.mode || 'balanced').replaceAll('_', ' ')}</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{tuningRecommendations.summary}</p>
+                  </div>
+                  {tuningRecommendations.dominant_engine && (
+                    <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                      Dominant: {tuningRecommendations.dominant_engine} {(Number(tuningRecommendations.dominant_engine_contribution || 0) * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="grid gap-3 p-6 md:grid-cols-2">
               {panFeedback.map(item => (
                 <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1571,12 +1514,85 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
                 </div>
               ))}
             </div>
+            {(tuningConfigChanges.length > 0 || tuningRecommendations?.available) && (
+              <div className="border-t border-slate-100 px-6 pb-6">
+                <div className="pt-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="font-semibold text-slate-900">Proposed optimization</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {showingManualConfigOptions
+                          ? 'No automatic YAML edit is recommended for this rerun, but you can manually tune the current values below.'
+                          : 'These are candidate values for the next benchmark rerun, not automatic production changes.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${showingManualConfigOptions ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {showingManualConfigOptions ? `${tuningConfigChanges.length} manual controls` : `${tuningConfigChanges.length} edits`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={applyOptimization}
+                        disabled={applyingOptimization || tuningConfigChanges.length === 0}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
+                      >
+                        {applyingOptimization ? 'Applying...' : 'Apply'}
+                      </button>
+                    </div>
+                  </div>
+                  {optimizationMessage && (
+                    <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{optimizationMessage}</div>
+                  )}
+                  {optimizationError && (
+                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{optimizationError}</div>
+                  )}
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                    <div className="grid gap-3 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid-cols-[1.25fr_2.4fr_0.8fr_1fr]">
+                      <div>YAML path</div>
+                      <div>Score effect</div>
+                      <div>Current</div>
+                      <div>Proposed</div>
+                    </div>
+                    <div className="divide-y divide-slate-100 bg-white">
+                      {tuningConfigChanges.map((change, index) => {
+                        const spec = optimizationControlSpec(change.path, change.current, change.proposed);
+                        const proposedValue = normalizeOptimizationValue(change.proposed, spec);
+                        const updateProposed = (value) => {
+                          const nextValue = normalizeOptimizationValue(value, spec);
+                          setEditableOptimizationChanges(prev => prev.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, proposed: nextValue } : item
+                          )));
+                          setOptimizationMessage('');
+                          setOptimizationError('');
+                        };
+                        return (
+                          <div key={`${change.path}-${index}`} className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.25fr_2.4fr_0.8fr_1fr] lg:items-center">
+                            <code className="break-all rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{change.path}</code>
+                            <div className="text-xs leading-5 text-slate-600">{configPathEffect(change.path)}</div>
+                            <div className="font-mono text-xs font-bold text-blue-700">{String(change.current)}</div>
+                            <input
+                              type="number"
+                              min={spec.min}
+                              max={spec.max}
+                              step={spec.step}
+                              value={proposedValue}
+                              onChange={event => updateProposed(event.target.value)}
+                              className="w-24 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-right font-mono text-xs font-bold text-emerald-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                              aria-label={`Manual proposed value for ${change.path}`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-
         </div>
       )}
 
-      {/* Charts */}
+      {/* Comparison charts */}
       {isComparisonReport && chartData.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
@@ -1606,8 +1622,10 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
             <p className="text-sm text-slate-500 mt-0.5">Click any pair to expand individual tool scores</p>
           </div>
 
-          <div className="hidden lg:grid px-6 py-3 bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold"
-            style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
+          <div
+            className="hidden lg:grid px-6 py-3 bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold"
+            style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}
+          >
             <div>File Pair</div>
             {activeTools.map(tool => (
               <div key={tool} className="text-center flex items-center justify-center gap-1.5">
@@ -1633,9 +1651,11 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
 
               return (
                 <div key={key}>
-                  <button onClick={() => togglePair(key)}
+                  <button
+                    onClick={() => togglePair(key)}
                     className="w-full px-6 py-4 hover:bg-slate-50/50 transition-colors text-left hidden lg:grid items-center"
-                    style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
+                    style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}
+                  >
                     <div className="flex items-center gap-3">
                       <div className={`w-2 h-8 rounded-full ${riskColor}`} />
                       <div>
@@ -1708,6 +1728,15 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
           )}
         </div>
       )}
+
+      {/* Empty state for focused mode with no pair results */}
+      {isFocusedMetricReport && !productPanResult && (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+          <BarChart3 size={36} className="mx-auto text-slate-300 mb-3" />
+          <div className="text-sm font-semibold text-slate-700">No evaluation results available</div>
+          <div className="mt-2 text-sm text-slate-500">The benchmark ran but returned no labeled metrics. Ensure the selected dataset has ground-truth labels.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1724,10 +1753,8 @@ const BENCHMARK_MODES = [
     bestFor: 'Best for improving your own detector',
     outputs: ['Per-run F1 / Precision / Recall / FPR', 'Best threshold', 'Top misses and false alarms'],
     accent: 'from-violet-500 via-fuchsia-500 to-rose-400',
-    accentBg: 'bg-violet-600',
     accentSoft: 'bg-violet-100 text-violet-700',
     border: 'border-violet-200',
-    activeBg: 'bg-violet-600',
     detailNote: 'A single-tool IntegrityDesk scorecard with threshold tuning and concrete next steps for improving quality.',
   },
   {
@@ -1740,10 +1767,8 @@ const BENCHMARK_MODES = [
     bestFor: 'Best for proving IntegrityDesk is better',
     outputs: ['Per-tool F1 / Precision / Recall / FPR', 'Leaderboard ranking', 'Speed vs quality tradeoffs'],
     accent: 'from-sky-500 via-cyan-500 to-emerald-400',
-    accentBg: 'bg-sky-600',
     accentSoft: 'bg-sky-100 text-sky-700',
     border: 'border-sky-200',
-    activeBg: 'bg-sky-600',
     detailNote: 'A ranked multi-tool leaderboard showing whether IntegrityDesk beats the external baselines on the same benchmark data.',
   },
 ];
@@ -1752,10 +1777,11 @@ const BENCHMARK_MODES = [
 export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'benchmark' | 'comparison' }) {
   const { user, loading: authLoading } = useAuth();
   const availableModes = useMemo(
-    () => BENCHMARK_MODES.filter(mode => (modeScope === 'comparison' ? mode.id === 'comparison' : mode.id === 'development')),
+    () => BENCHMARK_MODES.filter(mode => (modeScope === 'comparison' ? mode.id === 'comparison' : true)),
     [modeScope]
   );
-  const [activeModeId, setActiveModeId] = useState(modeScope === 'comparison' ? 'comparison' : 'development');
+  const defaultModeId = modeScope === 'comparison' ? 'comparison' : 'development';
+  const [activeModeId, setActiveModeId] = useState(defaultModeId);
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [selectedTools, setSelectedTools] = useState([]);
@@ -1768,7 +1794,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
 
-  // FIX: Merge API availability with full TOOLS metadata
   const availableTools = useMemo(() => mergeToolsWithAvailability(rawApiTools), [rawApiTools]);
 
   useEffect(() => {
@@ -1778,7 +1803,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
       .then(res => { if (res.data?.tools) setRawApiTools(res.data.tools); })
       .catch(() => {
         setToolsError('Unable to confirm installed benchmark tools. Showing last known tool set.');
-        // On error: show all TOOLS as available (except explicitly non-runnable)
         setRawApiTools(TOOLS.map(t => ({ id: t.id, available: t.runnable !== false })));
       })
       .finally(() => setToolsLoading(false));
@@ -1789,37 +1813,39 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
   const activeMode = availableModes.find(m => m.id === activeModeId) || availableModes[0];
 
+  // Reset wizard state when modeScope changes
   useEffect(() => {
-    const nextModeId = modeScope === 'comparison' ? 'comparison' : 'development';
-    if (activeModeId === nextModeId) return;
-    setActiveModeId(nextModeId);
+    setActiveModeId(defaultModeId);
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
     setSelectedTools([]);
     setSelectedDataset(null);
     setFiles([]);
-  }, [activeModeId, modeScope]);
+  }, [modeScope, defaultModeId]);
 
-  const switchMode = (modeId) => {
+  const switchMode = useCallback((modeId) => {
     setActiveModeId(modeId);
-    // FIX: also reset wizard state on mode switch
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
     setSelectedTools([]);
     setSelectedDataset(null);
     setFiles([]);
-  };
+  }, []);
 
-  const goToStep = (next, currentCompleted) => {
+  const goToStep = useCallback((next, currentCompleted) => {
     setCompletedSteps(prev => [...new Set([...prev, currentCompleted])]);
     setStep(next);
-    // Scroll step content into view smoothly
     setTimeout(() => document.getElementById('step-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  };
+  }, []);
 
-  const restart = () => { setStep(0); setCompletedSteps([]); setResults(null); };
+  const restart = useCallback(() => { setStep(0); setCompletedSteps([]); setResults(null); }, []);
+  const rerunBenchmark = useCallback(() => {
+    setResults(null);
+    setCompletedSteps([0, 1]);
+    setStep(2);
+  }, []);
 
   const STEPS = [
     { label: 'Tools', subtitle: 'Choose what to run' },
@@ -1828,90 +1854,70 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     { label: 'Report', subtitle: 'View results' },
   ];
 
+  const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
+  const pageDesc = modeScope === 'comparison'
+    ? 'Compare IntegrityDesk against external detection tools on the same benchmark data.'
+    : 'Benchmark workspace for improving IntegrityDesk or comparing it against other tools.';
+  const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
+
   return (
     <DashboardLayout requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
-      <div className={`px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none`}>
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
         <div className="space-y-6">
 
           {/* ── Page header ─────────────────────────────────────────────── */}
-          {modeScope !== 'comparison' && (
-            <div className="flex flex-col gap-4 mb-1 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
-                  <FlaskConical size={18} className="text-white" />
-                </div>
-                <div>
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                    IntegrityDesk Benchmark
-                  </h1>
-                  <p className="text-sm text-slate-500">
-                    Admin-only benchmark workspace for improving IntegrityDesk on labeled benchmark data.
-                  </p>
-                </div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
+                <PageIcon size={18} className="text-white" />
               </div>
-              <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-                <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
+              <div>
+                <h1 className="text-xl font-bold text-slate-900 tracking-tight">{pageTitle}</h1>
+                <p className="text-sm text-slate-500">{pageDesc}</p>
               </div>
             </div>
-          )}
-          {modeScope === 'comparison' && (
-            <div className="flex flex-col gap-4 mb-1 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
-                  <GitCompare size={18} className="text-white" />
-                </div>
-                <div>
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                    Compare Tools
-                  </h1>
-                  <p className="text-sm text-slate-500">
-                    Compare IntegrityDesk against external detection tools on the same benchmark data.
-                  </p>
-                </div>
-              </div>
-              <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-                <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
-              </div>
+            <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
+              <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
             </div>
-          )}
-
-          {/* ── Mode selector ────────────────────────────────────────────── */}
-          {availableModes.length > 1 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {availableModes.map(mode => {
-              const Icon = mode.icon;
-              const isActive = activeModeId === mode.id;
-              return (
-                <button key={mode.id} onClick={() => switchMode(mode.id)}
-                  className={`group relative rounded-2xl border-2 p-5 text-left transition-all duration-200 ${isActive ? 'border-slate-900 bg-slate-900 shadow-xl shadow-slate-900/15' : 'border-slate-200 bg-white hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-md'}`}>
-                  {isActive && (
-                    <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
-                      <div className={`absolute inset-0 bg-gradient-to-br ${mode.accent} opacity-10`} />
-                    </div>
-                  )}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${mode.accent} flex items-center justify-center shadow-md shrink-0`}>
-                      <Icon size={18} className="text-white" />
-                    </div>
-                    {isActive && <span className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Selected</span>}
-                  </div>
-                  <div className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] ${isActive ? 'text-slate-400' : 'text-slate-400'}`}>{mode.eyebrow}</div>
-                  <div className={`mt-1 text-base font-bold ${isActive ? 'text-white' : 'text-slate-900'}`}>{mode.label}</div>
-                  <p className={`mt-2 text-sm leading-5 ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>{mode.description}</p>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {mode.outputs.map(o => (
-                      <span key={o} className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isActive ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>{o}</span>
-                    ))}
-                  </div>
-                </button>
-              );
-            })}
           </div>
+
+          {/* ── Mode selector (only when multiple modes available) ────── */}
+          {availableModes.length > 1 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {availableModes.map(mode => {
+                const Icon = mode.icon;
+                const isActive = activeModeId === mode.id;
+                return (
+                  <button key={mode.id} onClick={() => switchMode(mode.id)}
+                    className={`group relative rounded-2xl border-2 p-5 text-left transition-all duration-200 ${isActive ? 'border-slate-900 bg-slate-900 shadow-xl shadow-slate-900/15' : 'border-slate-200 bg-white hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-md'}`}>
+                    {isActive && (
+                      <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+                        <div className={`absolute inset-0 bg-gradient-to-br ${mode.accent} opacity-10`} />
+                      </div>
+                    )}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${mode.accent} flex items-center justify-center shadow-md shrink-0`}>
+                        <Icon size={18} className="text-white" />
+                      </div>
+                      {isActive && <span className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Selected</span>}
+                    </div>
+                    <div className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400`}>{mode.eyebrow}</div>
+                    <div className={`mt-1 text-base font-bold ${isActive ? 'text-white' : 'text-slate-900'}`}>{mode.label}</div>
+                    <p className={`mt-2 text-sm leading-5 ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>{mode.description}</p>
+                    <div className="mt-4 flex flex-wrap gap-1.5">
+                      {mode.outputs.map(o => (
+                        <span key={o} className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isActive ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>{o}</span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           )}
 
           {/* ── Step wizard ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            {/* Run config summary bar — visible in steps 1+ */}
+            {/* Run config summary bar — visible in steps 1 and 2 */}
             {step >= 1 && step < 3 && (
               <div className="px-5 py-3 bg-slate-50/70 border-b border-slate-100">
                 <RunConfigBar
@@ -1926,18 +1932,17 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               </div>
             )}
 
-            {/* Step content */}
             <div id="step-content" className="p-5 sm:p-6">
               {step === 0 && (
                 <ToolSelectionStep
-              tools={availableTools}
-              selectedTools={selectedTools}
-              setSelectedTools={setSelectedTools}
-              loading={toolsLoading}
-              error={toolsError}
-              benchmarkMode={activeModeId}
-              onNext={() => goToStep(1, 0)}
-            />
+                  tools={availableTools}
+                  selectedTools={selectedTools}
+                  setSelectedTools={setSelectedTools}
+                  loading={toolsLoading}
+                  error={toolsError}
+                  benchmarkMode={activeModeId}
+                  onNext={() => goToStep(1, 0)}
+                />
               )}
               {step === 1 && (
                 <DatasetStep
@@ -1968,7 +1973,12 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 />
               )}
               {step === 3 && results && (
-                <ReportStep results={results} onRestart={restart} benchmarkMode={activeModeId} />
+                <ReportStep
+                  results={results}
+                  onRestart={restart}
+                  onRerun={rerunBenchmark}
+                  benchmarkMode={activeModeId}
+                />
               )}
             </div>
           </div>
