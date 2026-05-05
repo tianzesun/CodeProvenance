@@ -20,7 +20,6 @@ function ErrorAnalysisPage() {
   const [selectedJobId, setSelectedJobId] = useState('');
   const [availableJobs, setAvailableJobs] = useState([]);
 
-
   // Load available benchmark jobs
   useEffect(() => {
     const loadJobs = async () => {
@@ -222,8 +221,6 @@ function ErrorAnalysisPage() {
                 </div>
               )}
             </div>
-
-
 
             {/* Note about full error analysis */}
             <div className="bg-blue-50 rounded-2xl border border-blue-200 p-6">
