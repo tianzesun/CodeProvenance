@@ -185,59 +185,6 @@ function ErrorAnalysisPage() {
                 </div>
               </div>
             </div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{errorAnalysisData.trustLevel.description}</p>
-                <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${errorAnalysisData.trustLevel.className}`}>
-                  {errorAnalysisData.trustLevel.label} trust
-                </span>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Held-Out Labels</div>
-                <div className="mt-3 text-sm leading-6 text-slate-600">
-                  {errorAnalysisData.splitProtocol.holdout_positive_pairs ??
-                   errorAnalysisData.metricIntegrity.positive_pairs ??
-                   errorAnalysisData.productPanResult.nPositives ?? 0} positive pairs and{' '}
-                  {errorAnalysisData.splitProtocol.holdout_negative_pairs ??
-                   errorAnalysisData.metricIntegrity.negative_pairs ??
-                   errorAnalysisData.productPanResult.nNegatives ?? 0} negative pairs.
-                </div>
-                <div className="mt-2 text-xs font-semibold text-slate-500">
-                  Total evaluated: {errorAnalysisData.heldoutSize}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold</div>
-                <div className="mt-3 text-2xl font-bold text-slate-900">
-                  {Number.isFinite(errorAnalysisData.decisionThreshold) ? errorAnalysisData.decisionThreshold.toFixed(2) : 'N/A'}
-                </div>
-                <div className="mt-2 text-xs leading-5 text-slate-500">
-                  Used for classification decisions
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Confusion Matrix</div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-                  <div className="text-emerald-600">
-                    <div className="text-lg font-bold">{errorAnalysisData.confusion.tp || 0}</div>
-                    <div className="text-xs">TP</div>
-                  </div>
-                  <div className="text-rose-600">
-                    <div className="text-lg font-bold">{errorAnalysisData.confusion.fp || 0}</div>
-                    <div className="text-xs">FP</div>
-                  </div>
-                  <div className="text-amber-600">
-                    <div className="text-lg font-bold">{errorAnalysisData.confusion.fn || 0}</div>
-                    <div className="text-xs">FN</div>
-                  </div>
-                  <div className="text-slate-600">
-                    <div className="text-lg font-bold">{errorAnalysisData.confusion.tn || 0}</div>
-                    <div className="text-xs">TN</div>
-                  </div>
-                </div>
-              </div>
-            </div>
 
             {/* Pair Results Overview */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
