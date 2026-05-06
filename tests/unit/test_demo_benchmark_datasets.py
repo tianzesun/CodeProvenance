@@ -68,33 +68,34 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         runtime_seconds=2.0,
     )
 
-    assert metrics["precision"] == 0.6667
-    assert metrics["recall"] == 1.0
-    assert metrics["f1_score"] == 0.8
+    assert metrics["headline_metric_basis"] == "held_out_evaluation"
+    assert metrics["precision"] == 0.0
+    assert metrics["recall"] == 0.0
+    assert metrics["f1_score"] == 0.0
     assert metrics["granularity"] == 1.0
-    assert metrics["plagdet"] == 0.8
-    assert metrics["plagdet_percent"] == 80.0
+    assert metrics["plagdet"] == 0.0
+    assert metrics["plagdet_percent"] == 0.0
     assert metrics["top_10_retrieval"] == 0.5
     assert metrics["top_20_retrieval"] == 0.5
     assert metrics["top_10_recall"] == 1.0
     assert metrics["top_20_recall"] == 1.0
-    assert metrics["false_positive_rate"] == 0.5
+    assert metrics["false_positive_rate"] == 0.0
     assert "auc_pr" in metrics
     assert metrics["engine_contribution"] == {}
     assert metrics["ai_generated_recall"] is None
     assert metrics["runtime_seconds"] == 2.0
     assert metrics["avg_runtime_seconds"] == 0.5
     assert metrics["pan_metrics"] == {
-        "precision": 0.6667,
-        "recall": 1.0,
-        "f1_score": 0.8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_score": 0.0,
         "granularity": 1.0,
-        "plagdet": 0.8,
+        "plagdet": 0.0,
         "top_10_retrieval": 0.5,
         "top_20_retrieval": 0.5,
         "top_10_recall": 1.0,
         "top_20_recall": 1.0,
-        "false_positive_rate": 0.5,
+        "false_positive_rate": 0.0,
         "auc_pr": metrics["auc_pr"],
         "engine_contribution": {},
         "ai_generated_recall": None,
@@ -102,6 +103,7 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         "score_diagnostics": metrics["score_diagnostics"],
     }
     assert metrics["score_diagnostics"]["label_conflict"] is False
+    assert metrics["benchmark_trust"]["grade"] == "limited"
     assert metrics["granularity_basis"] == "pair_level_single_detection"
     assert metrics["metric_assumptions"]["span_level_scoring"] is False
     assert metrics["metric_assumptions"]["character_offsets"] is False

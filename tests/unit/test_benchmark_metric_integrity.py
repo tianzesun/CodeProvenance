@@ -25,11 +25,12 @@ def test_compute_evaluation_metrics_reports_exact_confusion_matrix() -> None:
         dataset_name="unit",
     )
 
-    assert metrics["precision"] == 1.0
-    assert metrics["recall"] == 0.5
-    assert abs(metrics["f1_score"] - 2/3) < 0.01
+    assert metrics["headline_metric_basis"] == "held_out_evaluation"
+    assert metrics["precision"] == 0.0
+    assert metrics["recall"] == 0.0
+    assert metrics["f1_score"] == 0.0
     assert metrics["false_positive_rate"] == 0.0
-    assert metrics["confusion_matrix"] == {"tp": 1, "fp": 0, "tn": 2, "fn": 1}
+    assert metrics["confusion_matrix"] == {"tp": 0, "fp": 0, "tn": 1, "fn": 1}
     assert metrics["fixed_threshold_metrics"]["confusion_matrix"] == {
         "tp": 1,
         "fp": 0,
@@ -37,6 +38,7 @@ def test_compute_evaluation_metrics_reports_exact_confusion_matrix() -> None:
         "fn": 0,
     }
     assert metrics["metric_integrity"]["calibration_bias_warning"] is True
+    assert metrics["benchmark_trust"]["grade"] == "limited"
     # assert metrics["metric_integrity"]["fixed_threshold_f1"] < metrics["f1_score"]  # Optimized may not always beat fixed
     # assert metrics["metric_integrity"]["heldout_f1"] == metrics["f1_score"]  # May differ due to split
 
@@ -66,8 +68,10 @@ def test_fixed_threshold_strategy_does_not_optimize_regression_threshold() -> No
     assert metrics["threshold_strategy"] == "fixed_threshold"
     assert metrics["best_threshold_exact"] == 0.82
     assert metrics["fixed_threshold"] == 0.82
-    assert metrics["confusion_matrix"] == {"tp": 0, "fp": 0, "tn": 1, "fn": 1}
+    assert metrics["headline_metric_basis"] == "locked_full_sample_evaluation"
+    assert metrics["confusion_matrix"] == {"tp": 1, "fp": 0, "tn": 2, "fn": 1}
     assert metrics["metric_integrity"]["calibration_bias_warning"] is False
+    assert metrics["benchmark_trust"]["grade"] == "limited"
 
 
 def test_engine_tuning_recommendations_include_yaml_config_changes(monkeypatch) -> None:

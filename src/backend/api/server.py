@@ -6016,6 +6016,11 @@ async def run_benchmark(
             k: {
                 "pairs": len(v.get("pairs", [])),
                 "error": v.get("error"),
+                "score_source": (
+                    "built_in_integritydesk"
+                    if k == "integritydesk"
+                    else ("real_cli" if "error" not in v else "unavailable")
+                ),
                 "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
                 "avg_runtime_seconds": round(
                     tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
@@ -6032,6 +6037,11 @@ async def run_benchmark(
             "accuracy": {
                 "integritydesk": round(id_avg, 4),
                 "best_competitor": round(comp_avg, 4),
+            },
+            "accuracy_basis": "mean_similarity_score_not_classification_accuracy",
+            "score_summary": {
+                "integritydesk_mean_similarity": round(id_avg, 4),
+                "competitor_mean_similarity": round(comp_avg, 4),
             },
             "dataset_name": dataset or "custom",
             "dataset_size": len(submissions),
@@ -6066,6 +6076,10 @@ async def run_benchmark(
     if evaluation_results:
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
+        response["benchmark_trust"] = (
+            evaluation_results.get("integritydesk")
+            or next(iter(evaluation_results.values()), {})
+        ).get("benchmark_trust", {})
         if benchmark_type == "regression_test":
             response["quality_gates"] = _build_regression_quality_gates(
                 evaluation_results.get("integritydesk") or {}
@@ -6172,6 +6186,17 @@ REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
         "direction": "max",
         "reason": "False accusations must stay rare.",
     },
+}
+
+BENCHMARK_TRUST_THRESHOLDS: Dict[str, int] = {
+    "strong_holdout_pairs": 40,
+    "strong_holdout_pairs_per_class": 10,
+    "moderate_holdout_pairs": 12,
+    "moderate_holdout_pairs_per_class": 3,
+    "strong_locked_pairs": 100,
+    "strong_locked_pairs_per_class": 20,
+    "moderate_locked_pairs": 30,
+    "moderate_locked_pairs_per_class": 5,
 }
 
 
@@ -6348,14 +6373,6 @@ def _compute_evaluation_metrics(
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
-    split_protocol = _build_stratified_calibration_holdout_split(binary_labels)
-    threshold_indices = split_protocol["calibration_indices"]
-    evaluation_indices = split_protocol["holdout_indices"]
-    threshold_scores_arr = scores_arr[threshold_indices]
-    threshold_labels_arr = labels_arr[threshold_indices]
-    evaluation_scores_arr = scores_arr[evaluation_indices]
-    evaluation_labels_arr = labels_arr[evaluation_indices]
-
     fixed_threshold = _coerce_float(settings.DEFAULT_THRESHOLD, 0.82)
     normalized_threshold_strategy = (
         "fixed_threshold"
@@ -6363,6 +6380,21 @@ def _compute_evaluation_metrics(
         else "calibration_holdout"
     )
     best_threshold = fixed_threshold
+    all_indices = list(range(len(binary_labels)))
+
+    if normalized_threshold_strategy == "fixed_threshold":
+        split_protocol = _build_locked_full_sample_protocol(binary_labels)
+        threshold_indices = all_indices
+        evaluation_indices = all_indices
+    else:
+        split_protocol = _build_stratified_calibration_holdout_split(binary_labels)
+        threshold_indices = split_protocol["calibration_indices"]
+        evaluation_indices = split_protocol["holdout_indices"]
+
+    threshold_scores_arr = scores_arr[threshold_indices]
+    threshold_labels_arr = labels_arr[threshold_indices]
+    evaluation_scores_arr = scores_arr[evaluation_indices]
+    evaluation_labels_arr = labels_arr[evaluation_indices]
 
     if normalized_threshold_strategy == "calibration_holdout":
         # Find the PAN/PlagDet operating point on the calibration slice only.
@@ -6428,26 +6460,14 @@ def _compute_evaluation_metrics(
     holdout_metrics = _binary_metrics_at_threshold(
         evaluation_scores_arr, evaluation_labels_arr, best_threshold
     )
-    full_sample_metrics = _binary_metrics_at_threshold(
-        scores_arr, labels_arr, best_threshold
+    headline_scores_arr = evaluation_scores_arr
+    headline_labels_arr = evaluation_labels_arr
+    headline_basis = (
+        "locked_full_sample_evaluation"
+        if normalized_threshold_strategy == "fixed_threshold"
+        else "held_out_evaluation"
     )
-    use_full_sample_headline = (
-        normalized_threshold_strategy == "calibration_holdout"
-        and int(split_protocol.get("holdout_size", 0)) < 4
-        and float(full_sample_metrics["f1_score"]) > float(holdout_metrics["f1_score"])
-    )
-    if use_full_sample_headline:
-        headline_scores_arr = scores_arr
-        headline_labels_arr = labels_arr
-        headline_basis = "full_sample_small_holdout_fallback"
-    else:
-        headline_scores_arr = evaluation_scores_arr
-        headline_labels_arr = evaluation_labels_arr
-        headline_basis = "held_out_evaluation"
-
-    headline_metrics = (
-        full_sample_metrics if use_full_sample_headline else holdout_metrics
-    )
+    headline_metrics = holdout_metrics
     precision = float(headline_metrics["precision"])
     recall = float(headline_metrics["recall"])
     f1_score = float(headline_metrics["f1_score"])
@@ -6498,6 +6518,14 @@ def _compute_evaluation_metrics(
             "scores before combining them into fusion weights."
         ),
     }
+    benchmark_trust = _build_benchmark_trust_assessment(
+        split_protocol=split_protocol,
+        confidence_intervals=confidence_intervals,
+        score_diagnostics=score_diagnostics,
+        threshold_strategy=normalized_threshold_strategy,
+        headline_basis=headline_basis,
+        binary_labels=binary_labels,
+    )
     metric_integrity = _build_metric_integrity_summary(
         scores=scores,
         labels=labels,
@@ -6509,6 +6537,8 @@ def _compute_evaluation_metrics(
         fixed_threshold_metrics=fixed_threshold_metrics,
         split_protocol=split_protocol,
         confidence_intervals=confidence_intervals,
+        score_diagnostics=score_diagnostics,
+        benchmark_trust=benchmark_trust,
     )
     calibration_report = _build_calibration_report(float(best_threshold), "benchmark")
     tuning_recommendations = _build_engine_tuning_recommendations(
@@ -6539,6 +6569,7 @@ def _compute_evaluation_metrics(
         "calibration_metrics": optimized_metrics,
         "holdout_metrics": holdout_metrics,
         "headline_metric_basis": headline_basis,
+        "benchmark_trust": benchmark_trust,
         "split_protocol": split_protocol,
         "confidence_intervals": confidence_intervals,
         "best_f1": round(f1_score, 4),
@@ -6672,6 +6703,28 @@ def _build_stratified_calibration_holdout_split(
     }
 
 
+def _build_locked_full_sample_protocol(binary_labels: List[int]) -> Dict[str, Any]:
+    """Describe a fixed-threshold evaluation over all labeled pairs."""
+    positive_count = int(sum(binary_labels))
+    negative_count = int(len(binary_labels) - positive_count)
+    all_indices = list(range(len(binary_labels)))
+    return {
+        "protocol": "locked_full_sample_evaluation",
+        "calibration_indices": all_indices,
+        "holdout_indices": all_indices,
+        "calibration_size": 0,
+        "holdout_size": len(all_indices),
+        "calibration_positive_pairs": 0,
+        "calibration_negative_pairs": 0,
+        "holdout_positive_pairs": positive_count,
+        "holdout_negative_pairs": negative_count,
+        "warning": (
+            "Fixed-threshold regression used every labeled pair. No threshold "
+            "was selected from this run."
+        ),
+    }
+
+
 def _classification_confidence_intervals(
     scores: List[float], binary_labels: List[int], threshold: float
 ) -> Dict[str, Any]:
@@ -6699,6 +6752,128 @@ def _classification_confidence_intervals(
     return {"available": True, "method": "bootstrap_percentile", **intervals}
 
 
+def _build_benchmark_trust_assessment(
+    split_protocol: Dict[str, Any],
+    confidence_intervals: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+    threshold_strategy: str,
+    headline_basis: str,
+    binary_labels: List[int],
+) -> Dict[str, Any]:
+    """Grade whether benchmark metrics are suitable for internal decisions."""
+    protocol = str(split_protocol.get("protocol", "unknown"))
+    holdout_size = int(split_protocol.get("holdout_size") or 0)
+    holdout_positive = int(split_protocol.get("holdout_positive_pairs") or 0)
+    holdout_negative = int(split_protocol.get("holdout_negative_pairs") or 0)
+    positive_count = int(sum(binary_labels))
+    negative_count = int(len(binary_labels) - positive_count)
+    reasons: List[str] = []
+    blockers: List[str] = []
+
+    if positive_count == 0 or negative_count == 0:
+        blockers.append("Benchmark needs both positive and negative labeled pairs.")
+    if score_diagnostics.get("label_conflict"):
+        blockers.append(
+            "Labeled negatives score at or above positives; inspect labels or fixtures."
+        )
+
+    confidence_available = bool(confidence_intervals.get("available"))
+    if not confidence_available:
+        reasons.append(
+            "Confidence intervals are unavailable or too unstable for certification."
+        )
+
+    if protocol == "deterministic_stratified_calibration_holdout":
+        if (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and confidence_available
+            and not blockers
+        ):
+            grade = "strong"
+            score = 90
+        elif (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and not blockers
+        ):
+            grade = "moderate"
+            score = 70
+        else:
+            grade = "limited"
+            score = 45
+            reasons.append(
+                "Held-out slice is small; use this run for direction, not final gates."
+            )
+    elif protocol == "locked_full_sample_evaluation":
+        if (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and confidence_available
+            and not blockers
+        ):
+            grade = "strong"
+            score = 85
+        elif (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and not blockers
+        ):
+            grade = "moderate"
+            score = 65
+        else:
+            grade = "limited"
+            score = 40
+            reasons.append(
+                "Locked regression sample is small; add more labeled pairs before "
+                "treating it as a release gate."
+            )
+    else:
+        grade = "limited"
+        score = 25
+        reasons.append("No independent evaluation protocol was available.")
+
+    if blockers:
+        grade = "invalid"
+        score = 0
+
+    can_gate = (
+        grade in {"strong", "moderate"} and threshold_strategy == "fixed_threshold"
+    )
+    if threshold_strategy != "fixed_threshold":
+        reasons.append(
+            "Threshold was calibrated in this run; use fixed-threshold regression "
+            "for pass/fail gates."
+        )
+
+    return {
+        "grade": grade,
+        "score": score,
+        "can_gate_internal_regression": can_gate,
+        "headline_basis": headline_basis,
+        "protocol": protocol,
+        "sample_size": holdout_size,
+        "positive_pairs": holdout_positive,
+        "negative_pairs": holdout_negative,
+        "confidence_intervals_available": confidence_available,
+        "blockers": blockers,
+        "warnings": reasons,
+        "minimums": BENCHMARK_TRUST_THRESHOLDS,
+    }
+
+
 def _build_metric_integrity_summary(
     scores: List[float],
     labels: List[int],
@@ -6710,6 +6885,8 @@ def _build_metric_integrity_summary(
     fixed_threshold_metrics: Dict[str, Any],
     split_protocol: Dict[str, Any],
     confidence_intervals: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+    benchmark_trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Describe benchmark metric trust boundaries and validation checks."""
     positive_count = int(sum(binary_labels))
@@ -6721,7 +6898,14 @@ def _build_metric_integrity_summary(
         warnings.append(
             str(split_protocol.get("warning") or "No held-out split available.")
         )
-
+    if split_protocol.get("protocol") == "locked_full_sample_evaluation":
+        warnings.append(str(split_protocol.get("warning", "")))
+    if score_diagnostics.get("label_conflict"):
+        warnings.append(
+            str(score_diagnostics.get("message", "Label conflict detected."))
+        )
+    warnings.extend(benchmark_trust.get("warnings", []))
+    warnings.extend(benchmark_trust.get("blockers", []))
 
     return {
         "label_count_matches_score_count": len(scores) == len(labels),
@@ -6743,6 +6927,7 @@ def _build_metric_integrity_summary(
         ),
         "split_protocol": split_protocol,
         "confidence_intervals": confidence_intervals,
+        "benchmark_trust": benchmark_trust,
         "warnings": warnings,
     }
 
@@ -9328,34 +9513,29 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
         metric_integrity = primary_metrics.get("metric_integrity") or {}
         split_protocol = primary_metrics.get("split_protocol") or {}
         confidence_intervals = primary_metrics.get("confidence_intervals") or {}
+        benchmark_trust = primary_metrics.get(
+            "benchmark_trust"
+        ) or metric_integrity.get("benchmark_trust", {})
         heldout_confusion = metric_integrity.get("heldout_confusion_matrix") or {}
         fixed_threshold_metrics = primary_metrics.get("fixed_threshold_metrics") or {}
-        trust_level = (
-            "strong"
-            if (
-                split_protocol.get("protocol")
-                == "deterministic_stratified_calibration_holdout"
-                and confidence_intervals.get("available")
-                and int(split_protocol.get("holdout_size") or 0) >= 20
-            )
-            else (
-                "moderate"
-                if split_protocol.get("protocol")
-                == "deterministic_stratified_calibration_holdout"
-                else "limited"
-            )
-        )
+        trust_level = benchmark_trust.get("grade", "limited")
         lines.extend(
             [
                 "Score Trust and Error Audit",
                 f"Trust level: {trust_level}",
+                f"Trust score: {benchmark_trust.get('score', 'N/A')}/100",
                 (
                     "Protocol: "
                     + (
                         "stratified calibration/holdout"
                         if split_protocol.get("protocol")
                         == "deterministic_stratified_calibration_holdout"
-                        else "fallback evaluation without separate holdout"
+                        else (
+                            "locked fixed-threshold evaluation"
+                            if split_protocol.get("protocol")
+                            == "locked_full_sample_evaluation"
+                            else "fallback evaluation without separate holdout"
+                        )
                     )
                 ),
                 (

@@ -899,9 +899,11 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
   const hasZipUpload = files.some(f => f.name?.toLowerCase().endsWith('.zip'));
-  const benchmarkType = benchmarkMode === 'development' || benchmarkMode === 'calibration'
-    ? 'pan_optimization'
-    : 'tool_comparison';
+  const benchmarkType = benchmarkMode === 'release' || benchmarkMode === 'regression'
+    ? 'regression_test'
+    : benchmarkMode === 'development' || benchmarkMode === 'calibration'
+      ? 'pan_optimization'
+      : 'tool_comparison';
 
   const run = useCallback(async () => {
     requestControllerRef.current?.abort();
@@ -1200,6 +1202,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
         fixedThreshold: metrics.fixed_threshold, fixedThresholdMetrics: metrics.fixed_threshold_metrics || {},
         confidenceIntervals: metrics.confidence_intervals || {}, splitProtocol: metrics.split_protocol || {},
         metricIntegrity: metrics.metric_integrity || {},
+        benchmarkTrust: metrics.benchmark_trust || metrics.metric_integrity?.benchmark_trust || {},
         tuningRecommendations: metrics.tuning_recommendations || null,
       };
     }).sort((a, b) => b.plagdet - a.plagdet);
@@ -1370,12 +1373,22 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const heldoutSize = Number(splitProtocol.holdout_size || 0);
   const hasHoldout = splitProtocol.protocol === 'deterministic_stratified_calibration_holdout';
   const hasConfidenceInterval = Boolean(confidenceIntervals.available && confidenceIntervals.f1);
+  const benchmarkTrust = productPanResult?.benchmarkTrust || metricIntegrity.benchmark_trust || results.benchmark_trust || {};
 
-  const trustLevel = hasHoldout && hasConfidenceInterval && heldoutSize >= 20
-    ? { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Held-out labels and confidence intervals are available.' }
-    : hasHoldout
-      ? { label: 'Moderate', className: 'bg-amber-100 text-amber-700', description: 'Held-out labels are used, but the sample is small or intervals are unavailable.' }
-      : { label: 'Limited', className: 'bg-rose-100 text-rose-700', description: 'No separate holdout was available; treat this as a smoke test, not a certification.' };
+  const trustStyles = {
+    strong: { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Enough labeled evaluation pairs and confidence intervals for internal regression decisions.' },
+    moderate: { label: 'Moderate', className: 'bg-amber-100 text-amber-700', description: 'Useful for internal decisions, but expand the labeled set before relying on it as the only gate.' },
+    limited: { label: 'Limited', className: 'bg-rose-100 text-rose-700', description: 'Use this run for direction only; sample size or protocol is too weak for pass/fail gates.' },
+    invalid: { label: 'Invalid', className: 'bg-red-100 text-red-700', description: 'Fix benchmark labels or class balance before trusting this run.' },
+  };
+  const trustLevel = trustStyles[benchmarkTrust.grade] || (
+    hasHoldout && hasConfidenceInterval && heldoutSize >= 20
+      ? trustStyles.strong
+      : hasHoldout
+        ? trustStyles.moderate
+        : trustStyles.limited
+  );
+  const trustMessages = [...(benchmarkTrust.blockers || []), ...(benchmarkTrust.warnings || [])];
 
   return (
     <div className="space-y-6">
@@ -1456,6 +1469,43 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">PAN Evaluation Scorecard</h2>
               <p className="text-sm text-slate-500 mt-0.5">Focused on {productPanResult.name} — threshold: {typeof productPanResult.threshold === 'number' ? productPanResult.threshold.toFixed(2) : 'N/A'}</p>
+            </div>
+            <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${trustLevel.className}`}>Trust: {trustLevel.label}</span>
+                    {typeof benchmarkTrust.score === 'number' && (
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">{benchmarkTrust.score}/100</span>
+                    )}
+                    {benchmarkTrust.can_gate_internal_regression && (
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">Gate-ready</span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{trustLevel.description}</p>
+                  {trustMessages.length > 0 && (
+                    <div className="mt-2 space-y-1 text-xs leading-5 text-slate-500">
+                      {trustMessages.slice(0, 3).map((warning, index) => (
+                        <div key={`${warning}-${index}`}>- {warning}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="grid min-w-[260px] grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Eval pairs</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.sample_size ?? splitProtocol.holdout_size ?? 'N/A'}</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Positive</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.positive_pairs ?? splitProtocol.holdout_positive_pairs ?? 'N/A'}</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Negative</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.negative_pairs ?? splitProtocol.holdout_negative_pairs ?? 'N/A'}</div>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
               {panMetricDiagnostics.map(metric => {
@@ -1758,13 +1808,27 @@ const BENCHMARK_MODES = [
     detailNote: 'A single-tool IntegrityDesk scorecard with threshold tuning and concrete next steps for improving quality.',
   },
   {
+    id: 'release',
+    icon: CheckCircle2,
+    eyebrow: 'Locked internal regression',
+    label: 'Trust Check',
+    tagline: 'Run IntegrityDesk at the fixed production threshold and use pass/fail quality gates.',
+    description: 'Validate IntegrityDesk on labeled benchmark data without tuning the threshold during the run.',
+    bestFor: 'Best for internal go/no-go checks',
+    outputs: ['Fixed-threshold F1 / Precision / Recall / FPR', 'Pass/fail gates', 'Trust grade and sample audit'],
+    accent: 'from-emerald-500 via-teal-500 to-cyan-400',
+    accentSoft: 'bg-emerald-100 text-emerald-700',
+    border: 'border-emerald-200',
+    detailNote: 'A locked-threshold scorecard for checking whether the current IntegrityDesk build is safe to keep.',
+  },
+  {
     id: 'comparison',
     icon: GitCompare,
     eyebrow: 'Competitive benchmark',
     label: 'Compare Against Other Tools',
-    tagline: 'Run IntegrityDesk beside MOSS, JPlag, Dolos, and others on the same benchmark to prove it wins.',
+    tagline: 'Run IntegrityDesk beside MOSS, JPlag, Dolos, and others on the same benchmark.',
     description: 'Compare multiple detectors on the same labeled dataset and see where IntegrityDesk wins or loses on F1, precision, recall, and false positive rate.',
-    bestFor: 'Best for proving IntegrityDesk is better',
+    bestFor: 'Best for comparative evidence',
     outputs: ['Per-tool F1 / Precision / Recall / FPR', 'Leaderboard ranking', 'Speed vs quality tradeoffs'],
     accent: 'from-sky-500 via-cyan-500 to-emerald-400',
     accentSoft: 'bg-sky-100 text-sky-700',
