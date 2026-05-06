@@ -332,13 +332,15 @@ def professor_profile_to_engine_weights(
     weights = applied.weights
     return _normalize_weights(
         {
-            "token": weights["token"] * 0.55,
-            "winnowing": weights["token"] * 0.45,
+            "token": weights["token"] * 0.25,
+            "winnowing": weights["token"] * 0.35,
+            "gst": weights["token"] * 0.20,
+            "ngram": weights["token"] * 0.20,
             "ast": weights["ast"],
-            "graph": weights["cfg_dfg"] * 0.60,
-            "execution": weights["runtime"] + weights["cfg_dfg"] * 0.40,
-            "embedding": weights["history"] * 0.45,
-            "llm": 0.02 if applied.profile.ai_rewrite_detection != "off" else 0.0,
+            "graph": weights["cfg_dfg"] * 0.75 + weights["runtime"] * 0.20,
+            "static_rules": weights["runtime"] * 0.40 + weights["cfg_dfg"] * 0.25,
+            "embedding": weights["history"] * 0.45
+            + (0.04 if applied.profile.ai_rewrite_detection != "off" else 0.0),
         }
     )
 

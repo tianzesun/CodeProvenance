@@ -25,8 +25,8 @@ const TOOLS = [
     id: 'integritydesk', name: 'IntegrityDesk', color: '#7C3AED',
     bgLight: 'bg-violet-50', textColor: 'text-violet-700', ring: 'ring-violet-500',
     gradient: 'from-violet-500 to-violet-700',
-    engines: ['AST', 'Embedding', 'Execution', 'Fingerprint', 'N-gram'],
-    desc: 'Full multi-engine fusion: AST, UniXcoder embeddings, execution similarity, and winnowing.',
+    engines: ['AST', 'Embedding', 'TF-IDF', 'Token Graph', 'AI Code'],
+    desc: 'Fusion with AST/embedding signals, TF-IDF baseline, token normalization graphs, merged subsequence evidence, and AI-code detection.',
     status: 'Ready to run',
   },
   {
@@ -1367,6 +1367,40 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     tp: Number(heldoutConfusion.tp || 0), fp: Number(heldoutConfusion.fp || 0),
     tn: Number(heldoutConfusion.tn || 0), fn: Number(heldoutConfusion.fn || 0),
   };
+  const integrityDeskMetricCards = productPanResult ? [
+    {
+      key: 'precision',
+      label: 'Precision',
+      value: productPanResult.precision,
+      detail: `${confusion.tp} TP / ${confusion.fp} FP`,
+      tone: metricTone(productPanResult.precision, 'higher'),
+      icon: Target,
+    },
+    {
+      key: 'recall',
+      label: 'Recall',
+      value: productPanResult.recall,
+      detail: `${confusion.tp} TP / ${confusion.fn} FN`,
+      tone: metricTone(productPanResult.recall, 'higher'),
+      icon: TrendingUp,
+    },
+    {
+      key: 'f1',
+      label: 'F1 Score',
+      value: productPanResult.f1Score,
+      detail: 'Precision/recall balance',
+      tone: metricTone(productPanResult.f1Score, 'higher'),
+      icon: Trophy,
+    },
+    {
+      key: 'fpr',
+      label: 'False Positive Rate',
+      value: productPanResult.falsePositiveRate,
+      detail: `${confusion.fp} FP / ${confusion.tn} TN`,
+      tone: metricTone(productPanResult.falsePositiveRate, 'lower'),
+      icon: AlertCircle,
+    },
+  ] : [];
 
   const falsePositiveExamples = labeledPairAudit.filter(pair => !pair.actual && pair.predicted).sort((a, b) => b.score - a.score).slice(0, 3);
   const falseNegativeExamples = labeledPairAudit.filter(pair => pair.actual && !pair.predicted).sort((a, b) => a.score - b.score).slice(0, 3);
@@ -1471,10 +1505,56 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       {isFocusedMetricReport && productPanResult && (
         <div className="space-y-6">
 
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="font-semibold text-slate-900">IntegrityDesk Metrics</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Precision, recall, and F1 for {results.datasetName || 'the selected labeled dataset'}.
+                  </p>
+                </div>
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                  Threshold {Number(decisionThreshold).toFixed(2)}
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-4">
+              {integrityDeskMetricCards.map(metric => {
+                const tone = metricToneClasses(metric.tone);
+                const Icon = metric.icon;
+                return (
+                  <div key={metric.key} className={`rounded-2xl border ${tone.border} ${tone.bg} p-5`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{metric.label}</div>
+                      <Icon size={18} className={tone.text} />
+                    </div>
+                    <div className={`mt-3 text-4xl font-black ${tone.text}`}>{formatPanMetricValue({ value: metric.value })}</div>
+                    <div className="mt-2 text-xs font-semibold text-slate-500">{metric.detail}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+              <div className="grid gap-3 text-sm md:grid-cols-4">
+                {[
+                  ['True positives', confusion.tp, 'text-emerald-700'],
+                  ['False positives', confusion.fp, 'text-rose-700'],
+                  ['False negatives', confusion.fn, 'text-amber-700'],
+                  ['True negatives', confusion.tn, 'text-slate-700'],
+                ].map(([label, value, className]) => (
+                  <div key={label} className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+                    <div className={`mt-1 text-2xl font-bold ${className}`}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="font-semibold text-slate-900">PAN Evaluation Scorecard</h2>
+              <h2 className="font-semibold text-slate-900">Detailed Evaluation Scorecard</h2>
               <p className="text-sm text-slate-500 mt-0.5">Focused on {productPanResult.name} — threshold: {typeof productPanResult.threshold === 'number' ? productPanResult.threshold.toFixed(2) : 'N/A'}</p>
             </div>
             <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">

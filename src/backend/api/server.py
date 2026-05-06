@@ -298,12 +298,13 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
 
 ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
     "fingerprint": "token",
-    "embedding": "semantic",
-    "unixcoder": "semantic",
+    "semantic": "embedding",
+    "unixcoder": "embedding",
     "ngram": "gst",
     "structural": "gst",
-    "graph": "execution_cfg",
-    "execution": "execution_cfg",
+    "string_tiling": "gst",
+    "execution": "graph",
+    "llm": "embedding",
 }
 
 
@@ -533,6 +534,10 @@ def _dataset_default_language(dataset_id: str) -> str:
         "codesearchnet": "mixed",
         "codexglue_clone": "java",
         "codexglue_defect": "c",
+        "CodeSimilarityDataset": "python",
+        "bigclonebench": "java",
+        "conplag": "java",
+        "conplag_classroom_java": "java",
         "google_codejam": "python",
         "human_eval": "python",
         "mbpp": "python",
@@ -592,11 +597,6 @@ def _infer_dataset_language(
     ):
         return "mixed"
 
-    if dataset_dir is not None and dataset_dir.exists():
-        inferred = _infer_language_from_directory(dataset_dir)
-        if inferred:
-            return inferred
-
     return default_language
 
 
@@ -646,6 +646,32 @@ def _infer_dataset_size_label(
         except OSError:
             pass
 
+    conplag_labels = dataset_dir / "versions" / "labels.csv"
+    if conplag_labels.exists():
+        try:
+            with conplag_labels.open("r", encoding="utf-8", newline="") as csv_file:
+                pair_count = max(0, sum(1 for _ in csv_file) - 1)
+            if pair_count > 0:
+                return f"{pair_count:,} labeled pairs"
+        except OSError:
+            pass
+
+    full_metadata_csv = dataset_dir / "full_metadata.csv"
+    if full_metadata_csv.exists():
+        try:
+            with full_metadata_csv.open("r", encoding="utf-8", newline="") as csv_file:
+                snippet_count = max(0, sum(1 for _ in csv_file) - 1)
+            if snippet_count > 0:
+                return f"{snippet_count:,} snippets"
+        except OSError:
+            pass
+
+    reduced_bcb = dataset_dir / "bcb_reduced"
+    if reduced_bcb.exists():
+        java_count = sum(1 for _ in reduced_bcb.rglob("*.java"))
+        if java_count > 0:
+            return f"{java_count:,} Java files"
+
     parquet_files = sorted((dataset_dir / "data").glob("*.parquet"))
     if parquet_files:
         return f"{len(parquet_files):,} parquet shard{'s' if len(parquet_files) != 1 else ''}"
@@ -659,7 +685,7 @@ def _infer_dataset_size_label(
                 total_files = num_examples * _dataset_snippets_per_row(dataset_info)
                 return f"{total_files:,} files"
 
-    return f"{_count_unique_code_files(dataset_dir)} files"
+    return "Dataset files"
 
 
 def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
@@ -712,6 +738,45 @@ def _count_generated_pair_labels(dataset_root: PathLib) -> tuple[int, int, int]:
         if _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) >= 2
     )
     return len(raw_pairs), positives, len(raw_pairs) - positives
+
+
+def _count_conplag_labels(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Count total, positive, and negative CONPLAG labels."""
+    return _count_csv_binary_labels(dataset_root / "versions" / "labels.csv", "verdict")
+
+
+def _count_code_similarity_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Estimate balanced pair counts for CodeSimilarityDataset."""
+    grouped = _code_similarity_snippet_groups(dataset_root)
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in grouped.values()
+    )
+    group_sizes = [len(files) for files in grouped.values()]
+    negative_pairs = 0
+    for left_index, left_size in enumerate(group_sizes):
+        for right_size in group_sizes[left_index + 1 :]:
+            negative_pairs += left_size * right_size
+    cap_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+    positives = min(positive_pairs, cap_each)
+    negatives = min(negative_pairs, cap_each)
+    return positives + negatives, positives, negatives
+
+
+def _count_bigclonebench_reduced_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Estimate balanced pair counts from BigCloneBench reduced functionality folders."""
+    groups = _bigclonebench_reduced_groups(dataset_root)
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in groups.values()
+    )
+    group_sizes = [len(files) for files in groups.values()]
+    negative_pairs = 0
+    for left_index, left_size in enumerate(group_sizes):
+        for right_size in group_sizes[left_index + 1 :]:
+            negative_pairs += left_size * right_size
+    cap_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+    positives = min(positive_pairs, cap_each)
+    negatives = min(negative_pairs, cap_each)
+    return positives + negatives, positives, negatives
 
 
 def _has_loadable_huggingface_dataset(dataset_root: PathLib) -> bool:
@@ -792,6 +857,22 @@ def _build_benchmark_dataset_readiness(
             "negative_pairs": negatives,
         }
 
+    if dataset_id == "CodeSimilarityDataset":
+        total, positives, negatives = _count_code_similarity_pairs(dataset_root)
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_snippet_groups",
+            "reason": (
+                f"CodeSimilarityDataset can create {positives} same-task positives and {negatives} cross-task negatives."
+                if runnable
+                else "CodeSimilarityDataset needs full_metadata.csv and snippet files."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
+        }
+
     if dataset_id == "google_codejam":
         gt_path = dataset_root / "ground_truth.json"
         runnable = gt_path.exists()
@@ -836,6 +917,22 @@ def _build_benchmark_dataset_readiness(
             "pair_count": positive_pairs + negative_pairs,
             "positive_pairs": positive_pairs,
             "negative_pairs": negative_pairs,
+        }
+
+    if dataset_id == "bigclonebench":
+        total, positives, negatives = _count_bigclonebench_reduced_pairs(dataset_root)
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_reduced_bcb_sources",
+            "reason": (
+                f"BigCloneBench reduced sample can create {positives} same-functionality positives and {negatives} cross-functionality negatives."
+                if runnable
+                else "BigCloneBench needs bcb_reduced functionality folders with Java files."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
         }
 
     if dataset_id == "poj104":
@@ -922,6 +1019,25 @@ def _build_benchmark_dataset_readiness(
             "pair_count": total_pairs,
             "positive_pairs": total_pairs // 2,  # Approximate: assuming balanced
             "negative_pairs": total_pairs // 2,
+        }
+
+    if dataset_id == "conplag":
+        total, positives, negatives = _count_conplag_labels(dataset_root)
+        version_dir = dataset_root / "versions" / "version_1"
+        runnable = (
+            total > 0 and positives > 0 and negatives > 0 and version_dir.exists()
+        )
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_conplag_files",
+            "reason": (
+                f"CONPLAG dataset with {total} labeled Java contest pairs ({positives} positive, {negatives} negative)."
+                if runnable
+                else "CONPLAG needs versions/labels.csv and versions/version_1 Java pair folders."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
         }
 
     if dataset_id == "conplag_classroom_java":
@@ -2176,8 +2292,12 @@ def _load_pair_labeled_benchmark_dataset(
         return _load_synthetic_pair_dataset(dataset_root, target_dir)
     if dataset_id == "kaggle_student_code":
         return _load_kaggle_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "CodeSimilarityDataset":
+        return _load_code_similarity_pair_dataset(dataset_root, target_dir)
     if dataset_id == "xiangtan":
         return _load_xiangtan_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "bigclonebench":
+        return _load_bigclonebench_reduced_pair_dataset(dataset_root, target_dir)
     if dataset_id == "codexglue_clone":
         return _load_codexglue_pair_dataset(dataset_root, target_dir)
     if dataset_id == "poj104":
@@ -2188,6 +2308,8 @@ def _load_pair_labeled_benchmark_dataset(
         return _load_google_codejam_pair_dataset(dataset_root, target_dir)
     if dataset_id == "IR-Plag-Dataset":
         return _load_ir_plag_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "conplag":
+        return _load_conplag_pair_dataset(dataset_root, target_dir)
     if dataset_id == "conplag_classroom_java":
         return _load_conplag_pair_dataset(dataset_root, target_dir)
     return {}, []
@@ -2273,6 +2395,114 @@ def _load_kaggle_pair_dataset(
                     "label": _label_to_clone_grade(row.get("Label", 0)),
                 }
             )
+
+    return submissions, explicit_pairs
+
+
+def _code_similarity_snippet_groups(dataset_root: PathLib) -> Dict[str, List[PathLib]]:
+    """Group CodeSimilarityDataset snippets by programming task."""
+    metadata_csv = dataset_root / "full_metadata.csv"
+    if not metadata_csv.exists():
+        return {}
+
+    groups: Dict[str, List[PathLib]] = {}
+    with metadata_csv.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            problem_type = str(row.get("problem_type", "")).strip()
+            filename = str(row.get("filename", "")).strip()
+            if not problem_type or not filename:
+                continue
+            source = dataset_root / problem_type / "snippets" / filename
+            if source.exists():
+                groups.setdefault(problem_type, []).append(source)
+
+    return {key: sorted(value) for key, value in groups.items() if len(value) >= 2}
+
+
+def _load_code_similarity_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load CodeSimilarityDataset as same-task positives and cross-task negatives."""
+    grouped = _code_similarity_snippet_groups(dataset_root)
+    if not grouped:
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+
+    positive_count = 0
+    for problem_type, files in grouped.items():
+        if positive_count >= max_each:
+            break
+        for left_index, source_a in enumerate(files):
+            if positive_count >= max_each:
+                break
+            for source_b in files[left_index + 1 :]:
+                if positive_count >= max_each:
+                    break
+                pair_id = f"codesim_pos_{positive_count:05d}_{problem_type}"
+                file_a = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_a.py",
+                    source_a.read_text(encoding="utf-8", errors="ignore"),
+                )
+                file_b = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_b.py",
+                    source_b.read_text(encoding="utf-8", errors="ignore"),
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "label": _label_to_clone_grade(1, 4),
+                        "case_category": "true_positive",
+                        "split": "test",
+                    }
+                )
+                positive_count += 1
+
+    group_items = list(grouped.items())
+    negative_count = 0
+    for left_index, (left_problem, left_files) in enumerate(group_items):
+        if negative_count >= max_each:
+            break
+        for right_problem, right_files in group_items[left_index + 1 :]:
+            if negative_count >= max_each:
+                break
+            for source_a in left_files:
+                if negative_count >= max_each:
+                    break
+                for source_b in right_files:
+                    if negative_count >= max_each:
+                        break
+                    pair_id = f"codesim_neg_{negative_count:05d}_{left_problem}_{right_problem}"
+                    file_a = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_a.py",
+                        source_a.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    file_b = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_b.py",
+                        source_b.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    explicit_pairs.append(
+                        {
+                            "file_a": file_a,
+                            "file_b": file_b,
+                            "label": 0,
+                            "case_category": "true_negative",
+                            "split": "test",
+                        }
+                    )
+                    negative_count += 1
 
     return submissions, explicit_pairs
 
@@ -2437,74 +2667,186 @@ def _load_ir_plag_pair_dataset(
     return submissions, explicit_pairs
 
 
+def _bigclonebench_reduced_groups(
+    dataset_root: PathLib, max_files_per_group: int = 8
+) -> Dict[str, List[PathLib]]:
+    """Group a bounded BigCloneBench reduced sample by functionality id."""
+    reduced_root = dataset_root / "bcb_reduced"
+    if not reduced_root.exists():
+        return {}
+
+    groups: Dict[str, List[PathLib]] = {}
+    for function_dir in sorted(
+        path for path in reduced_root.iterdir() if path.is_dir()
+    ):
+        files: List[PathLib] = []
+        for subdir_name in ("sample", "selected", "default"):
+            subdir = function_dir / subdir_name
+            if subdir.exists():
+                for source_file in sorted(subdir.glob("*.java")):
+                    files.append(source_file)
+                    if len(files) >= max_files_per_group:
+                        break
+            if len(files) >= max_files_per_group:
+                break
+        if len(files) >= 2:
+            groups[function_dir.name] = files
+
+    return groups
+
+
+def _load_bigclonebench_reduced_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced pair sample from BigCloneBench reduced functionality folders."""
+    grouped = _bigclonebench_reduced_groups(dataset_root)
+    if not grouped:
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+
+    positive_count = 0
+    for function_id, files in grouped.items():
+        if positive_count >= max_each:
+            break
+        for left_index, source_a in enumerate(files):
+            if positive_count >= max_each:
+                break
+            for source_b in files[left_index + 1 :]:
+                if positive_count >= max_each:
+                    break
+                pair_id = f"bcb_pos_{positive_count:05d}_{function_id}"
+                file_a = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_a.java",
+                    source_a.read_text(encoding="utf-8", errors="ignore"),
+                )
+                file_b = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_b.java",
+                    source_b.read_text(encoding="utf-8", errors="ignore"),
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "label": _label_to_clone_grade(1, 4),
+                        "case_category": "true_positive",
+                        "split": "test",
+                    }
+                )
+                positive_count += 1
+
+    group_items = list(grouped.items())
+    negative_count = 0
+    for left_index, (left_function, left_files) in enumerate(group_items):
+        if negative_count >= max_each:
+            break
+        for right_function, right_files in group_items[left_index + 1 :]:
+            if negative_count >= max_each:
+                break
+            for source_a in left_files[:3]:
+                if negative_count >= max_each:
+                    break
+                for source_b in right_files[:3]:
+                    if negative_count >= max_each:
+                        break
+                    pair_id = (
+                        f"bcb_neg_{negative_count:05d}_{left_function}_{right_function}"
+                    )
+                    file_a = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_a.java",
+                        source_a.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    file_b = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_b.java",
+                        source_b.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    explicit_pairs.append(
+                        {
+                            "file_a": file_a,
+                            "file_b": file_b,
+                            "label": 0,
+                            "case_category": "true_negative",
+                            "split": "test",
+                        }
+                    )
+                    negative_count += 1
+
+    return submissions, explicit_pairs
+
+
 def _load_conplag_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
-    """Load CONPLAG dataset pairs from labels.csv and version_1 directories."""
-    conplag_root = BENCHMARK_DATA_DIR / "conplag"
-    labels_csv = conplag_root / "versions" / "labels.csv"
-    version_1_dir = conplag_root / "versions" / "version_1"
+    """Load a balanced CONPLAG sample from labels.csv and version_1 directories."""
+    if dataset_root.name == "conplag_classroom_java":
+        dataset_root = BENCHMARK_DATA_DIR / "conplag"
+    labels_csv = dataset_root / "versions" / "labels.csv"
+    version_1_dir = dataset_root / "versions" / "version_1"
 
     if not (labels_csv.exists() and version_1_dir.exists()):
         return {}, []
 
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
-
-    import csv
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
 
     try:
-        with open(labels_csv, "r") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
-                    break
-                sub1, sub2, problem, verdict = (
-                    row["sub1"],
-                    row["sub2"],
-                    row["problem"],
-                    row["verdict"],
-                )
-                pair_dir = version_1_dir / f"{sub1}_{sub2}"
-                if not pair_dir.exists():
-                    continue
-
-                # Find Java files in the pair directory
-                java_files = list(pair_dir.glob("*.java"))
-                if len(java_files) != 2:
-                    continue
-
-                # Assume first file is sub1, second is sub2
-                file1_path, file2_path = java_files
-                code1 = file1_path.read_text(encoding="utf-8", errors="ignore")
-                code2 = file2_path.read_text(encoding="utf-8", errors="ignore")
-
-                file_a = _write_pair_submission(
-                    submissions,
-                    target_dir,
-                    f"conplag_{sub1}_{problem}.java",
-                    code1,
-                )
-                file_b = _write_pair_submission(
-                    submissions,
-                    target_dir,
-                    f"conplag_{sub2}_{problem}.java",
-                    code2,
-                )
-
-                label = _label_to_clone_grade(1 if verdict == "1" else 0)
-                case_category = "true_positive" if verdict == "1" else "true_negative"
-
-                explicit_pairs.append(
-                    {
-                        "file_a": file_a,
-                        "file_b": file_b,
-                        "label": label,
-                        "case_category": case_category,
-                    }
-                )
-    except Exception:
+        with labels_csv.open("r", encoding="utf-8", newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+    except OSError:
         return {}, []
+
+    positives = [row for row in rows if str(row.get("verdict", "")).strip() == "1"]
+    negatives = [row for row in rows if str(row.get("verdict", "")).strip() != "1"]
+    selected_rows = positives[:max_each] + negatives[:max_each]
+
+    for idx, row in enumerate(selected_rows):
+        sub1 = str(row.get("sub1", "")).strip()
+        sub2 = str(row.get("sub2", "")).strip()
+        problem = str(row.get("problem", "")).strip()
+        verdict = str(row.get("verdict", "")).strip()
+        if not sub1 or not sub2:
+            continue
+
+        pair_dir = version_1_dir / f"{sub1}_{sub2}"
+        java_files = sorted(pair_dir.glob("*.java")) if pair_dir.exists() else []
+        if len(java_files) != 2:
+            continue
+
+        source_a, source_b = java_files
+        pair_id = f"conplag_{idx:05d}_{sub1}_{sub2}"
+        file_a = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_a.java",
+            source_a.read_text(encoding="utf-8", errors="ignore"),
+        )
+        file_b = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_b.java",
+            source_b.read_text(encoding="utf-8", errors="ignore"),
+        )
+        explicit_pairs.append(
+            {
+                "file_a": file_a,
+                "file_b": file_b,
+                "label": _label_to_clone_grade(1 if verdict == "1" else 0),
+                "case_category": "true_positive" if verdict == "1" else "true_negative",
+                "problem": problem,
+                "split": "test",
+            }
+        )
 
     return submissions, explicit_pairs
 
@@ -4869,7 +5211,7 @@ async def upload_files(
             target.write_bytes(content)
             saved_files.append(f.filename)
 
-    starter_dir = job_dir / 'starter'
+    starter_dir = job_dir / "starter"
     starter_sources = []
     if starter_files:
         starter_dir.mkdir(exist_ok=True)
@@ -4878,7 +5220,7 @@ async def upload_files(
                 target = starter_dir / f.filename
                 content = await f.read()
                 target.write_bytes(content)
-                starter_sources.append(content.decode('utf-8', errors='ignore'))
+                starter_sources.append(content.decode("utf-8", errors="ignore"))
 
     if len(saved_files) < 2:
         return JSONResponse(
@@ -4932,7 +5274,7 @@ async def upload_zip(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
 
-    starter_dir = job_dir / 'starter'
+    starter_dir = job_dir / "starter"
     starter_sources = []
     if starter_files:
         starter_dir.mkdir(exist_ok=True)
@@ -4941,7 +5283,7 @@ async def upload_zip(
                 target = starter_dir / f.filename
                 content = await f.read()
                 target.write_bytes(content)
-                starter_sources.append(content.decode('utf-8', errors='ignore'))
+                starter_sources.append(content.decode("utf-8", errors="ignore"))
 
     return await _run_analysis(
         job_id,
@@ -5058,7 +5400,9 @@ async def _run_analysis(
 
         if "integritydesk" in selected_tool_ids:
             service = BatchDetectionService(
-                threshold=threshold, weights=fusion_weights or None, starter_sources=starter_sources
+                threshold=threshold,
+                weights=fusion_weights or None,
+                starter_sources=starter_sources,
             )
             results = service.compare_all_pairs(submissions)
             _merge_external_features_into_results(results, external_tool_results)
@@ -5628,7 +5972,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
             "created_by": metadata.get("created_by", "System"),
             "created_at": metadata.get("created", metadata.get("created_at", "")),
             "is_demo": is_demo,
-            "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, item),
+            "has_ground_truth": bool(readiness.get("runnable")),
             "benchmark_availability": readiness,
         }
         benchmark_quality = _build_benchmark_quality_certificate(item)
@@ -5690,6 +6034,10 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
         return True
     if dataset_id == "kaggle_student_code":
         return (dataset_root / "cheating_dataset.csv").exists()
+    if dataset_id in {"CodeSimilarityDataset", "bigclonebench", "conplag"}:
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
     if dataset_id in {"xiangtan", "google_codejam"}:
         return (dataset_root / "pairs.csv").exists() or (
             dataset_root / "ground_truth.json"
@@ -6522,7 +6870,14 @@ def _compute_evaluation_metrics(
 
     # Compute ROC-AUC and PR-AUC
     try:
-        from sklearn.metrics import roc_auc_score, average_precision_score
+        from sklearn.metrics import (
+            roc_auc_score,
+            average_precision_score,
+            precision_score,
+            recall_score,
+            f1_score,
+            confusion_matrix,
+        )
 
         if len(np.unique(labels_arr)) > 1:
             roc_auc = roc_auc_score(labels_arr, scores_arr)
@@ -6706,25 +7061,49 @@ def _binary_metrics_at_threshold(
 ) -> Dict[str, Any]:
     """Compute binary confusion metrics at a concrete decision threshold."""
     preds = (scores_arr >= threshold).astype(int)
-    tp = int(np.sum((preds == 1) & (labels_arr == 1)))
-    fp = int(np.sum((preds == 1) & (labels_arr == 0)))
-    tn = int(np.sum((preds == 0) & (labels_arr == 0)))
-    fn = int(np.sum((preds == 0) & (labels_arr == 1)))
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1_score = (
-        2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    )
-    false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    # Use sklearn for metrics computation
+    try:
+        from sklearn.metrics import (
+            confusion_matrix,
+            precision_score,
+            recall_score,
+            f1_score,
+        )
+
+        cm = confusion_matrix(labels_arr, preds)
+        tn, fp, fn, tp = cm.ravel()
+        precision = precision_score(labels_arr, preds, zero_division=0)
+        recall = recall_score(labels_arr, preds, zero_division=0)
+        f1_score_val = f1_score(labels_arr, preds, zero_division=0)
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    except ImportError:
+        # Fallback to manual computation
+        tp = int(np.sum((preds == 1) & (labels_arr == 1)))
+        fp = int(np.sum((preds == 1) & (labels_arr == 0)))
+        tn = int(np.sum((preds == 0) & (labels_arr == 0)))
+        fn = int(np.sum((preds == 0) & (labels_arr == 1)))
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1_score_val = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall)
+            else 0.0
+        )
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
     return {
         "threshold": round(float(threshold), 6),
         "precision": round(float(precision), 4),
         "recall": round(float(recall), 4),
-        "f1_score": round(float(f1_score), 4),
+        "f1_score": round(float(f1_score_val), 4),
         "false_positive_rate": round(float(false_positive_rate), 4),
-        "confusion_matrix": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
+        "confusion_matrix": {
+            "tp": int(tp),
+            "fp": int(fp),
+            "tn": int(tn),
+            "fn": int(fn),
+        },
     }
 
 
@@ -9039,13 +9418,25 @@ ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
     "winnowing": "Winnowing",
-    "gst": "GST",
+    "gst": "String Tiling",
+    "ngram": "N-gram",
     "semantic": "Semantic",
+    "embedding": "Embedding",
+    "graph": "Graph",
+    "static_rules": "Static Rules",
     "web": "Web",
     "ai_detection": "AI Detection",
-    "execution_cfg": "Execution/CFG",
 }
-UPLOAD_ENGINE_KEYS = ("token", "ast", "winnowing", "gst", "semantic")
+UPLOAD_ENGINE_KEYS = (
+    "token",
+    "winnowing",
+    "gst",
+    "ast",
+    "ngram",
+    "graph",
+    "embedding",
+    "static_rules",
+)
 
 
 def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
@@ -9117,10 +9508,15 @@ def _get_upload_engine_weights(
 def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
     fusion_weights = {
         "fingerprint": _coerce_float(engine_weights.get("token")),
-        "ast": _coerce_float(engine_weights.get("ast")),
         "winnowing": _coerce_float(engine_weights.get("winnowing")),
-        "ngram": _coerce_float(engine_weights.get("gst")),
-        "embedding": _coerce_float(engine_weights.get("semantic")),
+        "string_tiling": _coerce_float(engine_weights.get("gst")),
+        "ast": _coerce_float(engine_weights.get("ast")),
+        "ngram": _coerce_float(engine_weights.get("ngram")),
+        "graph": _coerce_float(engine_weights.get("graph")),
+        "embedding": _coerce_float(
+            engine_weights.get("embedding", engine_weights.get("semantic"))
+        ),
+        "static_rules": _coerce_float(engine_weights.get("static_rules")),
     }
     if not any(value > 0 for value in fusion_weights.values()):
         return {}

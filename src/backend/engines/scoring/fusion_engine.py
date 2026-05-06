@@ -46,16 +46,23 @@ class FusedScore:
 LANGUAGE_BASELINE: Dict[str, float] = {
     "embedding": 0.70,  # UniXcoder sees "this is Python code" for both
     "winnowing": 0.25,  # Common keywords/structures produce some overlap
+    "string_tiling": 0.20,  # Normalized local token runs from common idioms
     "ngram": 0.15,  # Character n-grams share syntax tokens
     "ast": 0.25,  # Similar AST node types (functions, returns, etc.)
+    "graph": 0.20,  # Common control/data-flow skeletons in same assignment
+    "static_rules": 0.20,  # Static rule patterns are coarse by design
     "fingerprint": 0.15,  # Token-level overlap from language keywords
+    "sklearn_cosine": 0.25,  # TF-IDF baseline has vocabulary overlap noise
 }
 
 WEIGHT_ALIASES: Dict[str, str] = {
     "token": "fingerprint",
     "semantic": "embedding",
     "codebert": "embedding",
-    "gst": "ngram",
+    "gst": "string_tiling",
+    "cfg": "graph",
+    "execution_cfg": "graph",
+    "llm": "embedding",
 }
 
 
@@ -103,23 +110,29 @@ def _get_default_config() -> Dict:
     return _with_policy_defaults(
         {
             "weights": {
-                "ast": 0.65,
-                "token": 0.25,
-                "winnowing": 0.10,
-                "graph": 0.00,
-                "execution": 0.00,
-                "embedding": 0.00,
-                "ngram": 0.00,
+                "token": 0.12,
+                "winnowing": 0.16,
+                "gst": 0.13,
+                "ast": 0.17,
+                "ngram": 0.10,
+                "graph": 0.15,
+                "embedding": 0.12,
+                "static_rules": 0.05,
                 "codebert": 0.00,
+                "sklearn_cosine": 0.00,
             },
             "baseline_correction": {
                 "enabled": True,
                 "baselines": {
                     "embedding": 0.70,
                     "winnowing": 0.25,
+                    "string_tiling": 0.20,
                     "ngram": 0.15,
                     "ast": 0.25,
+                    "graph": 0.20,
+                    "static_rules": 0.20,
                     "fingerprint": 0.15,
+                    "sklearn_cosine": 0.25,
                 },
             },
             "arbitration": {
@@ -558,8 +571,16 @@ class FusionEngine:
         cap = float(guard.get("insufficient_evidence_cap", 0.58))
         semantic_only_cap = float(guard.get("semantic_only_cap", 0.45))
 
-        concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
-        lexical_engines = ("fingerprint", "winnowing", "ngram")
+        concrete_engines = (
+            "ast",
+            "fingerprint",
+            "winnowing",
+            "string_tiling",
+            "ngram",
+            "graph",
+            "static_rules",
+        )
+        lexical_engines = ("fingerprint", "winnowing", "string_tiling", "ngram")
 
         # AI detection cannot alone trigger high-severity outcomes
         ai_score = corrected_scores.get("ai_detection", 0.0)

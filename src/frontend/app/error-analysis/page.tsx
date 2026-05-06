@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   GraduationCap,
   Zap,
+  Target,
 } from 'lucide-react';
 
 /* ─── tiny helpers ─────────────────────────────────────────────────────── */
@@ -324,11 +325,13 @@ function ErrorAnalysisPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <div className="relative">
-            <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-violet-600 animate-spin" />
+        <div className="p-4">
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+            <div className="relative">
+              <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-violet-600 animate-spin" />
+            </div>
+            <p className="text-sm text-slate-500 font-medium">Loading error analysis…</p>
           </div>
-          <p className="text-sm text-slate-500 font-medium">Loading error analysis…</p>
         </div>
       </DashboardLayout>
     );
@@ -338,7 +341,8 @@ function ErrorAnalysisPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="p-4">
+        <div className="space-y-6">
 
         {/* ── Page Header ── */}
         <div className="flex items-start justify-between">
@@ -473,9 +477,10 @@ function ErrorAnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               {
-                title: 'System Improvements',
-                color: 'border-rose-500',
-                accent: 'text-rose-400',
+                title: 'False Negatives',
+                color: 'border-orange-500',
+                accent: 'text-orange-400',
+                icon: TrendingUp,
                 items: [
                   ['Enhance semantic detection', 'Current system misses heavily obfuscated plagiarism — prioritise AST and embedding analysis.'],
                   ['Implement boilerplate filtering', 'Many false positives stem from required assignment templates.'],
@@ -498,6 +503,7 @@ function ErrorAnalysisPage() {
                 title: 'Preventive Measures',
                 color: 'border-emerald-500',
                 accent: 'text-emerald-400',
+                icon: Lightbulb,
                 items: [
                   ['Assignment design', 'Create unique problems that reduce template code sharing.'],
                   ['Code review process', 'Implement peer code reviews during development.'],
@@ -505,24 +511,34 @@ function ErrorAnalysisPage() {
                   ['Staged submissions', 'Require intermediate submissions to track code evolution.'],
                 ],
               },
-            ].map((section) => (
-              <div
-                key={section.title}
-                className={`bg-white/5 border-t-2 ${section.color} rounded-xl p-4 space-y-3`}
-              >
-                <h3 className={`text-sm font-bold ${section.accent}`}>{section.title}</h3>
-                <ul className="space-y-3">
-                  {section.items.map(([title, desc]) => (
-                    <li key={title}>
-                      <p className="text-xs font-semibold text-white">{title}</p>
-                      <p className="text-xs text-slate-400 leading-relaxed">{desc}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            ].map((section) => {
+              const Icon = section.icon;
+              return (
+                <div
+                  key={section.title}
+                  className={`bg-white/5 border-t-2 ${section.color} rounded-xl p-4 space-y-3`}
+                >
+                  <div className="flex items-center gap-2">
+                    {Icon && <Icon size={16} className={section.accent} />}
+                    <h3 className={`text-sm font-bold ${section.accent}`}>{section.title}</h3>
+                  </div>
+                  <ul className="space-y-3">
+                    {section.items.map((item) => {
+                      const [title, desc] = item;
+                      return (
+                        <li key={title}>
+                          <p className="text-xs font-semibold text-white">{title}</p>
+                          <p className="text-xs text-slate-400 leading-relaxed">{desc}</p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </div>
+      </div>
       </div>
     </DashboardLayout>
   );

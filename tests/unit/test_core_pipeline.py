@@ -36,14 +36,25 @@ class TestFeatureExtractor:
         assert fv.embedding == 0.0
         assert fv.ngram == 0.0
         assert fv.winnowing == 0.0
+        assert fv.string_tiling == 0.0
+        assert fv.graph == 0.0
+        assert fv.static_rules == 0.0
 
     def test_to_features_order(self) -> None:
         """to_features() returns features in FEATURE_ORDER."""
         fv = FeatureVector(
-            ast=0.1, fingerprint=0.2, embedding=0.3, ngram=0.4, winnowing=0.5
+            ast=0.1,
+            fingerprint=0.2,
+            embedding=0.3,
+            ngram=0.4,
+            winnowing=0.5,
+            string_tiling=0.6,
+            graph=0.7,
+            static_rules=0.8,
+            sklearn_cosine=0.9,
         )
         result = self.extractor.to_features(fv)
-        assert result == [0.1, 0.2, 0.3, 0.4, 0.5]
+        assert result == [0.2, 0.5, 0.6, 0.1, 0.4, 0.7, 0.3, 0.8, 0.9]
 
     def test_extract_identical_code_returns_max_scores(self) -> None:
         """Comparing identical code should produce non-zero similarity scores."""
@@ -55,6 +66,9 @@ class TestFeatureExtractor:
         assert fv.fingerprint > 0.0
         assert 0.0 <= fv.ast <= 1.0
         assert 0.0 <= fv.embedding <= 1.0
+        assert 0.0 <= fv.string_tiling <= 1.0
+        assert 0.0 <= fv.graph <= 1.0
+        assert 0.0 <= fv.static_rules <= 1.0
 
     def test_extract_different_code(self) -> None:
         """Completely different code should have low (but not necessarily zero) scores."""
@@ -100,6 +114,7 @@ class TestFeatureExtractor:
         self.extractor._unixcoder_engine = FindingEngine(0.75)
         self.extractor._ngram_engine = FloatEngine(0.4)
         self.extractor._winnowing_engine = FloatEngine(0.6)
+        self.extractor._graph_engine = FloatEngine(0.7)
 
         fv = self.extractor.extract("def a(): pass", "def b(): pass")
 
@@ -108,6 +123,7 @@ class TestFeatureExtractor:
         assert fv.embedding == 0.75
         assert fv.ngram == 0.4
         assert fv.winnowing == 0.6
+        assert fv.graph == 0.7
 
 
 # ─── FusionEngine ────────────────────────────────────────────────────────
@@ -145,12 +161,12 @@ class TestFusionEngine:
         assert engine.weights["ast"] == 0.5
         assert engine.weights["fingerprint"] == 0.3
         assert engine.weights["embedding"] == 0.1
-        assert engine.weights["ngram"] == 0.1
+        assert engine.weights["string_tiling"] == 0.1
 
     def test_config_baseline_aliases_map_to_feature_names(self) -> None:
         """Baseline correction must use the same feature names as extraction."""
         engine = FusionEngine(weights={"fingerprint": 1.0})
-        fv = FeatureVector(fingerprint=0.3)
+        fv = FeatureVector(fingerprint=0.15)
 
         result = engine.fuse(fv)
 
@@ -169,7 +185,14 @@ class TestFusionEngine:
         """All features = 1.0 → final score = 1.0."""
         engine = FusionEngine()
         fv = FeatureVector(
-            ast=1.0, fingerprint=1.0, embedding=1.0, ngram=1.0, winnowing=1.0
+            ast=1.0,
+            fingerprint=1.0,
+            embedding=1.0,
+            ngram=1.0,
+            winnowing=1.0,
+            string_tiling=1.0,
+            graph=1.0,
+            static_rules=1.0,
         )
         result = engine.fuse(fv)
         assert result.final_score == 1.0

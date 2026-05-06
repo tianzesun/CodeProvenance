@@ -116,7 +116,8 @@ def test_professor_profile_to_engine_weights_returns_normalized_engine_keys() ->
     assert round(sum(engine_weights.values()), 4) == 1.0
     assert engine_weights["ast"] > 0
     assert engine_weights["graph"] > 0
-    assert engine_weights["execution"] > 0
+    assert engine_weights["static_rules"] > 0
+    assert engine_weights["gst"] > 0
 
 
 def test_catalog_contains_all_simple_settings() -> None:

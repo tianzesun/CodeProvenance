@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, Cpu, Database, Save, Shield, SlidersHorizontal, Zap, Settings, Bot, GitMerge, Target, Eye, ExternalLink, Activity, Archive } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, SlidersHorizontal, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, Archive } from 'lucide-react';
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
@@ -17,7 +17,7 @@ const DEFAULT_PROFILE = {
 };
 
 const TABS = [
-  { id: 'general', label: 'General', icon: Settings },
+  { id: 'general', label: 'General', icon: Database },
   { id: 'engines', label: 'Detection Engines', icon: Cpu },
   { id: 'ai_models', label: 'AI Analysis', icon: Bot },
   { id: 'matching_rules', label: 'Matching Rules', icon: GitMerge },
@@ -32,11 +32,11 @@ const TABS = [
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState(null);
+  const [activeTab, setActiveTab] = useState('general');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [auditLogLevel, setAuditLogLevel] = useState('INFO');
   const [auditRetentionDays, setAuditRetentionDays] = useState(365);
   const [debugMode, setDebugMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('general');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -77,10 +77,6 @@ export default function SettingsPage() {
   };
 
   const saveSettings = async () => {
-    if (user?.role !== 'admin') {
-      setError('Admin access required to save settings');
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -135,9 +131,9 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm font-medium text-slate-500">Settings</div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">System Settings</h1>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Professor-friendly detection settings</h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                Configure detection engines, performance, integrations, and other system settings.
+                Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically.
               </p>
             </div>
             <button
@@ -157,7 +153,7 @@ export default function SettingsPage() {
         {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
 
         {/* Tab Navigation */}
-        <div className="flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm scrollbar-thin">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -306,11 +302,7 @@ export default function SettingsPage() {
           {/* Review and Evidence Tab */}
           {activeTab === 'review_evidence' && (
             <div className="space-y-6">
-              <SettingsGroup
-                title="Result Size"
-                description="Top 25 is the recommended review queue size for most assignments."
-                icon={Eye}
-              >
+              <SettingsGroup title="Result Size" description="Top 25 is the recommended review queue size for most assignments." icon={Eye}>
                 <SegmentedOptions
                   options={catalog.result_volume || []}
                   value={profile.result_volume}
@@ -364,6 +356,19 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {/* Integrations Tab */}
+          {activeTab === 'integrations' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Webhooks"
+                description="Configure webhooks for real-time notifications."
+                icon={Zap}
+              >
+                <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
+              </SettingsGroup>
+            </div>
+          )}
+
           {/* Performance Tab */}
           {activeTab === 'performance' && (
             <div className="space-y-6">
@@ -381,19 +386,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Integrations Tab */}
-          {activeTab === 'integrations' && (
-            <div className="space-y-6">
-              <SettingsGroup
-                title="Webhooks"
-                description="Configure webhooks for real-time notifications."
-                icon={Zap}
-              >
-                <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
-              </SettingsGroup>
-            </div>
-          )}
-
           {/* Audit Trail Tab */}
           {activeTab === 'audit_trail' && (
             <div className="space-y-6">
@@ -406,19 +398,7 @@ export default function SettingsPage() {
                   <SelectInput label="Log Level" value={auditLogLevel} options={[['DEBUG', 'Debug'], ['INFO', 'Info'], ['WARNING', 'Warning'], ['ERROR', 'Error']]} onChange={setAuditLogLevel} />
                   <TextInput label="Audit Retention Days" type="number" value={auditRetentionDays} onChange={(value) => setAuditRetentionDays(Number(value))} />
                 </div>
-              </SettingsGroup>
-            </div>
-          )}
-
-          {/* Expert Settings Tab */}
-          {activeTab === 'expert' && (
-            <div className="space-y-6">
-              <SettingsGroup
-                title="Expert Settings"
-                description="Advanced settings for experts only."
-                icon={SlidersHorizontal}
-              >
-                <label className="flex items-center gap-3">
+                <label className="flex items-center gap-3 mt-4">
                   <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded" />
                   <span className="text-sm font-medium text-slate-700">Enable Debug Mode</span>
                 </label>
