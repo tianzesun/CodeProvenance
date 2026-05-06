@@ -158,10 +158,7 @@ class FeatureExtractor:
                 from src.backend.engines.similarity.ast_similarity import ASTSimilarity
 
                 self._ast_engine = ASTSimilarity()
-            result = self._ast_engine.compare(
-                {"raw": a, "tokens": []},
-                {"raw": b, "tokens": []},
-            )
+            result = self._ast_engine.compare({"raw": a}, {"raw": b})
             return self._coerce_score(result, "ast")
         except Exception as exc:
             logger.debug("AST engine unavailable: %s", exc)
@@ -175,10 +172,7 @@ class FeatureExtractor:
                 )
 
                 self._token_engine = TokenSimilarity()
-            result = self._token_engine.compare(
-                {"raw": a, "tokens": []},
-                {"raw": b, "tokens": []},
-            )
+            result = self._token_engine.compare({"raw": a}, {"raw": b})
             return self._coerce_score(result, "fingerprint")
         except Exception as exc:
             logger.debug("Token/Fingerprint engine unavailable: %s", exc)
@@ -234,10 +228,7 @@ class FeatureExtractor:
                 )
 
                 self._ngram_engine = NgramSimilarity()
-            result = self._ngram_engine.compare(
-                {"raw": a, "tokens": []},
-                {"raw": b, "tokens": []},
-            )
+            result = self._ngram_engine.compare({"raw": a}, {"raw": b})
             return self._coerce_score(result, "ngram")
         except Exception as exc:
             logger.debug("N-gram engine unavailable: %s", exc)
@@ -251,10 +242,7 @@ class FeatureExtractor:
                 )
 
                 self._winnowing_engine = EnhancedWinnowingSimilarity()
-            result = self._winnowing_engine.compare(
-                {"raw": a, "tokens": []},
-                {"raw": b, "tokens": []},
-            )
+            result = self._winnowing_engine.compare({"raw": a}, {"raw": b})
             return self._coerce_score(result, "winnowing")
         except Exception as exc:
             logger.debug("Winnowing engine unavailable: %s", exc)

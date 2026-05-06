@@ -143,11 +143,19 @@ def _apply_structure_sensitivity_floor(
     ast_score: float,
     fingerprint_score: float,
     logic_flow: float,
+    ngram_score: float = 0.0,
+    winnowing_score: float = 0.0,
 ) -> float:
     """Preserve control-flow/reorder sensitivity when concrete structure agrees."""
-    if ast_score >= 0.85 and fingerprint_score >= 0.55 and logic_flow >= 0.90:
+    strong_lexical = fingerprint_score >= 0.80 and (
+        ngram_score >= 0.70 or winnowing_score >= 0.56
+    )
+    medium_lexical = fingerprint_score >= 0.65 and (
+        ngram_score >= 0.58 or winnowing_score >= 0.48
+    )
+    if ast_score >= 0.75 and strong_lexical and logic_flow >= 0.90:
         return max(score, 0.88)
-    if ast_score >= 0.85 and fingerprint_score >= 0.55 and logic_flow >= 0.78:
+    if ast_score >= 0.65 and medium_lexical and logic_flow >= 0.78:
         return max(score, 0.82)
     return score
 
@@ -156,7 +164,10 @@ class BatchDetectionService:
     """Process entire folders of student submissions."""
 
     def __init__(
-        self, threshold: float = 0.5, weights: Optional[Dict[str, float]] = None, starter_sources: Optional[List[str]] = None
+        self,
+        threshold: float = 0.5,
+        weights: Optional[Dict[str, float]] = None,
+        starter_sources: Optional[List[str]] = None,
     ):
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
@@ -170,6 +181,7 @@ class BatchDetectionService:
         self.starter_remover = None
         if starter_sources:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
+
             self.starter_remover = StarterCodeRemover(starter_sources)
 
     def ingest_folder(self, folder: Path) -> Dict[str, str]:
@@ -219,6 +231,8 @@ class BatchDetectionService:
                     features.ast,
                     features.fingerprint,
                     logic_flow,
+                    features.ngram,
+                    features.winnowing,
                 )
 
                 if final_score >= self.threshold * 0.5:  # Store even low scores
@@ -269,6 +283,8 @@ class BatchDetectionService:
                 features.ast,
                 features.fingerprint,
                 logic_flow,
+                features.ngram,
+                features.winnowing,
             )
             scored_pairs.append(
                 {
@@ -291,13 +307,15 @@ class BatchDetectionService:
         for item in scored_pairs:
             features = item["features"]
             raw_score = item["raw_score"]
-            final_score = _subtract_clean_baseline(raw_score, clean_baseline)
+            baseline_adjusted_score = _subtract_clean_baseline(
+                raw_score, clean_baseline
+            )
             results.append(
                 ComparisonResult(
                     file_a=item["file_a"],
                     file_b=item["file_b"],
-                    score=final_score,
-                    risk_level=_risk_level(final_score),
+                    score=raw_score,
+                    risk_level=_risk_level(raw_score),
                     features={
                         k: v
                         for k, v in {
@@ -309,6 +327,7 @@ class BatchDetectionService:
                             "logic_flow": item["logic_flow"],
                             "raw_score": raw_score,
                             "clean_baseline": clean_baseline,
+                            "baseline_adjusted_score": baseline_adjusted_score,
                         }.items()
                         if v is not None
                     },

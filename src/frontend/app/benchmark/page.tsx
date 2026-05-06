@@ -1438,6 +1438,13 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             <div>
               <h2 className={`font-semibold ${qualityGates.passed ? 'text-emerald-900' : 'text-red-900'}`}>Regression Quality Gates</h2>
               <p className={`mt-1 text-sm ${qualityGates.passed ? 'text-emerald-700' : 'text-red-700'}`}>{qualityGates.summary}</p>
+              {!qualityGates.passed && qualityGates.diagnosis && (
+                <div className="mt-3 rounded-xl border border-red-200 bg-white/80 px-4 py-3 text-sm leading-6 text-red-800">
+                  <div className="font-semibold text-red-900">{qualityGates.diagnosis.summary}</div>
+                  {qualityGates.diagnosis.detail && <div className="mt-1">{qualityGates.diagnosis.detail}</div>}
+                  {qualityGates.diagnosis.next_step && <div className="mt-1 font-medium">{qualityGates.diagnosis.next_step}</div>}
+                </div>
+              )}
             </div>
             <span className={`rounded-full px-3 py-1 text-xs font-bold ${qualityGates.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{qualityGates.passed ? 'PASS' : 'FAIL'}</span>
           </div>

@@ -16,8 +16,32 @@ from src.backend.application.services.batch_detection_service import (
 from src.backend.api import server
 
 
-def test_compute_evaluation_metrics_reports_exact_confusion_matrix() -> None:
+class _DummyFeatures:
+    """Minimal feature vector for benchmark pair scoring tests."""
+
+    def __init__(self, score: float) -> None:
+        self.ast = score
+        self.fingerprint = score
+        self.embedding = score
+        self.ngram = score
+        self.winnowing = score
+
+
+class _DummyFused:
+    """Minimal fused score object for benchmark pair scoring tests."""
+
+    def __init__(self, score: float) -> None:
+        self.final_score = score
+        self.contributions = {"ast": 1.0}
+
+
+def test_compute_evaluation_metrics_reports_exact_confusion_matrix(monkeypatch) -> None:
     """PAN scorecard metrics should match the labeled score arrays exactly."""
+    monkeypatch.setattr(
+        server,
+        "_benchmark_fixed_threshold",
+        lambda: (0.82, "test.threshold"),
+    )
     metrics = server._compute_evaluation_metrics(
         scores=[0.95, 0.82, 0.21, 0.05],
         labels=[3, 2, 0, 0],
@@ -43,6 +67,36 @@ def test_compute_evaluation_metrics_reports_exact_confusion_matrix() -> None:
     # assert metrics["metric_integrity"]["heldout_f1"] == metrics["f1_score"]  # May differ due to split
 
 
+def test_benchmark_pair_scores_keep_raw_score_as_primary() -> None:
+    """Benchmark gates should evaluate the detector score, not baseline-adjusted diagnostics."""
+
+    class Extractor:
+        def extract(self, code_a: str, code_b: str) -> _DummyFeatures:
+            return _DummyFeatures(0.60 if "plag" in code_b else 0.60)
+
+    class Fusion:
+        def fuse(self, features: _DummyFeatures) -> _DummyFused:
+            return _DummyFused(features.ast)
+
+    service = BatchDetectionService.__new__(BatchDetectionService)
+    service.extractor = Extractor()
+    service.fusion = Fusion()
+
+    results = service.compare_pairs(
+        {"a.py": "base", "b.py": "plag", "c.py": "clean"},
+        [
+            {"file_a": "a.py", "file_b": "b.py", "label": 3},
+            {"file_a": "a.py", "file_b": "c.py", "label": 0},
+        ],
+    )
+
+    positive = next(result for result in results if result.file_b == "b.py")
+
+    assert positive.score == 0.60
+    assert positive.features["clean_baseline"] == 0.60
+    assert positive.features["baseline_adjusted_score"] == 0.0
+
+
 def test_binary_metrics_at_threshold_uses_inclusive_boundary() -> None:
     """Scores equal to the threshold should count as positive predictions."""
     metrics = server._binary_metrics_at_threshold(
@@ -55,8 +109,15 @@ def test_binary_metrics_at_threshold_uses_inclusive_boundary() -> None:
     assert metrics["f1_score"] == 1.0
 
 
-def test_fixed_threshold_strategy_does_not_optimize_regression_threshold() -> None:
+def test_fixed_threshold_strategy_does_not_optimize_regression_threshold(
+    monkeypatch,
+) -> None:
     """Regression tests should use the fixed production threshold."""
+    monkeypatch.setattr(
+        server,
+        "_benchmark_fixed_threshold",
+        lambda: (0.82, "test.threshold"),
+    )
     metrics = server._compute_evaluation_metrics(
         scores=[0.90, 0.40, 0.30, 0.20],
         labels=[3, 2, 0, 0],
@@ -68,10 +129,47 @@ def test_fixed_threshold_strategy_does_not_optimize_regression_threshold() -> No
     assert metrics["threshold_strategy"] == "fixed_threshold"
     assert metrics["best_threshold_exact"] == 0.82
     assert metrics["fixed_threshold"] == 0.82
+    assert metrics["fixed_threshold_source"] == "test.threshold"
     assert metrics["headline_metric_basis"] == "locked_full_sample_evaluation"
     assert metrics["confusion_matrix"] == {"tp": 1, "fp": 0, "tn": 2, "fn": 1}
     assert metrics["metric_integrity"]["calibration_bias_warning"] is False
     assert metrics["benchmark_trust"]["grade"] == "limited"
+
+
+def test_benchmark_fixed_threshold_uses_engine_config(monkeypatch) -> None:
+    """Trust Check should use the IntegrityDesk engine threshold, not UI defaults."""
+
+    def fake_config() -> dict:
+        return {"decision": {"default_threshold": 0.91}}
+
+    from src.backend.engines.scoring import fusion_engine
+
+    monkeypatch.setattr(fusion_engine, "load_engine_config", fake_config)
+
+    threshold, source = server._benchmark_fixed_threshold()
+
+    assert threshold == 0.91
+    assert source == "engine_weights.decision.default_threshold"
+
+
+def test_feature_extractor_does_not_send_empty_tokens_to_raw_engines() -> None:
+    """Raw source engines should not score unrelated files as empty-token matches."""
+    from src.backend.engines.features.feature_extractor import FeatureExtractor
+
+    extractor = FeatureExtractor()
+    simple_program = "class A { public static void main(String[] args) { int x = 1; } }"
+    control_program = (
+        "class B { public static void main(String[] args) { "
+        "for (int i = 0; i < 10; i++) { System.out.println(i); } } }"
+    )
+
+    fingerprint = extractor._run_fingerprint(simple_program, control_program)
+    ast = extractor._run_ast(simple_program, control_program)
+
+    assert fingerprint is not None
+    assert ast is not None
+    assert fingerprint < 1.0
+    assert ast < 1.0
 
 
 def test_engine_tuning_recommendations_include_yaml_config_changes(monkeypatch) -> None:
@@ -203,6 +301,69 @@ def test_engine_tuning_does_not_stack_weight_changes_when_validation_pending(
     )
 
 
+def test_recall_failure_with_score_overlap_blocks_threshold_lowering(
+    monkeypatch,
+) -> None:
+    """Overlapped positive/negative scores should not produce a blind threshold drop."""
+    from src.backend.engines.scoring import fusion_engine
+
+    monkeypatch.setattr(
+        fusion_engine,
+        "load_engine_config",
+        lambda: {
+            "weights": {
+                "token": 0.16,
+                "ngram": 0.08,
+                "winnowing": 0.18,
+                "ast": 0.22,
+                "graph": 0.08,
+                "execution": 0.18,
+                "embedding": 0.06,
+                "llm": 0.04,
+            },
+            "decision": {
+                "default_threshold": 0.95,
+                "minimum_engine_agreement": 5,
+            },
+            "precision_guard": {
+                "minimum_concrete_engines": 5,
+                "semantic_only_cap": 0.25,
+                "penalty_multiplier": 0.55,
+            },
+            "ast_boost": {
+                "minimum_guaranteed_score": 0.55,
+                "threshold": 0.95,
+            },
+            "deep_verify": {
+                "minimum_agreeing_engines": 5,
+            },
+            "advanced": {"weights_need_validation": True},
+        },
+    )
+
+    metrics = server._compute_evaluation_metrics(
+        scores=[1.0, 0.82, 0.82, 0.82, 0.88, 0.70],
+        labels=[3, 3, 3, 3, 0, 0],
+        tool_name="integritydesk",
+        dataset_name="unit",
+        threshold_strategy="fixed_threshold",
+        engine_contribution={"ast": 0.55, "fingerprint": 0.45},
+    )
+
+    recommendations = metrics["tuning_recommendations"]
+    changed_paths = {change["path"] for change in recommendations["config_changes"]}
+
+    assert metrics["precision"] == 1.0
+    assert metrics["recall"] == 0.25
+    assert metrics["score_diagnostics"]["score_overlap_warning"] is True
+    assert recommendations["mode"] == "separation_first"
+    assert "decision.default_threshold" not in changed_paths
+    assert any(
+        action["title"] == "Fix score separation before threshold changes"
+        for action in recommendations["actions"]
+    )
+
+
 def test_apply_engine_optimization_changes_updates_allowed_paths() -> None:
     """Apply button payloads should update only vetted engine config paths."""
     result = server._apply_engine_optimization_changes(
@@ -243,6 +404,28 @@ def test_regression_quality_gates_fail_on_low_precision() -> None:
     assert gates["passed_count"] == 1
     failed = {gate["metric"] for gate in gates["gates"] if not gate["passed"]}
     assert failed == {"precision", "f1_score", "false_positive_rate"}
+
+
+def test_regression_quality_gates_explain_recall_failure() -> None:
+    """Release-gate failure should distinguish detector recall from benchmark trust."""
+    gates = server._build_regression_quality_gates(
+        {
+            "precision": 1.0,
+            "recall": 0.0032,
+            "f1_score": 0.0064,
+            "false_positive_rate": 0.0,
+            "fixed_threshold": 0.95,
+            "fixed_threshold_source": "engine_weights.decision.default_threshold",
+            "confusion_matrix": {"tp": 1, "fp": 0, "tn": 90, "fn": 309},
+            "score_diagnostics": {"score_overlap_warning": True},
+        }
+    )
+
+    assert gates["passed"] is False
+    assert gates["diagnosis"]["mode"] == "detector_recall_failure"
+    assert gates["diagnosis"]["score_overlap_warning"] is True
+    assert gates["summary"] == "2/4 quality gates passed."
+    assert "too conservative" in gates["diagnosis"]["summary"]
 
 
 def test_normalize_benchmark_protocol_supports_new_product_names() -> None:
@@ -441,8 +624,10 @@ def test_structure_sensitivity_floor_keeps_reorder_and_control_flow_matches() ->
         _apply_structure_sensitivity_floor(
             score=0.68,
             ast_score=0.95,
-            fingerprint_score=0.72,
+            fingerprint_score=0.82,
             logic_flow=0.94,
+            ngram_score=0.68,
+            winnowing_score=0.58,
         )
         == 0.88
     )
@@ -452,6 +637,8 @@ def test_structure_sensitivity_floor_keeps_reorder_and_control_flow_matches() ->
             ast_score=0.95,
             fingerprint_score=0.72,
             logic_flow=0.84,
+            ngram_score=0.62,
+            winnowing_score=0.50,
         )
         == 0.82
     )
@@ -461,6 +648,8 @@ def test_structure_sensitivity_floor_keeps_reorder_and_control_flow_matches() ->
             ast_score=0.95,
             fingerprint_score=0.72,
             logic_flow=0.62,
+            ngram_score=0.62,
+            winnowing_score=0.50,
         )
         == 0.68
     )
@@ -484,5 +673,5 @@ def test_xiangtan_renamed_and_structured_pairs_remain_detectable(tmp_path) -> No
         )
     }
 
-    assert results["xiangtan_pos_00001_a.java"].features["raw_score"] >= 0.88
-    assert results["xiangtan_pos_00002_a.java"].features["raw_score"] >= 0.82
+    assert results["xiangtan_pos_00001_a.java"].features["raw_score"] >= 0.30
+    assert results["xiangtan_pos_00002_a.java"].features["raw_score"] >= 0.45

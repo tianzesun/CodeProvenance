@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Set, Tuple, Optional
 from .base_similarity import BaseSimilarityAlgorithm
 from collections import Counter, defaultdict
 import hashlib
+import re
 from src.backend.utils.hash_utils import fast_hash64
 
 
@@ -1105,10 +1106,59 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         if "ast" in parsed:
             return self._convert_to_ast_nodes(parsed["ast"])
 
-        if "tokens" in parsed:
-            return self._build_ast_from_tokens(parsed["tokens"])
+        tokens = parsed.get("tokens")
+        if tokens:
+            return self._build_ast_from_tokens(tokens)
+
+        raw = parsed.get("raw", "")
+        if raw:
+            return self._build_ast_from_tokens(self._tokenize_raw_for_ast(raw))
 
         return None
+
+    def _tokenize_raw_for_ast(self, source: str) -> List[Dict[str, str]]:
+        """Build coarse AST tokens from raw source when a parser is unavailable."""
+        source = re.sub(r"//.*?$", "", source, flags=re.MULTILINE)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+        source = re.sub(r"#.*?$", "", source, flags=re.MULTILINE)
+        raw_tokens = re.findall(
+            r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\+\+|--|\S",
+            source,
+        )
+        class_keywords = {"class", "interface", "enum", "struct"}
+        function_keywords = {"def", "func", "function"}
+        control_keywords = {
+            "if",
+            "else",
+            "for",
+            "while",
+            "switch",
+            "case",
+            "return",
+            "break",
+            "continue",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "do",
+        }
+        tokens = []
+        for token in raw_tokens:
+            if token in class_keywords:
+                token_type = "CLASS"
+            elif token in function_keywords:
+                token_type = "FUNCTION"
+            elif token in control_keywords:
+                token_type = "KEYWORD"
+            elif token.isdigit():
+                token_type = "LITERAL"
+            elif re.match(r"^[A-Za-z_]\w*$", token):
+                token_type = "IDENTIFIER"
+            else:
+                token_type = "OPERATOR"
+            tokens.append({"type": token_type, "value": token})
+        return tokens
 
     def _deep_copy_ast(self, node: ASTNode) -> ASTNode:
         """Create deep copy of ASTNode subtree."""
