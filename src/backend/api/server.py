@@ -28,7 +28,6 @@ import math
 import subprocess
 import csv
 import xml.etree.ElementTree as ET
-import urllib.request
 from collections import Counter
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
@@ -1740,44 +1739,9 @@ def _is_dolos_plagiarism_cli(candidate: PathLib) -> bool:
 
 def _find_moss_script() -> Optional[PathLib]:
     """Find the MOSS Perl script in the configured tool location."""
-    moss_dir = _find_tool_dir("moss")
-    if not moss_dir:
-        return None
-    return _first_existing_path([moss_dir / "moss.pl"])
+    from src.backend.benchmark.adapters.moss_adapter import MossAdapter
 
-
-def _prepare_moss_script(
-    script_path: PathLib, run_dir: PathLib, moss_user_id: str
-) -> PathLib:
-    """Create a job-local MOSS script that uses app settings and writable logs."""
-    run_dir.mkdir(parents=True, exist_ok=True)
-    patched_script = run_dir / script_path.name
-    log_path = run_dir / "moss.log"
-    script_text = script_path.read_text(encoding="utf-8")
-    log_literal = repr(str(log_path))
-    safe_user_id = re.sub(r"[^0-9]", "", moss_user_id) or "0"
-
-    script_text = re.sub(
-        r"my\s+\$logfile\s*=\s*[^;]+;",
-        f"my $logfile = $ENV{{'MOSS_LOGFILE'}} || {log_literal};",
-        script_text,
-        count=1,
-    )
-    script_text = re.sub(
-        r"\$userid\s*=\s*[^;]+;",
-        "$userid = $ENV{'MOSS_USER_ID'} || " f"{safe_user_id};",
-        script_text,
-        count=1,
-    )
-    script_text = script_text.replace(
-        'system("bash", "save_moss_report.sh","$logfile");',
-        'system("bash", "save_moss_report.sh", "$logfile") '
-        'if -e "save_moss_report.sh";',
-    )
-
-    patched_script.write_text(script_text, encoding="utf-8")
-    patched_script.chmod(0o700)
-    return patched_script
+    return MossAdapter.SCRIPT_PATH if MossAdapter.SCRIPT_PATH.exists() else None
 
 
 def _find_nicad_executable() -> Optional[PathLib]:
@@ -8457,324 +8421,30 @@ def _nicad_score(code_a: str, code_b: str) -> float:
 
 def _run_moss_cli(submissions, pairs):
     moss_user_id = _get_setting_secret("moss_user_id")
-    script_path = _find_moss_script()
-    if not moss_user_id or not script_path:
+    if not moss_user_id or not _find_moss_script():
         return None
 
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
-    detail_by_pair: Dict[str, Dict[str, Any]] = {}
-    language_map = {
-        "python": "python",
-        "java": "java",
-        "c": "cc",
-        "cpp": "cc",
-        "javascript": "javascript",
-        "csharp": "csharp",
-    }
+    from src.backend.benchmark.adapters.moss_adapter import run_moss_batch
 
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        moss_language = language_map.get(language)
-        if not moss_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"moss-{language}-") as temp_dir:
-            run_dir = PathLib(temp_dir)
-            source_root = run_dir / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            written_paths = _write_submissions_to_directory(
-                source_root, language_submissions
-            )
-            run_script_path = _prepare_moss_script(script_path, run_dir, moss_user_id)
-
-            env = os.environ.copy()
-            env["MOSS_USER_ID"] = moss_user_id
-            env["MOSS_LOGFILE"] = str(run_dir / "moss.log")
-            result = subprocess.run(
-                [
-                    "perl",
-                    str(run_script_path),
-                    "-l",
-                    moss_language,
-                    *written_paths.values(),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=300,
-                cwd=str(script_path.parent),
-                env=env,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "MOSS execution failed"
-                )
-
-            report_url = None
-            for line in result.stdout.splitlines():
-                stripped = line.strip()
-                if stripped.startswith(
-                    "http://moss.stanford.edu/results/"
-                ) or stripped.startswith("https://moss.stanford.edu/results/"):
-                    report_url = stripped.rstrip("/")
-            if not report_url:
-                continue
-
-            with urllib.request.urlopen(f"{report_url}/") as response:
-                html = response.read().decode("utf-8", "ignore")
-
-            # Debug: log HTML content for troubleshooting
-            logger.info(f"MOSS HTML preview: {html[:500]}...")
-
-            row_pattern = re.compile(
-                r'<TR><TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>\s*<TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>',
-                re.IGNORECASE,
-            )
-            path_to_filename = {
-                path: filename for filename, path in written_paths.items()
-            }
-
-            matches_found = row_pattern.findall(html)
-            logger.info(f"MOSS regex matches found: {len(matches_found)}")
-
-            for left_path, left_pct, right_path, right_pct in matches_found:
-                left_name = path_to_filename.get(left_path)
-                right_name = path_to_filename.get(right_path)
-                if not left_name or not right_name:
-                    continue
-
-                left_pct_val = float(left_pct)
-                right_pct_val = float(right_pct)
-
-                # Use minimum as similarity score - represents guaranteed overlap
-                similarity = min(left_pct_val, right_pct_val) / 100.0
-
-                logger.info(
-                    f"MOSS pair: {left_name} ({left_pct_val}%) vs {right_name} ({right_pct_val}%) -> similarity: {similarity:.3f}"
-                )
-
-                pair_key = _pair_key(left_name, right_name)
-                score_by_pair[pair_key] = max(
-                    score_by_pair.get(pair_key, 0.0),
-                    max(0.0, min(1.0, similarity)),
-                )
-                detail_by_pair[pair_key] = {
-                    "file_a_percent": left_pct_val / 100.0,
-                    "file_b_percent": right_pct_val / 100.0,
-                    "report_url": report_url,
-                }
-
-    results = []
-    for fa, fb in pairs:
-        pair_key = _pair_key(fa, fb)
-        score = score_by_pair.get(pair_key, 0.0)
-        results.append(
-            {
-                "file_a": fa,
-                "file_b": fb,
-                "score": score,
-                **detail_by_pair.get(pair_key, {}),
-            }
-        )
-    report_urls = sorted(
-        {
-            str(detail.get("report_url"))
-            for detail in detail_by_pair.values()
-            if detail.get("report_url")
-        }
-    )
-    payload = {"pairs": results}
-    if report_urls:
-        payload["report_url"] = report_urls[0]
-    return payload
+    return run_moss_batch(submissions, pairs, moss_user_id=moss_user_id)
 
 
 def _run_jplag_cli(submissions, pairs):
-    jar_path = _find_jplag_jar()
-    if not jar_path:
+    if not _find_jplag_jar():
         return None
 
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
+    from src.backend.benchmark.adapters.jplag_adapter import run_jplag_batch
 
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    language_map = {
-        "python": "python3",
-        "javascript": "javascript",
-        "typescript": "typescript",
-        "java": "java",
-        "c": "c",
-        "cpp": "cpp",
-        "csharp": "csharp",
-        "go": "go",
-        "rust": "rust",
-        "kotlin": "kotlin",
-        "swift": "swift",
-    }
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        jplag_language = language_map.get(language)
-        if not jplag_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"jplag-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            result_root = PathLib(temp_dir) / "results"
-            source_root.mkdir(parents=True, exist_ok=True)
-            submission_map = _write_submissions_as_submission_dirs(
-                source_root, language_submissions
-            )
-
-            result = subprocess.run(
-                [
-                    "java",
-                    "-jar",
-                    str(jar_path),
-                    "-l",
-                    jplag_language,
-                    "-t",
-                    "3",
-                    "--csv-export",
-                    "-M",
-                    "RUN",
-                    "-r",
-                    str(result_root),
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=240,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "JPlag execution failed"
-                )
-
-            csv_path = result_root / "results.csv"
-            if not csv_path.exists():
-                continue
-
-            logger.info(f"JPlag CSV output found at: {csv_path}")
-            with csv_path.open(newline="", encoding="utf-8") as handle:
-                reader = csv.DictReader(handle)
-                for row in reader:
-                    left_submission = row.get("submissionName1")
-                    right_submission = row.get("submissionName2")
-                    if (
-                        left_submission not in submission_map
-                        or right_submission not in submission_map
-                    ):
-                        continue
-                    try:
-                        similarity = float(row.get("averageSimilarity", 0.0))
-                    except (TypeError, ValueError):
-                        continue
-                    left_name = submission_map[left_submission]["filename"]
-                    right_name = submission_map[right_submission]["filename"]
-                    score_by_pair[_pair_key(left_name, right_name)] = max(
-                        0.0, min(1.0, similarity)
-                    )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
+    return run_jplag_batch(submissions, pairs)
 
 
 def _run_dolos_cli(submissions, pairs):
-    cli_path = _find_dolos_cli()
-    dolos_dir = _find_tool_dir("dolos")
-    node_bin_dir = (dolos_dir / "node20" / "bin") if dolos_dir else None
-    if not cli_path:
+    if not _find_dolos_cli():
         return None
 
-    similarity_by_pair: Dict[str, float] = {}
+    from src.backend.benchmark.adapters.dolos_adapter import run_dolos_batch
 
-    with tempfile.TemporaryDirectory(prefix="dolos-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        report_dir = PathLib(temp_dir) / "report"
-        source_root.mkdir(parents=True, exist_ok=True)
-        written_paths = _write_submissions_to_directory(source_root, submissions)
-
-        env = os.environ.copy()
-        if node_bin_dir and node_bin_dir.exists():
-            env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
-
-        command_prefix = (
-            ["node", str(cli_path)] if cli_path.suffix == ".js" else [str(cli_path)]
-        )
-        result = subprocess.run(
-            [
-                *command_prefix,
-                "run",
-                "--output-format",
-                "csv",
-                "--output-destination",
-                str(report_dir),
-                *written_paths.values(),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=180,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                result.stderr.strip()
-                or result.stdout.strip()
-                or "Dolos execution failed"
-            )
-
-        pairs_path = report_dir / "pairs.csv"
-        if not pairs_path.exists():
-            return {"pairs": []}
-
-        logger.info(f"Dolos CSV output found at: {pairs_path}")
-        with pairs_path.open(newline="", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                left_name = PathLib(row.get("leftFilePath", "")).name
-                right_name = PathLib(row.get("rightFilePath", "")).name
-                if not left_name or not right_name:
-                    continue
-                try:
-                    similarity = float(row.get("similarity", 0.0))
-                except (TypeError, ValueError):
-                    continue
-                similarity_by_pair[_pair_key(left_name, right_name)] = max(
-                    0.0, min(1.0, similarity)
-                )
-
-    results = []
-    for fa, fb in pairs:
-        score = similarity_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
+    return run_dolos_batch(submissions, pairs)
 
 
 def _run_nicad_cli(submissions, pairs):
@@ -8895,103 +8565,12 @@ def _run_nicad_cli(submissions, pairs):
 
 
 def _run_pmd_cli(submissions, pairs):
-    pmd_path = _find_pmd_executable()
-    if not pmd_path:
+    if not _find_pmd_executable():
         return None
 
-    token_counts = {
-        filename: max(1, len(_tokenize_code(content)))
-        for filename, content in submissions.items()
-    }
-    score_by_pair: Dict[str, float] = {}
-    groups: Dict[str, Dict[str, str]] = {}
+    from src.backend.benchmark.adapters.pmd_adapter import run_pmd_batch
 
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_pmd_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"pmd-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            written_paths = _write_submissions_to_directory(
-                source_root, language_submissions
-            )
-
-            result = subprocess.run(
-                [
-                    str(pmd_path),
-                    "cpd",
-                    "--language",
-                    language,
-                    "--minimum-tokens",
-                    "5",
-                    "--format",
-                    "csv",
-                    "--no-fail-on-error",
-                    "--no-fail-on-violation",
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=180,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "PMD CPD execution failed"
-                )
-
-            output_lines = [line for line in result.stdout.splitlines() if line.strip()]
-            if len(output_lines) <= 1:
-                continue
-
-            logger.info(f"PMD CPD found {len(output_lines)} output lines")
-            path_to_filename = {
-                path: filename for filename, path in written_paths.items()
-            }
-            reader = csv.reader(output_lines)
-            next(reader, None)
-
-            for row in reader:
-                if len(row) < 5:
-                    continue
-                try:
-                    duplicated_tokens = int(row[1])
-                    occurrence_count = int(row[2])
-                except (TypeError, ValueError):
-                    continue
-
-                file_names: List[str] = []
-                for index in range(3, min(len(row), 3 + occurrence_count * 2), 2):
-                    file_path = row[index + 1]
-                    filename = path_to_filename.get(file_path)
-                    if filename:
-                        file_names.append(filename)
-
-                for i in range(len(file_names)):
-                    for j in range(i + 1, len(file_names)):
-                        fa = file_names[i]
-                        fb = file_names[j]
-                        denominator = max(1, min(token_counts[fa], token_counts[fb]))
-                        score = max(0.0, min(1.0, duplicated_tokens / denominator))
-                        pair_key = _pair_key(fa, fb)
-                        score_by_pair[pair_key] = max(
-                            score_by_pair.get(pair_key, 0.0), score
-                        )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
+    return run_pmd_batch(submissions, pairs)
 
 
 def _run_ac_cli(submissions, pairs):

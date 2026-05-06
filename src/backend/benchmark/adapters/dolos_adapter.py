@@ -1,128 +1,203 @@
-"""Dolos benchmark adapter.
+"""Canonical Dolos benchmark adapter backed by the bundled Dolos CLI."""
 
-Dolos is a source code plagiarism detection tool using winnowing-based
-token comparison. Since npm install failed (tree-sitter build error),
-this adapter implements the Dolos algorithm (winnowing + token fingerprinting)
-to provide comparable benchmark results.
-
-Reference: https://dolos.ugent.be/
-
-The algorithm uses:
-1. Token-based winnowing (similar to MOSS/YAP)
-2. N-gram fingerprinting
-3. Jaccard similarity for comparison
-"""
 from __future__ import annotations
 
-import hashlib
-from typing import Dict, List, Set, Tuple
+import csv
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional
 
-from src.backend.benchmark.similarity.base_engine import BaseSimilarityEngine
+from src.backend.benchmark.adapters.base_adapter import BaseAdapter
+from src.backend.benchmark.contracts.evaluation_result import (
+    EnrichedPair,
+    EvaluationResult,
+)
 
 
-class DolosBenchmarkEngine(BaseSimilarityEngine):
-    """Dolos-like similarity using winnowing algorithm.
-    
-    Implements the core Dolos algorithm:
-    - Normalize code to tokens
-    - Generate k-grams
-    - Winnowing to select fingerprints
-    - Jaccard similarity for comparison
-    """
-    
-    # Winnowing parameters
-    KGRAM_SIZE = 5      # Size of k-grams
-    WINDOW_SIZE = 8     # Window size for winnowing
-    
-    def __init__(self, kgram_size: int = 5, window_size: int = 8):
-        self._kgram_size = kgram_size
-        self._window_size = window_size
-    
+class DolosBenchmarkEngine(BaseAdapter):
+    """Run the real Dolos CLI and parse its CSV pair report."""
+
+    TOOL_DIRS = (
+        Path(__file__).resolve().parents[4] / "tools" / "external" / "dolos-cli",
+        Path(__file__).resolve().parents[4] / "tools" / "external" / "dolos",
+    )
+
+    def __init__(self, threshold: float = 0.5) -> None:
+        self._threshold = threshold
+
     @property
     def name(self) -> str:
+        """Return the adapter name."""
         return "dolos"
-    
-    def compare(self, code_a: str, code_b: str) -> float:
-        """Compare two code strings using winnowing algorithm."""
-        if not code_a or not code_b:
-            return 0.0
-        
-        # Tokenize
-        tokens_a = self._tokenize(code_a)
-        tokens_b = self._tokenize(code_b)
-        
-        if not tokens_a or not tokens_b:
-            return 0.0
-        
-        # Generate fingerprints with winnowing
-        fp_a = self._winnow(tokens_a)
-        fp_b = self._winnow(tokens_b)
-        
-        if not fp_a or not fp_b:
-            return 0.0
-        
-        # Jaccard similarity
-        intersection = len(fp_a & fp_b)
-        union = len(fp_a | fp_b)
-        
-        if union == 0:
-            return 0.0
-        
-        return intersection / union
-    
-    def _tokenize(self, code: str) -> List[str]:
-        """Normalize code to tokens (Dolos-style).
-        
-        Removes whitespace, comments, normalizes case,
-        keeps keywords and operators.
-        """
-        import re
-        
-        # Remove comments
-        code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
-        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
-        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-        
-        # Normalize whitespace and case
-        code = code.lower().strip()
-        
-        # Tokenize: split on whitespace, punctuation
-        tokens = re.findall(r'[a-zA-Z_]\w*|[0-9]+|[^\s\w]', code)
-        
-        # Filter out empty tokens
-        return [t for t in tokens if t.strip()]
-    
-    def _kgrams(self, tokens: List[str]) -> List[Tuple[str, ...]]:
-        """Generate k-grams from token list."""
-        if len(tokens) < self._kgram_size:
-            return [tuple(tokens)]
-        
-        return [tuple(tokens[i:i + self._kgram_size]) 
-                for i in range(len(tokens) - self._kgram_size + 1)]
-    
-    def _winnow(self, tokens: List[str]) -> Set[int]:
-        """Apply winnowing to generate fingerprints."""
-        kgrams = self._kgrams(tokens)
-        if not kgrams:
-            return set()
-        
-        # Hash each k-gram
-        hashes = []
-        for kg in kgrams:
-            h = hashlib.md5(str(kg).encode()).hexdigest()
-            hashes.append(int(h[:12], 16))  # First 12 hex chars as hash
-        
-        # Apply winnowing
-        fingerprints = set()
-        window = self._window_size
-        
-        if len(hashes) <= window:
-            fingerprints.add(min(hashes))
-            return fingerprints
-        
-        for i in range(len(hashes) - window + 1):
-            window_hashes = hashes[i:i + window]
-            min_hash = min(window_hashes)
-            fingerprints.add(min_hash)
-        
-        return fingerprints
+
+    @property
+    def version(self) -> str:
+        """Return the adapter version."""
+        return "real-dolos-cli"
+
+    def is_available(self) -> bool:
+        """Return whether the Dolos CLI is available."""
+        return self._find_cli() is not None
+
+    def evaluate(self, pair: EnrichedPair) -> EvaluationResult:
+        """Evaluate one pair through the same batch runner used by dashboards."""
+        payload = self.run_batch(
+            {"a.py": pair.code_a, "b.py": pair.code_b}, [("a.py", "b.py")]
+        )
+        score = payload["pairs"][0]["score"] if payload.get("pairs") else 0.0
+        return self._make_result(
+            pair,
+            score,
+            self._threshold,
+            metadata={"real_dolos": True},
+        )
+
+    def run_batch(
+        self, submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+    ) -> Dict[str, Any]:
+        """Run Dolos for all submissions and return requested pair scores."""
+        cli_path = self._find_cli()
+        if not cli_path:
+            return {"pairs": []}
+
+        similarity_by_pair: Dict[str, float] = {}
+        with tempfile.TemporaryDirectory(prefix="dolos-adapter-") as temp_dir:
+            source_root = Path(temp_dir) / "subs"
+            report_dir = Path(temp_dir) / "report"
+            source_root.mkdir(parents=True, exist_ok=True)
+            written_paths = self._write_submissions(source_root, submissions)
+
+            env = os.environ.copy()
+            node_bin_dir = cli_path.parents[2] / "node20" / "bin"
+            if node_bin_dir.exists():
+                env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
+
+            command_prefix = (
+                ["node", str(cli_path)] if cli_path.suffix == ".js" else [str(cli_path)]
+            )
+            result = subprocess.run(
+                [
+                    *command_prefix,
+                    "run",
+                    "--output-format",
+                    "csv",
+                    "--output-destination",
+                    str(report_dir),
+                    *written_paths.values(),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+                env=env,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or "Dolos execution failed"
+                )
+
+            pairs_path = report_dir / "pairs.csv"
+            if pairs_path.exists():
+                similarity_by_pair.update(self._parse_pairs_csv(pairs_path))
+
+        return {
+            "pairs": [
+                {
+                    "file_a": file_a,
+                    "file_b": file_b,
+                    "score": similarity_by_pair.get(
+                        self._pair_key(file_a, file_b), 0.0
+                    ),
+                }
+                for file_a, file_b in pairs
+            ]
+        }
+
+    def compare(self, code1: str, code2: str) -> float:
+        """Compare two code strings using the real Dolos CLI."""
+        payload = self.run_batch({"a.py": code1, "b.py": code2}, [("a.py", "b.py")])
+        return payload["pairs"][0]["score"] if payload.get("pairs") else 0.0
+
+    def _parse_pairs_csv(self, pairs_path: Path) -> Dict[str, float]:
+        """Parse Dolos pairs.csv into pair scores."""
+        scores: Dict[str, float] = {}
+        with pairs_path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                left_name = Path(row.get("leftFilePath", "")).name
+                right_name = Path(row.get("rightFilePath", "")).name
+                if not left_name or not right_name:
+                    continue
+                try:
+                    similarity = float(row.get("similarity", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                scores[self._pair_key(left_name, right_name)] = max(
+                    0.0, min(1.0, similarity)
+                )
+        return scores
+
+    def _find_cli(self) -> Optional[Path]:
+        """Find the Dolos plagiarism CLI."""
+        candidates = []
+        for tool_dir in self.TOOL_DIRS:
+            candidates.extend(
+                [
+                    tool_dir / "node_modules" / ".bin" / "dolos",
+                    tool_dir / "cli" / "node_modules" / ".bin" / "dolos",
+                    tool_dir / "cli" / "dist" / "cli.js",
+                    tool_dir / "dolos",
+                ]
+            )
+        for candidate in candidates:
+            if candidate.exists() and self._is_dolos_cli(candidate):
+                return candidate
+        return None
+
+    def _is_dolos_cli(self, candidate: Path) -> bool:
+        """Return whether a candidate binary is the Dolos plagiarism CLI."""
+        command = (
+            ["node", str(candidate)] if candidate.suffix == ".js" else [str(candidate)]
+        )
+        try:
+            result = subprocess.run(
+                [*command, "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except Exception:
+            return False
+        help_text = f"{result.stdout}\n{result.stderr}".lower()
+        return (
+            "code similarity" in help_text
+            or "plagiarism" in help_text
+            or "--output-format" in help_text
+        )
+
+    def _write_submissions(
+        self, target_dir: Path, submissions: Dict[str, str]
+    ) -> Dict[str, str]:
+        """Write submissions to a temporary directory."""
+        written_paths: Dict[str, str] = {}
+        for filename, content in sorted(submissions.items()):
+            file_path = target_dir / Path(filename).name
+            file_path.write_text(content, encoding="utf-8")
+            written_paths[filename] = str(file_path)
+        return written_paths
+
+    def _pair_key(self, file_a: str, file_b: str) -> str:
+        """Build a stable unordered pair key."""
+        return "::".join(sorted((file_a, file_b)))
+
+
+def run_dolos_batch(
+    submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+) -> Dict[str, Any]:
+    """Run the canonical Dolos batch adapter used by benchmark APIs."""
+    return DolosBenchmarkEngine().run_batch(submissions, pairs)

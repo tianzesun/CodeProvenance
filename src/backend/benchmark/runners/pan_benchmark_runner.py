@@ -1110,7 +1110,7 @@ class PANBenchmarkRunner:
 def _tool_factories() -> dict[str, Any]:
     """Return the supported benchmark tools and their adapter classes."""
     tool_adapters = _load_tool_adapters_module()
-    from src.backend.benchmark.adapters.external.pmd_adapter import PMDBenchmarkEngine
+    from src.backend.benchmark.adapters.pmd_adapter import PMDBenchmarkEngine
 
     return {
         "codeprovenance": tool_adapters.IntegrityDeskAdapter,
