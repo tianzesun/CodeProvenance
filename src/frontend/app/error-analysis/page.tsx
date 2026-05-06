@@ -338,7 +338,7 @@ function ErrorAnalysisPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto space-y-8 pb-12">
+      <div className="space-y-6">
 
         {/* ── Page Header ── */}
         <div className="flex items-start justify-between">
