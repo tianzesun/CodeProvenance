@@ -241,7 +241,10 @@ class PMDBenchmarkEngine(BaseAdapter):
 
 
 def run_pmd_batch(
-    submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+    submissions: Dict[str, str],
+    pairs: Iterable[tuple[str, str]],
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """Run the canonical PMD batch adapter used by benchmark APIs."""
+    _ = progress_cb
     return PMDBenchmarkEngine().run_batch(submissions, pairs)

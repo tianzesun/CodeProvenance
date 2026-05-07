@@ -7,7 +7,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import {
   BarChart3, Loader2, Trophy, FileUp, X, AlertCircle,
-  Zap, Target, Layers, TrendingUp, CheckCircle2, ChevronDown, ChevronUp,
+  Zap, Layers, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, Square, Check,
   ChevronRight, UploadCloud, Database, Settings2, ClipboardList, Plus,
   GitCompare, Eye,
@@ -42,6 +42,7 @@ const TOOLS = [
     gradient: 'from-amber-500 to-amber-700', engines: ['Token', 'AST'],
     desc: 'AST-based plagiarism detector widely used in academic settings. Supports 10+ languages.',
     status: 'Ready to run',
+    icon: 'https://github.com/jplag/JPlag/raw/main/core/src/main/resources/de/jplag/logo-dark.png',
   },
   {
     id: 'dolos', name: 'Dolos', color: '#047857',
@@ -49,6 +50,7 @@ const TOOLS = [
     gradient: 'from-emerald-500 to-emerald-700', engines: ['AST', 'Fingerprint'],
     desc: 'Modern AST + fingerprint tool from University of Ghent. Produces a pairwise similarity matrix.',
     status: 'Ready to run',
+    icon: 'https://avatars.githubusercontent.com/u/40892657?s=48&v=4',
   },
   {
     id: 'nicad', name: 'NiCad', color: '#9D174D',
@@ -63,6 +65,7 @@ const TOOLS = [
     gradient: 'from-slate-500 to-slate-700', engines: ['Token', 'Duplication'],
     desc: 'Copy-Paste Detector from the PMD project. Fast token-based duplication finder.',
     status: 'Ready to run',
+    icon: 'https://raw.githubusercontent.com/pmd/pmd/main/docs/images/logo/pmd-logo-300px.png',
   },
   {
     id: 'sherlock', name: 'Sherlock', color: '#065F46',
@@ -71,13 +74,6 @@ const TOOLS = [
     desc: 'Classical token-based plagiarism detector from University of Sydney.',
     status: 'Setup needed', runnable: false,
   },
-  {
-    id: 'sim', name: 'SIM', color: '#6B21A8',
-    bgLight: 'bg-purple-50', textColor: 'text-purple-700', ring: 'ring-purple-500',
-    gradient: 'from-purple-500 to-purple-700', engines: ['Text'],
-    desc: 'Classical similarity detector by Dick Grune. Historical baseline for multi-language comparison.',
-    status: 'Ready to run',
-  },
 ];
 
 function mergeToolsWithAvailability(apiTools = []) {
@@ -85,7 +81,12 @@ function mergeToolsWithAvailability(apiTools = []) {
   return TOOLS.map(toolDef => {
     const apiTool = apiTools.find(t => t.id === toolDef.id);
     if (!apiTool) return { ...toolDef, available: false };
-    return { ...toolDef, available: apiTool.available !== false, status: apiTool.status || toolDef.status };
+    return {
+      ...toolDef,
+      available: apiTool.available !== false,
+      runnable: apiTool.runnable !== false,
+      status: apiTool.status || toolDef.status,
+    };
   });
 }
 
@@ -471,12 +472,13 @@ function ToolGrid({ tools, selectedTools, onToggle }) {
               </div>
             )}
             <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
-              <Zap size={16} className="text-white" />
+              {tool.icon ? (
+                <img src={tool.icon} alt={`${tool.name} icon`} className="w-6 h-6 object-contain" />
+              ) : (
+                <Zap size={16} className="text-white" />
+              )}
             </div>
             <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-            <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>
-              {tool.status || (canRun ? 'Ready to run' : 'Setup needed')}
-            </div>
             <div className="mt-1 flex flex-wrap gap-1.5">
               {(tool.engines || []).slice(0, 3).map(engine => (
                 <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
@@ -884,11 +886,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
 // ── Step 3: Run ────────────────────────────────────────────────────────────
 function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, autoStart = false, onBack, onComplete }) {
-  const { token } = useAuth();
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState('');
-  const [progressPct, setProgressPct] = useState(0);
-  const [error, setError] = useState('');
+   const { token } = useAuth();
+   const [running, setRunning] = useState(false);
+   const [progress, setProgress] = useState([]);
+   const [progressPct, setProgressPct] = useState(0);
+   const [progressMode, setProgressMode] = useState('indeterminate');
+   const [error, setError] = useState('');
 
   // Use a ref to hold the run function so the autoStart effect always calls the latest version
   const runRef = useRef(null);
@@ -905,74 +908,103 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
       ? 'pan_optimization'
       : 'tool_comparison';
 
-  const run = useCallback(async () => {
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-    setError(''); setRunning(true); setProgressPct(10);
-    try {
-      if (uploadMode === 'builtin' && activeDataset) {
-        if (activeDataset.cases) {
-          const allResults = [];
-          const cases = activeDataset.cases;
-          for (let i = 0; i < cases.length; i++) {
-            const tc = cases[i];
-            setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
-            setProgressPct(10 + (i / cases.length) * 80);
-            const blobA = new Blob([tc.codeA], { type: 'text/plain' });
-            const blobB = new Blob([tc.codeB], { type: 'text/plain' });
+    const run = useCallback(async () => {
+      requestControllerRef.current?.abort();
+      const controller = new AbortController();
+      requestControllerRef.current = controller;
+      setError(''); setRunning(true);
+      setProgress([]); setProgressPct(0); setProgressMode('indeterminate');
+      try {
+        setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
+        if (uploadMode === 'builtin' && activeDataset) {
+          if (activeDataset.cases) {
+            setProgressMode('determinate');
+            const allResults = [];
+            const cases = activeDataset.cases;
+            const toolNames = selectedTools.map(t => TOOLS.find(tool => tool.id === t)?.name || t).join(', ');
+            setProgress(prev => [...prev, `Dataset: ${activeDataset.name} (${cases.length} guided test cases)`]);
+            setProgress(prev => [...prev, `Tools: ${toolNames}`]);
+            for (let i = 0; i < cases.length; i++) {
+              const tc = cases[i];
+              setProgress(prev => [...prev, `[${i + 1}/${cases.length}] Analyzing "${tc.label}" using ${toolNames}…`]);
+              setProgressPct(Math.round(((i + 0.5) / cases.length) * 100));
+              const blobA = new Blob([tc.codeA], { type: 'text/plain' });
+              const blobB = new Blob([tc.codeB], { type: 'text/plain' });
+              const formData = new FormData();
+              formData.append('files', new File([blobA], `${tc.id}_a.py`));
+              formData.append('files', new File([blobB], `${tc.id}_b.py`));
+              formData.append('benchmark_type', benchmarkType);
+              if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
+              selectedTools.forEach(t => formData.append('tools', t));
+              try {
+                const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
+                allResults.push({ testCase: tc, ...res.data });
+              } catch (err) {
+                if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
+              }
+            }
+            if (allResults.length > 0) {
+              setProgress(prev => [...prev, `✓ Completed ${allResults.length}/${cases.length} test cases`]);
+              setProgressPct(100);
+              const merged = { ...allResults[0], pair_results: allResults.flatMap(r => r.pair_results || []) };
+              setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
+            }
+          } else {
+            setProgress(prev => [...prev, `Dataset: ${activeDataset.name}`]);
+            setProgressMode('indeterminate');
             const formData = new FormData();
-            formData.append('files', new File([blobA], `${tc.id}_a.py`));
-            formData.append('files', new File([blobB], `${tc.id}_b.py`));
+            selectedTools.forEach(t => formData.append('tools', t));
+            formData.append('dataset', activeDataset.id);
             formData.append('benchmark_type', benchmarkType);
             if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-            selectedTools.forEach(t => formData.append('tools', t));
-            try {
-              const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-              allResults.push({ testCase: tc, ...res.data });
+	            try {
+	              const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
+	              setProgress(prev => [...prev, `Running ${toolNames} on all file pairs…`]);
+	              try {
+	                const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
+	                setProgress(prev => [...prev, `✓ Benchmark complete — ${res.data?.pair_results?.length || 0} similarity pairs found`]);
+	                setProgressPct(100);
+	                onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+	              } catch (err) {
+	                throw err;
+	              }
             } catch (err) {
-              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
+              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
+              else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
             }
           }
-          if (allResults.length > 0) {
-            setProgressPct(100); setProgress('Complete!');
-            const merged = { ...allResults[0], pair_results: allResults.flatMap(r => r.pair_results || []) };
-            setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
-          }
-        } else {
-          setProgress('Loading dataset…'); setProgressPct(30);
-          const formData = new FormData();
-          selectedTools.forEach(t => formData.append('tools', t));
-          formData.append('dataset', activeDataset.id);
+	        } else {
+	          setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
+	          setProgressMode('indeterminate');
+	          const formData = new FormData();
+          files.forEach(f => formData.append('files', f));
           formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-          setProgress(benchmarkType === 'pan_optimization' ? 'Running IntegrityDesk benchmark…' : 'Running multi-tool comparison…');
-          setProgressPct(50);
-          const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-          setProgressPct(100); setProgress('Complete!');
-          onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+          selectedTools.forEach(t => formData.append('tools', t));
+	          try {
+	            const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
+	            setProgress(prev => [...prev, `Running ${toolNames} on ${files.length} file(s)…`]);
+	            try {
+	              const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
+	              setProgress(prev => [...prev, `✓ Analysis complete — ${res.data?.pair_results?.length || 0} pairs analyzed`]);
+	              setProgressPct(100);
+	              setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
+	            } catch (err) {
+	              throw err;
+	            }
+          } catch (err) {
+            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
+            else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+          }
         }
-      } else {
-        setProgress('Uploading files…'); setProgressPct(20);
-        const formData = new FormData();
-        files.forEach(f => formData.append('files', f));
-        formData.append('benchmark_type', benchmarkType);
-        if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-        selectedTools.forEach(t => formData.append('tools', t));
-        setProgress(benchmarkType === 'pan_optimization' ? 'Running IntegrityDesk benchmark…' : 'Running analysis across all selected tools…');
-        setProgressPct(50);
-        const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-        setProgressPct(100); setProgress('Complete!');
-        setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
+      } catch (err) {
+        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
+        else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+      } finally {
+        if (requestControllerRef.current === controller) requestControllerRef.current = null;
+        setRunning(false);
       }
-    } catch (err) {
-      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress('Run cancelled');
-      else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
-    } finally {
-      if (requestControllerRef.current === controller) requestControllerRef.current = null;
-      setRunning(false);
-    }
-  }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
+    }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
 
   // Keep ref current so autoStart fires the latest version
   runRef.current = run;
@@ -988,54 +1020,63 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     return () => requestControllerRef.current?.abort();
   }, []);
 
-  const stop = () => {
-    requestControllerRef.current?.abort();
-    setRunning(false);
-    setProgress('Cancelling run…');
-    setProgressPct(0);
-  };
+	   const stop = () => {
+	     requestControllerRef.current?.abort();
+	     setRunning(false);
+	     setProgress(prev => [...prev, '⨯ Cancelling…']);
+	     setProgressPct(0);
+	   };
 
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-5"><ClipboardList size={18} className="text-violet-500" />Benchmark Configuration</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Tools</p>
-            <div className="flex flex-wrap gap-1.5">
-              {selectedTools.slice(0, 6).map(id => { const t = TOOLS.find(x => x.id === id); return t ? <span key={id} className={`text-xs font-medium px-2.5 py-1 rounded-lg ${t.bgLight} ${t.textColor}`}>{t.name}</span> : null; })}
-              {selectedTools.length > 6 && <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600">+{selectedTools.length - 6} more</span>}
-            </div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dataset</p>
-            {uploadMode === 'builtin' ? (
-              <><p className="font-semibold text-slate-800 text-sm">{activeDataset?.name || 'Unknown'}</p><p className="text-xs text-slate-500 mt-1">{activeDataset?.cases?.length ? `${activeDataset.cases.length} guided scenarios` : activeDatasetMeta?.label || 'Dataset library'}</p></>
-            ) : (
-              <><p className="font-semibold text-slate-800 text-sm">{files.length} uploaded file{files.length !== 1 ? 's' : ''}</p><p className="text-xs text-slate-500 mt-1">{hasZipUpload ? 'ZIP archive' : 'Direct file upload'}</p></>
-            )}
-          </div>
-        </div>
-      </div>
+   const isDeterminateProgress = progressMode === 'determinate';
 
-      <div>
-        {error && (
+	   return (
+     <div className="space-y-5">
+       <div>
+         {error && (
           <div className="mb-4 flex items-start gap-3 p-4 bg-red-50 border border-red-100 rounded-xl">
             <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
             <p className="text-sm text-red-700">{error}</p>
           </div>
-        )}
-        {running && (
-          <div className="mb-5">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><Loader2 size={15} className="text-violet-600 animate-spin" />{progress}</p>
-              <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
-            </div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
-            </div>
-          </div>
-        )}
+         )}
+         {running && (
+           <div className="mb-5">
+             <div className="flex items-center justify-between mb-2">
+               <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+	                 <Loader2 size={15} className="text-violet-600 animate-spin" />
+	                 Benchmark in progress
+	               </p>
+	               <span className="text-sm font-bold text-violet-600">
+	                 {isDeterminateProgress ? `${Math.round(progressPct)}%` : 'Running'}
+	               </span>
+	             </div>
+             
+             {/* Terminal-like console output */}
+             <div className="bg-slate-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+               <div className="space-y-1">
+                 {progress.length === 0 && (
+                   <div className="text-slate-400">Initializing benchmark…</div>
+                 )}
+                 {progress.map((msg, idx) => (
+                   <div key={idx} className={`${msg.startsWith('✓') ? 'text-emerald-400' : msg.startsWith('⨯') ? 'text-rose-400' : 'text-slate-300'}`}>
+                     <span className="text-slate-500 mr-2">{String(idx + 1).padStart(2, '0')}</span>
+                     {msg}
+                   </div>
+                 ))}
+                 {(running || progressPct < 100) && (
+                   <div className="text-slate-400 animate-pulse">_</div>
+                 )}
+               </div>
+             </div>
+
+	             {/* Progress bar */}
+	             <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mt-3">
+	               <div
+	                 className={`h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-300 ${isDeterminateProgress ? '' : 'animate-pulse'}`}
+	                 style={{ width: isDeterminateProgress ? `${progressPct}%` : '100%' }}
+	               />
+	             </div>
+           </div>
+         )}
         <div className="flex items-center gap-3">
           {!running ? (
             <button onClick={run} className="flex-1 flex items-center justify-center gap-3 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl text-base">
@@ -1226,6 +1267,11 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const comparison = results.comparison || {};
   const comparisonDeltas = comparison.metrics || {};
   const qualityGates = results.quality_gates || null;
+  const pairSamplingAudit = results.pair_sampling_audit || null;
+  const pairSamplingWarnings = [
+    ...(pairSamplingAudit?.warnings || []),
+    ...(pairSamplingAudit?.blockers || []),
+  ];
 
   const pairKey = (pair, idx) => `${pair.file_a || 'a'}::${pair.file_b || 'b'}::${pair.label || idx}`;
   const togglePair = (key) => setExpandedPairs(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1367,41 +1413,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     tp: Number(heldoutConfusion.tp || 0), fp: Number(heldoutConfusion.fp || 0),
     tn: Number(heldoutConfusion.tn || 0), fn: Number(heldoutConfusion.fn || 0),
   };
-  const integrityDeskMetricCards = productPanResult ? [
-    {
-      key: 'precision',
-      label: 'Precision',
-      value: productPanResult.precision,
-      detail: `${confusion.tp} TP / ${confusion.fp} FP`,
-      tone: metricTone(productPanResult.precision, 'higher'),
-      icon: Target,
-    },
-    {
-      key: 'recall',
-      label: 'Recall',
-      value: productPanResult.recall,
-      detail: `${confusion.tp} TP / ${confusion.fn} FN`,
-      tone: metricTone(productPanResult.recall, 'higher'),
-      icon: TrendingUp,
-    },
-    {
-      key: 'f1',
-      label: 'F1 Score',
-      value: productPanResult.f1Score,
-      detail: 'Precision/recall balance',
-      tone: metricTone(productPanResult.f1Score, 'higher'),
-      icon: Trophy,
-    },
-    {
-      key: 'fpr',
-      label: 'False Positive Rate',
-      value: productPanResult.falsePositiveRate,
-      detail: `${confusion.fp} FP / ${confusion.tn} TN`,
-      tone: metricTone(productPanResult.falsePositiveRate, 'lower'),
-      icon: AlertCircle,
-    },
-  ] : [];
-
   const falsePositiveExamples = labeledPairAudit.filter(pair => !pair.actual && pair.predicted).sort((a, b) => b.score - a.score).slice(0, 3);
   const falseNegativeExamples = labeledPairAudit.filter(pair => pair.actual && !pair.predicted).sort((a, b) => a.score - b.score).slice(0, 3);
   const heldoutSize = Number(splitProtocol.holdout_size || 0);
@@ -1457,11 +1468,46 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
 
 
       {/* ── FIX: Tool failures shown in all modes ── */}
-      {toolFailureRows.length > 0 && (
+	      {toolFailureRows.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
           <div className="font-semibold text-amber-900 mb-2 flex items-center gap-2"><AlertCircle size={15} className="shrink-0" />Some tools did not return scores:</div>
           <div className="space-y-1">
             {toolFailureRows.map(f => <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>)}
+          </div>
+        </div>
+	      )}
+
+      {pairSamplingAudit && (
+        <div className={`rounded-2xl border px-5 py-4 text-sm leading-6 ${pairSamplingAudit.blockers?.length ? 'border-red-200 bg-red-50 text-red-800' : pairSamplingWarnings.length ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="font-semibold mb-1 flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />Benchmark Sampling Audit
+              </div>
+              <div>
+                Used {pairSamplingAudit.selected?.total_pairs || 0} balanced evaluation pairs from {pairSamplingAudit.original?.total_pairs || 0} available labeled pairs.
+              </div>
+              <div className="mt-1 text-xs opacity-80">
+                Policy: {String(pairSamplingAudit.sampling_policy || '').replaceAll('_', ' ')}
+              </div>
+              {pairSamplingWarnings.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {pairSamplingWarnings.map((warning, index) => (
+                    <div key={`${warning}-${index}`}>- {warning}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="grid min-w-[260px] grid-cols-2 gap-2 text-center">
+              <div className="rounded-xl bg-white/80 px-3 py-2 ring-1 ring-black/5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] opacity-60">Positive</div>
+                <div className="mt-1 text-lg font-bold">{pairSamplingAudit.selected?.positive_pairs || 0}</div>
+              </div>
+              <div className="rounded-xl bg-white/80 px-3 py-2 ring-1 ring-black/5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] opacity-60">Negative</div>
+                <div className="mt-1 text-lg font-bold">{pairSamplingAudit.selected?.negative_pairs || 0}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1509,31 +1555,15 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             <div className="px-6 py-5 border-b border-slate-100">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h2 className="font-semibold text-slate-900">IntegrityDesk Metrics</h2>
+                  <h2 className="font-semibold text-slate-900">Metrics</h2>
                   <p className="text-sm text-slate-500 mt-0.5">
-                    Precision, recall, and F1 for {results.datasetName || 'the selected labeled dataset'}.
+                    Evaluation summary for {productPanResult.name} on {results.datasetName || 'the selected labeled dataset'}.
                   </p>
                 </div>
                 <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
                   Threshold {Number(decisionThreshold).toFixed(2)}
                 </div>
               </div>
-            </div>
-            <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-4">
-              {integrityDeskMetricCards.map(metric => {
-                const tone = metricToneClasses(metric.tone);
-                const Icon = metric.icon;
-                return (
-                  <div key={metric.key} className={`rounded-2xl border ${tone.border} ${tone.bg} p-5`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{metric.label}</div>
-                      <Icon size={18} className={tone.text} />
-                    </div>
-                    <div className={`mt-3 text-4xl font-black ${tone.text}`}>{formatPanMetricValue({ value: metric.value })}</div>
-                    <div className="mt-2 text-xs font-semibold text-slate-500">{metric.detail}</div>
-                  </div>
-                );
-              })}
             </div>
             <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-4">
               <div className="grid gap-3 text-sm md:grid-cols-4">
@@ -1884,7 +1914,7 @@ const BENCHMARK_MODES = [
     id: 'development',
     icon: Zap,
     eyebrow: 'IntegrityDesk optimization',
-    label: 'Improve IntegrityDesk',
+    label: 'Evaluate & Improve',
     tagline: 'Run labeled tests, inspect per-run F1 / Precision / Recall / FPR, and keep improving IntegrityDesk.',
     description: 'Run IntegrityDesk on labeled benchmark data, tune the threshold, and inspect the misses and false alarms that are blocking quality.',
     bestFor: 'Best for improving your own detector',
@@ -1898,7 +1928,7 @@ const BENCHMARK_MODES = [
     id: 'release',
     icon: CheckCircle2,
     eyebrow: 'Locked internal regression',
-    label: 'Trust Check',
+    label: 'Validate Version',
     tagline: 'Run IntegrityDesk at the fixed production threshold and use pass/fail quality gates.',
     description: 'Validate IntegrityDesk on labeled benchmark data without tuning the threshold during the run.',
     bestFor: 'Best for internal go/no-go checks',
@@ -1912,7 +1942,7 @@ const BENCHMARK_MODES = [
     id: 'comparison',
     icon: GitCompare,
     eyebrow: 'Competitive benchmark',
-    label: 'Compare Against Other Tools',
+    label: 'Compare Tools',
     tagline: 'Run IntegrityDesk beside MOSS, JPlag, Dolos, and others on the same benchmark.',
     description: 'Compare multiple detectors on the same labeled dataset and see where IntegrityDesk wins or loses on F1, precision, recall, and false positive rate.',
     bestFor: 'Best for comparative evidence',
@@ -2006,9 +2036,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   ];
 
   const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
-  const pageDesc = modeScope === 'comparison'
-    ? 'Compare IntegrityDesk against external detection tools on the same benchmark data.'
-    : 'Benchmark workspace for improving IntegrityDesk or comparing it against other tools.';
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
 
   return (
@@ -2024,7 +2051,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900 tracking-tight">{pageTitle}</h1>
-                <p className="text-sm text-slate-500">{pageDesc}</p>
               </div>
             </div>
             <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
@@ -2034,32 +2060,23 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
           {/* ── Mode selector (only when multiple modes available) ────── */}
           {availableModes.length > 1 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
               {availableModes.map(mode => {
                 const Icon = mode.icon;
                 const isActive = activeModeId === mode.id;
                 return (
-                  <button key={mode.id} onClick={() => switchMode(mode.id)}
-                    className={`group relative rounded-2xl border-2 p-5 text-left transition-all duration-200 ${isActive ? 'border-slate-900 bg-slate-900 shadow-xl shadow-slate-900/15' : 'border-slate-200 bg-white hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-md'}`}>
-                    {isActive && (
-                      <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
-                        <div className={`absolute inset-0 bg-gradient-to-br ${mode.accent} opacity-10`} />
-                      </div>
-                    )}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${mode.accent} flex items-center justify-center shadow-md shrink-0`}>
-                        <Icon size={18} className="text-white" />
-                      </div>
-                      {isActive && <span className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Selected</span>}
-                    </div>
-                    <div className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400`}>{mode.eyebrow}</div>
-                    <div className={`mt-1 text-base font-bold ${isActive ? 'text-white' : 'text-slate-900'}`}>{mode.label}</div>
-                    <p className={`mt-2 text-sm leading-5 ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>{mode.description}</p>
-                    <div className="mt-4 flex flex-wrap gap-1.5">
-                      {mode.outputs.map(o => (
-                        <span key={o} className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isActive ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>{o}</span>
-                      ))}
-                    </div>
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => switchMode(mode.id)}
+                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    <span>{mode.label}</span>
                   </button>
                 );
               })}

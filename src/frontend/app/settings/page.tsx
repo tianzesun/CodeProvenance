@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, Cpu, Database, Save, Shield, SlidersHorizontal, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, Archive } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, Settings, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, Archive } from 'lucide-react';
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',

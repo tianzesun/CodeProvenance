@@ -55,7 +55,10 @@ class DolosBenchmarkEngine(BaseAdapter):
         )
 
     def run_batch(
-        self, submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+        self,
+        submissions: Dict[str, str],
+        pairs: Iterable[tuple[str, str]],
+        progress_cb=None,
     ) -> Dict[str, Any]:
         """Run Dolos for all submissions and return requested pair scores."""
         cli_path = self._find_cli()
@@ -77,7 +80,7 @@ class DolosBenchmarkEngine(BaseAdapter):
             command_prefix = (
                 ["node", str(cli_path)] if cli_path.suffix == ".js" else [str(cli_path)]
             )
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 [
                     *command_prefix,
                     "run",
@@ -87,17 +90,26 @@ class DolosBenchmarkEngine(BaseAdapter):
                     str(report_dir),
                     *written_paths.values(),
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                check=False,
-                timeout=180,
-                env=env,
+                bufsize=1,
+                universal_newlines=True,
             )
-            if result.returncode != 0:
+
+            # Stream output
+            if proc.stdout:
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if progress_cb:
+                        progress_cb(line)
+            else:
+                proc.wait()
+
+            proc.wait()
+            if proc.returncode != 0:
                 raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "Dolos execution failed"
+                    f"Dolos exited with code {proc.returncode}. See logs for details."
                 )
 
             pairs_path = report_dir / "pairs.csv"
@@ -197,7 +209,9 @@ class DolosBenchmarkEngine(BaseAdapter):
 
 
 def run_dolos_batch(
-    submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+    submissions: Dict[str, str],
+    pairs: Iterable[tuple[str, str]],
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """Run the canonical Dolos batch adapter used by benchmark APIs."""
-    return DolosBenchmarkEngine().run_batch(submissions, pairs)
+    return DolosBenchmarkEngine().run_batch(submissions, pairs, progress_cb=progress_cb)

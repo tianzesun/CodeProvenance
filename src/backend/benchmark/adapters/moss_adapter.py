@@ -332,6 +332,11 @@ def run_moss_batch(
     submissions: Dict[str, str],
     pairs: Iterable[tuple[str, str]],
     moss_user_id: Optional[str] = None,
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """Run the canonical MOSS batch adapter used by benchmark APIs."""
-    return MossAdapter(moss_user_id=moss_user_id).run_batch(submissions, pairs)
+    _ = progress_cb
+    max_matches = max(10, min(1000, len(submissions)))
+    return MossAdapter(moss_user_id=moss_user_id, max_matches=max_matches).run_batch(
+        submissions, pairs
+    )

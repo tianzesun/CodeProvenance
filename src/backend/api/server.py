@@ -27,7 +27,6 @@ import time
 import math
 import subprocess
 import csv
-import xml.etree.ElementTree as ET
 from collections import Counter
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
@@ -35,9 +34,23 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
 import numpy as np
 
-from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
+from fastapi import (
+    FastAPI,
+    Request,
+    Response,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    BackgroundTasks,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import (
+    HTMLResponse,
+    FileResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 
 from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
@@ -112,6 +125,19 @@ AUTH_EXEMPT_PATHS = {
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+# In-memory progress tracking for benchmark jobs
+import threading
+
+BENCHMARK_PROGRESS: Dict[str, List[str]] = {}
+BENCHMARK_RESULTS: Dict[str, Any] = {}
+BENCHMARK_LOCK = threading.Lock()
+
+
+def _append_progress(job_id: str, line: str) -> None:
+    with BENCHMARK_LOCK:
+        BENCHMARK_PROGRESS.setdefault(job_id, []).append(line)
+
 
 REAL_BENCHMARK_TOOL_IDS = {
     "integritydesk",
@@ -2077,28 +2103,10 @@ def _run_selected_external_tools(
     pairs: List[tuple],
 ) -> Dict[str, Dict[str, Any]]:
     """Run selected non-IntegrityDesk tools and preserve per-tool failures."""
-    tool_results: Dict[str, Dict[str, Any]] = {}
-    for tool_id in selected_tool_ids:
-        if tool_id == "integritydesk":
-            continue
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
-        started = time.perf_counter()
-        try:
-            score_data = _run_competitor_tool(tool_id, submissions, pairs)
-            if score_data:
-                tool_results[tool_id] = score_data
-            else:
-                tool_results[tool_id] = {"error": _unavailable_tool_reason(tool_id)}
-        except Exception as exc:
-            logger.exception("External tool %s failed during upload analysis", tool_id)
-            tool_results[tool_id] = {"error": str(exc)}
-        finally:
-            tool_results.setdefault(tool_id, {})
-            tool_results[tool_id]["runtime_seconds"] = round(
-                time.perf_counter() - started, 4
-            )
-
-    return tool_results
+    runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
+    return runner.run_selected_tools(selected_tool_ids, submissions, pairs)
 
 
 def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
@@ -2225,6 +2233,132 @@ def _write_pair_submission(
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / safe_name).write_text(code, encoding="utf-8")
     return safe_name
+
+
+def _pair_label_value(pair: Dict[str, Any]) -> int:
+    """Return the normalized benchmark label for a pair record."""
+    return _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
+
+
+def _stable_pair_sort_key(dataset_id: str, pair: Dict[str, Any]) -> str:
+    """Return a deterministic pseudo-random sort key for benchmark pairs."""
+    key = "|".join(
+        [
+            str(dataset_id or "custom"),
+            str(pair.get("file_a", "")),
+            str(pair.get("file_b", "")),
+            str(pair.get("label", "")),
+            str(pair.get("case_category", "")),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _build_pair_sampling_audit(
+    dataset_id: str,
+    original_pairs: List[Dict[str, Any]],
+    selected_pairs: List[Dict[str, Any]],
+    *,
+    balanced: bool,
+) -> Dict[str, Any]:
+    """Describe how labeled benchmark pairs were selected for this run."""
+
+    def counts_for(pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        positive = sum(1 for pair in pairs if _pair_label_value(pair) >= 2)
+        negative = len(pairs) - positive
+        categories = Counter(
+            str(pair.get("case_category") or "unspecified") for pair in pairs
+        )
+        splits = Counter(str(pair.get("split") or "unspecified") for pair in pairs)
+        return {
+            "total_pairs": len(pairs),
+            "positive_pairs": positive,
+            "negative_pairs": negative,
+            "class_balance_ratio": round(
+                min(positive, negative) / max(positive, negative, 1), 4
+            ),
+            "case_categories": dict(sorted(categories.items())),
+            "splits": dict(sorted(splits.items())),
+        }
+
+    original_counts = counts_for(original_pairs)
+    selected_counts = counts_for(selected_pairs)
+    warnings: List[str] = []
+    blockers: List[str] = []
+    if selected_counts["positive_pairs"] == 0 or selected_counts["negative_pairs"] == 0:
+        blockers.append(
+            "Selected benchmark sample lacks both positive and negative pairs."
+        )
+    if selected_counts["class_balance_ratio"] < 0.5:
+        warnings.append("Selected benchmark sample is class-imbalanced.")
+    if original_counts["class_balance_ratio"] < 0.5:
+        warnings.append("Original dataset pair list is class-imbalanced.")
+
+    synthetic_negative_datasets = {
+        "CodeSimilarityDataset",
+        "bigclonebench",
+        "poolc_600k_python",
+        "poj104",
+        "xiangtan",
+    }
+    if dataset_id in synthetic_negative_datasets:
+        warnings.append(
+            "Negative pairs are generated by the loader; validate them before certification."
+        )
+
+    return {
+        "dataset": dataset_id or "custom",
+        "sampling_policy": (
+            "deterministic_balanced_shuffle"
+            if balanced
+            else "deterministic_shuffle_unbalanced"
+        ),
+        "random_seed_source": "sha256(dataset,file_a,file_b,label,case_category)",
+        "original": original_counts,
+        "selected": selected_counts,
+        "dropped_pairs": max(0, len(original_pairs) - len(selected_pairs)),
+        "warnings": warnings,
+        "blockers": blockers,
+    }
+
+
+def _select_reliable_explicit_pairs(
+    dataset_id: str, explicit_pairs: List[Dict[str, Any]]
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Select a deterministic balanced labeled sample for benchmark scoring."""
+    if not explicit_pairs:
+        return [], _build_pair_sampling_audit(dataset_id, [], [], balanced=False)
+
+    positives = [pair for pair in explicit_pairs if _pair_label_value(pair) >= 2]
+    negatives = [pair for pair in explicit_pairs if _pair_label_value(pair) < 2]
+    positives = sorted(
+        positives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
+    negatives = sorted(
+        negatives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
+
+    if positives and negatives:
+        per_class = min(
+            len(positives),
+            len(negatives),
+            max(1, PAIR_BENCHMARK_MAX_PAIRS // 2),
+        )
+        selected = positives[:per_class] + negatives[:per_class]
+        balanced = True
+    else:
+        selected = sorted(
+            explicit_pairs, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+        )[:PAIR_BENCHMARK_MAX_PAIRS]
+        balanced = False
+
+    selected = sorted(
+        selected, key=lambda pair: _stable_pair_sort_key(f"{dataset_id}:eval", pair)
+    )
+    audit = _build_pair_sampling_audit(
+        dataset_id, explicit_pairs, selected, balanced=balanced
+    )
+    return selected, audit
 
 
 def _pair_language_extension(language: Any) -> str:
@@ -2558,6 +2692,12 @@ def _load_ir_plag_pair_dataset(
             continue
         original_file = original_files[0]  # Take first one
         original_code = original_file.read_text(encoding="utf-8", errors="ignore")
+        original_submission = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"ir_plag_{case_dir.name}_original.java",
+            original_code,
+        )
 
         # Generate positive pairs: original vs each plagiarized variant
         for level_dir in sorted(plagiarized_dir.iterdir()):
@@ -2573,12 +2713,6 @@ def _load_ir_plag_pair_dataset(
                     plag_code = plag_file.read_text(encoding="utf-8", errors="ignore")
 
                     pair_id = f"ir_plag_{case_dir.name}_{level_dir.name}_{variant_dir.name}_{plag_file.stem}"
-                    file_a = _write_pair_submission(
-                        submissions,
-                        target_dir,
-                        f"{pair_id}_original.java",
-                        original_code,
-                    )
                     file_b = _write_pair_submission(
                         submissions,
                         target_dir,
@@ -2587,7 +2721,7 @@ def _load_ir_plag_pair_dataset(
                     )
                     explicit_pairs.append(
                         {
-                            "file_a": file_a,
+                            "file_a": original_submission,
                             "file_b": file_b,
                             "label": _label_to_clone_grade(1),  # Positive
                             "case_category": "true_positive",
@@ -2607,12 +2741,6 @@ def _load_ir_plag_pair_dataset(
                 )
 
                 pair_id = f"ir_plag_{case_dir.name}_nonplag_{non_plag_dir.name}_{non_plag_file.stem}"
-                file_a = _write_pair_submission(
-                    submissions,
-                    target_dir,
-                    f"{pair_id}_original.java",
-                    original_code,
-                )
                 file_b = _write_pair_submission(
                     submissions,
                     target_dir,
@@ -2621,7 +2749,7 @@ def _load_ir_plag_pair_dataset(
                 )
                 explicit_pairs.append(
                     {
-                        "file_a": file_a,
+                        "file_a": original_submission,
                         "file_b": file_b,
                         "label": _label_to_clone_grade(0),  # Negative
                         "case_category": "true_negative",
@@ -6073,6 +6201,7 @@ async def run_benchmark(
 
     submissions = {}
     explicit_pairs: List[Dict[str, Any]] = []
+    pair_sampling_audit: Dict[str, Any] = {}
 
     logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
@@ -6080,6 +6209,18 @@ async def run_benchmark(
         submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
             dataset, job_dir
         )
+        if explicit_pairs:
+            explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
+                dataset, explicit_pairs
+            )
+            selected_files = {
+                str(pair.get("file_a", "")) for pair in explicit_pairs
+            } | {str(pair.get("file_b", "")) for pair in explicit_pairs}
+            submissions = {
+                filename: content
+                for filename, content in submissions.items()
+                if filename in selected_files
+            }
         if not submissions:
             submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
@@ -6089,6 +6230,14 @@ async def run_benchmark(
     logger.info(
         f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully"
     )
+    if pair_sampling_audit:
+        logger.info(
+            "[BENCHMARK %s] Pair sampling: %s selected from %s (%s)",
+            job_id,
+            pair_sampling_audit.get("selected", {}).get("total_pairs", 0),
+            pair_sampling_audit.get("original", {}).get("total_pairs", 0),
+            pair_sampling_audit.get("sampling_policy"),
+        )
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -6191,6 +6340,11 @@ async def run_benchmark(
 
     total_tools = len([t for t in tools if t != "integritydesk"])
     current_tool_idx = 1
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
+
+    external_tool_runner = ExternalToolRunner(
+        moss_user_id=_get_setting_secret("moss_user_id")
+    )
     for tool in tools:
         if tool == "integritydesk":
             continue
@@ -6200,7 +6354,7 @@ async def run_benchmark(
         current_tool_idx += 1
         tool_started = time.perf_counter()
         try:
-            score_data = _run_competitor_tool(tool, submissions, all_pairs)
+            score_data = external_tool_runner.run_tool(tool, submissions, all_pairs)
             if score_data:
                 tool_results[tool] = score_data
             else:
@@ -6381,6 +6535,8 @@ async def run_benchmark(
         ),
         "has_ground_truth": bool(ground_truth_labels),
     }
+    if pair_sampling_audit:
+        response["pair_sampling_audit"] = pair_sampling_audit
     if benchmark_quality:
         response["benchmark_quality"] = benchmark_quality
 
@@ -8248,531 +8404,6 @@ def _compute_auc_fallback(
         prec = tp / (tp + np.arange(1, len(tp) + 1))
         rec = tp / max(1, tp[-1])
         return np.trapz(prec, rec)
-
-
-def _run_competitor_tool(tool, submissions, pairs):
-    if tool == "moss":
-        return _run_moss_cli(submissions, pairs)
-    elif tool == "dolos":
-        return _run_dolos_cli(submissions, pairs)
-    elif tool == "jplag":
-        return _run_jplag_cli(submissions, pairs)
-    elif tool == "nicad":
-        return _run_nicad_cli(submissions, pairs)
-    elif tool == "pmd":
-        return _run_pmd_cli(submissions, pairs)
-
-    elif tool == "sherlock":
-        return _run_sherlock_cli(submissions, pairs)
-    return None
-
-
-def _coerce_similarity_score(result):
-    if isinstance(result, (int, float)):
-        return float(result)
-
-    score = getattr(result, "score", None)
-    if isinstance(score, (int, float)):
-        return float(score)
-
-    return 0.0
-
-
-def _run_pairwise_tool(submissions, pairs, scorer, tolerate_pair_errors: bool = False):
-    results = []
-    for fa, fb in pairs:
-        try:
-            score = _coerce_similarity_score(scorer(submissions[fa], submissions[fb]))
-        except Exception:
-            if not tolerate_pair_errors:
-                raise
-            score = 0.0
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _tokenize_code(code: str) -> List[str]:
-    return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|\S", code.lower())
-
-
-def _token_jaccard_score(code_a: str, code_b: str) -> float:
-    tokens_a = set(_tokenize_code(code_a))
-    tokens_b = set(_tokenize_code(code_b))
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
-
-
-def _line_overlap_score(code_a: str, code_b: str) -> float:
-    lines_a = {line.strip() for line in code_a.splitlines() if line.strip()}
-    lines_b = {line.strip() for line in code_b.splitlines() if line.strip()}
-    if not lines_a and not lines_b:
-        return 1.0
-    if not lines_a or not lines_b:
-        return 0.0
-    return len(lines_a & lines_b) / len(lines_a | lines_b)
-
-
-def _sequence_similarity_score(code_a: str, code_b: str) -> float:
-    from difflib import SequenceMatcher
-
-    tokens_a = _tokenize_code(code_a)
-    tokens_b = _tokenize_code(code_b)
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return SequenceMatcher(a=tokens_a, b=tokens_b).ratio()
-
-
-_NICAD_KEYWORDS = frozenset(
-    [
-        "def",
-        "class",
-        "return",
-        "if",
-        "else",
-        "elif",
-        "for",
-        "while",
-        "import",
-        "from",
-        "try",
-        "except",
-        "finally",
-        "with",
-        "as",
-        "in",
-        "not",
-        "and",
-        "or",
-        "is",
-        "none",
-        "true",
-        "false",
-        "pass",
-        "break",
-        "continue",
-        "raise",
-        "yield",
-        "lambda",
-        "public",
-        "private",
-        "protected",
-        "static",
-        "void",
-        "int",
-        "float",
-        "double",
-        "char",
-        "boolean",
-        "string",
-        "new",
-        "this",
-        "super",
-        "extends",
-        "implements",
-        "const",
-        "let",
-        "var",
-        "function",
-        "async",
-        "await",
-    ]
-)
-
-
-def _nicad_normalize(code: str) -> List[str]:
-    code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-    code = re.sub(r"//.*$", "", code, flags=re.MULTILINE)
-    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-    code = re.sub(r'"[^"]*"', '"STRING"', code)
-    code = re.sub(r"'[^']*'", "'STRING'", code)
-    code = re.sub(r"\b[0-9]+\.?[0-9]*\b", "NUM", code)
-
-    normalized = []
-    identifier_map: Dict[str, str] = {}
-    next_identifier = 0
-
-    for token in re.findall(r"[A-Za-z_]\w*|==|!=|<=|>=|\S", code):
-        lowered = token.lower()
-        if re.match(r"[A-Za-z_]\w*$", token) and lowered not in _NICAD_KEYWORDS:
-            if token not in identifier_map:
-                identifier_map[token] = f"__id{next_identifier}__"
-                next_identifier += 1
-            normalized.append(identifier_map[token])
-        else:
-            normalized.append(lowered)
-
-    return normalized
-
-
-def _nicad_score(code_a: str, code_b: str) -> float:
-    tokens_a = set(_nicad_normalize(code_a))
-    tokens_b = set(_nicad_normalize(code_b))
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
-
-
-def _run_moss_cli(submissions, pairs):
-    moss_user_id = _get_setting_secret("moss_user_id")
-    if not moss_user_id or not _find_moss_script():
-        return None
-
-    from src.backend.benchmark.adapters.moss_adapter import run_moss_batch
-
-    return run_moss_batch(submissions, pairs, moss_user_id=moss_user_id)
-
-
-def _run_jplag_cli(submissions, pairs):
-    if not _find_jplag_jar():
-        return None
-
-    from src.backend.benchmark.adapters.jplag_adapter import run_jplag_batch
-
-    return run_jplag_batch(submissions, pairs)
-
-
-def _run_dolos_cli(submissions, pairs):
-    if not _find_dolos_cli():
-        return None
-
-    from src.backend.benchmark.adapters.dolos_adapter import run_dolos_batch
-
-    return run_dolos_batch(submissions, pairs)
-
-
-def _run_nicad_cli(submissions, pairs):
-    nicad_path = _find_nicad_executable()
-    txl_path = _find_txl_executable()
-    if not nicad_path or not txl_path:
-        return None
-
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
-    language_map = {
-        "python": "py",
-        "java": "java",
-        "csharp": "cs",
-        "php": "php",
-        "ruby": "rb",
-        "swift": "swift",
-        "rust": "rs",
-    }
-
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        nicad_language = language_map.get(language)
-        if not nicad_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"nicad-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            submission_map = _write_submissions_as_submission_dirs(
-                source_root, language_submissions
-            )
-
-            env = os.environ.copy()
-            env["PATH"] = f"{txl_path.parent}:{env.get('PATH', '')}"
-
-            result = subprocess.run(
-                [
-                    str(nicad_path),
-                    "files",
-                    nicad_language,
-                    str(source_root),
-                    "default-report",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=240,
-                cwd=str(
-                    nicad_path.parent.parent
-                    if nicad_path.parent.name == "bin"
-                    else nicad_path.parent
-                ),
-                env=env,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "NiCad execution failed"
-                )
-
-            report_dir = None
-            for line in result.stdout.splitlines():
-                if line.startswith("Results in "):
-                    report_dir = line.replace("Results in ", "", 1).strip()
-            if not report_dir:
-                continue
-
-            report_path = PathLib(report_dir)
-            xml_candidates = sorted(report_path.glob("*-classes-withsource.xml"))
-            if not xml_candidates:
-                xml_candidates = sorted(report_path.glob("*.xml"))
-            if not xml_candidates:
-                continue
-
-            logger.info(f"NiCad XML output found at: {xml_candidates[0]}")
-            tree = ET.parse(xml_candidates[0])
-            root = tree.getroot()
-            for class_node in root.findall("class"):
-                try:
-                    similarity = float(class_node.get("similarity", "0")) / 100.0
-                except (TypeError, ValueError):
-                    continue
-                class_files = []
-                for source_node in class_node.findall("source"):
-                    source_path = source_node.get("file", "")
-                    if not source_path:
-                        continue
-                    filename = PathLib(source_path).name
-                    if filename in language_submissions:
-                        class_files.append(filename)
-                        continue
-                    for submission_data in submission_map.values():
-                        if PathLib(submission_data["path"]).name == filename:
-                            class_files.append(submission_data["filename"])
-                            break
-                for i in range(len(class_files)):
-                    for j in range(i + 1, len(class_files)):
-                        pair_key = _pair_key(class_files[i], class_files[j])
-                        score_by_pair[pair_key] = max(
-                            score_by_pair.get(pair_key, 0.0), similarity
-                        )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_pmd_cli(submissions, pairs):
-    if not _find_pmd_executable():
-        return None
-
-    from src.backend.benchmark.adapters.pmd_adapter import run_pmd_batch
-
-    return run_pmd_batch(submissions, pairs)
-
-
-def _run_ac_cli(submissions, pairs):
-    ac_dir = _find_tool_dir("ac")
-    jar_path = (
-        ac_dir / "ac-2.2.1-SNAPSHOT-92c42.jar"
-        if ac_dir
-        else TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar"
-    )
-    if not jar_path.exists():
-        return None
-
-    distance_by_pair = {}
-
-    with tempfile.TemporaryDirectory(prefix="ac-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        source_root.mkdir(parents=True, exist_ok=True)
-
-        for filename, content in submissions.items():
-            submission_dir = source_root / PathLib(filename).stem
-            submission_dir.mkdir(parents=True, exist_ok=True)
-            (submission_dir / PathLib(filename).name).write_text(
-                content, encoding="utf-8"
-            )
-
-        result = subprocess.run(
-            [
-                "java",
-                "-cp",
-                str(jar_path),
-                "es.ucm.fdi.ac.CommandLineMain",
-                str(source_root),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                result.stderr.strip() or result.stdout.strip() or "AC execution failed"
-            )
-
-        csv_lines = []
-        capture = False
-        for raw_line in result.stdout.splitlines():
-            line = raw_line.strip()
-            if line.startswith("Distance (0=same, 1=very different),StudentA,StudentB"):
-                capture = True
-                csv_lines.append("distance,student_a,student_b")
-                continue
-            if capture:
-                if not line or line.startswith("Test finished!"):
-                    break
-                if re.match(r"^[0-9.]+,[^,]+,[^,]+$", line):
-                    csv_lines.append(line)
-
-        if len(csv_lines) <= 1:
-            return {"pairs": []}
-
-        reader = csv.DictReader(csv_lines)
-        for row in reader:
-            try:
-                distance = float(row["distance"])
-            except (TypeError, ValueError):
-                continue
-            pair_key = _pair_key(f"{row['student_a']}.py", f"{row['student_b']}.py")
-            distance_by_pair[pair_key] = max(0.0, min(1.0, distance))
-
-    results = []
-    for fa, fb in pairs:
-        distance = distance_by_pair.get(
-            _pair_key(PathLib(fa).stem + ".py", PathLib(fb).stem + ".py")
-        )
-        if distance is None:
-            score = 0.0
-        else:
-            score = 1.0 - distance
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-
-    return {"pairs": results}
-
-
-def _run_sherlock_cli(
-    submissions: Dict[str, str], pairs: List[tuple]
-) -> Optional[Dict[str, Any]]:
-    """Run the local Sherlock binary and convert percentage output to pair scores."""
-    sherlock_path = _find_sherlock_executable()
-    if not sherlock_path:
-        return None
-
-    score_by_pair: Dict[str, float] = {}
-    groups: Dict[str, Dict[str, str]] = {}
-
-    for filename, content in submissions.items():
-        suffix = PathLib(filename).suffix.lower()
-        if not suffix:
-            continue
-        groups.setdefault(suffix, {})[filename] = content
-
-    with tempfile.TemporaryDirectory(prefix="sherlock-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        source_root.mkdir(parents=True, exist_ok=True)
-        written_paths = _write_submissions_to_directory(source_root, submissions)
-        path_to_filename = {
-            str(PathLib(path).resolve()): filename
-            for filename, path in written_paths.items()
-        }
-        name_to_filename = {
-            PathLib(path).name: filename for filename, path in written_paths.items()
-        }
-
-        for suffix, suffix_submissions in groups.items():
-            if len(suffix_submissions) < 2:
-                continue
-
-            result = subprocess.run(
-                [
-                    str(sherlock_path),
-                    "-t",
-                    "0",
-                    "-e",
-                    suffix,
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=180,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "Sherlock execution failed"
-                )
-
-            for raw_line in result.stdout.splitlines():
-                parts = [part.strip() for part in raw_line.split(";")]
-                if len(parts) != 3 or not parts[2].endswith("%"):
-                    continue
-
-                left_name = _resolve_sherlock_output_file(
-                    parts[0], path_to_filename, name_to_filename
-                )
-                right_name = _resolve_sherlock_output_file(
-                    parts[1], path_to_filename, name_to_filename
-                )
-                if not left_name or not right_name:
-                    continue
-
-                try:
-                    similarity = float(parts[2].rstrip("%")) / 100.0
-                except ValueError:
-                    continue
-
-                pair_key = _pair_key(left_name, right_name)
-                score_by_pair[pair_key] = max(
-                    score_by_pair.get(pair_key, 0.0), max(0.0, min(1.0, similarity))
-                )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _resolve_sherlock_output_file(
-    raw_path: str, path_to_filename: Dict[str, str], name_to_filename: Dict[str, str]
-) -> Optional[str]:
-    """Map a Sherlock output path or basename back to the original submission name."""
-    resolved = str(PathLib(raw_path).resolve())
-    if resolved in path_to_filename:
-        return path_to_filename[resolved]
-    return name_to_filename.get(PathLib(raw_path).name)
-
-
-def _run_sherlock_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _line_overlap_score)
-
-
-def _run_sim_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _sequence_similarity_score)
-
-
-def _run_codequiry_approx(submissions, pairs):
-    try:
-        from src.backend.engines.similarity.embedding_similarity import (
-            EmbeddingSimilarity,
-        )
-
-        engine = EmbeddingSimilarity()
-        return _run_pairwise_tool(
-            submissions,
-            pairs,
-            lambda code_a, code_b: engine.compare({"raw": code_a}, {"raw": code_b}),
-        )
-    except Exception:
-        return None
 
 
 def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> PathLib:

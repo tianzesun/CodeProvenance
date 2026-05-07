@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -69,7 +70,10 @@ class JPlagAdapter(BaseAdapter):
         return self._make_result(pair, score, self._threshold, metadata=metadata)
 
     def run_batch(
-        self, submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+        self,
+        submissions: Dict[str, str],
+        pairs: Iterable[tuple[str, str]],
+        progress_cb=None,
     ) -> Dict[str, Any]:
         """Run JPlag for all submissions and return requested pair scores."""
         jar_path = self._find_jar()
@@ -90,7 +94,7 @@ class JPlagAdapter(BaseAdapter):
             if not jplag_language:
                 continue
             group_scores = self._run_group(
-                jar_path, jplag_language, language_submissions
+                jar_path, jplag_language, language_submissions, progress_cb
             )
             score_by_pair.update(group_scores)
 
@@ -106,7 +110,12 @@ class JPlagAdapter(BaseAdapter):
         }
 
     def _run_group(
-        self, jar_path: Path, jplag_language: str, submissions: Dict[str, str]
+        self,
+        jar_path: Path,
+        jplag_language: str,
+        submissions: Dict[str, str],
+        progress_cb=None,
+        allow_text_fallback: bool = True,
     ) -> Dict[str, float]:
         """Run one JPlag language group."""
         with tempfile.TemporaryDirectory(prefix="jplag-adapter-") as temp_dir:
@@ -114,7 +123,11 @@ class JPlagAdapter(BaseAdapter):
             result_root = Path(temp_dir) / "results"
             source_root.mkdir(parents=True, exist_ok=True)
             submission_map = self._write_submission_dirs(source_root, submissions)
-            result = subprocess.run(
+            suffixes = self._suffixes_for_submissions(submissions)
+            suffix_args = ["-p", suffixes] if suffixes else []
+
+            # Use Popen to stream output line-by-line
+            proc = subprocess.Popen(
                 [
                     "java",
                     "-jar",
@@ -124,24 +137,89 @@ class JPlagAdapter(BaseAdapter):
                     "-t",
                     str(self._min_tokens),
                     "--csv-export",
+                    "--overwrite",
+                    "--cluster-skip",
+                    *suffix_args,
                     "-M",
                     "RUN",
                     "-r",
                     str(result_root),
                     str(source_root),
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                check=False,
-                timeout=240,
+                bufsize=1,
+                universal_newlines=True,
             )
-            if result.returncode != 0:
+
+            output_lines: list[str] = []
+
+            # Stream output lines to progress callback
+            if proc.stdout:
+                for line in proc.stdout:
+                    cleaned_line = self._clean_output_line(line)
+                    if cleaned_line:
+                        output_lines.append(cleaned_line)
+                        if progress_cb:
+                            progress_cb(cleaned_line)
+            else:
+                # Fallback: wait without streaming
+                proc.wait()
+
+            proc.wait()
+            csv_path = result_root / "results.csv"
+            if proc.returncode != 0:
+                if csv_path.exists():
+                    return self._parse_results_csv(csv_path, submission_map)
+                if self._is_recoverable_submission_failure(output_lines):
+                    if allow_text_fallback and jplag_language != "text":
+                        return self._run_group(
+                            jar_path,
+                            "text",
+                            submissions,
+                            progress_cb,
+                            allow_text_fallback=False,
+                        )
+                    return {}
+                detail = self._format_failure_output(output_lines)
                 raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "JPlag execution failed"
+                    f"JPlag exited with code {proc.returncode}: {detail}"
                 )
-            return self._parse_results_csv(result_root / "results.csv", submission_map)
+
+            return self._parse_results_csv(csv_path, submission_map)
+
+    def _clean_output_line(self, line: str) -> str:
+        """Strip terminal control characters from JPlag progress output."""
+        cleaned = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
+        cleaned = cleaned.replace("\r", "\n")
+        parts = [part.strip() for part in cleaned.splitlines() if part.strip()]
+        return " | ".join(parts)
+
+    def _format_failure_output(self, output_lines: list[str]) -> str:
+        """Build a concise JPlag failure detail from captured output lines."""
+        unique_lines = list(dict.fromkeys(output_lines))
+        if not unique_lines:
+            return "no output captured"
+        return " | ".join(unique_lines[-8:])
+
+    def _is_recoverable_submission_failure(self, output_lines: list[str]) -> bool:
+        """Return whether JPlag failed only because it removed bad submissions."""
+        output = "\n".join(output_lines).lower()
+        return (
+            "submissionset" in output and "submission" in output and "removed" in output
+        )
+
+    def _suffixes_for_submissions(self, submissions: Dict[str, str]) -> str:
+        """Return JPlag suffix filters for the submitted filenames."""
+        suffixes = sorted(
+            {
+                Path(filename).suffix.lower().lstrip(".")
+                for filename in submissions
+                if Path(filename).suffix
+            }
+        )
+        return ",".join(suffixes)
 
     def _parse_results_csv(
         self, csv_path: Path, submission_map: Dict[str, Dict[str, str]]
@@ -228,7 +306,9 @@ class JPlagAdapter(BaseAdapter):
 
 
 def run_jplag_batch(
-    submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
+    submissions: Dict[str, str],
+    pairs: Iterable[tuple[str, str]],
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """Run the canonical JPlag batch adapter used by benchmark APIs."""
-    return JPlagAdapter().run_batch(submissions, pairs)
+    return JPlagAdapter().run_batch(submissions, pairs, progress_cb=progress_cb)
