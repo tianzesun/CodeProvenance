@@ -185,7 +185,7 @@ export default function ResultsPage() {
       return;
     }
 
-    apiClient.get(`/api/job/${id}`)
+    apiClient.get(`/api/jobs/${id}`)
       .then((res) => {
         setJob(res.data);
         setError(null);
@@ -231,7 +231,8 @@ export default function ResultsPage() {
   const results = useMemo(() => sortResultsByScore(Array.isArray(job?.results) ? job.results : []), [job]);
   const threshold = getThreshold(job);
   const flaggedResults = results.filter((result) => Number(result.score) >= threshold);
-  const activeResult = flaggedResults[activeIndex] || results[activeIndex] || results[0] || null;
+  const reviewResults = flaggedResults.length ? flaggedResults : results;
+  const activeResult = reviewResults[activeIndex] || reviewResults[0] || null;
   const submissions = job?.submissions && typeof job.submissions === 'object' ? job.submissions : {};
   const leftCode = getSubmissionCode(submissions, activeResult?.file_a, fallbackCode(activeResult?.file_a || 'Student A'));
   const rightCode = getSubmissionCode(submissions, activeResult?.file_b, fallbackCode(activeResult?.file_b || 'Student B'));
@@ -240,6 +241,12 @@ export default function ResultsPage() {
   const score = Number(activeResult?.score) || 0;
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
+
+  useEffect(() => {
+    if (activeIndex >= reviewResults.length) {
+      setActiveIndex(0);
+    }
+  }, [activeIndex, reviewResults.length]);
 
   if (loading) {
     return (
@@ -280,6 +287,25 @@ export default function ResultsPage() {
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
                   Review Summary
                 </h1>
+                <label className="mt-4 block max-w-xl">
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Pair</span>
+                  <select
+                    value={Math.min(activeIndex, Math.max(reviewResults.length - 1, 0))}
+                    onChange={(event) => setActiveIndex(Number(event.target.value))}
+                    className="mt-2 h-11 w-full rounded-md border border-[color:var(--border)] bg-white px-3 text-sm font-semibold text-[var(--text-primary)] outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+                    disabled={reviewResults.length === 0}
+                  >
+                    {reviewResults.length === 0 ? (
+                      <option value={0}>No comparison pairs available</option>
+                    ) : (
+                      reviewResults.map((result, index) => (
+                        <option key={`${result.file_a}-${result.file_b}-${index}`} value={index}>
+                          {index + 1}. {result.file_a} vs {result.file_b} - {formatPercent(result.score)}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[720px]">

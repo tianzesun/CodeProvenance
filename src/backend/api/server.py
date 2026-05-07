@@ -44,6 +44,7 @@ from fastapi import (
     HTTPException,
     BackgroundTasks,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     HTMLResponse,
@@ -2115,14 +2116,39 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
         for member in zf.namelist():
             if member.endswith("/"):
                 continue
-            filename = PathLib(member).name
-            if _is_code_file(filename):
-                target = target_dir / filename
+            member_path = PathLib(member)
+            if _is_code_file(member_path.name):
+                safe_parts = [
+                    part
+                    for part in member_path.parts
+                    if part not in {"", ".", ".."} and not PathLib(part).is_absolute()
+                ]
+                relative_path = (
+                    PathLib(*safe_parts) if safe_parts else PathLib(member_path.name)
+                )
+                target = _unique_child_path(target_dir, relative_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src, open(target, "wb") as dst:
                     dst.write(src.read())
                 extracted.append(str(target))
     return extracted
+
+
+def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
+    """Return a child path under root_dir without overwriting existing uploads."""
+    target = root_dir / relative_path
+    if not target.exists():
+        return target
+
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    counter = 2
+    while True:
+        candidate = parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
@@ -4036,13 +4062,19 @@ def _build_ai_text_trust_report(ai_detection: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+def _build_web_analysis_summary(
+    submissions: Dict[str, str], settings_payload: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Build public-source match evidence from administrator-configured sources."""
     if not submissions:
         return {}
 
-    web_enabled = (
-        os.getenv("INTEGRITYDESK_ENABLE_WEB_ANALYSIS", "").strip().lower()
-        in TRUTHY_VALUES
+    settings_payload = settings_payload or {}
+    source_sites = _normalize_source_scan_sites(
+        settings_payload.get("source_scan_sites")
+    )
+    web_enabled = bool(settings_payload.get("source_scan_enabled")) and bool(
+        source_sites
     )
     github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
     stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
@@ -4050,12 +4082,13 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     if not web_enabled:
         return {
             "enabled": False,
-            "configured": bool(github_token or stackoverflow_api_key),
-            "status_message": "Web analysis is available but disabled by default. Set INTEGRITYDESK_ENABLE_WEB_ANALYSIS=1 to query external sources during assignment checks.",
+            "configured": bool(source_sites),
+            "status_message": "External source scanning is disabled in admin settings.",
             "matched_submissions": 0,
             "highest_similarity": 0.0,
             "average_similarity": 0.0,
             "source_totals": {},
+            "configured_sources": source_sites,
             "submissions": [],
         }
 
@@ -4069,8 +4102,8 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     source_totals: Dict[str, int] = {}
 
     for name, code in submissions.items():
-        result = service.perform_full_web_scan(
-            code, _infer_language_from_filename(name)
+        result = service.scan_configured_sources(
+            code, _infer_language_from_filename(name), source_sites
         )
         sources = []
         for source in result.get("web_results", [])[:5]:
@@ -4117,13 +4150,14 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     return {
         "enabled": True,
         "configured": True,
-        "status_message": "External source checks are enabled for this assignment.",
+        "status_message": "External source checks scanned administrator-configured sources.",
         "matched_submissions": sum(1 for entry in entries if entry["match_count"] > 0),
         "highest_similarity": round(
             max((entry["max_similarity"] for entry in entries), default=0.0), 3
         ),
         "average_similarity": round(average_similarity, 3),
         "source_totals": source_totals,
+        "configured_sources": source_sites,
         "submissions": entries,
     }
 
@@ -4151,12 +4185,15 @@ def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 @app.get("/api/auth/status")
 async def auth_status():
-    with SessionLocal() as db:
-        user_count = int(db.scalar(select(func.count()).select_from(User)) or 0)
+    user_count = await run_in_threadpool(_get_user_count)
     _ensure_auth_secret()
     return JSONResponse(
         content={"bootstrapped": user_count > 0, "user_count": user_count}
     )
+
+def _get_user_count():
+    with SessionLocal() as db:
+        return int(db.scalar(select(func.count()).select_from(User)) or 0)
 
 
 @app.post("/api/auth/bootstrap-admin")
@@ -4171,12 +4208,35 @@ async def bootstrap_admin(request: Request):
         raise HTTPException(status_code=400, detail="Email and full name are required")
     _validate_password_input(password)
 
+    user = await run_in_threadpool(_bootstrap_admin_sync, email, full_name, password, tenant_name)
+    _ensure_auth_secret()
+    return JSONResponse(
+        content={"user": _serialize_user(user), "message": "Admin account created"}
+    )
+
+def _bootstrap_admin_sync(email, full_name, password, tenant_name):
     with SessionLocal() as db:
         existing_users = int(db.scalar(select(func.count()).select_from(User)) or 0)
         if existing_users > 0:
             raise HTTPException(
                 status_code=400, detail="Bootstrap has already been completed"
             )
+
+        tenant = _create_tenant(
+            db, tenant_name or _generate_tenant_name(full_name, email)
+        )
+        user = User(
+            tenant_id=tenant.id,
+            email=email,
+            full_name=full_name,
+            hashed_password=_hash_password(password),
+            role="admin",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
 
         tenant = _create_tenant(
             db, tenant_name or _generate_tenant_name(full_name, email)
@@ -4208,6 +4268,12 @@ async def login(request: Request):
         raise HTTPException(status_code=400, detail="Email and password are required")
     _validate_password_input(password)
 
+    user = await run_in_threadpool(_login_sync, email, password)
+    response = JSONResponse(content={"user": _serialize_user(user)})
+    _issue_auth_cookie(response, user)
+    return response
+
+def _login_sync(email, password):
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.email == email))
         if not user or not _verify_password(password, user.password_hash):
@@ -4219,10 +4285,7 @@ async def login(request: Request):
         db.add(user)
         db.commit()
         db.refresh(user)
-
-        response = JSONResponse(content={"user": _serialize_user(user)})
-        _issue_auth_cookie(response, user)
-        return response
+        return user
 
 
 @app.post("/api/auth/logout")
@@ -5298,10 +5361,12 @@ async def upload_files(
     saved_files = []
     for f in files:
         if f.filename and _is_code_file(f.filename):
-            target = job_dir / f.filename
+            safe_name = PathLib(f.filename).name
+            target = _unique_child_path(job_dir, PathLib(safe_name))
+            target.parent.mkdir(parents=True, exist_ok=True)
             content = await f.read()
             target.write_bytes(content)
-            saved_files.append(f.filename)
+            saved_files.append(str(target.relative_to(job_dir)))
 
     starter_dir = job_dir / "starter"
     starter_sources = []
@@ -5309,7 +5374,9 @@ async def upload_files(
         starter_dir.mkdir(exist_ok=True)
         for f in starter_files:
             if f.filename and _is_code_file(f.filename):
-                target = starter_dir / f.filename
+                safe_name = PathLib(f.filename).name
+                target = _unique_child_path(starter_dir, PathLib(safe_name))
+                target.parent.mkdir(parents=True, exist_ok=True)
                 content = await f.read()
                 target.write_bytes(content)
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
@@ -5372,7 +5439,9 @@ async def upload_zip(
         starter_dir.mkdir(exist_ok=True)
         for f in starter_files:
             if f.filename and _is_code_file(f.filename):
-                target = starter_dir / f.filename
+                safe_name = PathLib(f.filename).name
+                target = _unique_child_path(starter_dir, PathLib(safe_name))
+                target.parent.mkdir(parents=True, exist_ok=True)
                 content = await f.read()
                 target.write_bytes(content)
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
@@ -5388,6 +5457,76 @@ async def upload_zip(
         engine_keys,
         tool_ids,
         starter_sources,
+    )
+
+
+@app.post("/api/ai-detect")
+async def detect_ai_generated_code(
+    request: Request,
+    files: Optional[List[UploadFile]] = File(default=None),
+    file: Optional[UploadFile] = File(default=None),
+    course_name: str = Form(default=""),
+    assignment_name: str = Form(default=""),
+):
+    """Run AI-generated code detection for one or more uploaded submissions."""
+    current_user = _require_current_user(request)
+    job_id = str(uuid.uuid4())[:8]
+    job_dir = UPLOADS_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    uploads = list(files or [])
+    if file is not None:
+        uploads.append(file)
+
+    for upload in uploads:
+        if not upload.filename:
+            continue
+        filename = PathLib(upload.filename).name
+        content = await upload.read()
+        target = job_dir / filename
+        target.write_bytes(content)
+        if filename.lower().endswith(".zip"):
+            _extract_zip(target, job_dir)
+
+    submissions = _read_files_from_dir(job_dir)
+    if not submissions:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Upload at least one valid code file or ZIP archive."},
+        )
+
+    ai_detection = _build_ai_detection_summary(submissions)
+    _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
+    _jobs[job_id] = {
+        "id": job_id,
+        "job_type": "ai_detector",
+        "course_name": course_name or "AI Detector",
+        "assignment_name": assignment_name or "AI Generated Code Review",
+        "status": "completed",
+        "created_at": datetime.now().isoformat(),
+        "file_count": len(submissions),
+        "results": [],
+        "summary": {
+            "total_files": len(submissions),
+            "flagged_files": ai_detection.get("flagged_count", 0),
+            "highest_ai_probability": ai_detection.get("highest_score", 0.0),
+            "average_ai_probability": ai_detection.get("average_score", 0.0),
+        },
+        "review_status": "unreviewed",
+        "review_notes": "",
+        "review_updated_at": None,
+        "tenant_id": current_user.get("tenant_id"),
+        "owner_user_id": current_user.get("id"),
+        "owner_user_email": current_user.get("email"),
+        "selected_tool_ids": ["ai_detector"],
+        "selected_tools": ["AI Detector"],
+        "ai_detection": ai_detection,
+        "submissions": {k: v[:3000] for k, v in submissions.items()},
+    }
+    _persist_job(job_id)
+    return JSONResponse(
+        content={"job_id": job_id, "status": "completed", "ai_detection": ai_detection}
     )
 
 
@@ -5509,7 +5648,8 @@ async def _run_analysis(
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
         ai_detection = _build_ai_detection_summary(submissions)
-        web_analysis = _build_web_analysis_summary(submissions)
+        settings_payload = _build_settings_payload(current_user.get("tenant_id"))
+        web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
         reproducibility_report = _build_reproducibility_report(
@@ -8588,6 +8728,8 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "audit_log_level": "INFO",
     "audit_retention_days": 365,
     "debug_mode": False,
+    "source_scan_enabled": False,
+    "source_scan_sites": ["https://github.com"],
     "professor_profile": {
         "assignment_type": "auto_detect",
         "sensitivity": "balanced",
@@ -8621,6 +8763,8 @@ SETTINGS_ATTR_MAP = {
     "audit_log_level": "AUDIT_LOG_LEVEL",
     "audit_retention_days": "AUDIT_RETENTION_DAYS",
     "debug_mode": "DEBUG_MODE",
+    "source_scan_enabled": "SOURCE_SCAN_ENABLED",
+    "source_scan_sites": "SOURCE_SCAN_SITES",
 }
 
 SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key", "moss_user_id"}
@@ -8664,6 +8808,9 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
     payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
+    payload["source_scan_sites"] = _normalize_source_scan_sites(
+        payload.get("source_scan_sites")
+    )
 
     openai_key = str(payload.get("openai_api_key") or "")
     anthropic_key = str(payload.get("anthropic_api_key") or "")
@@ -8694,9 +8841,28 @@ def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
         if key in merged:
+            if not hasattr(settings, attr):
+                continue
             setattr(settings, attr, merged[key])
             if key in SECRET_SETTING_KEYS and merged[key]:
                 os.environ[attr] = str(merged[key])
+
+
+def _normalize_source_scan_sites(value: Any) -> List[str]:
+    """Normalize admin-configured external source scan locations."""
+    if isinstance(value, str):
+        raw_sites = re.split(r"[\n,]+", value)
+    elif isinstance(value, list):
+        raw_sites = [str(item) for item in value]
+    else:
+        raw_sites = []
+
+    sites: List[str] = []
+    for site in raw_sites:
+        normalized = site.strip()
+        if normalized and normalized not in sites:
+            sites.append(normalized)
+    return sites[:20]
 
 
 def _get_upload_engine_weights(
@@ -8953,6 +9119,102 @@ async def download_report_pdf(job_id: str, request: Request):
             f"attachment; filename=integritydesk_report_{job_id}.pdf"
         )
         return response
+
+
+def _build_ai_originality_report_html(job: Dict[str, Any]) -> str:
+    """Build a compact printable AI Detector originality report."""
+    import html
+
+    ai_detection = (
+        job.get("ai_detection") if isinstance(job.get("ai_detection"), dict) else {}
+    )
+    submissions = (
+        ai_detection.get("submissions")
+        if isinstance(ai_detection.get("submissions"), list)
+        else []
+    )
+
+    rows = []
+    for entry in submissions:
+        if not isinstance(entry, dict):
+            continue
+        indicators = ", ".join(
+            str(item) for item in (entry.get("indicators") or [])[:5]
+        )
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(entry.get('name') or 'Submission'))}</td>"
+            f"<td>{_format_report_percent(_coerce_float(entry.get('ai_probability')))}</td>"
+            f"<td>{_format_report_percent(_coerce_float(entry.get('confidence')))}</td>"
+            f"<td>{html.escape(str(entry.get('status') or 'Review Signal'))}</td>"
+            f"<td>{html.escape(indicators or 'No notable indicators')}</td>"
+            "</tr>"
+        )
+
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>IntegrityDesk Originality Report</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; color: #0f172a; margin: 32px; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    .muted {{ color: #64748b; font-size: 13px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }}
+    .card {{ border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }}
+    .label {{ color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }}
+    .value {{ font-size: 22px; font-weight: 700; margin-top: 6px; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }}
+    th, td {{ border-bottom: 1px solid #e2e8f0; padding: 10px; text-align: left; vertical-align: top; }}
+    th {{ background: #f8fafc; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: .08em; }}
+    .notice {{ border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 12px; padding: 12px; margin-top: 18px; color: #1e40af; }}
+  </style>
+</head>
+<body>
+  <h1>IntegrityDesk Originality Report</h1>
+  <div class="muted">
+    {html.escape(str(job.get("assignment_name") or "AI Generated Code Review"))}
+    · {html.escape(str(job.get("course_name") or "Course"))}
+    · Report ID {html.escape(str(job.get("id") or ""))}
+  </div>
+  <div class="grid">
+    <div class="card"><div class="label">Files</div><div class="value">{int(ai_detection.get("total_files") or job.get("file_count") or 0)}</div></div>
+    <div class="card"><div class="label">Flagged</div><div class="value">{int(ai_detection.get("flagged_count") or 0)}</div></div>
+    <div class="card"><div class="label">Highest AI Probability</div><div class="value">{_format_report_percent(_coerce_float(ai_detection.get("highest_score")))}</div></div>
+    <div class="card"><div class="label">Average</div><div class="value">{_format_report_percent(_coerce_float(ai_detection.get("average_score")))}</div></div>
+  </div>
+  <div class="notice">AI Detector results are review signals and should not be used as standalone misconduct findings.</div>
+  <table>
+    <thead><tr><th>Submission</th><th>AI Probability</th><th>Confidence</th><th>Status</th><th>Indicators</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="5">No AI evidence stored.</td></tr>'}</tbody>
+  </table>
+</body>
+</html>"""
+
+
+@app.get("/report/{job_id}/ai-originality-pdf")
+async def download_ai_originality_pdf(job_id: str, request: Request):
+    job = _require_job_access(job_id, request)
+    if job.get("job_type") != "ai_detector":
+        raise HTTPException(status_code=404, detail="AI Detector report not found")
+
+    html_content = _build_ai_originality_report_html(job)
+    try:
+        import weasyprint
+
+        pdf = weasyprint.HTML(string=html_content).write_pdf()
+        response = Response(content=pdf, media_type="application/pdf")
+    except Exception as exc:
+        logger.warning("AI originality PDF fallback for %s: %s", job_id, exc)
+        response = Response(
+            content=_minimal_pdf_bytes(f"IntegrityDesk Originality Report {job_id}"),
+            media_type="application/pdf",
+        )
+
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=integritydesk_originality_report_{job_id}.pdf"
+    )
+    return response
 
 
 @app.get("/benchmark/{job_id}/download-csv")
@@ -10409,6 +10671,8 @@ async def update_settings(request: Request):
                 continue
             if key == "engine_weights":
                 value = _normalize_engine_weights(value)
+            if key == "source_scan_sites":
+                value = _normalize_source_scan_sites(value)
             if key == "professor_profile":
                 from src.backend.engines.scoring.professor_profiles import (
                     apply_professor_profile,
