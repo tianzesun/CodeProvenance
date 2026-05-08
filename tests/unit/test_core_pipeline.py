@@ -69,6 +69,8 @@ class TestFeatureExtractor:
         assert 0.0 <= fv.string_tiling <= 1.0
         assert 0.0 <= fv.graph <= 1.0
         assert 0.0 <= fv.static_rules <= 1.0
+        assert 0.0 <= fv.cfg_similarity <= 1.0
+        assert 0.0 <= fv.dfg_similarity <= 1.0
 
     def test_extract_different_code(self) -> None:
         """Completely different code should have low (but not necessarily zero) scores."""
@@ -124,6 +126,27 @@ class TestFeatureExtractor:
         assert fv.ngram == 0.4
         assert fv.winnowing == 0.6
         assert fv.graph == 0.7
+
+    def test_extract_uses_ast_cfg_pdg_for_obfuscated_python(self) -> None:
+        """Feature extraction should expose robust graph evidence for obfuscation."""
+        code_a = """
+def combine(a, b):
+    left = a + 1
+    right = b + 2
+    return left * right
+"""
+        code_b = """
+def product(x, y):
+    right = y + 2
+    left = x + 1
+    return left * right
+"""
+
+        fv = self.extractor.extract(code_a, code_b)
+
+        assert fv.graph > 0.9
+        assert fv.cfg_similarity > 0.9
+        assert fv.dfg_similarity > 0.9
 
 
 # ─── FusionEngine ────────────────────────────────────────────────────────

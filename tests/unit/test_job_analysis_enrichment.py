@@ -1,5 +1,7 @@
 """Tests for assignment-level AI and web analysis payload enrichment."""
 
+import zipfile
+
 from src.backend.api.server import (
     _build_ai_text_trust_report,
     _build_ai_detection_summary,
@@ -10,6 +12,11 @@ from src.backend.api.server import (
     _build_reproducibility_report,
     _build_web_analysis_summary,
     _normalize_job,
+    _extract_zip,
+    _read_files_from_dir,
+)
+from src.backend.application.services.batch_detection_service import (
+    BatchDetectionService,
 )
 
 
@@ -197,3 +204,49 @@ def test_benchmark_split_guard_blocks_locked_test_tuning() -> None:
     assert blocked["allowed"] is False
     assert "cannot be used" in blocked["message"]
     assert allowed["allowed"] is True
+
+
+def test_compare_all_pairs_keeps_every_pair() -> None:
+    """Four submissions should produce all six pairwise rows."""
+    submissions = {
+        "A.py": "def solve_a(x):\n    return x + 1\n",
+        "B.py": "def solve_b(x):\n    return x + 2\n",
+        "C.py": "def solve_c(x):\n    return x * 3\n",
+        "D.py": "def solve_d(x):\n    return x - 4\n",
+    }
+
+    results = BatchDetectionService(threshold=0.99).compare_all_pairs(submissions)
+    pairs = {tuple(sorted((result.file_a, result.file_b))) for result in results}
+
+    assert len(results) == 6
+    assert pairs == {
+        ("A.py", "B.py"),
+        ("A.py", "C.py"),
+        ("A.py", "D.py"),
+        ("B.py", "C.py"),
+        ("B.py", "D.py"),
+        ("C.py", "D.py"),
+    }
+
+
+def test_zip_upload_preserves_class_submission_paths(tmp_path) -> None:
+    """Class ZIPs often contain repeated basenames under student folders."""
+    zip_path = tmp_path / "class.zip"
+    target_dir = tmp_path / "extract"
+    target_dir.mkdir()
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("alice/main.py", "def solve():\n    return 'alice'\n")
+        archive.writestr("bob/main.py", "def solve():\n    return 'bob'\n")
+        archive.writestr("carol/main.py", "def solve():\n    return 'carol'\n")
+        archive.writestr("dan/main.py", "def solve():\n    return 'dan'\n")
+
+    extracted = _extract_zip(zip_path, target_dir)
+    submissions = _read_files_from_dir(target_dir)
+
+    assert len(extracted) == 4
+    assert sorted(submissions) == [
+        "alice__main.py",
+        "bob__main.py",
+        "carol__main.py",
+        "dan__main.py",
+    ]

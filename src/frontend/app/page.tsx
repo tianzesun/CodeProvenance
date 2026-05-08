@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
+  Bot,
   CheckCircle2,
   GripVertical,
   LayoutGrid,
@@ -19,7 +20,6 @@ import {
   Download,
   FileSearch,
   FileText,
-  FolderArchive,
   Loader2,
   Plus,
   RotateCcw,
@@ -36,8 +36,8 @@ const HOME_LAYOUT_TIP_STORAGE_KEY = 'integritydesk-home-layout-tip-v1';
 const HOME_CARD_DEFAULT_ORDER = [
   'recent-checks',
   'report-center',
-  'upload-files',
-  'upload-zip',
+  'plagiarism-checker',
+  'ai-detector',
   'settings',
 ];
 const HOME_CARD_OPTIONAL_ORDER = ['compare-tools', 'benchmark-suite', 'admin-console'];
@@ -567,29 +567,29 @@ export default function Home() {
         </div>
       ),
     },
-    'upload-files': {
-      id: 'upload-files',
-      label: 'Upload individual files',
+    'plagiarism-checker': {
+      id: 'plagiarism-checker',
+      label: 'Plagiarism Checker',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
-          href="/upload?mode=individual"
+          href="/upload"
           icon={Upload}
-          title="Upload individual files"
-          description="Use this when the submissions are already split into separate source files."
+          title="Plagiarism Checker"
+          description="Upload two files, many files, or a ZIP. IntegrityDesk automatically runs pairwise or class-wide comparison."
         />
       ),
     },
-    'upload-zip': {
-      id: 'upload-zip',
-      label: 'Upload one ZIP archive',
+    'ai-detector': {
+      id: 'ai-detector',
+      label: 'AI Detector',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
-          href="/upload?mode=zip"
-          icon={FolderArchive}
-          title="Upload one ZIP archive"
-          description="Use this when the assignment comes as a folder export or submission bundle."
+          href="/ai-detector"
+          icon={Bot}
+          title="AI Detector"
+          description="Stage a single-submission detector for AI-generated code signals, explanations, and professor evidence."
         />
       ),
     },
@@ -679,7 +679,7 @@ export default function Home() {
                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-8 py-4 text-base font-semibold transition hover:scale-105"
                   >
                     <Plus size={18} />
-                    New Check
+                    Plagiarism Checker
                   </Link>
 
                   {latestCompleted && (

@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
   BookOpen,
+  Bot,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -15,6 +16,7 @@ import {
   LogOut,
   Menu,
   MoonStar,
+  PlusCircle,
   SearchCheck,
   Settings,
   Shield,
@@ -49,6 +51,18 @@ export default function Sidebar() {
           label: 'Dashboard',
           icon: LayoutDashboard,
           activeOn: ['/'],
+        },
+        {
+          href: '/upload',
+          label: 'Plagiarism Checker',
+          icon: PlusCircle,
+          activeOn: ['/upload'],
+        },
+        {
+          href: '/ai-detector',
+          label: 'AI Detector',
+          icon: Bot,
+          activeOn: ['/ai-detector'],
         },
         {
           href: '/assignments',

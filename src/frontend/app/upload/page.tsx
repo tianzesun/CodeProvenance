@@ -253,6 +253,24 @@ export default function UploadPage() {
   }, [files]);
 
   const selectedFiles = useMemo(() => (zipFile ? [] : files), [files, zipFile]);
+  const inferredComparisonScope = useMemo(() => {
+    if (zipFile || files.length > 2) {
+      return {
+        label: 'Class-wide comparison',
+        detail: 'IntegrityDesk will rank suspicious pairs across the uploaded submissions.',
+      };
+    }
+    if (files.length === 2) {
+      return {
+        label: 'Pairwise comparison',
+        detail: 'IntegrityDesk will compare the two selected submissions directly.',
+      };
+    }
+    return {
+      label: 'Awaiting submissions',
+      detail: 'Upload two files, multiple files, or one ZIP to start plagiarism review.',
+    };
+  }, [files.length, zipFile]);
   const selectedAssignmentMode = useMemo(() => assignmentModes.find((m) => m.id === selectedAssignmentModeId), [assignmentModes, selectedAssignmentModeId]);
   const hasMixedZipSelection = useMemo(() => files.length > 1 && files.some((f) => f.name.toLowerCase().endsWith('.zip')), [files]);
   const canRunCheck = useMemo(() => {
@@ -390,11 +408,11 @@ export default function UploadPage() {
                   </div>
                   <div>
                     <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                      Upload Assignment
+                      Plagiarism Checker
                     </h1>
                   </div>
                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                    Upload a ZIP, LMS export, or repository bundle. IntegrityDesk detects the assignment shape, removes starter code, calibrates thresholds, and returns only the cases worth instructor time.
+                    Upload files and IntegrityDesk chooses the right comparison scope automatically. Admin-configured GitHub and web sources are scanned when enabled in settings.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
@@ -411,7 +429,7 @@ export default function UploadPage() {
                         </svg>
                         Analyzing…
                       </>
-                      : <><Zap size={16} />Analyze Assignment<ArrowRight size={15} className="opacity-70" /></>}
+                      : <><Zap size={16} />Analyze<ArrowRight size={15} className="opacity-70" /></>}
                   </button>
                 </div>
               </div>
@@ -437,6 +455,18 @@ export default function UploadPage() {
                       {task}
                     </div>
                   ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {inferredComparisonScope && (
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+              <div className="flex items-start gap-3">
+                <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                <div>
+                  <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
+                  <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
                 </div>
               </div>
             </section>
@@ -511,7 +541,7 @@ export default function UploadPage() {
                     {isDragOver ? 'Release to upload' : 'Drag files here'}
                   </h3>
                   <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
-                    Upload a ZIP archive, LMS export, Git repository bundle, or multiple submission files.
+                    Upload a ZIP archive, LMS export, repository bundle, or source files for this review.
                   </p>
                   <div className="flex flex-wrap justify-center gap-3">
                     <button

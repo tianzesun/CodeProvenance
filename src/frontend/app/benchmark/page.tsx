@@ -25,8 +25,8 @@ const TOOLS = [
     id: 'integritydesk', name: 'IntegrityDesk', color: '#7C3AED',
     bgLight: 'bg-violet-50', textColor: 'text-violet-700', ring: 'ring-violet-500',
     gradient: 'from-violet-500 to-violet-700',
-    engines: ['AST', 'Embedding', 'TF-IDF', 'Token Graph', 'AI Code'],
-    desc: 'Fusion with AST/embedding signals, TF-IDF baseline, token normalization graphs, merged subsequence evidence, and AI-code detection.',
+    engines: ['Token Graph', 'String Tiling', 'AST', 'PDG', 'N-gram', 'Code Embedding', 'Rules'],
+    desc: 'Seven-engine fusion for obfuscation-resistant class review: token normalization graph, subsequence merging, AST/CFG/PDG, n-grams, CodeBERT-style embeddings, and static-rule evidence.',
     status: 'Ready to run',
   },
   {
@@ -770,12 +770,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             >
               <input
                 id="file-input" type="file" className="hidden" multiple
-                accept=".zip,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
+                accept=".zip,.txt,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
                 onChange={e => setFiles(Array.from(e.target.files))}
               />
               <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
               <p className="font-semibold text-slate-600 mb-1">Drop source files or a ZIP archive here</p>
-              <p className="text-sm text-slate-400">Upload 2 or more source files, or a single ZIP for one-off comparison</p>
+              <p className="text-sm text-slate-400">Upload 2 or more files, or a single ZIP for one-off comparison</p>
               <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
                 <FileUp size={14} />Browse files
               </div>
@@ -793,7 +793,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
               </div>
             )}
             {files.length === 1 && !hasZipUpload && (
-              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive</p>
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 files, or use a ZIP archive</p>
             )}
           </div>
         )}
@@ -1673,14 +1673,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                 </div>
               </div>
             )}
-            <div className="grid gap-3 p-6 md:grid-cols-2">
-              {panFeedback.map(item => (
-                <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="font-semibold text-slate-900">{item.title}</div>
-                  <div className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</div>
-                </div>
-              ))}
-            </div>
+
             {(tuningConfigChanges.length > 0 || tuningRecommendations?.available) && (
               <div className="border-t border-slate-100 px-6 pb-6">
                 <div className="pt-5">
@@ -1760,7 +1753,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       )}
 
       {/* Comparison charts */}
-      {isComparisonReport && chartData.length > 0 && (
+      {chartData.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Pair-by-Pair Scores</h2>
@@ -1782,7 +1775,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       )}
 
       {/* Detailed pair results */}
-      {isComparisonReport && (pair_results?.length || 0) > 0 && (
+      {(pair_results?.length || 0) > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>

@@ -57,6 +57,7 @@ from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload
 
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.backend.application.services.batch_detection_service import (
@@ -4191,6 +4192,7 @@ async def auth_status():
         content={"bootstrapped": user_count > 0, "user_count": user_count}
     )
 
+
 def _get_user_count():
     with SessionLocal() as db:
         return int(db.scalar(select(func.count()).select_from(User)) or 0)
@@ -4208,11 +4210,14 @@ async def bootstrap_admin(request: Request):
         raise HTTPException(status_code=400, detail="Email and full name are required")
     _validate_password_input(password)
 
-    user = await run_in_threadpool(_bootstrap_admin_sync, email, full_name, password, tenant_name)
+    user = await run_in_threadpool(
+        _bootstrap_admin_sync, email, full_name, password, tenant_name
+    )
     _ensure_auth_secret()
     return JSONResponse(
         content={"user": _serialize_user(user), "message": "Admin account created"}
     )
+
 
 def _bootstrap_admin_sync(email, full_name, password, tenant_name):
     with SessionLocal() as db:
@@ -4229,13 +4234,16 @@ def _bootstrap_admin_sync(email, full_name, password, tenant_name):
             tenant_id=tenant.id,
             email=email,
             full_name=full_name,
-            hashed_password=_hash_password(password),
+            password_hash=_hash_password(password),
             role="admin",
             is_active=True,
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
+        # Refresh with tenant loaded
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
         return user
 
         tenant = _create_tenant(
@@ -4273,9 +4281,12 @@ async def login(request: Request):
     _issue_auth_cookie(response, user)
     return response
 
+
 def _login_sync(email, password):
     with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.email == email))
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.email == email)
+        )
         if not user or not _verify_password(password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
@@ -4304,7 +4315,11 @@ async def auth_me(request: Request):
 async def list_users(request: Request):
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
-        users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+        users = db.scalars(
+            select(User)
+            .options(joinedload(User.tenant))
+            .order_by(User.created_at.desc())
+        ).all()
         return JSONResponse(
             content={"users": [_serialize_user(user) for user in users]}
         )
@@ -4346,7 +4361,10 @@ async def create_user(request: Request):
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
+        # Refresh with tenant loaded
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
 
         return JSONResponse(
             status_code=201,
@@ -8954,7 +8972,9 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     with SessionLocal() as db:
-        user = db.get(User, user_id)
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user_id)
+        )
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
         serialized = _serialize_user(user)
