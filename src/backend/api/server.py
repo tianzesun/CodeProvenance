@@ -57,6 +57,7 @@ from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload
 
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.backend.application.services.batch_detection_service import (
@@ -97,8 +98,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(frontend_origin_candidates),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["content-type", "authorization", "accept", "accept-language", "content-language", "*"],
 )
 
 REPORTS_DIR = project_root / "reports"
@@ -4191,6 +4192,7 @@ async def auth_status():
         content={"bootstrapped": user_count > 0, "user_count": user_count}
     )
 
+
 def _get_user_count():
     with SessionLocal() as db:
         return int(db.scalar(select(func.count()).select_from(User)) or 0)
@@ -4208,35 +4210,24 @@ async def bootstrap_admin(request: Request):
         raise HTTPException(status_code=400, detail="Email and full name are required")
     _validate_password_input(password)
 
-    user = await run_in_threadpool(_bootstrap_admin_sync, email, full_name, password, tenant_name)
+    user_data = await run_in_threadpool(
+        _bootstrap_admin_sync, email, full_name, password, tenant_name
+    )
     _ensure_auth_secret()
     return JSONResponse(
-        content={"user": _serialize_user(user), "message": "Admin account created"}
+        content={"user": user_data, "message": "Admin account created"}
     )
 
+
 def _bootstrap_admin_sync(email, full_name, password, tenant_name):
-    with SessionLocal() as db:
+    db = SessionLocal()
+
+    try:
         existing_users = int(db.scalar(select(func.count()).select_from(User)) or 0)
         if existing_users > 0:
             raise HTTPException(
                 status_code=400, detail="Bootstrap has already been completed"
             )
-
-        tenant = _create_tenant(
-            db, tenant_name or _generate_tenant_name(full_name, email)
-        )
-        user = User(
-            tenant_id=tenant.id,
-            email=email,
-            full_name=full_name,
-            hashed_password=_hash_password(password),
-            role="admin",
-            is_active=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
 
         tenant = _create_tenant(
             db, tenant_name or _generate_tenant_name(full_name, email)
@@ -4251,11 +4242,45 @@ def _bootstrap_admin_sync(email, full_name, password, tenant_name):
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
 
-        response = JSONResponse(content={"user": _serialize_user(user)})
-        _issue_auth_cookie(response, user)
-        return response
+        user_data = _serialize_user(user)
+        return user_data
+
+    finally:
+        db.close()
+
+
+def _login_sync(email, password):
+    db = SessionLocal()
+
+    try:
+        user = (
+            db.query(User)
+            .options(joinedload(User.tenant))
+            .filter(User.email == email)
+            .first()
+        )
+
+        if not user or not _verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Your account is disabled")
+
+        user.last_login_at = datetime.utcnow()
+        db.add(user)
+        db.commit()
+
+        user_data = _serialize_user(user)
+        return user_data
+
+    finally:
+        db.close()
+
+
+def _get_user_for_cookie(email):
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == email))
+        return user
 
 
 @app.post("/api/auth/login")
@@ -4268,24 +4293,12 @@ async def login(request: Request):
         raise HTTPException(status_code=400, detail="Email and password are required")
     _validate_password_input(password)
 
-    user = await run_in_threadpool(_login_sync, email, password)
-    response = JSONResponse(content={"user": _serialize_user(user)})
+    user_data = await run_in_threadpool(_login_sync, email, password)
+    # Need to fetch user again for cookie issuance since we now return serialized data
+    user = await run_in_threadpool(_get_user_for_cookie, email)
+    response = JSONResponse(content={"user": user_data})
     _issue_auth_cookie(response, user)
     return response
-
-def _login_sync(email, password):
-    with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.email == email))
-        if not user or not _verify_password(password, user.password_hash):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        if not user.is_active:
-            raise HTTPException(status_code=403, detail="Your account is disabled")
-
-        user.last_login_at = datetime.utcnow()
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
 
 
 @app.post("/api/auth/logout")
@@ -4304,7 +4317,7 @@ async def auth_me(request: Request):
 async def list_users(request: Request):
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
-        users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+        users = db.scalars(select(User).options(joinedload(User.tenant)).order_by(User.created_at.desc())).all()
         return JSONResponse(
             content={"users": [_serialize_user(user) for user in users]}
         )
@@ -4346,12 +4359,11 @@ async def create_user(request: Request):
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
 
         return JSONResponse(
             status_code=201,
             content={
-                "user": _serialize_user(user),
+                "user": _serialize_user(user),  # Still works since we're in session
                 "created_by": current_user["email"],
             },
         )
@@ -8692,13 +8704,15 @@ def _create_access_token(user: User) -> str:
 
 
 def _serialize_user(user: User) -> Dict[str, Any]:
+    tenant = getattr(user, "tenant", None)
+
     return {
         "id": str(user.id),
         "email": user.email,
         "full_name": user.full_name,
         "role": user.role,
         "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
-        "tenant_name": user.tenant.name if getattr(user, "tenant", None) else None,
+        "tenant_name": tenant.name if tenant else None,
         "is_active": bool(user.is_active),
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -8954,7 +8968,7 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     with SessionLocal() as db:
-        user = db.get(User, user_id)
+        user = db.get(User, user_id, options=[joinedload(User.tenant)])
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
         serialized = _serialize_user(user)
@@ -9000,6 +9014,7 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
 
 @app.middleware("http")
 async def dashboard_auth_middleware(request: Request, call_next):
+    # Always allow OPTIONS requests for CORS preflight - let CORS middleware handle headers
     if request.method == "OPTIONS":
         return await call_next(request)
 
