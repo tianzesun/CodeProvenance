@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .base_similarity import BaseSimilarityAlgorithm
+from src.backend.domain.models import Finding
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +115,19 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             ) from e
 
         logger.info("Loading %s onto %s …", self.model_name, self.device)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = (
-            AutoModel.from_pretrained(self.model_name)
-            .to(self.device)
-            .eval()
-        )
+
+        # Suppress warnings during model loading (known issue with unixcoder-base)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*embeddings\\.position_ids.*")
+            warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self._model = (
+                AutoModel.from_pretrained(self.model_name, ignore_mismatched_sizes=True, trust_remote_code=True)
+                .to(self.device)
+                .eval()
+            )
         logger.info("Model loaded.")
 
     # ─────────────────────────────────────────
@@ -213,34 +221,42 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     #  Public API (matches BaseSimilarityAlgorithm)
     # ─────────────────────────────────────────
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
         """
         Compare two parsed code dicts.
         Reads 'raw' key first (set by FeatureExtractor), falls back to 'tokens'.
 
-        Returns similarity in [0.0, 1.0].
+        Returns a Finding with similarity score in [0.0, 1.0].
         """
         text_a = self._extract_text(parsed_a)
         text_b = self._extract_text(parsed_b)
 
         if not text_a and not text_b:
-            return 1.0
+            return Finding(engine=self.name, score=1.0, confidence=1.0,
+                         methodology="UniXcoder semantic similarity")
         if not text_a or not text_b:
-            return 0.0
+            return Finding(engine=self.name, score=0.0, confidence=1.0,
+                         methodology="UniXcoder semantic similarity")
 
         # Skip very short snippets — noise dominates embeddings below ~5 tokens
         if len(text_a.split()) < 5 or len(text_b.split()) < 5:
-            return self._token_fallback(parsed_a, parsed_b)
+            fallback_result = self._token_fallback(parsed_a, parsed_b)
+            return Finding(engine=self.name, score=fallback_result.score, confidence=fallback_result.confidence,
+                         methodology="UniXcoder semantic similarity (token fallback)")
 
         try:
             embeddings = self._embed_texts([text_a, text_b])
             # Rows are already L2-normalised → dot product == cosine similarity
             score = float(np.dot(embeddings[0], embeddings[1]))
             # Map cosine [-1, 1] → [0, 1]
-            return max(0.0, min(1.0, (score + 1.0) / 2.0))
+            normalized_score = max(0.0, min(1.0, (score + 1.0) / 2.0))
+            return Finding(engine=self.name, score=normalized_score, confidence=0.9,
+                         methodology="UniXcoder semantic similarity using CLS token embeddings")
         except Exception as e:
             logger.warning("UniXcoder compare failed: %s — using token fallback", e)
-            return self._token_fallback(parsed_a, parsed_b)
+            fallback_result = self._token_fallback(parsed_a, parsed_b)
+            return Finding(engine=self.name, score=fallback_result.score, confidence=fallback_result.confidence,
+                         methodology="UniXcoder semantic similarity (fallback due to error)")
 
     def similarity_matrix(self, codes: List[str]) -> np.ndarray:
         """
@@ -326,10 +342,11 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         return ""
 
     @staticmethod
-    def _token_fallback(parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def _token_fallback(parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
         """Fallback to token similarity when embedding is unavailable / unreliable."""
         try:
             from .token_similarity import TokenSimilarity
             return TokenSimilarity().compare(parsed_a, parsed_b)
         except Exception:
-            return 0.0
+            return Finding(engine="token", score=0.0, confidence=0.1,
+                         methodology="Token similarity fallback")

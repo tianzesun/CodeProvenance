@@ -4217,6 +4217,10 @@ async def bootstrap_admin(request: Request):
     return JSONResponse(
         content={"user": user_data, "message": "Admin account created"}
     )
+    _ensure_auth_secret()
+    return JSONResponse(
+        content={"user": user_data, "message": "Admin account created"}
+    )
 
 
 def _bootstrap_admin_sync(email, full_name, password, tenant_name):
@@ -4300,7 +4304,6 @@ async def login(request: Request):
     _issue_auth_cookie(response, user)
     return response
 
-
 @app.post("/api/auth/logout")
 async def logout():
     response = JSONResponse(content={"status": "ok"})
@@ -4317,7 +4320,11 @@ async def auth_me(request: Request):
 async def list_users(request: Request):
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
-        users = db.scalars(select(User).options(joinedload(User.tenant)).order_by(User.created_at.desc())).all()
+        users = db.scalars(
+            select(User)
+            .options(joinedload(User.tenant))
+            .order_by(User.created_at.desc())
+        ).all()
         return JSONResponse(
             content={"users": [_serialize_user(user) for user in users]}
         )
@@ -4359,6 +4366,10 @@ async def create_user(request: Request):
         )
         db.add(user)
         db.commit()
+        # Refresh with tenant loaded
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
 
         return JSONResponse(
             status_code=201,
@@ -8968,7 +8979,9 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     with SessionLocal() as db:
-        user = db.get(User, user_id, options=[joinedload(User.tenant)])
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user_id)
+        )
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
         serialized = _serialize_user(user)

@@ -25,11 +25,14 @@ if DATABASE_URL.startswith("sqlite"):
     )
 
 # Create engine with PostgreSQL/Neon settings.
+pool_size = int(os.getenv("DATABASE_POOL_SIZE", "10"))
+max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=pool_size,
+    max_overflow=max_overflow,
+    pool_recycle=300,  # Recycle connections after 5 minutes to prevent stale connections
     echo=False,
 )
 

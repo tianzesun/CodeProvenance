@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Set, Tuple
 from .base_similarity import BaseSimilarityAlgorithm
 from collections import Counter
 import math
+from difflib import SequenceMatcher
 from src.backend.domain.models import EvidenceBlock, Finding
 
 logger = logging.getLogger(__name__)
@@ -176,19 +177,27 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         # 3. Create Evidence Blocks (Canonical Schema)
         evidence = []
-        if final_score > 0.5:
-            # Simple heuristic for evidence: find longest common token sequence
-            # (In a real system, you'd use a more sophisticated diff/match algorithm)
-            evidence.append(
-                EvidenceBlock(
-                    engine=self.name,
-                    score=final_score,
-                    confidence=0.8,
-                    a_snippet="Matching token sequences detected",
-                    b_snippet="Matching token sequences detected",
-                    transformation_notes=["Token-level similarity"],
+        if final_score > 0.8:  # Only create evidence for high similarity
+            # Find the longest matching substring in the original code
+            matcher = SequenceMatcher(None, code_a, code_b)
+            match = matcher.find_longest_match(0, len(code_a), 0, len(code_b))
+            if match.size > 10:  # Only if match is substantial
+                a_snippet = code_a[match.a:match.a + match.size]
+                b_snippet = code_b[match.b:match.b + match.size]
+                evidence.append(
+                    EvidenceBlock(
+                        engine=self.name,
+                        score=final_score,
+                        confidence=0.8,
+                        a_start_line=code_a[:match.a].count('\n') + 1,
+                        a_end_line=code_a[:match.a + match.size].count('\n') + 1,
+                        b_start_line=code_b[:match.b].count('\n') + 1,
+                        b_end_line=code_b[:match.b + match.size].count('\n') + 1,
+                        a_snippet=a_snippet,
+                        b_snippet=b_snippet,
+                        transformation_notes=["Exact substring match"],
+                    )
                 )
-            )
 
         final_score = min(1.0, max(0.0, final_score))
         if abs(final_score - 1.0) < 1e-12:

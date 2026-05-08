@@ -235,27 +235,26 @@ class BatchDetectionService:
                     features.winnowing,
                 )
 
-                if final_score >= self.threshold * 0.5:  # Store even low scores
-                    pair_result = ComparisonResult(
-                        file_a=fa,
-                        file_b=fb,
-                        score=final_score,
-                        risk_level=_risk_level(final_score),
-                        features={
-                            k: v
-                            for k, v in {
-                                "ast": features.ast,
-                                "fingerprint": features.fingerprint,
-                                "embedding": features.embedding,
-                                "ngram": features.ngram,
-                                "winnowing": features.winnowing,
-                                "logic_flow": logic_flow,
-                            }.items()
-                            if v is not None
-                        },
-                        contributions=dict(fused.contributions),
-                    )
-                    results.append(pair_result)
+                pair_result = ComparisonResult(
+                    file_a=fa,
+                    file_b=fb,
+                    score=final_score,
+                    risk_level=_risk_level(final_score),
+                    features={
+                        k: v
+                        for k, v in {
+                            "ast": features.ast,
+                            "fingerprint": features.fingerprint,
+                            "embedding": features.embedding,
+                            "ngram": features.ngram,
+                            "winnowing": features.winnowing,
+                            "logic_flow": logic_flow,
+                        }.items()
+                        if v is not None
+                    },
+                    contributions=dict(fused.contributions),
+                )
+                results.append(pair_result)
 
         # Sort by score descending
         results.sort(key=lambda x: x.score, reverse=True)

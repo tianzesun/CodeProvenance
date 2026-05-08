@@ -82,6 +82,88 @@ def calculate_average(numbers):
     assert result.individual_scores["tfidf_similarity"] > 0.5
 
 
+def test_ast_cfg_pdg_signal_handles_dead_code_insertion() -> None:
+    """AST/CFG/PDG normalization should preserve similarity through dead code."""
+    code_a = """
+def normalize(value):
+    if value > 0:
+        return value + 1
+    return 0
+"""
+    code_b = """
+def transform(item):
+    unused_marker = 42
+    if False:
+        print(unused_marker)
+    if item > 0:
+        return item + 1
+        junk = item * 99
+    return 0
+"""
+
+    result = CodeAnalyzer(threshold=0.5).compare_codes(
+        code_a, code_b, "python", "python"
+    )
+
+    assert result.individual_scores["ast_cfg_pdg_similarity"] > 0.7
+    assert result.individual_scores["pdg_similarity"] > 0.8
+    assert result.is_suspicious
+
+
+def test_ast_cfg_pdg_signal_handles_independent_statement_reordering() -> None:
+    """Independent statement reordering should keep strong structural evidence."""
+    code_a = """
+def combine(a, b):
+    left = a + 1
+    right = b + 2
+    return left * right
+"""
+    code_b = """
+def product(x, y):
+    right = y + 2
+    left = x + 1
+    return left * right
+"""
+
+    result = CodeAnalyzer(threshold=0.5).compare_codes(
+        code_a, code_b, "python", "python"
+    )
+
+    assert result.individual_scores["ast_cfg_pdg_similarity"] > 0.9
+    assert result.individual_scores["cfg_similarity"] > 0.9
+    assert result.is_suspicious
+
+
+def test_ast_cfg_pdg_signal_handles_control_flow_rewrite() -> None:
+    """Control-flow structure should still surface loop/branch-equivalent rewrites."""
+    code_a = """
+def count_positive(values):
+    total = 0
+    for value in values:
+        if value > 0:
+            total += 1
+    return total
+"""
+    code_b = """
+def number_above_zero(items):
+    count = 0
+    index = 0
+    while index < len(items):
+        current = items[index]
+        if current > 0:
+            count += 1
+        index += 1
+    return count
+"""
+
+    result = CodeAnalyzer(threshold=0.45).compare_codes(
+        code_a, code_b, "python", "python"
+    )
+
+    assert result.individual_scores["ast_cfg_pdg_similarity"] > 0.45
+    assert result.individual_scores["normalization_graph_similarity"] > 0.45
+
+
 def test_ai_detection_exposes_model_fusion_fields() -> None:
     """Single-file analysis should expose heuristic and model-backed AI scores."""
     code = '''

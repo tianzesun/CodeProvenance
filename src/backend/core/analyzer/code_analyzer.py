@@ -123,16 +123,18 @@ class CodeAnalyzer:
         subsequence_merge_score = _merged_subsequence_similarity(
             normalized_a, normalized_b
         )
+        ast_cfg_pdg_scores = _ast_cfg_pdg_similarity(code_a, code_b, language_a)
         tfidf_score = _tfidf_similarity(code_a, code_b, language_a)
 
         overall_score = (
-            0.15 * token_score
-            + 0.20 * ngram_score
-            + 0.10 * winnowing_score
-            + 0.15 * structure_score
-            + 0.10 * sequence_score
-            + 0.15 * normalization_graph_score
+            0.08 * token_score
+            + 0.10 * ngram_score
+            + 0.07 * winnowing_score
+            + 0.10 * structure_score
+            + 0.08 * sequence_score
+            + 0.14 * normalization_graph_score
             + 0.10 * subsequence_merge_score
+            + 0.28 * ast_cfg_pdg_scores["similarity"]
             + 0.05 * tfidf_score
         )
         overall_score = max(0.0, min(1.0, overall_score))
@@ -145,6 +147,10 @@ class CodeAnalyzer:
             "sequence_similarity": sequence_score,
             "normalization_graph_similarity": normalization_graph_score,
             "subsequence_merge_similarity": subsequence_merge_score,
+            "ast_cfg_pdg_similarity": ast_cfg_pdg_scores["similarity"],
+            "normalized_ast_similarity": ast_cfg_pdg_scores["ast_sim"],
+            "cfg_similarity": ast_cfg_pdg_scores["cfg_sim"],
+            "pdg_similarity": ast_cfg_pdg_scores["pdg_sim"],
             "tfidf_similarity": tfidf_score,
         }
 
@@ -391,6 +397,28 @@ def _model_ai_detection(code: str) -> Dict[str, float | bool]:
         }
     except Exception:
         return {"ai_probability": 0.0, "confidence": 0.0}
+
+
+def _ast_cfg_pdg_similarity(
+    code_a: str, code_b: str, language: str
+) -> Dict[str, float]:
+    """Compare normalized AST, CFG, and PDG structure for Python code."""
+    if language != "python":
+        return {"similarity": 0.0, "ast_sim": 0.0, "cfg_sim": 0.0, "pdg_sim": 0.0}
+
+    try:
+        from src.backend.engines.features.ast_normalizer import compare_robust
+
+        result = compare_robust(code_a, code_b)
+    except Exception:
+        return {"similarity": 0.0, "ast_sim": 0.0, "cfg_sim": 0.0, "pdg_sim": 0.0}
+
+    return {
+        "similarity": float(result.get("similarity", 0.0)),
+        "ast_sim": float(result.get("ast_sim", 0.0)),
+        "cfg_sim": float(result.get("cfg_sim", 0.0)),
+        "pdg_sim": float(result.get("pdg_sim", 0.0)),
+    }
 
 
 def _tfidf_similarity(code_a: str, code_b: str, language: str) -> float:

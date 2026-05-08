@@ -134,6 +134,8 @@ class FeatureExtractor:
         winnowing = self._run_winnowing(code_a, code_b)
         string_tiling = self._run_string_tiling(code_a, code_b)
         graph = self._run_graph(code_a, code_b)
+        ast_cfg_pdg = self._run_ast_cfg_pdg(code_a, code_b)
+        graph = max(graph or 0.0, ast_cfg_pdg["similarity"])
         static_rules = self._run_static_rules(code_a, code_b)
         sklearn_cosine = self._run_sklearn(code_a, code_b)
 
@@ -147,7 +149,8 @@ class FeatureExtractor:
             graph=graph if graph is not None else 0.0,
             static_rules=static_rules if static_rules is not None else 0.0,
             sklearn_cosine=sklearn_cosine if sklearn_cosine is not None else 0.0,
-            cfg_similarity=graph if graph is not None else 0.0,
+            cfg_similarity=max(graph or 0.0, ast_cfg_pdg["cfg_sim"]),
+            dfg_similarity=ast_cfg_pdg["pdg_sim"],
         )
 
     def to_features(self, fv: FeatureVector) -> List[float]:
@@ -313,6 +316,23 @@ class FeatureExtractor:
         except Exception as exc:
             logger.debug("Graph engine unavailable: %s", exc)
             return None
+
+    def _run_ast_cfg_pdg(self, a: str, b: str) -> Dict[str, float]:
+        """Run normalized AST plus CFG/PDG comparison for Python code."""
+        try:
+            from src.backend.engines.features.ast_normalizer import compare_robust
+
+            result = compare_robust(a, b)
+        except Exception as exc:
+            logger.debug("AST/CFG/PDG normalizer unavailable: %s", exc)
+            return {"similarity": 0.0, "ast_sim": 0.0, "cfg_sim": 0.0, "pdg_sim": 0.0}
+
+        return {
+            "similarity": float(result.get("similarity", 0.0)),
+            "ast_sim": float(result.get("ast_sim", 0.0)),
+            "cfg_sim": float(result.get("cfg_sim", 0.0)),
+            "pdg_sim": float(result.get("pdg_sim", 0.0)),
+        }
 
     def _run_static_rules(self, a: str, b: str) -> Optional[float]:
         """Compare PMD-like static rule fingerprints without external tools."""

@@ -102,6 +102,8 @@ export default function SettingsPage() {
         audit_log_level: auditLogLevel,
         audit_retention_days: auditRetentionDays,
         debug_mode: debugMode,
+        source_scan_enabled: Boolean(settings.source_scan_enabled),
+        source_scan_sites: settings.source_scan_sites || [],
       };
       await axios.patch('/api/settings', payload);
       const fresh = await axios.get('/api/settings');
@@ -345,11 +347,29 @@ export default function SettingsPage() {
           {activeTab === 'external_sources' && (
             <div className="space-y-6">
               <SettingsGroup
-                title="External Tools"
-                description="Configure external plagiarism detection tools."
+                title="External Source Scan"
+                description="Configure public source locations that Plagiarism Checker scans for copied code."
                 icon={ExternalLink}
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.source_scan_enabled)}
+                      onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950">Scan configured public sources during plagiarism checks</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">Use repository URLs such as https://github.com/owner/repo for practical public-code comparison.</span>
+                    </span>
+                  </label>
+                  <TextAreaInput
+                    label="Websites or repositories to scan"
+                    value={(settings.source_scan_sites || []).join('\n')}
+                    placeholder={'https://github.com/example/course-solutions\nhttps://raw.githubusercontent.com/example/repo/main/solution.py'}
+                    onChange={(value) => updateSetting('source_scan_sites', value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))}
+                  />
                   <TextInput label="MOSS User ID" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
                 </div>
               </SettingsGroup>
@@ -486,6 +506,21 @@ function TextInput({ label, value, onChange, type = 'text', placeholder = '' }) 
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+      />
+    </label>
+  );
+}
+
+function TextAreaInput({ label, value, onChange, placeholder = '' }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <textarea
+        value={value ?? ''}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        rows={5}
+        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
       />
     </label>
   );
