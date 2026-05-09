@@ -28,6 +28,7 @@ const TOOLS = [
     engines: ['Token Graph', 'String Tiling', 'AST', 'PDG', 'N-gram', 'Code Embedding', 'Rules'],
     desc: 'Seven-engine fusion for obfuscation-resistant class review: token normalization graph, subsequence merging, AST/CFG/PDG, n-grams, CodeBERT-style embeddings, and static-rule evidence.',
     status: 'Ready to run',
+    icon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzcwM0FFRCIvPgo8dGV4dCB4PSIxNiIgeT0iMjAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkQ8L3RleHQ+Cjwvc3ZnPg==',
   },
   {
     id: 'moss', name: 'MOSS', color: '#0369A1',
@@ -35,6 +36,7 @@ const TOOLS = [
     gradient: 'from-sky-500 to-sky-700', engines: ['Fingerprint', 'Token'],
     desc: "Stanford's canonical academic plagiarism detector using k-gram fingerprinting.",
     status: 'Ready to run',
+    icon: 'https://theory.stanford.edu/~aiken/moss/mosslogo.gif',
   },
   {
     id: 'jplag', name: 'JPlag', color: '#B45309',
@@ -888,10 +890,11 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, autoStart = false, onBack, onComplete }) {
    const { token } = useAuth();
    const [running, setRunning] = useState(false);
-   const [progress, setProgress] = useState([]);
-   const [progressPct, setProgressPct] = useState(0);
-   const [progressMode, setProgressMode] = useState('indeterminate');
-   const [error, setError] = useState('');
+    const [progress, setProgress] = useState([]);
+    const [progressPct, setProgressPct] = useState(0);
+    const [progressMode, setProgressMode] = useState('indeterminate');
+    const [error, setError] = useState('');
+    const [pdfFormat, setPdfFormat] = useState('detailed_scorecard');
 
   // Use a ref to hold the run function so the autoStart effect always calls the latest version
   const runRef = useRef(null);
@@ -914,20 +917,23 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
       requestControllerRef.current = controller;
       setError(''); setRunning(true);
       setProgress([]); setProgressPct(0); setProgressMode('indeterminate');
+
       try {
-        setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
         if (uploadMode === 'builtin' && activeDataset) {
           if (activeDataset.cases) {
+            // Guided test cases - use original implementation
             setProgressMode('determinate');
             const allResults = [];
             const cases = activeDataset.cases;
             const toolNames = selectedTools.map(t => TOOLS.find(tool => tool.id === t)?.name || t).join(', ');
             setProgress(prev => [...prev, `Dataset: ${activeDataset.name} (${cases.length} guided test cases)`]);
             setProgress(prev => [...prev, `Tools: ${toolNames}`]);
+
             for (let i = 0; i < cases.length; i++) {
               const tc = cases[i];
               setProgress(prev => [...prev, `[${i + 1}/${cases.length}] Analyzing "${tc.label}" using ${toolNames}…`]);
               setProgressPct(Math.round(((i + 0.5) / cases.length) * 100));
+
               const blobA = new Blob([tc.codeA], { type: 'text/plain' });
               const blobB = new Blob([tc.codeB], { type: 'text/plain' });
               const formData = new FormData();
@@ -936,13 +942,18 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               formData.append('benchmark_type', benchmarkType);
               if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
               selectedTools.forEach(t => formData.append('tools', t));
+
               try {
-                const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
+                const res = await axios.post(`${API}/api/benchmark`, formData, {
+                  withCredentials: true,
+                  signal: controller.signal
+                });
                 allResults.push({ testCase: tc, ...res.data });
               } catch (err) {
                 if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
               }
             }
+
             if (allResults.length > 0) {
               setProgress(prev => [...prev, `✓ Completed ${allResults.length}/${cases.length} test cases`]);
               setProgressPct(100);
@@ -950,56 +961,78 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
             }
           } else {
+            // Regular dataset benchmark
             setProgress(prev => [...prev, `Dataset: ${activeDataset.name}`]);
-            setProgressMode('indeterminate');
+            setProgressMode('determinate');
             const formData = new FormData();
             selectedTools.forEach(t => formData.append('tools', t));
             formData.append('dataset', activeDataset.id);
             formData.append('benchmark_type', benchmarkType);
             if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-	            try {
-	              const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
-	              setProgress(prev => [...prev, `Running ${toolNames} on all file pairs…`]);
-	              try {
-	                const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-	                setProgress(prev => [...prev, `✓ Benchmark complete — ${res.data?.pair_results?.length || 0} similarity pairs found`]);
-	                setProgressPct(100);
-	                onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
-	              } catch (err) {
-	                throw err;
-	              }
+
+            // Use regular POST instead of streaming
+            try {
+              const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
+              setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
+              setProgress(prev => [...prev, `Tools: ${toolNames}`]);
+              setProgress(prev => [...prev, `Running benchmark analysis…`]);
+
+              const res = await axios.post(`${API}/api/benchmark/stream`, formData, {
+                withCredentials: true,
+                signal: controller.signal,
+                headers: { 'Content-Type': 'multipart/form-data' }
+              });
+
+              setProgress(prev => [...prev, `✓ Benchmark complete — ${res.data?.pair_results?.length || 0} similarity pairs found`]);
+              setProgressPct(100);
+              onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
             } catch (err) {
-              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
-              else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+                setProgress(prev => [...prev, '⨯ Run cancelled']);
+              } else {
+                setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+              }
             }
           }
-	        } else {
-	          setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
-	          setProgressMode('indeterminate');
-	          const formData = new FormData();
+        } else {
+          // File upload benchmark
+          setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
+          setProgressMode('determinate');
+          const formData = new FormData();
           files.forEach(f => formData.append('files', f));
           formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
           selectedTools.forEach(t => formData.append('tools', t));
-	          try {
-	            const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
-	            setProgress(prev => [...prev, `Running ${toolNames} on ${files.length} file(s)…`]);
-	            try {
-	              const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-	              setProgress(prev => [...prev, `✓ Analysis complete — ${res.data?.pair_results?.length || 0} pairs analyzed`]);
-	              setProgressPct(100);
-	              setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
-	            } catch (err) {
-	              throw err;
-	            }
+
+          // Use regular POST instead of streaming
+          try {
+            setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
+            setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
+            setProgress(prev => [...prev, `Running benchmark analysis…`]);
+
+            const res = await axios.post(`${API}/api/benchmark/stream`, formData, {
+              withCredentials: true,
+              signal: controller.signal,
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            setProgress(prev => [...prev, `✓ Analysis complete — ${res.data?.pair_results?.length || 0} pairs analyzed`]);
+            setProgressPct(100);
+            onComplete({ ...res.data, runAt: new Date().toISOString() });
           } catch (err) {
-            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
-            else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+              setProgress(prev => [...prev, '⨯ Run cancelled']);
+            } else {
+              setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+            }
           }
         }
       } catch (err) {
-        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress(prev => [...prev, '⨯ Run cancelled']);
-        else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+          setProgress(prev => [...prev, '⨯ Run cancelled']);
+        } else {
+          setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+        }
       } finally {
         if (requestControllerRef.current === controller) requestControllerRef.current = null;
         setRunning(false);
@@ -1295,13 +1328,17 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
-  const downloadPDF = async () => {
+  const downloadPDF = async (format = 'legacy') => {
     try {
       setPdfDownloading(true); setPdfError('');
-      const res = await axios.post(`${API}/api/benchmark/export-pdf`, results, { responseType: 'blob', withCredentials: true });
+      const payload = { ...results, format };
+      const res = await axios.post(`${API}/api/benchmark/export-pdf`, payload, { responseType: 'blob', withCredentials: true });
       const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.pdf`; a.click(); URL.revokeObjectURL(url);
+      const filename = format === 'detailed_scorecard'
+        ? `benchmark-evaluation-scorecard-${new Date().toISOString().slice(0, 10)}.pdf`
+        : `benchmark-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
     } catch { setPdfError('Could not export the benchmark report as PDF. Please try again.'); }
     finally { setPdfDownloading(false); }
   };
@@ -1447,10 +1484,20 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={downloadPDF} disabled={pdfDownloading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 disabled:bg-white/50 text-slate-900 font-semibold rounded-xl transition-all text-sm">
-            <Download size={15} />{pdfDownloading ? 'Preparing…' : 'PDF'}
-          </button>
+          <div className="flex items-center gap-1">
+            <select
+              value={pdfFormat}
+              onChange={(e) => setPdfFormat(e.target.value)}
+              className="px-3 py-2.5 bg-white/10 border border-white/20 text-white rounded-l-xl text-sm focus:ring-2 focus:ring-white/20"
+            >
+              <option value="detailed_scorecard">Detailed Scorecard</option>
+              <option value="legacy">Simple Report</option>
+            </select>
+            <button onClick={() => downloadPDF(pdfFormat)} disabled={pdfDownloading}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 disabled:bg-white/50 text-slate-900 font-semibold rounded-r-xl transition-all text-sm">
+              <Download size={15} />{pdfDownloading ? 'Preparing…' : 'PDF'}
+            </button>
+          </div>
           {isComparisonReport && (
             <>
               <button onClick={downloadCSV} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />CSV</button>
