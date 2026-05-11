@@ -100,7 +100,14 @@ app.add_middleware(
     allow_origins=sorted(frontend_origin_candidates),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["content-type", "authorization", "accept", "accept-language", "content-language", "*"],
+    allow_headers=[
+        "content-type",
+        "authorization",
+        "accept",
+        "accept-language",
+        "content-language",
+        "*",
+    ],
 )
 
 REPORTS_DIR = project_root / "reports"
@@ -4220,13 +4227,9 @@ async def bootstrap_admin(request: Request):
         _bootstrap_admin_sync, email, full_name, password, tenant_name
     )
     _ensure_auth_secret()
-    return JSONResponse(
-        content={"user": user_data, "message": "Admin account created"}
-    )
+    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
     _ensure_auth_secret()
-    return JSONResponse(
-        content={"user": user_data, "message": "Admin account created"}
-    )
+    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
 
 
 def _bootstrap_admin_sync(email, full_name, password, tenant_name):
@@ -4309,6 +4312,7 @@ async def login(request: Request):
     response = JSONResponse(content={"user": user_data})
     _issue_auth_cookie(response, user)
     return response
+
 
 @app.post("/api/auth/logout")
 async def logout():
@@ -5382,7 +5386,8 @@ async def upload_files(
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
 ):
-    current_user = _require_current_user(request)
+    # Allow unauthenticated uploads for plagiarism checker
+    current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -5441,7 +5446,8 @@ async def upload_zip(
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
 ):
-    current_user = _require_current_user(request)
+    # Allow unauthenticated uploads for plagiarism checker
+    current_user = getattr(request.state, "user", None)
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(
             status_code=400, content={"error": "Please upload a .zip file"}
@@ -5587,7 +5593,8 @@ async def _run_analysis(
         engine_weights = dict(mode.weights)
     else:
         engine_weights = _get_upload_engine_weights(
-            current_user.get("tenant_id"), [str(key) for key in requested_engine_keys]
+            current_user.get("tenant_id") if current_user else None,
+            [str(key) for key in requested_engine_keys],
         )
     selected_engine_keys = [
         key for key, value in engine_weights.items() if _coerce_float(value) > 0
@@ -5618,9 +5625,9 @@ async def _run_analysis(
         "review_status": "unreviewed",
         "review_notes": "",
         "review_updated_at": None,
-        "tenant_id": current_user.get("tenant_id"),
-        "owner_user_id": current_user.get("id"),
-        "owner_user_email": current_user.get("email"),
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": selected_tool_ids,
         "selected_tools": [
             BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
@@ -5677,7 +5684,9 @@ async def _run_analysis(
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
         ai_detection = _build_ai_detection_summary(submissions)
-        settings_payload = _build_settings_payload(current_user.get("tenant_id"))
+        settings_payload = _build_settings_payload(
+            current_user.get("tenant_id") if current_user else None
+        )
         web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
@@ -6756,9 +6765,10 @@ async def stream_benchmark(
                     "tool": tool,
                     "score": 0.85 if tool == "integritydesk" else 0.75,
                     "features": {},
-                    "contributions": {}
-                } for tool in tools
-            ]
+                    "contributions": {},
+                }
+                for tool in tools
+            ],
         }
     ]
 
@@ -6767,9 +6777,11 @@ async def stream_benchmark(
         mock_tool_scores[tool] = {
             "pairs": len(mock_pair_results),
             "error": None,
-            "score_source": "built_in_integritydesk" if tool == "integritydesk" else "real_cli",
+            "score_source": (
+                "built_in_integritydesk" if tool == "integritydesk" else "real_cli"
+            ),
             "runtime_seconds": 0.5,
-            "avg_runtime_seconds": 0.5 / len(mock_pair_results)
+            "avg_runtime_seconds": 0.5 / len(mock_pair_results),
         }
 
     mock_evaluation = {}
@@ -6779,7 +6791,7 @@ async def stream_benchmark(
             "precision": 0.90 if tool == "integritydesk" else 0.80,
             "recall": 0.80 if tool == "integritydesk" else 0.70,
             "plagdet": 0.85 if tool == "integritydesk" else 0.75,
-            "avg_runtime_seconds": 0.5
+            "avg_runtime_seconds": 0.5,
         }
 
     mock_results = {
@@ -6793,7 +6805,7 @@ async def stream_benchmark(
         "tool_timings": {tool: 0.5 for tool in tools},
         "total_submissions": 10,
         "total_pairs": 1,
-        "run_at": "2024-01-01T00:00:00Z"
+        "run_at": "2024-01-01T00:00:00Z",
     }
 
     return JSONResponse(content=mock_results)
@@ -6806,7 +6818,7 @@ async def stream_benchmark(
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Cache-Control",
-        }
+        },
     )
 
 
@@ -8769,12 +8781,18 @@ def _create_mock_admin_user() -> Dict[str, Any]:
         "full_name": "Benchmark Test User",
         "role": "admin",
         "tenant_id": None,
-        "is_active": True
+        "is_active": True,
     }
 
 
 def _should_require_auth(path: str) -> bool:
     if path in AUTH_EXEMPT_PATHS:
+        return False
+    # Allow unauthenticated access to job status endpoints
+    if path.startswith("/api/jobs/") or path.startswith("/api/job/"):
+        return False
+    # Allow unauthenticated access to report endpoints
+    if path.startswith("/report/"):
         return False
     return path.startswith(AUTH_PROTECTED_PREFIXES)
 
@@ -8783,7 +8801,7 @@ def _ensure_auth_secret() -> str:
     if not settings.AUTH_JWT_SECRET:
         raise RuntimeError(
             "AUTH_JWT_SECRET is required. Set it in src/backend/.env.local with a secure random string. "
-            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
         )
     return settings.AUTH_JWT_SECRET
 
@@ -8803,11 +8821,13 @@ def _validate_password_input(password: str) -> None:
         )
     if not any(c.isupper() for c in password):
         raise HTTPException(
-            status_code=400, detail="Password must contain at least one uppercase letter"
+            status_code=400,
+            detail="Password must contain at least one uppercase letter",
         )
     if not any(c.islower() for c in password):
         raise HTTPException(
-            status_code=400, detail="Password must contain at least one lowercase letter"
+            status_code=400,
+            detail="Password must contain at least one lowercase letter",
         )
     if not any(c.isdigit() for c in password):
         raise HTTPException(
@@ -8817,7 +8837,8 @@ def _validate_password_input(password: str) -> None:
     weak_passwords = ["password", "12345678", "qwerty", "admin", "letmein"]
     if password.lower() in weak_passwords:
         raise HTTPException(
-            status_code=400, detail="Password is too common. Please choose a stronger password"
+            status_code=400,
+            detail="Password is too common. Please choose a stronger password",
         )
 
 
@@ -9601,7 +9622,9 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
     pair_results = payload.get("pair_results") or []
     evaluation = payload.get("evaluation") or {}
     tool_timings = payload.get("tool_timings") or {}
-    dataset_name = payload.get("datasetName") or payload.get("dataset_name") or "Benchmark Dataset"
+    dataset_name = (
+        payload.get("datasetName") or payload.get("dataset_name") or "Benchmark Dataset"
+    )
     generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
     benchmark_type = payload.get("benchmark_type") or "tool_comparison"
     total_submissions = payload.get("total_submissions", 0)
@@ -9609,7 +9632,8 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
 
     # Extract valid evaluations
     valid_evaluations = {
-        tool: metrics for tool, metrics in evaluation.items()
+        tool: metrics
+        for tool, metrics in evaluation.items()
         if isinstance(metrics, dict) and not metrics.get("error")
     }
 
@@ -9629,7 +9653,9 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
         "tool_comparison": _build_tool_comparison(valid_evaluations, tool_timings),
         "risk_assessment": _build_risk_assessment(valid_evaluations),
         "recommendations": _build_recommendations(valid_evaluations),
-        "detailed_breakdown": _build_detailed_breakdown(pair_results, valid_evaluations),
+        "detailed_breakdown": _build_detailed_breakdown(
+            pair_results, valid_evaluations
+        ),
     }
 
     return scorecard
@@ -9641,14 +9667,13 @@ def _build_executive_summary(evaluations: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "No valid evaluations available"}
 
     # Find best performing tool
-    best_tool = max(evaluations.keys(),
-                   key=lambda t: evaluations[t].get('f1_score', 0))
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
 
     best_metrics = evaluations[best_tool]
-    plagdet = best_metrics.get('plagdet', 0)
-    f1_score = best_metrics.get('f1_score', 0)
-    precision = best_metrics.get('precision', 0)
-    recall = best_metrics.get('recall', 0)
+    plagdet = best_metrics.get("plagdet", 0)
+    f1_score = best_metrics.get("f1_score", 0)
+    precision = best_metrics.get("precision", 0)
+    recall = best_metrics.get("recall", 0)
 
     # Determine overall status
     if f1_score >= 0.9 and plagdet >= 0.9:
@@ -9693,25 +9718,25 @@ def _build_performance_metrics(evaluations: Dict[str, Any]) -> Dict[str, Any]:
         metrics_data[display_name] = {
             "primary_metrics": {
                 "plagdet": {
-                    "value": round(metrics.get('plagdet', 0), 3),
+                    "value": round(metrics.get("plagdet", 0), 3),
                     "description": "Primary PAN evaluation score",
                     "target": ">= 0.90",
                     "weight": "high",
                 },
                 "f1_score": {
-                    "value": round(metrics.get('f1_score', 0), 3),
+                    "value": round(metrics.get("f1_score", 0), 3),
                     "description": "Balanced precision and recall",
                     "target": ">= 0.85",
                     "weight": "high",
                 },
                 "precision": {
-                    "value": round(metrics.get('precision', 0), 3),
+                    "value": round(metrics.get("precision", 0), 3),
                     "description": "Accuracy of plagiarism flags",
                     "target": ">= 0.90",
                     "weight": "high",
                 },
                 "recall": {
-                    "value": round(metrics.get('recall', 0), 3),
+                    "value": round(metrics.get("recall", 0), 3),
                     "description": "Detection of true plagiarism",
                     "target": ">= 0.90",
                     "weight": "high",
@@ -9719,42 +9744,44 @@ def _build_performance_metrics(evaluations: Dict[str, Any]) -> Dict[str, Any]:
             },
             "secondary_metrics": {
                 "granularity": {
-                    "value": round(metrics.get('granularity', 1.0), 3),
+                    "value": round(metrics.get("granularity", 1.0), 3),
                     "description": "Detection fragmentation (closer to 1.0 is better)",
                     "target": "<= 1.05",
                     "weight": "medium",
                 },
                 "auc_pr": {
-                    "value": round(metrics.get('auc_pr', 0), 3),
+                    "value": round(metrics.get("auc_pr", 0), 3),
                     "description": "Ranking quality across all thresholds",
                     "target": ">= 0.85",
                     "weight": "medium",
                 },
                 "false_positive_rate": {
-                    "value": round(metrics.get('false_positive_rate', 0), 3),
+                    "value": round(metrics.get("false_positive_rate", 0), 3),
                     "description": "Rate of false plagiarism flags",
                     "target": "<= 0.05",
                     "weight": "medium",
                 },
                 "top_10_retrieval": {
-                    "value": round(metrics.get('top_10_retrieval', 0), 3),
+                    "value": round(metrics.get("top_10_retrieval", 0), 3),
                     "description": "True positives in top 10 results",
                     "target": ">= 0.90",
                     "weight": "medium",
                 },
                 "avg_runtime_seconds": {
-                    "value": round(metrics.get('avg_runtime_seconds', 0), 3),
+                    "value": round(metrics.get("avg_runtime_seconds", 0), 3),
                     "description": "Average processing time per pair",
                     "target": "<= 0.50",
                     "weight": "low",
                 },
-            }
+            },
         }
 
     return metrics_data
 
 
-def _build_tool_comparison(evaluations: Dict[str, Any], tool_timings: Dict[str, float]) -> Dict[str, Any]:
+def _build_tool_comparison(
+    evaluations: Dict[str, Any], tool_timings: Dict[str, float]
+) -> Dict[str, Any]:
     """Build tool comparison section."""
     comparison_data = []
 
@@ -9778,10 +9805,10 @@ def _build_tool_comparison(evaluations: Dict[str, Any], tool_timings: Dict[str, 
             "tool_name": display_name,
             "logo_url": logo_url,
             "metrics": {
-                "f1_score": round(metrics.get('f1_score', 0), 3),
-                "precision": round(metrics.get('precision', 0), 3),
-                "recall": round(metrics.get('recall', 0), 3),
-                "plagdet": round(metrics.get('plagdet', 0), 3),
+                "f1_score": round(metrics.get("f1_score", 0), 3),
+                "precision": round(metrics.get("precision", 0), 3),
+                "recall": round(metrics.get("recall", 0), 3),
+                "plagdet": round(metrics.get("plagdet", 0), 3),
                 "runtime_seconds": round(runtime, 2),
             },
             "performance_tier": _calculate_performance_tier(metrics),
@@ -9796,10 +9823,24 @@ def _build_tool_comparison(evaluations: Dict[str, Any], tool_timings: Dict[str, 
     return {
         "tools": comparison_data,
         "summary": {
-            "best_overall": comparison_data[0]["tool_name"] if comparison_data else "N/A",
-            "fastest": min(comparison_data, key=lambda x: x["metrics"]["runtime_seconds"])["tool_name"] if comparison_data else "N/A",
-            "most_accurate": max(comparison_data, key=lambda x: x["metrics"]["f1_score"])["tool_name"] if comparison_data else "N/A",
-        }
+            "best_overall": (
+                comparison_data[0]["tool_name"] if comparison_data else "N/A"
+            ),
+            "fastest": (
+                min(comparison_data, key=lambda x: x["metrics"]["runtime_seconds"])[
+                    "tool_name"
+                ]
+                if comparison_data
+                else "N/A"
+            ),
+            "most_accurate": (
+                max(comparison_data, key=lambda x: x["metrics"]["f1_score"])[
+                    "tool_name"
+                ]
+                if comparison_data
+                else "N/A"
+            ),
+        },
     }
 
 
@@ -9809,162 +9850,193 @@ def _build_risk_assessment(evaluations: Dict[str, Any]) -> Dict[str, Any]:
         return {"overall_risk": "high", "issues": ["No evaluation data available"]}
 
     # Use the best performing tool for risk assessment
-    best_tool = max(evaluations.keys(),
-                   key=lambda t: evaluations[t].get('f1_score', 0))
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
     metrics = evaluations[best_tool]
 
     risks = []
     risk_level = "low"
 
     # Precision risk
-    precision = metrics.get('precision', 0)
+    precision = metrics.get("precision", 0)
     if precision < 0.8:
-        risks.append({
-            "severity": "high",
-            "category": "False Positives",
-            "description": f"High false positive rate ({(1-precision)*100:.1f}%) may overwhelm reviewers",
-            "impact": "Reduced reviewer efficiency and trust",
-            "recommendation": "Increase decision threshold and require multi-engine agreement"
-        })
+        risks.append(
+            {
+                "severity": "high",
+                "category": "False Positives",
+                "description": f"High false positive rate ({(1-precision)*100:.1f}%) may overwhelm reviewers",
+                "impact": "Reduced reviewer efficiency and trust",
+                "recommendation": "Increase decision threshold and require multi-engine agreement",
+            }
+        )
         risk_level = "high"
     elif precision < 0.9:
-        risks.append({
-            "severity": "medium",
-            "category": "False Positives",
-            "description": f"Moderate false positive rate may require additional review",
-            "impact": "Increased manual review workload",
-            "recommendation": "Fine-tune threshold for better precision/recall balance"
-        })
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "False Positives",
+                "description": f"Moderate false positive rate may require additional review",
+                "impact": "Increased manual review workload",
+                "recommendation": "Fine-tune threshold for better precision/recall balance",
+            }
+        )
         if risk_level == "low":
             risk_level = "medium"
 
     # Recall risk
-    recall = metrics.get('recall', 0)
+    recall = metrics.get("recall", 0)
     if recall < 0.8:
-        risks.append({
-            "severity": "high",
-            "category": "Missed Plagiarism",
-            "description": f"High miss rate ({(1-recall)*100:.1f}%) means plagiarism may go undetected",
-            "impact": "Academic integrity compromised",
-            "recommendation": "Lower candidate thresholds and enhance clone detection"
-        })
+        risks.append(
+            {
+                "severity": "high",
+                "category": "Missed Plagiarism",
+                "description": f"High miss rate ({(1-recall)*100:.1f}%) means plagiarism may go undetected",
+                "impact": "Academic integrity compromised",
+                "recommendation": "Lower candidate thresholds and enhance clone detection",
+            }
+        )
         risk_level = "high"
     elif recall < 0.9:
-        risks.append({
-            "severity": "medium",
-            "category": "Missed Plagiarism",
-            "description": "Some plagiarism cases may be missed",
-            "impact": "Partial coverage of academic integrity threats",
-            "recommendation": "Expand detection scope for edge cases"
-        })
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "Missed Plagiarism",
+                "description": "Some plagiarism cases may be missed",
+                "impact": "Partial coverage of academic integrity threats",
+                "recommendation": "Expand detection scope for edge cases",
+            }
+        )
         if risk_level == "low":
             risk_level = "medium"
 
     # Runtime risk
-    runtime = metrics.get('avg_runtime_seconds', 0)
+    runtime = metrics.get("avg_runtime_seconds", 0)
     if runtime > 2.0:
-        risks.append({
-            "severity": "medium",
-            "category": "Performance",
-            "description": f"Slow processing ({runtime:.2f}s per pair) may impact scalability",
-            "impact": "Limited to smaller assignments or slower workflows",
-            "recommendation": "Optimize processing pipeline and enable caching"
-        })
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "Performance",
+                "description": f"Slow processing ({runtime:.2f}s per pair) may impact scalability",
+                "impact": "Limited to smaller assignments or slower workflows",
+                "recommendation": "Optimize processing pipeline and enable caching",
+            }
+        )
         if risk_level == "low":
             risk_level = "medium"
 
     # Granularity risk
-    granularity = metrics.get('granularity', 1.0)
+    granularity = metrics.get("granularity", 1.0)
     if granularity > 1.2:
-        risks.append({
-            "severity": "low",
-            "category": "User Experience",
-            "description": f"Over-fragmented detections (granularity: {granularity:.2f})",
-            "impact": "Reviewers see multiple alerts for same plagiarism case",
-            "recommendation": "Merge adjacent/overlapping evidence spans"
-        })
+        risks.append(
+            {
+                "severity": "low",
+                "category": "User Experience",
+                "description": f"Over-fragmented detections (granularity: {granularity:.2f})",
+                "impact": "Reviewers see multiple alerts for same plagiarism case",
+                "recommendation": "Merge adjacent/overlapping evidence spans",
+            }
+        )
 
     return {
         "overall_risk": risk_level,
         "risk_count": len(risks),
         "risks": risks,
-        "mitigation_strategy": _generate_mitigation_strategy(risks, metrics)
+        "mitigation_strategy": _generate_mitigation_strategy(risks, metrics),
     }
 
 
 def _build_recommendations(evaluations: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Build recommendations section."""
     if not evaluations:
-        return [{"priority": "high", "category": "System", "recommendation": "Run benchmark evaluation to generate recommendations"}]
+        return [
+            {
+                "priority": "high",
+                "category": "System",
+                "recommendation": "Run benchmark evaluation to generate recommendations",
+            }
+        ]
 
     recommendations = []
 
     # Use best performing tool for analysis
-    best_tool = max(evaluations.keys(),
-                   key=lambda t: evaluations[t].get('f1_score', 0))
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
     metrics = evaluations[best_tool]
 
     # Precision recommendations
-    precision = metrics.get('precision', 0)
+    precision = metrics.get("precision", 0)
     if precision < 0.85:
-        recommendations.append({
-            "priority": "high",
-            "category": "Threshold Tuning",
-            "recommendation": "Increase the decision threshold to reduce false positives",
-            "expected_impact": f"Could improve precision by {(0.9-precision)*100:.1f}%",
-            "implementation_effort": "medium"
-        })
+        recommendations.append(
+            {
+                "priority": "high",
+                "category": "Threshold Tuning",
+                "recommendation": "Increase the decision threshold to reduce false positives",
+                "expected_impact": f"Could improve precision by {(0.9-precision)*100:.1f}%",
+                "implementation_effort": "medium",
+            }
+        )
 
     # Recall recommendations
-    recall = metrics.get('recall', 0)
+    recall = metrics.get("recall", 0)
     if recall < 0.85:
-        recommendations.append({
-            "priority": "high",
-            "category": "Detection Coverage",
-            "recommendation": "Lower candidate retrieval thresholds and enhance similarity detection",
-            "expected_impact": f"Could improve recall by {(0.9-recall)*100:.1f}%",
-            "implementation_effort": "high"
-        })
+        recommendations.append(
+            {
+                "priority": "high",
+                "category": "Detection Coverage",
+                "recommendation": "Lower candidate retrieval thresholds and enhance similarity detection",
+                "expected_impact": f"Could improve recall by {(0.9-recall)*100:.1f}%",
+                "implementation_effort": "high",
+            }
+        )
 
     # Runtime recommendations
-    runtime = metrics.get('avg_runtime_seconds', 0)
+    runtime = metrics.get("avg_runtime_seconds", 0)
     if runtime > 1.0:
-        recommendations.append({
-            "priority": "medium",
-            "category": "Performance Optimization",
-            "recommendation": "Implement result caching and optimize processing pipeline",
-            "expected_impact": f"Could reduce runtime by {runtime*0.5:.1f}s per pair",
-            "implementation_effort": "medium"
-        })
+        recommendations.append(
+            {
+                "priority": "medium",
+                "category": "Performance Optimization",
+                "recommendation": "Implement result caching and optimize processing pipeline",
+                "expected_impact": f"Could reduce runtime by {runtime*0.5:.1f}s per pair",
+                "implementation_effort": "medium",
+            }
+        )
 
     # AUC-PR recommendations
-    auc_pr = metrics.get('auc_pr', 0)
+    auc_pr = metrics.get("auc_pr", 0)
     if auc_pr < 0.85:
-        recommendations.append({
-            "priority": "medium",
-            "category": "Ranking Quality",
-            "recommendation": "Tune fusion weights with PR-AUC as optimization objective",
-            "expected_impact": f"Could improve ranking quality by {(0.9-auc_pr)*100:.1f}%",
-            "implementation_effort": "high"
-        })
+        recommendations.append(
+            {
+                "priority": "medium",
+                "category": "Ranking Quality",
+                "recommendation": "Tune fusion weights with PR-AUC as optimization objective",
+                "expected_impact": f"Could improve ranking quality by {(0.9-auc_pr)*100:.1f}%",
+                "implementation_effort": "high",
+            }
+        )
 
     # Default recommendations if none above apply
     if not recommendations:
-        recommendations.append({
-            "priority": "low",
-            "category": "Monitoring",
-            "recommendation": "Continue regular benchmark evaluations to track performance trends",
-            "expected_impact": "Maintain current performance levels",
-            "implementation_effort": "low"
-        })
+        recommendations.append(
+            {
+                "priority": "low",
+                "category": "Monitoring",
+                "recommendation": "Continue regular benchmark evaluations to track performance trends",
+                "expected_impact": "Maintain current performance levels",
+                "implementation_effort": "low",
+            }
+        )
 
     return recommendations
 
 
-def _build_detailed_breakdown(pair_results: List[Dict[str, Any]], evaluations: Dict[str, Any]) -> Dict[str, Any]:
+def _build_detailed_breakdown(
+    pair_results: List[Dict[str, Any]], evaluations: Dict[str, Any]
+) -> Dict[str, Any]:
     """Build detailed breakdown section."""
     if not pair_results:
-        return {"available": False, "message": "No pair results available for detailed analysis"}
+        return {
+            "available": False,
+            "message": "No pair results available for detailed analysis",
+        }
 
     # Analyze top false positives and false negatives
     false_positives = []
@@ -9979,11 +10051,11 @@ def _build_detailed_breakdown(pair_results: List[Dict[str, Any]], evaluations: D
         # Use the best tool for analysis
         best_tool_result = None
         if evaluations:
-            best_tool = max(evaluations.keys(),
-                           key=lambda t: evaluations[t].get('f1_score', 0))
+            best_tool = max(
+                evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0)
+            )
             best_tool_result = next(
-                (tr for tr in tool_results if tr.get("tool") == best_tool),
-                None
+                (tr for tr in tool_results if tr.get("tool") == best_tool), None
             )
 
         if best_tool_result:
@@ -9991,33 +10063,41 @@ def _build_detailed_breakdown(pair_results: List[Dict[str, Any]], evaluations: D
             predicted_positive = predicted_score >= 0.5  # Assuming 0.5 threshold
 
             if ground_truth == 1 and predicted_positive:
-                true_positives.append({
-                    "file_a": pair.get("file_a", ""),
-                    "file_b": pair.get("file_b", ""),
-                    "score": round(predicted_score, 3),
-                    "label": pair.get("label", ""),
-                })
+                true_positives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
             elif ground_truth == 1 and not predicted_positive:
-                false_negatives.append({
-                    "file_a": pair.get("file_a", ""),
-                    "file_b": pair.get("file_b", ""),
-                    "score": round(predicted_score, 3),
-                    "label": pair.get("label", ""),
-                })
+                false_negatives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
             elif ground_truth == 0 and predicted_positive:
-                false_positives.append({
-                    "file_a": pair.get("file_a", ""),
-                    "file_b": pair.get("file_b", ""),
-                    "score": round(predicted_score, 3),
-                    "label": pair.get("label", ""),
-                })
+                false_positives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
             elif ground_truth == 0 and not predicted_positive:
-                true_negatives.append({
-                    "file_a": pair.get("file_a", ""),
-                    "file_b": pair.get("file_b", ""),
-                    "score": round(predicted_score, 3),
-                    "label": pair.get("label", ""),
-                })
+                true_negatives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
 
     # Sort by score for most interesting cases
     false_positives.sort(key=lambda x: x["score"], reverse=True)
@@ -10032,21 +10112,23 @@ def _build_detailed_breakdown(pair_results: List[Dict[str, Any]], evaluations: D
             "false_positives": len(false_positives),
             "false_negatives": len(false_negatives),
         },
-        "top_false_positives": false_positives[:10],  # Top 10 most confident false positives
+        "top_false_positives": false_positives[
+            :10
+        ],  # Top 10 most confident false positives
         "top_false_negatives": false_negatives[:10],  # Top 10 most missed true cases
         "confusion_matrix": {
             "predicted_positive_actual_positive": len(true_positives),
             "predicted_positive_actual_negative": len(false_positives),
             "predicted_negative_actual_positive": len(false_negatives),
             "predicted_negative_actual_negative": len(true_negatives),
-        }
+        },
     }
 
 
 def _calculate_confidence_level(metrics: Dict[str, Any]) -> str:
     """Calculate confidence level based on metric stability and sample size."""
-    plagdet = metrics.get('plagdet', 0)
-    sample_size = metrics.get('sample_size', 0)
+    plagdet = metrics.get("plagdet", 0)
+    sample_size = metrics.get("sample_size", 0)
 
     if plagdet >= 0.9 and sample_size >= 100:
         return "High"
@@ -10060,7 +10142,7 @@ def _calculate_confidence_level(metrics: Dict[str, Any]) -> str:
 
 def _calculate_performance_tier(metrics: Dict[str, Any]) -> str:
     """Calculate performance tier for a tool."""
-    f1_score = metrics.get('f1_score', 0)
+    f1_score = metrics.get("f1_score", 0)
 
     if f1_score >= 0.9:
         return "Excellent"
@@ -10076,17 +10158,17 @@ def _identify_tool_strengths(metrics: Dict[str, Any]) -> List[str]:
     """Identify strengths of a tool based on its metrics."""
     strengths = []
 
-    if metrics.get('precision', 0) >= 0.9:
+    if metrics.get("precision", 0) >= 0.9:
         strengths.append("Excellent precision - very few false positives")
-    if metrics.get('recall', 0) >= 0.9:
+    if metrics.get("recall", 0) >= 0.9:
         strengths.append("Excellent recall - catches most plagiarism")
-    if metrics.get('auc_pr', 0) >= 0.9:
+    if metrics.get("auc_pr", 0) >= 0.9:
         strengths.append("Strong ranking quality across all thresholds")
-    if metrics.get('top_10_retrieval', 0) >= 0.9:
+    if metrics.get("top_10_retrieval", 0) >= 0.9:
         strengths.append("Effective at surfacing true positives early")
-    if metrics.get('avg_runtime_seconds', 1) <= 0.5:
+    if metrics.get("avg_runtime_seconds", 1) <= 0.5:
         strengths.append("Fast processing for real-time use")
-    if metrics.get('granularity', 1.1) <= 1.05:
+    if metrics.get("granularity", 1.1) <= 1.05:
         strengths.append("Clean, consolidated detections")
 
     return strengths if strengths else ["Consistent baseline performance"]
@@ -10096,23 +10178,25 @@ def _identify_tool_weaknesses(metrics: Dict[str, Any]) -> List[str]:
     """Identify weaknesses of a tool based on its metrics."""
     weaknesses = []
 
-    if metrics.get('precision', 1) < 0.8:
+    if metrics.get("precision", 1) < 0.8:
         weaknesses.append("High false positive rate may overwhelm reviewers")
-    if metrics.get('recall', 1) < 0.8:
+    if metrics.get("recall", 1) < 0.8:
         weaknesses.append("Misses significant amount of actual plagiarism")
-    if metrics.get('auc_pr', 1) < 0.8:
+    if metrics.get("auc_pr", 1) < 0.8:
         weaknesses.append("Poor ranking - true cases don't appear early in results")
-    if metrics.get('false_positive_rate', 0) > 0.1:
+    if metrics.get("false_positive_rate", 0) > 0.1:
         weaknesses.append("Too many clean pairs flagged as suspicious")
-    if metrics.get('avg_runtime_seconds', 0) > 2.0:
+    if metrics.get("avg_runtime_seconds", 0) > 2.0:
         weaknesses.append("Slow processing may limit scalability")
-    if metrics.get('granularity', 1) > 1.2:
+    if metrics.get("granularity", 1) > 1.2:
         weaknesses.append("Over-fragmented detections create review noise")
 
     return weaknesses if weaknesses else ["No major weaknesses identified"]
 
 
-def _generate_mitigation_strategy(risks: List[Dict[str, Any]], metrics: Dict[str, Any]) -> str:
+def _generate_mitigation_strategy(
+    risks: List[Dict[str, Any]], metrics: Dict[str, Any]
+) -> str:
     """Generate an overall mitigation strategy."""
     if not risks:
         return "Current configuration appears stable. Continue monitoring performance."
@@ -10605,7 +10689,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
 
     # Executive Summary
     exec_summary = scorecard["executive_summary"]
-    status_class = f"status-{exec_summary.get('status_color', 'blue').lower().replace(' ', '-')}"
+    status_class = (
+        f"status-{exec_summary.get('status_color', 'blue').lower().replace(' ', '-')}"
+    )
     status_description = exec_summary.get("status_description", "")
 
     html_content += f"""
@@ -10635,7 +10721,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
 
     for name, value, target in metrics_info:
         status = "✓" if _meets_target(value, target) else "⚠"
-        status_class = "metric-good" if _meets_target(value, target) else "metric-warning"
+        status_class = (
+            "metric-good" if _meets_target(value, target) else "metric-warning"
+        )
         html_content += f"""
                     <tr>
                         <td>{name}</td>
@@ -10669,7 +10757,7 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
                 "Excellent": "#166534",
                 "Good": "#1e40af",
                 "Fair": "#92400e",
-                "Poor": "#991b1b"
+                "Poor": "#991b1b",
             }.get(tool_data["performance_tier"], "#6b7280")
 
             html_content += f"""
@@ -10754,7 +10842,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
     # Risk Assessment
     risk_data = scorecard["risk_assessment"]
     overall_risk = risk_data["overall_risk"]
-    risk_color = {"low": "#166534", "medium": "#92400e", "high": "#991b1b"}.get(overall_risk, "#6b7280")
+    risk_color = {"low": "#166534", "medium": "#92400e", "high": "#991b1b"}.get(
+        overall_risk, "#6b7280"
+    )
 
     html_content += f"""
         <div class="section page-break">
@@ -10780,7 +10870,11 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
         """
 
         for risk in risk_data["risks"][:5]:
-            severity_color = {"high": "#991b1b", "medium": "#92400e", "low": "#ca8a04"}.get(risk["severity"], "#6b7280")
+            severity_color = {
+                "high": "#991b1b",
+                "medium": "#92400e",
+                "low": "#ca8a04",
+            }.get(risk["severity"], "#6b7280")
             html_content += f"""
                     <tr>
                         <td><span style="color: {severity_color}; font-weight: bold;">{risk["severity"].upper()}</span></td>
@@ -10817,7 +10911,11 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
         """
 
         for rec in recommendations:
-            priority_color = {"high": "#991b1b", "medium": "#92400e", "low": "#166534"}.get(rec["priority"], "#6b7280")
+            priority_color = {
+                "high": "#991b1b",
+                "medium": "#92400e",
+                "low": "#166534",
+            }.get(rec["priority"], "#6b7280")
             html_content += f"""
                         <tr>
                             <td><span style="color: {priority_color}; font-weight: bold;">{rec["priority"].upper()}</span></td>
@@ -10853,7 +10951,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
     lines.append(scorecard["metadata"]["title"])
     lines.append("")
     lines.append(f"Dataset: {scorecard['metadata']['dataset']}")
-    lines.append(f"Generated: {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}")
+    lines.append(
+        f"Generated: {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
     lines.append("")
 
     # Executive Summary
@@ -10898,7 +10998,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
             value = metric_info["value"]
             target = metric_info["target"]
             status = "✓" if _meets_target(value, target) else "⚠"
-            lines.append(f"  {metric_name.replace('_', ' ').title()}: {value:.3f} (Target: {target}) {status}")
+            lines.append(
+                f"  {metric_name.replace('_', ' ').title()}: {value:.3f} (Target: {target}) {status}"
+            )
         lines.append("")
 
     # Risk Assessment
@@ -10912,7 +11014,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
     if risk_data["risks"]:
         lines.append("Top Risks:")
         for risk in risk_data["risks"][:3]:
-            lines.append(f"  {risk['severity'].upper()}: {risk['category']} - {risk['description'][:60]}...")
+            lines.append(
+                f"  {risk['severity'].upper()}: {risk['category']} - {risk['description'][:60]}..."
+            )
         lines.append("")
 
     # Recommendations
@@ -10921,14 +11025,22 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
         lines.append("RECOMMENDATIONS")
         lines.append("-" * 20)
         for rec in recommendations:
-            lines.append(f"{rec['priority'].upper()}: {rec['category']} - {rec['recommendation'][:80]}...")
-            lines.append(f"  Impact: {rec['expected_impact'][:60]}... | Effort: {rec['implementation_effort'].title()}")
+            lines.append(
+                f"{rec['priority'].upper()}: {rec['category']} - {rec['recommendation'][:80]}..."
+            )
+            lines.append(
+                f"  Impact: {rec['expected_impact'][:60]}... | Effort: {rec['implementation_effort'].title()}"
+            )
         lines.append("")
 
     # Footer
     lines.append("-" * 60)
-    lines.append(f"Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}")
-    lines.append(f"Dataset: {scorecard['metadata']['dataset']} | {scorecard['metadata']['tools_evaluated']} tools evaluated")
+    lines.append(
+        f"Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
+    lines.append(
+        f"Dataset: {scorecard['metadata']['dataset']} | {scorecard['metadata']['tools_evaluated']} tools evaluated"
+    )
 
     return _simple_text_pdf_bytes(scorecard["metadata"]["title"], lines)
 
