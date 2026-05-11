@@ -4296,6 +4296,13 @@ def _get_user_for_cookie(email):
         return user
 
 
+def _get_user_by_id(user_id: str):
+    """Get a user by their ID for cookie operations."""
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.id == user_id))
+        return user
+
+
 @app.post("/api/auth/login")
 async def login(request: Request):
     payload = await request.json()
@@ -4324,6 +4331,18 @@ async def logout():
 @app.get("/api/auth/me")
 async def auth_me(request: Request):
     return JSONResponse(content={"user": _require_current_user(request)})
+
+
+@app.post("/api/auth/refresh")
+async def refresh_session(request: Request):
+    """Refresh the session by extending the cookie expiration."""
+    user = _authenticate_request(request)
+    user_obj = await run_in_threadpool(_get_user_by_id, user["id"])
+    if not user_obj:
+        raise HTTPException(status_code=401, detail="User not found")
+    response = JSONResponse(content={"user": user})
+    _issue_auth_cookie(response, user_obj)
+    return response
 
 
 @app.get("/api/admin/users")
