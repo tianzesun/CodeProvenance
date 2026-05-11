@@ -132,6 +132,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-tools",
     "/api/benchmark",
     "/api/benchmark/export-pdf",
+    "/api/upload-settings",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
