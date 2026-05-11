@@ -111,6 +111,14 @@ class ReportGenerator:
         .risk-review {{ background: #e0f2fe; color: #075985; }}
         .risk-medium {{ background: #fef3c7; color: #92400e; }}
         .risk-low {{ background: #dcfce7; color: #166534; }}
+        .action-buttons {{ display: flex; gap: 10px; margin-top: 8px; }}
+        .btn {{ display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; border: none; transition: all 0.2s; }}
+        .btn-primary {{ background: rgba(255,255,255,.95); color: #1a73e8; }}
+        .btn-primary:hover {{ background: #fff; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+        .btn-secondary {{ background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3); }}
+        .btn-secondary:hover {{ background: rgba(255,255,255,.25); }}
+        .no-print {{ display: block; }}
+        .icon {{ width: 16px; height: 16px; }}
         details.finding {{ border-top: 1px solid var(--line); }}
         details.finding:first-child {{ border-top: 0; }}
         summary {{ cursor: pointer; list-style: none; padding: 18px; display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; }}
@@ -136,6 +144,8 @@ class ReportGenerator:
             body {{ background: #fff; }}
             .shell {{ box-shadow: none; }}
             summary:after {{ display: none; }}
+            .no-print {{ display: none !important; }}
+            .action-buttons {{ display: none !important; }}
         }}
         @media (max-width: 900px) {{
             header, main, footer {{ padding-left: 18px; padding-right: 18px; }}
@@ -154,6 +164,20 @@ class ReportGenerator:
             <div>
                 <div class="eyebrow">{escape(self.institution_name)} Evidence Packet</div>
                 <h1>IntegrityDesk Originality Report</h1>
+                <div class="action-buttons no-print">
+                    <a href="/report/{escape(str(results.get('report_id', '')))}/download-pdf" class="btn btn-primary" download>
+                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Download PDF
+                    </a>
+                    <button onclick="window.print()" class="btn btn-secondary">
+                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                        </svg>
+                        Print Report
+                    </button>
+                </div>
             </div>
         </div>
         <div class="meta">Generated {timestamp}<br>Report ID {escape(str(results.get('report_id', 'N/A')))}</div>
