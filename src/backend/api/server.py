@@ -9147,7 +9147,11 @@ def _require_current_user(request: Request, admin_only: bool = False) -> Dict[st
     return user
 
 
-def _job_is_accessible(job: Dict[str, Any], user: Dict[str, Any]) -> bool:
+def _job_is_accessible(job: Dict[str, Any], user: Optional[Dict[str, Any]]) -> bool:
+    # Allow access to jobs without authentication (guest users)
+    if user is None:
+        return True
+
     if user.get("role") == "admin":
         return True
 
@@ -9159,6 +9163,10 @@ def _job_is_accessible(job: Dict[str, Any], user: Dict[str, Any]) -> bool:
     if tenant_id and tenant_id == user.get("tenant_id"):
         return True
 
+    # Allow access if job has no owner (guest job)
+    if not owner_user_id and not tenant_id:
+        return True
+
     return False
 
 
@@ -9167,7 +9175,8 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    user = _require_current_user(request)
+    # Allow unauthenticated access for guest users
+    user = getattr(request.state, "user", None)
     if not _job_is_accessible(job, user):
         raise HTTPException(status_code=404, detail="Job not found")
 

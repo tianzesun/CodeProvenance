@@ -250,7 +250,7 @@ export default function ResultsPage() {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout requireAuth={false}>
         <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-[color:var(--border)] border-t-[var(--accent-blue)]" />
           <p className="mt-4 text-sm text-[var(--text-secondary)]">Loading review workspace...</p>
@@ -261,7 +261,7 @@ export default function ResultsPage() {
 
   if (!job || error) {
     return (
-      <DashboardLayout>
+      <DashboardLayout requireAuth={false}>
         <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
           <div className="max-w-md rounded-lg border border-[color:var(--border)] bg-white p-6 text-center shadow-sm">
             <div className="text-lg font-semibold text-[var(--text-primary)]">{error || 'Assignment not found'}</div>
@@ -275,7 +275,7 @@ export default function ResultsPage() {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout requireAuth={false}>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="max-w-none space-y-6">
           <section className="rounded-lg border border-[color:var(--border)] bg-white p-5 shadow-sm">
@@ -318,75 +318,75 @@ export default function ResultsPage() {
           </section>
 
           <main className="space-y-6">
-              <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-                      Evidence: {activeResult?.file_a || 'Student A'} vs {activeResult?.file_b || 'Student B'} — {formatPercent(score)}
-                    </h2>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {evidenceTypes.map((item) => (
-                        <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => updateReview({ review_status: 'needs_review' })}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      <ShieldCheck size={15} />
-                      Mark for Review
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateReview({ review_status: 'dismissed' })}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)] disabled:opacity-60"
-                    >
-                      <XCircle size={15} />
-                      Dismiss
-                    </button>
-                    <a
-                      href={`/report/${id}/committee`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]"
-                    >
-                      Open Report
-                    </a>
+            <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                    Evidence: {activeResult?.file_a || 'Student A'} vs {activeResult?.file_b || 'Student B'} — {formatPercent(score)}
+                  </h2>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {evidenceTypes.map((item) => (
+                      <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                        {item}
+                      </span>
+                    ))}
                   </div>
                 </div>
-              </section>
 
-              <section className="grid gap-4 lg:grid-cols-2">
-                <CodePanel
-                  title={activeResult?.file_a || 'Student A'}
-                  code={leftCode}
-                  highlights={leftHighlights}
-                  panelRef={leftRef}
-                  onScroll={() => syncScroll(leftRef, rightRef)}
-                />
-                <CodePanel
-                  title={activeResult?.file_b || 'Student B'}
-                  code={rightCode}
-                  highlights={rightHighlights}
-                  panelRef={rightRef}
-                  onScroll={() => syncScroll(rightRef, leftRef)}
-                />
-              </section>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updateReview({ review_status: 'needs_review' })}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    <ShieldCheck size={15} />
+                    Mark for Review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateReview({ review_status: 'dismissed' })}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)] disabled:opacity-60"
+                  >
+                    <XCircle size={15} />
+                    Dismiss
+                  </button>
+                  <a
+                    href={`/report/${id}/committee`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]"
+                  >
+                    Open Report
+                  </a>
+                </div>
+              </div>
+            </section>
 
-              {job.review_notes && (
-                <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
-                  <h2 className="font-semibold text-[var(--text-primary)]">Review Note</h2>
-                  <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{job.review_notes}</p>
-                </section>
-              )}
+            <section className="grid gap-4 lg:grid-cols-2">
+              <CodePanel
+                title={activeResult?.file_a || 'Student A'}
+                code={leftCode}
+                highlights={leftHighlights}
+                panelRef={leftRef}
+                onScroll={() => syncScroll(leftRef, rightRef)}
+              />
+              <CodePanel
+                title={activeResult?.file_b || 'Student B'}
+                code={rightCode}
+                highlights={rightHighlights}
+                panelRef={rightRef}
+                onScroll={() => syncScroll(rightRef, leftRef)}
+              />
+            </section>
+
+            {job.review_notes && (
+              <section className="rounded-lg border border-[color:var(--border)] bg-white p-4 shadow-sm">
+                <h2 className="font-semibold text-[var(--text-primary)]">Review Note</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{job.review_notes}</p>
+              </section>
+            )}
 
           </main>
         </div>
@@ -431,9 +431,8 @@ const CodePanel = ({ title, code, highlights, panelRef, onScroll }) => (
           return (
             <div
               key={lineNumber}
-              className={`grid grid-cols-[52px_1fr] px-3 ${
-                highlighted ? 'bg-red-500/20 outline outline-1 outline-red-400/20' : ''
-              }`}
+              className={`grid grid-cols-[52px_1fr] px-3 ${highlighted ? 'bg-red-500/20 outline outline-1 outline-red-400/20' : ''
+                }`}
             >
               <span className="select-none pr-3 text-right text-slate-500">{lineNumber}</span>
               <code className="whitespace-pre">{line || ' '}</code>
