@@ -6769,79 +6769,14 @@ async def stream_benchmark(
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
 ):
-    # User authentication is handled by middleware, user info is in request.state
-    selected_tools: List[str] = []
-    for tool in tools:
-        tool_id = str(tool).strip().lower()
-        if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
-            selected_tools.append(tool_id)
-    tools = selected_tools or ["integritydesk"]
-
-    # Return direct JSON response for testing
-    mock_pair_results = [
-        {
-            "file_a": "student1.py",
-            "file_b": "student2.py",
-            "label": "student1.py vs student2.py",
-            "tool_results": [
-                {
-                    "tool": tool,
-                    "score": 0.85 if tool == "integritydesk" else 0.75,
-                    "features": {},
-                    "contributions": {},
-                }
-                for tool in tools
-            ],
-        }
-    ]
-
-    mock_tool_scores = {}
-    for tool in tools:
-        mock_tool_scores[tool] = {
-            "pairs": len(mock_pair_results),
-            "error": None,
-            "score_source": (
-                "built_in_integritydesk" if tool == "integritydesk" else "real_cli"
-            ),
-            "runtime_seconds": 0.5,
-            "avg_runtime_seconds": 0.5 / len(mock_pair_results),
-        }
-
-    mock_evaluation = {}
-    for tool in tools:
-        mock_evaluation[tool] = {
-            "f1_score": 0.85 if tool == "integritydesk" else 0.75,
-            "precision": 0.90 if tool == "integritydesk" else 0.80,
-            "recall": 0.80 if tool == "integritydesk" else 0.70,
-            "plagdet": 0.85 if tool == "integritydesk" else 0.75,
-            "avg_runtime_seconds": 0.5,
-        }
-
-    mock_results = {
-        "job_id": "test-benchmark",
-        "benchmark_type": "tool_comparison",
-        "tools": tools,
-        "dataset": "test-dataset",
-        "pair_results": mock_pair_results,
-        "tool_scores": mock_tool_scores,
-        "evaluation": mock_evaluation,
-        "tool_timings": {tool: 0.5 for tool in tools},
-        "total_submissions": 10,
-        "total_pairs": 1,
-        "run_at": "2024-01-01T00:00:00Z",
-    }
-
-    return JSONResponse(content=mock_results)
-
-    return StreamingResponse(
-        generate_progress(benchmark_type, dataset, preset_id, tools, files),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
+    """Delegate to the real benchmark endpoint (streaming was replaced with direct JSON)."""
+    return await run_benchmark(
+        request=request,
+        files=files,
+        tools=tools,
+        dataset=dataset,
+        benchmark_type=benchmark_type,
+        preset_id=preset_id,
     )
 
 
@@ -8789,9 +8724,6 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
 
     content = "\n".join(new_lines).rstrip()
     ENV_SETTINGS_PATH.write_text(f"{content}\n" if content else "", encoding="utf-8")
-
-
-
 
 
 def _should_require_auth(path: str) -> bool:
