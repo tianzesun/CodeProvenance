@@ -976,7 +976,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           }
         } else {
-          // Regular dataset benchmark
+          // Regular dataset benchmark — use async background job to avoid timeout
           setProgress(prev => [...prev, `Dataset: ${activeDataset.name}`]);
           setProgressMode('determinate');
           const formData = new FormData();
@@ -985,38 +985,65 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
 
-          // Use regular POST instead of streaming
           try {
             const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
             setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
             setProgress(prev => [...prev, `Tools: ${toolNames}`]);
-            setProgress(prev => [...prev, `Running benchmark analysis…`]);
 
-            const res = await apiClient.post('/api/benchmark/stream', formData, {
+            // Start the job in the background
+            const startRes = await apiClient.post('/api/benchmark/start', formData, {
               signal: controller.signal,
-              headers: { 'Content-Type': 'multipart/form-data' }
+              headers: { 'Content-Type': 'multipart/form-data' },
+              timeout: 15000,
             });
+            const { job_id } = startRes.data;
+            setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
 
-            setProgress(prev => [...prev, `✓ Benchmark complete — ${res.data?.pair_results?.length || 0} similarity pairs found`]);
-            setProgressPct(100);
-            console.log('Benchmark completed successfully:', res.data);
-            onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+            // Poll for completion
+            let seenLines = 0;
+            while (!controller.signal.aborted) {
+              await new Promise(r => setTimeout(r, 2000));
+              if (controller.signal.aborted) break;
+
+              const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
+                signal: controller.signal,
+                timeout: 10000,
+              });
+              const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
+
+              // Show any new progress lines from the server
+              if (serverProgress && serverProgress.length > seenLines) {
+                const newLines = serverProgress.slice(seenLines);
+                newLines.forEach((line: string) => setProgress(prev => [...prev, line]));
+                seenLines = serverProgress.length;
+                setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
+              }
+
+              if (status === 'done' && result) {
+                setProgress(prev => [...prev, `✓ Benchmark complete — ${result?.pair_results?.length || 0} similarity pairs found`]);
+                setProgressPct(100);
+                onComplete({ ...result, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+                return;
+              }
+              if (status === 'error') {
+                setError(serverError || 'Benchmark failed. Please try again.');
+                setProgress(prev => [...prev, '❌ Benchmark failed']);
+                return;
+              }
+            }
           } catch (err) {
             if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
               setProgress(prev => [...prev, '⨯ Run cancelled']);
             } else {
               console.error('Benchmark error:', err);
-              console.error('Response data:', err.response?.data);
-              console.error('Response status:', err.response?.status);
               setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
               setProgress(prev => [...prev, '❌ Benchmark failed']);
             }
-            // Don't call onComplete if there's an error
             return;
           }
         }
       } else {
-        // File upload benchmark
+        // File upload benchmark — use async background job to avoid timeout
         setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
         setProgressMode('determinate');
         const formData = new FormData();
@@ -1025,20 +1052,47 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
 
-        // Use regular POST instead of streaming
         try {
           setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
-          setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
-          setProgress(prev => [...prev, `Running benchmark analysis…`]);
 
-          const res = await apiClient.post('/api/benchmark/stream', formData, {
+          const startRes = await apiClient.post('/api/benchmark/start', formData, {
             signal: controller.signal,
-            headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 15000,
           });
+          const { job_id } = startRes.data;
+          setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
 
-          setProgress(prev => [...prev, `✓ Analysis complete — ${res.data?.pair_results?.length || 0} pairs analyzed`]);
-          setProgressPct(100);
-          onComplete({ ...res.data, runAt: new Date().toISOString() });
+          let seenLines = 0;
+          while (!controller.signal.aborted) {
+            await new Promise(r => setTimeout(r, 2000));
+            if (controller.signal.aborted) break;
+
+            const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
+              signal: controller.signal,
+              timeout: 10000,
+            });
+            const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
+
+            if (serverProgress && serverProgress.length > seenLines) {
+              const newLines = serverProgress.slice(seenLines);
+              newLines.forEach((line: string) => setProgress(prev => [...prev, line]));
+              seenLines = serverProgress.length;
+              setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
+            }
+
+            if (status === 'done' && result) {
+              setProgress(prev => [...prev, `✓ Analysis complete — ${result?.pair_results?.length || 0} pairs analyzed`]);
+              setProgressPct(100);
+              onComplete({ ...result, runAt: new Date().toISOString() });
+              return;
+            }
+            if (status === 'error') {
+              setError(serverError || 'Benchmark failed. Please try again.');
+              setProgress(prev => [...prev, '❌ Benchmark failed']);
+              return;
+            }
+          }
         } catch (err) {
           if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
             setProgress(prev => [...prev, '⨯ Run cancelled']);
@@ -2146,8 +2200,8 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                     type="button"
                     onClick={() => switchMode(mode.id)}
                     className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${isActive
-                        ? 'bg-slate-900 text-white shadow-sm'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                       }`}
                   >
                     <Icon size={15} />

@@ -133,6 +133,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/upload-settings",
     "/api/benchmark",
     "/api/benchmark/stream",
+    "/api/benchmark/start",
     "/api/benchmark/export-pdf",
     "/api/benchmark-tools",
     "/api/benchmark-datasets",
@@ -6780,6 +6781,461 @@ async def stream_benchmark(
     )
 
 
+# ── Background benchmark job store ────────────────────────────────────────
+BENCHMARK_JOBS: Dict[str, Dict[str, Any]] = {}
+BENCHMARK_JOBS_LOCK = threading.Lock()
+
+
+def _benchmark_job_set(job_id: str, updates: Dict[str, Any]) -> None:
+    """Thread-safe update of a benchmark job record."""
+    with BENCHMARK_JOBS_LOCK:
+        BENCHMARK_JOBS.setdefault(job_id, {}).update(updates)
+
+
+def _run_benchmark_background(
+    job_id: str,
+    tool_ids: List[str],
+    dataset: str,
+    benchmark_type: str,
+    preset_id: str,
+    file_bytes: List[tuple],  # list of (filename, bytes)
+) -> None:
+    """Run the full benchmark in a background thread and store the result."""
+    import asyncio
+    import io
+
+    def _progress(msg: str) -> None:
+        _benchmark_job_set(job_id, {})
+        with BENCHMARK_JOBS_LOCK:
+            BENCHMARK_JOBS[job_id].setdefault("progress", []).append(msg)
+
+    try:
+        _benchmark_job_set(job_id, {"status": "running", "progress": []})
+        _progress(f"Starting benchmark with tools: {', '.join(tool_ids)}")
+
+        selected_tools: List[str] = []
+        for tool in tool_ids:
+            tool_id = str(tool).strip().lower()
+            if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
+                selected_tools.append(tool_id)
+        tools = selected_tools or ["integritydesk"]
+
+        job_dir = UPLOADS_DIR / f"bench_{job_id}"
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
+        btype = normalized_protocol["benchmark_type"]
+        protocol = normalized_protocol["protocol"]
+        threshold_policy = normalized_protocol["threshold_policy"]
+        optimization_objective = normalized_protocol["optimization_objective"]
+        report_type = normalized_protocol["report_type"]
+
+        if btype in {"pan_optimization", "regression_test"}:
+            dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
+            has_labeled = bool(
+                dataset
+                and dataset != "custom"
+                and dataset_root
+                and _dataset_has_pair_ground_truth(dataset, dataset_root)
+            )
+            if not has_labeled:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                _benchmark_job_set(
+                    job_id,
+                    {
+                        "status": "error",
+                        "error": (
+                            "PAN metrics require labeled ground truth. Select a labeled "
+                            "demo/synthetic original-vs-plagiarized dataset."
+                        ),
+                    },
+                )
+                return
+
+        submissions: Dict[str, str] = {}
+        explicit_pairs: List[Dict[str, Any]] = []
+        pair_sampling_audit: Dict[str, Any] = {}
+
+        if dataset and dataset != "custom":
+            _progress(f"Loading dataset: {dataset}")
+            submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
+                dataset, job_dir
+            )
+            if explicit_pairs:
+                explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
+                    dataset, explicit_pairs
+                )
+                selected_files = {str(p.get("file_a", "")) for p in explicit_pairs} | {
+                    str(p.get("file_b", "")) for p in explicit_pairs
+                }
+                submissions = {
+                    fn: content
+                    for fn, content in submissions.items()
+                    if fn in selected_files
+                }
+            if not submissions:
+                submissions = _load_benchmark_dataset(dataset, job_dir)
+        else:
+            _progress(f"Processing {len(file_bytes)} uploaded files")
+            for fname, fbytes in file_bytes:
+                safe = PathLib(fname).name
+                target = job_dir / safe
+                target.write_bytes(fbytes)
+                try:
+                    submissions[safe] = fbytes.decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
+        _progress(f"Loaded {len(submissions)} submissions")
+
+        if len(submissions) < 2:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            _benchmark_job_set(
+                job_id,
+                {"status": "error", "error": "At least 2 code files required"},
+            )
+            return
+
+        if explicit_pairs:
+            all_pairs = [
+                (str(p["file_a"]), str(p["file_b"]))
+                for p in explicit_pairs
+                if p.get("file_a") in submissions and p.get("file_b") in submissions
+            ]
+        else:
+            file_list = list(submissions.keys())
+            all_pairs = [
+                (file_list[i], file_list[j])
+                for i in range(len(file_list))
+                for j in range(i + 1, len(file_list))
+            ]
+        _progress(f"Generated {len(all_pairs)} comparison pairs")
+
+        tool_results: Dict[str, Any] = {}
+        tool_timings: Dict[str, float] = {}
+
+        if "integritydesk" in tools:
+            _progress("Running IntegrityDesk engine…")
+            t0 = time.perf_counter()
+            try:
+                import os as _os
+
+                orig_emb = _os.environ.get("EMBEDDING_RUNTIME")
+                disable_emb = False
+                try:
+                    import torch
+
+                    if not torch.cuda.is_available() and settings.EMBEDDING_RUNTIME in (
+                        "local_unixcoder",
+                        "local",
+                        "unixcoder",
+                    ):
+                        disable_emb = True
+                        _os.environ["EMBEDDING_RUNTIME"] = "none"
+                except ImportError:
+                    if settings.EMBEDDING_RUNTIME in (
+                        "local_unixcoder",
+                        "local",
+                        "unixcoder",
+                    ):
+                        disable_emb = True
+                        _os.environ["EMBEDDING_RUNTIME"] = "none"
+
+                service = BatchDetectionService(threshold=0.3)
+                if explicit_pairs:
+                    results = service.compare_pairs(submissions, explicit_pairs)
+                else:
+                    results = service.compare_all_pairs(submissions)
+                tool_results["integritydesk"] = {
+                    "pairs": [
+                        {
+                            "file_a": r.file_a,
+                            "file_b": r.file_b,
+                            "score": round(r.score, 3),
+                            "features": {k: round(v, 3) for k, v in r.features.items()},
+                            "contributions": {
+                                k: round(v, 3) for k, v in r.contributions.items()
+                            },
+                        }
+                        for r in results
+                    ]
+                }
+                _progress(f"IntegrityDesk: {len(results)} pairs analysed")
+                if disable_emb:
+                    if orig_emb:
+                        _os.environ["EMBEDDING_RUNTIME"] = orig_emb
+                    elif "EMBEDDING_RUNTIME" in _os.environ:
+                        del _os.environ["EMBEDDING_RUNTIME"]
+            except Exception as exc:
+                logger.exception("IntegrityDesk benchmark failed in background job")
+                tool_results["integritydesk"] = {"error": str(exc)}
+                _progress(f"IntegrityDesk error: {exc}")
+            finally:
+                tool_timings["integritydesk"] = time.perf_counter() - t0
+
+        from src.backend.benchmark.runners.external_tool_runner import (
+            ExternalToolRunner,
+        )
+
+        ext_runner = ExternalToolRunner(
+            moss_user_id=_get_setting_secret("moss_user_id")
+        )
+        for tool in tools:
+            if tool == "integritydesk":
+                continue
+            _progress(f"Running {tool}…")
+            t0 = time.perf_counter()
+            try:
+                score_data = ext_runner.run_tool(tool, submissions, all_pairs)
+                tool_results[tool] = (
+                    score_data if score_data else {"error": f"{tool} not available"}
+                )
+            except Exception as exc:
+                logger.exception("%s benchmark failed in background job", tool)
+                tool_results[tool] = {"error": str(exc)}
+                _progress(f"{tool} error: {exc}")
+            finally:
+                tool_timings[tool] = time.perf_counter() - t0
+
+        explicit_pair_labels = {
+            frozenset((str(p.get("file_a", "")), str(p.get("file_b", "")))): int(
+                p.get("label", 0)
+            )
+            for p in explicit_pairs
+        }
+        pair_results = []
+        for fa, fb in all_pairs:
+            entry: Dict[str, Any] = {
+                "file_a": fa,
+                "file_b": fb,
+                "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
+                "tool_results": [],
+            }
+            lk = frozenset((fa, fb))
+            if lk in explicit_pair_labels:
+                entry["ground_truth_label"] = explicit_pair_labels[lk]
+            for tn, td in tool_results.items():
+                if "pairs" in td:
+                    for p in td["pairs"]:
+                        if (p["file_a"] == fa and p["file_b"] == fb) or (
+                            p["file_a"] == fb and p["file_b"] == fa
+                        ):
+                            entry["tool_results"].append(
+                                {
+                                    "tool": tn,
+                                    "score": p["score"],
+                                    "features": p.get("features", {}),
+                                    "contributions": p.get("contributions", {}),
+                                }
+                            )
+            pair_results.append(entry)
+
+        ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
+        evaluation_results: Dict[str, Any] = {}
+        if ground_truth_labels:
+            for tn, td in tool_results.items():
+                if "pairs" not in td:
+                    continue
+                scores, labels = [], []
+                for entry in pair_results:
+                    fa, fb = entry["file_a"], entry["file_b"]
+                    for tr in entry["tool_results"]:
+                        if tr["tool"] == tn:
+                            scores.append(tr["score"])
+                            idx = next(
+                                (
+                                    i
+                                    for i, p in enumerate(pair_results)
+                                    if p["file_a"] == fa and p["file_b"] == fb
+                                ),
+                                -1,
+                            )
+                            if 0 <= idx < len(ground_truth_labels):
+                                labels.append(ground_truth_labels[idx])
+                            break
+                if scores and labels:
+                    metrics = _compute_evaluation_metrics(
+                        scores,
+                        labels,
+                        tn,
+                        dataset or "custom",
+                        tool_timings.get(tn, 0.0),
+                        _compute_engine_contribution(td.get("pairs", [])),
+                        threshold_strategy=(
+                            "fixed_threshold"
+                            if btype == "regression_test"
+                            else "calibration_holdout"
+                        ),
+                    )
+                    evaluation_results[tn] = metrics
+
+        id_avg = sum(
+            p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])
+        ) / max(1, len(tool_results.get("integritydesk", {}).get("pairs", [])))
+        comp_scores = [
+            p["score"]
+            for t, d in tool_results.items()
+            if t != "integritydesk" and "pairs" in d
+            for p in d["pairs"]
+        ]
+        comp_avg = sum(comp_scores) / len(comp_scores) if comp_scores else 0
+        benchmark_quality = (
+            _build_benchmark_quality_certificate(BENCHMARK_DATA_DIR / dataset)
+            if dataset and dataset != "custom"
+            else None
+        )
+
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+        response: Dict[str, Any] = {
+            "job_id": job_id,
+            "preset_id": preset_id,
+            "preset_name": next(
+                (
+                    preset["name"]
+                    for preset in BENCHMARK_WORKFLOW_PRESETS
+                    if preset["id"] == preset_id
+                ),
+                "",
+            ),
+            "requested_tools": tools,
+            "tool_scores": {
+                k: {
+                    "pairs": len(v.get("pairs", [])),
+                    "error": v.get("error"),
+                    "score_source": (
+                        "built_in_integritydesk"
+                        if k == "integritydesk"
+                        else ("real_cli" if "error" not in v else "unavailable")
+                    ),
+                    "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
+                    "avg_runtime_seconds": round(
+                        tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
+                    ),
+                }
+                for k, v in tool_results.items()
+            },
+            "pair_results": pair_results,
+            "summary": {
+                "pairs_tested": len(pair_results),
+                "tools_compared": len(
+                    [t for t in tool_results if "error" not in tool_results[t]]
+                ),
+                "accuracy": {
+                    "integritydesk": round(id_avg, 4),
+                    "best_competitor": round(comp_avg, 4),
+                },
+                "accuracy_basis": "mean_similarity_score_not_classification_accuracy",
+                "score_summary": {
+                    "integritydesk_mean_similarity": round(id_avg, 4),
+                    "competitor_mean_similarity": round(comp_avg, 4),
+                },
+                "dataset_name": dataset or "custom",
+                "dataset_size": len(submissions),
+                "positive_pairs": int(
+                    sum(1 for label in ground_truth_labels if label >= 2)
+                ),
+                "negative_pairs": int(
+                    sum(1 for label in ground_truth_labels if label < 2)
+                ),
+                "optimization_trials": 17,
+                "cross_validation_folds": 1,
+                "optimization_method": "Threshold sweep over 17 cutoffs, maximising F1",
+            },
+            "benchmark_type": btype,
+            "protocol": protocol,
+            "threshold_policy": threshold_policy,
+            "optimization_objective": optimization_objective,
+            "report_type": report_type,
+            "benchmark_goal": (
+                "admin_pan_optimization"
+                if btype == "pan_optimization"
+                else (
+                    "locked_regression_test"
+                    if btype == "regression_test"
+                    else "professor_tool_comparison"
+                )
+            ),
+            "has_ground_truth": bool(ground_truth_labels),
+        }
+        if pair_sampling_audit:
+            response["pair_sampling_audit"] = pair_sampling_audit
+        if benchmark_quality:
+            response["benchmark_quality"] = benchmark_quality
+        if evaluation_results:
+            response["evaluation"] = evaluation_results
+            response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
+            response["benchmark_trust"] = (
+                evaluation_results.get("integritydesk")
+                or next(iter(evaluation_results.values()), {})
+            ).get("benchmark_trust", {})
+            if btype == "regression_test":
+                response["quality_gates"] = _build_regression_quality_gates(
+                    evaluation_results.get("integritydesk") or {}
+                )
+
+        response = _persist_benchmark_response(response)
+        _progress("✓ Benchmark complete")
+        _benchmark_job_set(job_id, {"status": "done", "result": response})
+
+    except Exception as exc:
+        logger.exception("Background benchmark job %s failed", job_id)
+        _benchmark_job_set(job_id, {"status": "error", "error": str(exc)})
+
+
+@app.post("/api/benchmark/start")
+async def start_benchmark_job(
+    request: Request,
+    files: List[UploadFile] = File(default=[]),
+    tools: List[str] = Form(default=[]),
+    dataset: str = Form(default=""),
+    benchmark_type: str = Form(default="tool_comparison"),
+    preset_id: str = Form(default=""),
+):
+    """Start a benchmark in the background and return a job_id immediately."""
+    job_id = str(uuid.uuid4())[:8]
+
+    # Read file bytes now, before the request context closes
+    file_bytes: List[tuple] = []
+    for f in files:
+        if f.filename:
+            content = await f.read()
+            file_bytes.append((f.filename, content))
+
+    tool_list = list(tools)  # copy from form data
+
+    _benchmark_job_set(job_id, {"status": "queued", "progress": []})
+
+    t = threading.Thread(
+        target=_run_benchmark_background,
+        args=(job_id, tool_list, dataset, benchmark_type, preset_id, file_bytes),
+        daemon=True,
+    )
+    t.start()
+
+    return JSONResponse(content={"job_id": job_id, "status": "queued"})
+
+
+@app.get("/api/benchmark/status/{job_id}")
+async def get_benchmark_job_status(job_id: str):
+    """Poll the status and progress of a background benchmark job."""
+    with BENCHMARK_JOBS_LOCK:
+        job = BENCHMARK_JOBS.get(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Benchmark job not found")
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "progress": job.get("progress", []),
+            "result": job.get("result") if job.get("status") == "done" else None,
+            "error": job.get("error") if job.get("status") == "error" else None,
+        }
+    )
+
+
 @app.post("/api/benchmark/apply-optimization")
 async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
     """Apply proposed benchmark optimization changes to engine_weights.yaml."""
@@ -8731,6 +9187,9 @@ def _should_require_auth(path: str) -> bool:
         return False
     # Allow unauthenticated access to job status endpoints
     if path.startswith("/api/jobs/") or path.startswith("/api/job/"):
+        return False
+    # Allow unauthenticated access to benchmark status polling
+    if path.startswith("/api/benchmark/status/"):
         return False
     # Allow unauthenticated access to report endpoints
     if path.startswith("/report/"):
