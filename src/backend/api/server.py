@@ -128,11 +128,14 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/status",
     "/api/auth/login",
     "/api/auth/bootstrap-admin",
-    "/api/benchmark-datasets",
-    "/api/benchmark-tools",
-    "/api/benchmark",
-    "/api/benchmark/export-pdf",
+    "/api/upload",
+    "/api/upload-zip",
     "/api/upload-settings",
+    "/api/benchmark",
+    "/api/benchmark/stream",
+    "/api/benchmark/export-pdf",
+    "/api/benchmark-tools",
+    "/api/benchmark-datasets",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -8788,21 +8791,7 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
     ENV_SETTINGS_PATH.write_text(f"{content}\n" if content else "", encoding="utf-8")
 
 
-def _is_benchmark_testing_endpoint(path: str) -> bool:
-    """Check if the path is a benchmark endpoint that should bypass authentication for testing."""
-    return path.startswith("/api/benchmark")
 
-
-def _create_mock_admin_user() -> Dict[str, Any]:
-    """Create a mock admin user for testing purposes."""
-    return {
-        "id": "benchmark-test-user",
-        "email": "benchmark-test@example.com",
-        "full_name": "Benchmark Test User",
-        "role": "admin",
-        "tenant_id": None,
-        "is_active": True,
-    }
 
 
 def _should_require_auth(path: str) -> bool:
@@ -9205,20 +9194,13 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
 
 @app.middleware("http")
 async def dashboard_auth_middleware(request: Request, call_next):
-    """Authentication middleware with selective bypass for testing endpoints."""
+    """Authentication middleware for protected endpoints."""
     # Always allow OPTIONS requests for CORS preflight - let CORS middleware handle headers
     if request.method == "OPTIONS":
         return await call_next(request)
 
     path = request.url.path
     if not _should_require_auth(path):
-        return await call_next(request)
-
-    # TEMPORARY TESTING BYPASS: Allow benchmark endpoints without authentication
-    # This allows users to test benchmarks while authentication issues are resolved
-    # TODO: Remove this bypass once proper authentication is working
-    if _is_benchmark_testing_endpoint(path):
-        request.state.user = _create_mock_admin_user()
         return await call_next(request)
 
     try:

@@ -651,7 +651,7 @@ export default function Home() {
       : {}),
   };
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-8 lg:space-y-10">
           <section className="theme-card-strong theme-section-line relative overflow-hidden rounded-[32px] px-6 py-6 lg:px-8 lg:py-8">

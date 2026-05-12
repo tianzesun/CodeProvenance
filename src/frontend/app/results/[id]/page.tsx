@@ -250,7 +250,7 @@ export default function ResultsPage() {
 
   if (loading) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-[color:var(--border)] border-t-[var(--accent-blue)]" />
           <p className="mt-4 text-sm text-[var(--text-secondary)]">Loading review workspace...</p>
@@ -261,7 +261,7 @@ export default function ResultsPage() {
 
   if (!job || error) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
           <div className="max-w-md rounded-lg border border-[color:var(--border)] bg-white p-6 text-center shadow-sm">
             <div className="text-lg font-semibold text-[var(--text-primary)]">{error || 'Assignment not found'}</div>
@@ -275,7 +275,7 @@ export default function ResultsPage() {
   }
 
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="max-w-none space-y-6">
           <section className="rounded-lg border border-[color:var(--border)] bg-white p-5 shadow-sm">

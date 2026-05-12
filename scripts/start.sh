@@ -129,6 +129,7 @@ echo "Starting dashboard..."
 cd "$DASHBOARD_DIR"
 
 export PORT="$DASHBOARD_PORT"
+export HOST="127.0.0.1"
 export API_URL="$BACKEND_URL"
 export NEXT_PUBLIC_API_URL="$BACKEND_URL"
 

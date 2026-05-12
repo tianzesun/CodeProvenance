@@ -60,13 +60,72 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [status, setStatus] = useState<AuthStatus>('loading');
-  const [bootstrapped, setBootstrapped] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    // Try to restore user from localStorage on initial load
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('integritydesk_auth_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          // Basic validation of stored user data
+          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
+            return parsed;
+          } else {
+            // Invalid data, remove it
+            localStorage.removeItem('integritydesk_auth_user');
+          }
+        }
+      } catch {
+        // If parsing fails, clean up
+        localStorage.removeItem('integritydesk_auth_user');
+      }
+    }
+    return null;
+  });
+  const [status, setStatus] = useState<AuthStatus>(() => {
+    // Set initial status based on stored user
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('integritydesk_auth_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          // Basic validation of stored user data
+          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
+            return 'authenticated';
+          } else {
+            localStorage.removeItem('integritydesk_auth_user');
+          }
+        }
+      } catch {
+        localStorage.removeItem('integritydesk_auth_user');
+      }
+    }
+    return 'loading';
+  });
+  const [bootstrapped, setBootstrapped] = useState(() => {
+    // Initialize bootstrapped to true if we have stored user data
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('integritydesk_auth_user');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
+            return true; // Assume system is bootstrapped if we have valid user data
+          }
+        } catch {
+          // Invalid data
+        }
+      }
+    }
+    return false;
+  });
 
   const clearSession = useCallback(() => {
     setUser(null);
     setStatus('anonymous');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('integritydesk_auth_user');
+    }
   }, []);
 
   const handleSessionExpired = useCallback(async () => {
@@ -74,7 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const refreshSession = useCallback(async () => {
-    setStatus((current) => (bootstrapped ? current : 'loading'));
+    // If we already have user data from localStorage, just verify the system is bootstrapped
+    const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
 
     try {
       const statusRes = await apiClient.get('/api/auth/status');
@@ -86,25 +146,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const meRes = await apiClient.get('/api/auth/me');
-      const nextUser = meRes.data?.user ?? null;
-
       setBootstrapped(true);
-      setUser(nextUser);
-      setStatus(nextUser ? 'authenticated' : 'anonymous');
+
+      // If we have stored user data, try to verify it's still valid
+      if (hasStoredUser && user) {
+        try {
+          const meRes = await apiClient.get('/api/auth/me');
+          const currentUser = meRes.data?.user ?? null;
+
+          // Update user data if it changed
+          if (currentUser && JSON.stringify(currentUser) !== JSON.stringify(user)) {
+            setUser(currentUser);
+            localStorage.setItem('integritydesk_auth_user', JSON.stringify(currentUser));
+          }
+        } catch {
+          // If verification fails, clear the session
+          clearSession();
+        }
+      } else {
+        // No stored user, try to get current user
+        const meRes = await apiClient.get('/api/auth/me');
+        const nextUser = meRes.data?.user ?? null;
+
+        setUser(nextUser);
+        setStatus(nextUser ? 'authenticated' : 'anonymous');
+
+        if (nextUser) {
+          localStorage.setItem('integritydesk_auth_user', JSON.stringify(nextUser));
+        }
+      }
     } catch {
       setBootstrapped(true);
-      clearSession();
+      // Don't clear session if we have stored user data - it might just be a network issue
+      if (!hasStoredUser) {
+        clearSession();
+      }
     }
-  }, [bootstrapped, clearSession]);
+  }, [user, clearSession]);
 
   useEffect(() => {
     installAuthInterceptors(async () => {
       await handleSessionExpired();
     });
 
-    refreshSession();
-  }, [handleSessionExpired, refreshSession]);
+    // Only check bootstrap status once, not on every navigation
+    if (!bootstrapped) {
+      apiClient.get('/api/auth/status').then((statusRes) => {
+        const nextBootstrapped = Boolean(statusRes.data?.bootstrapped);
+        setBootstrapped(nextBootstrapped);
+
+        if (!nextBootstrapped) {
+          clearSession();
+          return;
+        }
+
+        // If we have stored user data and system is bootstrapped, we're good
+        const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
+        if (!hasStoredUser) {
+          // No stored user, try to refresh session
+          refreshSession();
+        }
+      }).catch(() => {
+        // If we can't check status, assume system is bootstrapped to avoid loops
+        setBootstrapped(true);
+        const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
+        if (!hasStoredUser) {
+          clearSession();
+        }
+      });
+    }
+  }, [bootstrapped, handleSessionExpired, refreshSession, clearSession]);
+
+  // Periodic session validation (every 5 minutes)
+  useEffect(() => {
+    if (!user || status !== 'authenticated') return;
+
+    const interval = setInterval(async () => {
+      try {
+        await apiClient.get('/api/auth/me');
+      } catch {
+        // If session validation fails, clear the session
+        clearSession();
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [user, status, clearSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiClient.post('/api/auth/login', { email, password });
@@ -113,6 +240,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBootstrapped(true);
     setUser(nextUser);
     setStatus(nextUser ? 'authenticated' : 'anonymous');
+
+    // Persist user in localStorage
+    if (nextUser && typeof window !== 'undefined') {
+      localStorage.setItem('integritydesk_auth_user', JSON.stringify(nextUser));
+    }
   }, []);
 
   const bootstrapAdmin = useCallback(async (payload: BootstrapAdminInput) => {
@@ -122,6 +254,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBootstrapped(true);
     setUser(nextUser);
     setStatus(nextUser ? 'authenticated' : 'anonymous');
+
+    // Persist user in localStorage
+    if (nextUser && typeof window !== 'undefined') {
+      localStorage.setItem('integritydesk_auth_user', JSON.stringify(nextUser));
+    }
   }, []);
 
   const logout = useCallback(async () => {

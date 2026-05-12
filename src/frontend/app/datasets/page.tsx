@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo, FormEvent } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { Database, Plus, FileText, Trash2, Edit, ExternalLink, Loader2, Grid, List } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo, FormEvent } from 'react';
+import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
-
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+import { Database, Plus, FileText, Trash2, Edit, ExternalLink, Loader2, Grid, List } from 'lucide-react';
 
 interface Dataset {
   id: string;
@@ -79,8 +78,8 @@ export default function DatasetsPage() {
       try {
         setLoading(true);
         const [datasetsRes, toolsRes] = await Promise.all([
-          axios.get(`${API}/api/benchmark-datasets`, { withCredentials: true }),
-          axios.get(`${API}/api/benchmark-tools`, { withCredentials: true })
+          apiClient.get('/api/benchmark-datasets'),
+          apiClient.get('/api/benchmark-tools')
         ]);
         setDatasets(datasetsRes.data.datasets);
         setTools(toolsRes.data.tools);
@@ -92,7 +91,10 @@ export default function DatasetsPage() {
       }
     };
 
-    loadData();
+    // Only load data if user is authenticated
+    if (user) {
+      loadData();
+    }
   }, [user]);
 
   const createDemoDataset = async (event: FormEvent<HTMLFormElement>) => {
@@ -100,11 +102,11 @@ export default function DatasetsPage() {
     setCreatingDataset(true);
 
     try {
-      const result = await axios.post(`${API}/api/admin/create-demo-dataset`, datasetForm, { withCredentials: true });
+      const result = await apiClient.post('/api/admin/create-demo-dataset', datasetForm);
 
       if (result.data && result.data.files_created) {
         // Refresh datasets list after creation
-        const datasetsRes = await axios.get(`${API}/api/benchmark-datasets`, { withCredentials: true });
+        const datasetsRes = await apiClient.get('/api/benchmark-datasets');
         setDatasets(datasetsRes.data.datasets);
       }
 

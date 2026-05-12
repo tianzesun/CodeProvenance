@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
@@ -18,6 +18,9 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   const pathname = usePathname();
   const { user, loading, bootstrapped } = useAuth();
 
+  // Prevent redirect loops by tracking last redirect
+  const lastRedirectRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (loading) {
       return;
@@ -28,14 +31,30 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
       return;
     }
 
-    if (!bootstrapped || !user) {
-      router.replace(`/login?next=${encodeURIComponent(pathname || '/')}`);
-      return;
-    }
+    // Add a small delay to prevent rapid redirect loops
+    const timer = setTimeout(() => {
+      const redirectKey = `${pathname}-${bootstrapped}-${!!user}-${requiredRole}`;
 
-    if (requiredRole === 'admin' && user.role !== 'admin') {
-      router.replace('/');
-    }
+      if (!bootstrapped || !user) {
+        if (lastRedirectRef.current !== redirectKey) {
+          lastRedirectRef.current = redirectKey;
+          router.replace(`/login?next=${encodeURIComponent(pathname || '/')}`);
+        }
+        return;
+      }
+
+      if (requiredRole === 'admin' && user.role !== 'admin') {
+        if (lastRedirectRef.current !== redirectKey) {
+          lastRedirectRef.current = redirectKey;
+          router.replace('/');
+        }
+      }
+
+      // Reset redirect key when authentication is successful
+      lastRedirectRef.current = null;
+    }, 100); // 100ms delay
+
+    return () => clearTimeout(timer);
   }, [bootstrapped, loading, pathname, requiredRole, requireAuth, router, user]);
 
   // Show loading only if auth is required

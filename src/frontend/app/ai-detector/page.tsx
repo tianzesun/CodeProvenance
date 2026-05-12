@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+const API = '';
 
 function formatSize(bytes) {
   return bytes < 1024 * 1024

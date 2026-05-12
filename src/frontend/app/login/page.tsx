@@ -121,9 +121,14 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (!loading && user) {
-      router.replace(nextPath);
-    }
+    // Add a small delay to prevent immediate redirects during authentication resolution
+    const timer = setTimeout(() => {
+      if (!loading && user) {
+        router.replace(nextPath);
+      }
+    }, 200); // 200ms delay
+
+    return () => clearTimeout(timer);
   }, [loading, user, nextPath, router]);
 
   const handleEmailChange = (value: string) => {

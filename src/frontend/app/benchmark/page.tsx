@@ -3,7 +3,8 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
 import {
   BarChart3, Loader2, Trophy, FileUp, X, AlertCircle,
@@ -16,8 +17,6 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
-
-const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 // ── Tool definitions ──────────────────────────────────────────────────────
 const TOOLS = [
@@ -177,9 +176,24 @@ function sortDatasets(datasets, demo = false) {
   });
 }
 
-function buildDatasetLibrary(benchmarkDatasets = []) {
-  const presetDatasets = sortDatasets(benchmarkDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' })));
-  const demoDatasets = sortDatasets(benchmarkDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })), true);
+function buildDatasetLibrary(benchmarkDatasets = [], benchmarkMode = 'comparison') {
+  // Determine if the current benchmark mode requires labeled ground truth
+  const requiresGroundTruth = benchmarkMode === 'development' || benchmarkMode === 'calibration' ||
+                              benchmarkMode === 'release' || benchmarkMode === 'regression';
+
+  // Filter datasets based on ground truth requirement
+  const filteredDatasets = benchmarkDatasets.filter(dataset => {
+    if (requiresGroundTruth) {
+      // For modes requiring ground truth, only show datasets that have it
+      return dataset.has_ground_truth === true;
+    } else {
+      // For comparison mode, show all datasets
+      return true;
+    }
+  });
+
+  const presetDatasets = sortDatasets(filteredDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' })));
+  const demoDatasets = sortDatasets(filteredDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })), true);
   return { presetDatasets, demoDatasets, allDatasets: [...presetDatasets, ...demoDatasets] };
 }
 
@@ -596,7 +610,7 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
 }
 
 // ── Step 2: Dataset Selection ──────────────────────────────────────────────
-function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, onBack, onNext }) {
+function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, benchmarkMode, canManageDemoDatasets, onBack, onNext }) {
   const [libraryFilter, setLibraryFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -611,7 +625,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     setCreatingDataset(true);
     setCreateError('');
     try {
-      await axios.post(`${API}/api/admin/create-demo-dataset`, datasetForm, { withCredentials: true });
+      await apiClient.post('/api/admin/create-demo-dataset', datasetForm);
       setShowCreateModal(false);
       setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
     } catch (err) {
@@ -629,7 +643,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   const handleDrop = useCallback(e => { e.preventDefault(); setFiles(Array.from(e.dataTransfer.files)); }, [setFiles]);
 
-  const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
+  const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets, benchmarkMode), [benchmarkDatasets, benchmarkMode]);
   const availableLanguages = useMemo(() => {
     const langs = new Set(allDatasets.map(d => d.language?.toLowerCase() || 'mixed').filter(Boolean));
     return Array.from(langs).sort();
@@ -944,13 +958,14 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               selectedTools.forEach(t => formData.append('tools', t));
 
               try {
-                const res = await axios.post(`${API}/api/benchmark`, formData, {
-                  withCredentials: true,
+                const res = await apiClient.post('/api/benchmark', formData, {
                   signal: controller.signal
                 });
                 allResults.push({ testCase: tc, ...res.data });
               } catch (err) {
                 if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
+                console.error('Test case benchmark error:', err);
+                // Continue with other test cases, but don't fail the whole benchmark
               }
             }
 
@@ -977,21 +992,27 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               setProgress(prev => [...prev, `Tools: ${toolNames}`]);
               setProgress(prev => [...prev, `Running benchmark analysis…`]);
 
-              const res = await axios.post(`${API}/api/benchmark/stream`, formData, {
-                withCredentials: true,
+              const res = await apiClient.post('/api/benchmark/stream', formData, {
                 signal: controller.signal,
                 headers: { 'Content-Type': 'multipart/form-data' }
               });
 
               setProgress(prev => [...prev, `✓ Benchmark complete — ${res.data?.pair_results?.length || 0} similarity pairs found`]);
               setProgressPct(100);
+              console.log('Benchmark completed successfully:', res.data);
               onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
             } catch (err) {
               if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
                 setProgress(prev => [...prev, '⨯ Run cancelled']);
               } else {
+                console.error('Benchmark error:', err);
+                console.error('Response data:', err.response?.data);
+                console.error('Response status:', err.response?.status);
                 setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+                setProgress(prev => [...prev, '❌ Benchmark failed']);
               }
+              // Don't call onComplete if there's an error
+              return;
             }
           }
         } else {
@@ -1010,8 +1031,7 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
             setProgress(prev => [...prev, `Running benchmark analysis…`]);
 
-            const res = await axios.post(`${API}/api/benchmark/stream`, formData, {
-              withCredentials: true,
+            const res = await apiClient.post('/api/benchmark/stream', formData, {
               signal: controller.signal,
               headers: { 'Content-Type': 'multipart/form-data' }
             });
@@ -1236,6 +1256,22 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const [optimizationError, setOptimizationError] = useState('');
   const [editableOptimizationChanges, setEditableOptimizationChanges] = useState([]);
 
+  // Add error checking for results data
+  if (!results || typeof results !== 'object') {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 text-lg font-semibold mb-2">Error Loading Results</div>
+        <div className="text-slate-600">Benchmark results data is missing or invalid.</div>
+        <button
+          onClick={onRestart}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
   const { tool_scores, pair_results } = results;
   const itemsPerPage = 50;
   const totalPairs = (pair_results || []).length;
@@ -1332,7 +1368,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     try {
       setPdfDownloading(true); setPdfError('');
       const payload = { ...results, format };
-      const res = await axios.post(`${API}/api/benchmark/export-pdf`, payload, { responseType: 'blob', withCredentials: true });
+      const res = await apiClient.post('/api/benchmark/export-pdf', payload, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const filename = format === 'detailed_scorecard'
@@ -1367,10 +1403,10 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       console.log('Applying optimization with changes:', tuningConfigChanges);
       console.log('Using job ID:', jobId);
 
-      const res = await axios.post(`${API}/api/benchmark/apply-optimization`, {
+      const res = await apiClient.post('/api/benchmark/apply-optimization', {
         config_changes: tuningConfigChanges,
         source_job_id: jobId,
-      }, { withCredentials: true });
+      });
 
       setOptimizationMessage(res.data?.message || 'Proposed optimization applied.');
     } catch (err) {
@@ -2020,14 +2056,14 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   useEffect(() => {
     if (authLoading || !user) return;
     setToolsLoading(true);
-    axios.get(`${API}/api/benchmark-tools`, { withCredentials: true })
+    apiClient.get('/api/benchmark-tools')
       .then(res => { if (res.data?.tools) setRawApiTools(res.data.tools); })
       .catch(() => {
         setToolsError('Unable to confirm installed benchmark tools. Showing last known tool set.');
         setRawApiTools(TOOLS.map(t => ({ id: t.id, available: t.runnable !== false })));
       })
       .finally(() => setToolsLoading(false));
-    axios.get(`${API}/api/benchmark-datasets`, { withCredentials: true })
+    apiClient.get('/api/benchmark-datasets')
       .then(res => { if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets); })
       .catch(() => { });
   }, [authLoading, user]);
@@ -2078,8 +2114,8 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
 
-  return (
-    <DashboardLayout requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
+   return (
+     <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined} requireAuth={false}>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
         <div className="space-y-6">
 
@@ -2161,6 +2197,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   files={files}
                   setFiles={setFiles}
                   benchmarkDatasets={benchmarkDatasets}
+                  benchmarkMode={activeModeId}
                   canManageDemoDatasets={user?.role === 'admin'}
                   onBack={() => setStep(0)}
                   onNext={() => goToStep(2, 1)}

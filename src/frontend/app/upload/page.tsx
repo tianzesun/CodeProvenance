@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
 import {
   Upload as UploadIcon,
@@ -303,7 +304,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     let active = true;
-    axios.get(`${API}/api/benchmark-tools`).then((res) => {
+    apiClient.get('/api/benchmark-tools').then((res) => {
       if (!active) return;
       const t = Array.isArray(res.data?.tools) ? res.data.tools : [];
       const tools = t.length > 0 ? t : FALLBACK_TOOL_OPTIONS;
@@ -393,7 +394,7 @@ export default function UploadPage() {
     setSelectedToolIds((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]), []);
 
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-8 lg:space-y-10">
 
