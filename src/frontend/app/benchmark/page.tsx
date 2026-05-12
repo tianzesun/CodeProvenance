@@ -3,7 +3,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
 import {
@@ -908,7 +908,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [progressPct, setProgressPct] = useState(0);
   const [progressMode, setProgressMode] = useState('indeterminate');
   const [error, setError] = useState('');
-  const [pdfFormat, setPdfFormat] = useState('detailed_scorecard');
 
   // Use a ref to hold the run function so the autoStart effect always calls the latest version
   const runRef = useRef(null);
@@ -1299,12 +1298,45 @@ function PanLeaderboard({ rows }) {
   );
 }
 
+// ── Error boundary for ReportStep ─────────────────────────────────────────
+class ReportErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('ReportStep render error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+          <div className="text-red-600 font-semibold text-lg mb-2">Report failed to render</div>
+          <div className="text-red-500 text-sm mb-4 font-mono">{String(this.state.error?.message || this.state.error)}</div>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); this.props.onRestart?.(); }}
+            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-800"
+          >
+            Start New Benchmark
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── Step 4: Report ─────────────────────────────────────────────────────────
 function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
+  const { user } = useAuth();
   const [expandedPairs, setExpandedPairs] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState('');
+  const [pdfFormat, setPdfFormat] = useState('detailed_scorecard');
   const [applyingOptimization, setApplyingOptimization] = useState(false);
   const [optimizationMessage, setOptimizationMessage] = useState('');
   const [optimizationError, setOptimizationError] = useState('');
@@ -2271,12 +2303,14 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 />
               )}
               {step === 3 && results && (
-                <ReportStep
-                  results={results}
-                  onRestart={restart}
-                  onRerun={rerunBenchmark}
-                  benchmarkMode={activeModeId}
-                />
+                <ReportErrorBoundary onRestart={restart}>
+                  <ReportStep
+                    results={results}
+                    onRestart={restart}
+                    onRerun={rerunBenchmark}
+                    benchmarkMode={activeModeId}
+                  />
+                </ReportErrorBoundary>
               )}
             </div>
           </div>
