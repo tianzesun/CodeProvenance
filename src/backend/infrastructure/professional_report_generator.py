@@ -5,7 +5,7 @@ Generates HTML, PDF, and JSON reports with:
 - Similarity heatmaps
 - Risk level indicators
 - AI detection results
-- Professional formatting
+- Professional formatting comparable to Turnitin
 
 Usage:
     from src.backend.infrastructure.professional_report_generator import ReportGenerator
@@ -43,204 +43,273 @@ class ReportGenerator:
         self.branding_color = branding_color
 
     def generate_html_report(self, results: Dict[str, Any]) -> str:
-        """Generate a comprehensive HTML report.
-
-        Args:
-            results: Analysis results from the detection service
-
-        Returns:
-            HTML string of the report
-        """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """Generate a comprehensive, Turnitin-grade HTML originality report."""
+        now = datetime.now()
+        timestamp = now.strftime("%B %d, %Y at %H:%M UTC")
+        timestamp_short = now.strftime("%Y-%m-%d %H:%M")
         summary = results.get("summary", {})
         pairs = results.get("pairs", [])
-        top_pair = max(
-            pairs, key=lambda pair: pair.get("similarity_score", 0), default={}
+
+        # Resolve report_id from top-level or metadata
+        report_id = str(
+            results.get("report_id")
+            or results.get("metadata", {}).get("report_id")
+            or ""
         )
+        if not report_id:
+            report_id = (
+                hashlib.sha256(timestamp_short.encode()).hexdigest()[:12].upper()
+            )
+
+        sorted_pairs = sorted(
+            pairs, key=lambda p: p.get("similarity_score", 0), reverse=True
+        )
+        top_pair = sorted_pairs[0] if sorted_pairs else {}
         top_score = top_pair.get("similarity_score", 0)
 
-        html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IntegrityDesk Originality Report - {escape(self.institution_name)}</title>
-    <style>
-        :root {{ color-scheme: light; --brand: {self.branding_color}; --ink: #172033; --muted: #64748b; --line: #dbe3ef; --soft: #f7f9fc; }}
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; background: #eef3f8; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }}
-        .shell {{ max-width: 980px; margin: 0 auto; background: #fff; min-height: 100vh; box-shadow: 0 20px 70px rgba(15, 23, 42, 0.12); }}
-        .conf-banner {{ background: #172033; color: #fff; text-align: center; padding: 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }}
-        header {{ padding: 26px 34px; color: #fff; border-bottom: 1px solid #1557b0; background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%); display: flex; justify-content: space-between; gap: 22px; align-items: center; }}
-        .report-head-left {{ display: flex; align-items: center; gap: 16px; }}
-        .report-logo {{ width: 42px; height: 42px; background: rgba(255,255,255,.18); border-radius: 8px; display: grid; place-items: center; font-weight: 900; }}
-        .eyebrow {{ color: rgba(255,255,255,.82); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }}
-        h1 {{ margin: 8px 0 4px; font-size: 30px; line-height: 1.15; }}
-        h2 {{ margin: 0; font-size: 18px; }}
-        h3 {{ margin: 0; font-size: 15px; }}
-        .meta {{ color: var(--muted); font-size: 13px; }}
-        header .meta {{ color: rgba(255,255,255,.82); text-align: right; }}
-        header h1 {{ color: #fff; }}
-        main {{ padding: 30px 40px 44px; }}
-        .summary {{ display: grid; grid-template-columns: 1.2fr repeat(4, minmax(130px, 1fr)); gap: 14px; margin-bottom: 22px; }}
-        .card {{ border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 16px; }}
-        .card.soft {{ background: var(--soft); }}
-        .label {{ color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }}
-        .value {{ margin-top: 6px; font-size: 24px; font-weight: 800; }}
-        .section {{ border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 18px; overflow: hidden; }}
-        .section-head {{ padding: 16px 18px; border-bottom: 1px solid var(--line); background: #fbfdff; display: flex; justify-content: space-between; gap: 16px; align-items: center; }}
-        .section-body {{ padding: 18px; }}
-        .method-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }}
-        .method {{ border-left: 3px solid var(--brand); background: #f8fafc; padding: 12px; border-radius: 6px; font-size: 13px; color: #334155; }}
-        .decision-panel {{ border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 8px; padding: 18px; }}
-        .decision-title {{ color: #1e3a8a; font-size: 20px; font-weight: 900; margin: 4px 0 8px; }}
-        .two-col {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 14px; }}
-        .audit-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }}
-        .audit-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; background: #fff; }}
-        .hash {{ font: 11px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", monospace; color: #475569; overflow-wrap: anywhere; }}
-        .decision-box {{ border: 1px solid #c7d2fe; background: #eef2ff; border-radius: 8px; padding: 12px; margin-bottom: 12px; }}
-        .signature-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }}
-        .signature-line {{ border-top: 1px solid #334155; padding-top: 7px; color: #475569; font-size: 12px; }}
-        .heat-row {{ display: grid; grid-template-columns: 34px 1fr 78px 84px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #eef2f7; }}
-        .heat-row:last-child {{ border-bottom: 0; }}
-        .rank {{ width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: var(--brand); color: #fff; font-weight: 800; font-size: 12px; }}
-        .bar {{ height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin-top: 6px; }}
-        .bar > span {{ display: block; height: 100%; background: var(--brand); }}
-        .badge {{ display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 800; }}
-        .risk-critical, .risk-high {{ background: #fee2e2; color: #991b1b; }}
-        .risk-review {{ background: #e0f2fe; color: #075985; }}
-        .risk-medium {{ background: #fef3c7; color: #92400e; }}
-        .risk-low {{ background: #dcfce7; color: #166534; }}
-        .action-buttons {{ display: flex; gap: 10px; margin-top: 8px; }}
-        .btn {{ display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; border: none; transition: all 0.2s; }}
-        .btn-primary {{ background: rgba(255,255,255,.95); color: #1a73e8; }}
-        .btn-primary:hover {{ background: #fff; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-        .btn-secondary {{ background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3); }}
-        .btn-secondary:hover {{ background: rgba(255,255,255,.25); }}
-        .no-print {{ display: block; }}
-        .icon {{ width: 16px; height: 16px; }}
-        details.finding {{ border-top: 1px solid var(--line); }}
-        details.finding:first-child {{ border-top: 0; }}
-        summary {{ cursor: pointer; list-style: none; padding: 18px; display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; }}
-        summary::-webkit-details-marker {{ display: none; }}
-        summary:after {{ content: "Show Details"; color: var(--brand); font-size: 13px; font-weight: 800; }}
-        details[open] summary:after {{ content: "Hide Details"; }}
-        .finding-body {{ padding: 0 18px 18px; }}
-        .evidence-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }}
-        .code-card {{ border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #0f172a; }}
-        .code-title {{ background: #1e293b; color: #e2e8f0; font-size: 12px; font-weight: 700; padding: 9px 12px; }}
-        table.code {{ width: 100%; border-collapse: collapse; font: 12px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace; }}
-        .ln {{ width: 48px; text-align: right; color: #94a3b8; background: #111827; border-right: 1px solid #334155; padding: 0 8px; user-select: none; vertical-align: top; }}
-        .src {{ color: #dbeafe; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 10px; }}
-        .matched .ln {{ background: #3f2f12; color: #fde68a; }}
-        .matched .src {{ background: #422006; color: #fef3c7; }}
-        .signals {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }}
-        .signal {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; }}
-        .signal-row {{ display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; border-bottom: 1px solid #eef2f7; }}
-        .signal-row:last-child {{ border-bottom: 0; }}
-        .note {{ color: #475569; font-size: 13px; }}
-        footer {{ border-top: 1px solid var(--line); color: var(--muted); padding: 18px 40px; font-size: 12px; }}
-        @media print {{
-            body {{ background: #fff; }}
-            .shell {{ box-shadow: none; }}
-            summary:after {{ display: none; }}
-            .no-print {{ display: none !important; }}
-            .action-buttons {{ display: none !important; }}
-        }}
-        @media (max-width: 900px) {{
-            header, main, footer {{ padding-left: 18px; padding-right: 18px; }}
-            .summary, .method-grid, .evidence-grid, .signals, .two-col, .audit-grid, .signature-grid {{ grid-template-columns: 1fr; }}
-            summary {{ grid-template-columns: 1fr; }}
-            .heat-row {{ grid-template-columns: 30px 1fr; }}
-        }}
-    </style>
-</head>
-<body>
-<div class="shell">
-    <div class="conf-banner">Confidential -- Academic Integrity Evidence Report</div>
-    <header>
-        <div class="report-head-left">
-            <div class="report-logo">ID</div>
-            <div>
-                <div class="eyebrow">{escape(self.institution_name)} Evidence Packet</div>
-                <h1>IntegrityDesk Originality Report</h1>
-                <div class="action-buttons no-print">
-                    <a href="/report/{escape(str(results.get('report_id', '')))}/download-pdf" class="btn btn-primary" download>
-                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        Download PDF
-                    </a>
-                    <button onclick="window.print()" class="btn btn-secondary">
-                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
-                        </svg>
-                        Print Report
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div class="meta">Generated {timestamp}<br>Report ID {escape(str(results.get('report_id', 'N/A')))}</div>
-    </header>
-    <main>
-        <div class="summary">
-            <div class="card soft">
-                <div class="label">Fused Review Score</div>
-                <div class="value">{top_score:.1%}</div>
-                <div class="meta">{escape(str(top_pair.get('file_a', 'No file')))} vs {escape(str(top_pair.get('file_b', 'No file')))}</div>
-            </div>
-            <div class="card"><div class="label">Files</div><div class="value">{summary.get('total_files', 0)}</div></div>
-            <div class="card"><div class="label">Pairs</div><div class="value">{summary.get('total_pairs', 0)}</div></div>
-            <div class="card"><div class="label">Flagged</div><div class="value">{summary.get('suspicious_pairs', 0)}</div></div>
-            <div class="card"><div class="label">Avg Fused Score</div><div class="value">{summary.get('average_similarity', 0):.1%}</div></div>
-        </div>
+        total_files = summary.get("total_files", 0)
+        total_pairs_count = summary.get("total_pairs", 0)
+        flagged = summary.get("suspicious_pairs", 0)
+        avg_score = summary.get("average_similarity", 0)
 
-        {self._generate_executive_decision(results, top_pair)}
-        {self._generate_chain_of_custody(results, timestamp)}
+        if top_score >= 0.85:
+            risk_color = "#dc2626"
+            risk_label = "Critical Risk"
+            risk_bg = "#fef2f2"
+        elif top_score >= 0.65:
+            risk_color = "#ea580c"
+            risk_label = "High Risk"
+            risk_bg = "#fff7ed"
+        elif top_score >= 0.40:
+            risk_color = "#d97706"
+            risk_label = "Medium Risk"
+            risk_bg = "#fffbeb"
+        else:
+            risk_color = "#16a34a"
+            risk_label = "Low Risk"
+            risk_bg = "#f0fdf4"
 
-        <section class="section">
-            <div class="section-head">
-                <h2>How The System Reached This Result</h2>
-                <span class="meta">Corroborating evidence, not a single score</span>
-            </div>
-            <div class="section-body">
-                <div class="method-grid">
-                    <div class="method"><strong>Lexical evidence.</strong> Token, n-gram, and winnowing signals find copied or lightly edited source even when spacing and comments change.</div>
-                    <div class="method"><strong>Structural evidence.</strong> AST and control-structure signals compare program shape so renamed variables do not hide similar logic.</div>
-                    <div class="method"><strong>Report evidence.</strong> The highlighted snippets below show matching line spans from the submitted files. External tools are listed separately with their own coverage numbers when available.</div>
-                </div>
-            </div>
-        </section>
+        score_pct = f"{top_score:.0%}"
+        avg_pct = f"{avg_score:.0%}"
+        brand = self.branding_color
 
-        {self._generate_ai_summary(results.get('ai_detection', {}))}
+        selected_tools = results.get("selected_tools", [])
+        tools_str = escape(
+            ", ".join(str(t) for t in selected_tools)
+            if selected_tools
+            else "IntegrityDesk"
+        )
 
-        <section class="section">
-            <div class="section-head">
-                <h2>Top Review Pairs</h2>
-            </div>
-            <div class="section-body">
-                {self._generate_heatmap(pairs)}
-            </div>
-        </section>
+        pairs_html = self._generate_pair_details(sorted_pairs)
+        heatmap_html = self._generate_heatmap(sorted_pairs)
+        ai_html = self._generate_ai_summary(results.get("ai_detection", {}))
+        exec_html = self._generate_executive_decision(results, top_pair)
+        custody_html = self._generate_chain_of_custody(
+            results, timestamp_short, report_id
+        )
+        signoff_html = self._generate_signoff_section()
 
-        <section class="section">
-            <div class="section-head">
-                <h2>Detailed Findings And Evidence</h2>
-                <span class="meta">{len(pairs)} pair(s)</span>
-            </div>
-            {self._generate_pair_details(pairs)}
-        </section>
+        css = (
+            f"*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}"
+            f"html{{font-size:14px;-webkit-text-size-adjust:100%}}"
+            f"body{{background:#f0f4f8;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}}"
+            f"a{{color:{brand};text-decoration:none}}"
+            f".shell{{max-width:1020px;margin:0 auto;background:#fff;box-shadow:0 0 0 1px #e2e8f0,0 24px 64px rgba(15,23,42,.10)}}"
+            f".conf-banner{{background:#0f172a;color:#94a3b8;text-align:center;padding:7px 16px;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}}"
+            f".rpt-header{{background:linear-gradient(135deg,{brand} 0%,#1557b0 100%);color:#fff;padding:28px 36px 24px}}"
+            f".rpt-header-top{{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}}"
+            f".rpt-brand{{display:flex;align-items:center;gap:14px}}"
+            f".rpt-logo{{width:46px;height:46px;background:rgba(255,255,255,.18);border-radius:10px;display:grid;place-items:center;font-weight:900;font-size:17px;flex-shrink:0;border:1.5px solid rgba(255,255,255,.25)}}"
+            f".rpt-title-block .eyebrow{{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.75);margin-bottom:4px}}"
+            f".rpt-title-block h1{{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.2;color:#fff}}"
+            f".rpt-title-block .subtitle{{font-size:12px;color:rgba(255,255,255,.75);margin-top:3px}}"
+            f".rpt-meta-block{{text-align:right;font-size:11px;color:rgba(255,255,255,.80);line-height:1.7}}"
+            f".rpt-meta-block strong{{color:#fff;font-weight:700}}"
+            f".action-bar{{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}}"
+            f".btn{{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;border:none;transition:all .18s;text-decoration:none;line-height:1}}"
+            f".btn-dl{{background:rgba(255,255,255,.95);color:{brand}}}"
+            f".btn-dl:hover{{background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18);transform:translateY(-1px)}}"
+            f".btn-pr{{background:rgba(255,255,255,.12);color:#fff;border:1.5px solid rgba(255,255,255,.30)}}"
+            f".btn-pr:hover{{background:rgba(255,255,255,.22)}}"
+            f".score-banner{{background:{risk_bg};border-bottom:3px solid {risk_color};padding:20px 36px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}}"
+            f".score-circle{{width:80px;height:80px;border-radius:50%;background:{risk_color};display:grid;place-items:center;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.15)}}"
+            f".score-circle span{{font-size:22px;font-weight:900;color:#fff;letter-spacing:-.03em}}"
+            f".score-info h2{{font-size:18px;font-weight:800;color:{risk_color};margin-bottom:3px}}"
+            f".score-info p{{font-size:12px;color:#475569;max-width:480px;line-height:1.5}}"
+            f".score-chips{{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}}"
+            f".chip{{display:inline-flex;flex-direction:column;align-items:center;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;min-width:72px;box-shadow:0 1px 3px rgba(0,0,0,.06)}}"
+            f".chip-val{{font-size:18px;font-weight:800;color:#0f172a;line-height:1}}"
+            f".chip-lbl{{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-top:3px}}"
+            f"main{{padding:28px 36px 48px}}"
+            f".sec{{border:1px solid #e2e8f0;border-radius:10px;background:#fff;margin-top:20px;overflow:hidden}}"
+            f".sec-head{{padding:14px 18px;border-bottom:1px solid #e2e8f0;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:12px}}"
+            f".sec-head h2{{font-size:14px;font-weight:700;color:#0f172a;letter-spacing:-.01em}}"
+            f".sec-body{{padding:18px}}"
+            f".method-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}"
+            f".method-card{{border-left:3px solid {brand};background:#f8fafc;padding:12px 14px;border-radius:0 6px 6px 0;font-size:12px;color:#334155;line-height:1.6}}"
+            f".method-card strong{{display:block;color:#0f172a;margin-bottom:4px;font-size:12px}}"
+            f".heat-row{{display:grid;grid-template-columns:32px 1fr 70px 90px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #f1f5f9}}"
+            f".heat-row:last-child{{border-bottom:0}}"
+            f".rank-badge{{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:{brand};color:#fff;font-weight:800;font-size:11px}}"
+            f".heat-files{{min-width:0}}"
+            f".heat-files .pair-names{{font-size:12px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}"
+            f".heat-bar{{height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:5px}}"
+            f".heat-bar span{{display:block;height:100%;border-radius:999px}}"
+            f".heat-score{{font-size:14px;font-weight:800;color:#0f172a;text-align:right}}"
+            f".badge{{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:10px;font-weight:800;letter-spacing:.03em;white-space:nowrap}}"
+            f".badge-critical,.badge-high{{background:#fee2e2;color:#991b1b}}"
+            f".badge-review{{background:#dbeafe;color:#1e40af}}"
+            f".badge-medium{{background:#fef3c7;color:#92400e}}"
+            f".badge-low{{background:#dcfce7;color:#166534}}"
+            f"details.finding{{border-top:1px solid #f1f5f9}}"
+            f"details.finding:first-child{{border-top:0}}"
+            f"details.finding summary{{cursor:pointer;list-style:none;padding:14px 18px;display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;user-select:none}}"
+            f"details.finding summary::-webkit-details-marker{{display:none}}"
+            f"details.finding summary::after{{content:'\\25B8 Show';color:{brand};font-size:11px;font-weight:800;white-space:nowrap}}"
+            f"details.finding[open] summary::after{{content:'\\25BE Hide'}}"
+            f"details.finding summary:hover{{background:#f8fafc}}"
+            f".finding-body{{padding:0 18px 18px}}"
+            f".signals{{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}}"
+            f".signal-card{{border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px}}"
+            f".signal-card h3{{font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #f1f5f9}}"
+            f".sig-row{{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid #f8fafc}}"
+            f".sig-row:last-child{{border-bottom:0}}"
+            f".sig-row .engine-name{{color:#475569;text-transform:capitalize}}"
+            f".sig-row .engine-score{{font-weight:700;color:#0f172a;flex-shrink:0}}"
+            f".sig-bar-wrap{{flex:1;height:5px;background:#f1f5f9;border-radius:999px;overflow:hidden;margin:0 8px}}"
+            f".sig-bar{{height:100%;border-radius:999px;background:{brand}}}"
+            f".evidence-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}}"
+            f".code-card{{border:1px solid #1e293b;border-radius:8px;overflow:hidden}}"
+            f".code-card-header{{background:#1e293b;color:#e2e8f0;font-size:11px;font-weight:700;padding:8px 12px;display:flex;align-items:center;justify-content:space-between}}"
+            f".code-card-header .file-name{{font-family:'SFMono-Regular',Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}"
+            f".code-card-header .line-range{{font-size:10px;color:#94a3b8;flex-shrink:0;margin-left:8px}}"
+            f"table.code-tbl{{width:100%;border-collapse:collapse;font:11.5px/1.55 'SFMono-Regular',Consolas,'Liberation Mono',monospace;background:#0f172a}}"
+            f".code-tbl .ln{{width:44px;text-align:right;color:#475569;background:#111827;border-right:1px solid #1e293b;padding:0 8px;user-select:none;vertical-align:top}}"
+            f".code-tbl .src{{color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere;padding:0 10px;vertical-align:top}}"
+            f".code-tbl tr.matched .ln{{background:#3b2a0a;color:#fbbf24}}"
+            f".code-tbl tr.matched .src{{background:#2d1f06;color:#fef3c7}}"
+            f".prov-card{{border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:10px}}"
+            f".prov-card h3{{font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px}}"
+            f".prov-row{{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:11px;border-bottom:1px solid #f8fafc}}"
+            f".prov-row:last-child{{border-bottom:0}}"
+            f".prov-row .prov-key{{color:#64748b;flex-shrink:0}}"
+            f".prov-row .prov-hash{{font-family:'SFMono-Regular',Consolas,monospace;color:#334155;overflow-wrap:anywhere;text-align:right}}"
+            f".sig-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:16px}}"
+            f".sig-line{{border-top:1.5px solid #334155;padding-top:8px;color:#64748b;font-size:11px}}"
+            f".ai-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}"
+            f".note{{color:#64748b;font-size:12px;line-height:1.6}}"
+            # Keep legacy class names so helper methods still work
+            f".decision-panel{{border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;padding:18px}}"
+            f".decision-title{{color:#1e3a8a;font-size:20px;font-weight:900;margin:4px 0 8px}}"
+            f".two-col{{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:14px}}"
+            f".label{{color:#64748b;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}}"
+            f".value{{margin-top:6px;font-size:24px;font-weight:800}}"
+            f".card{{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:16px}}"
+            f".card.soft{{background:#f8fafc}}"
+            f".section{{border:1px solid #e2e8f0;border-radius:8px;background:#fff;margin-top:18px;overflow:hidden}}"
+            f".section-head{{padding:16px 18px;border-bottom:1px solid #e2e8f0;background:#f8fafc;display:flex;justify-content:space-between;gap:16px;align-items:center}}"
+            f".section-body{{padding:18px}}"
+            f".hash{{font:11px/1.45 'SFMono-Regular',Consolas,'Liberation Mono',monospace;color:#475569;overflow-wrap:anywhere}}"
+            f".decision-box{{border:1px solid #c7d2fe;background:#eef2ff;border-radius:8px;padding:12px;margin-bottom:12px}}"
+            f".signature-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}}"
+            f".signature-line{{border-top:1px solid #334155;padding-top:7px;color:#475569;font-size:12px}}"
+            f".signal{{border:1px solid #e2e8f0;border-radius:8px;padding:12px}}"
+            f".signal-row{{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px;border-bottom:1px solid #f1f5f9}}"
+            f".signal-row:last-child{{border-bottom:0}}"
+            f".audit-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}"
+            f".audit-item{{border:1px solid #e2e8f0;border-radius:8px;padding:11px 12px;background:#fff}}"
+            f"footer{{border-top:1px solid #e2e8f0;padding:16px 36px;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}}"
+            f"footer .footer-brand{{font-weight:700;color:#64748b}}"
+            f"@media print{{body{{background:#fff}}.shell{{box-shadow:none;max-width:100%}}.action-bar,.no-print{{display:none!important}}details.finding summary::after{{display:none}}details.finding>.finding-body{{display:block!important}}details.finding{{page-break-inside:avoid}}.code-card{{page-break-inside:avoid}}.sec{{page-break-inside:avoid}}}}"
+            f"@media(max-width:760px){{.rpt-header,.score-banner,main,footer{{padding-left:16px;padding-right:16px}}.method-grid,.signals,.evidence-grid,.sig-grid,.ai-grid,.two-col,.audit-grid{{grid-template-columns:1fr}}.score-chips{{margin-left:0}}.heat-row{{grid-template-columns:28px 1fr 60px}}}}"
+        )
 
-        {self._generate_signoff_section()}
-    </main>
-    <footer>
-        Generated by CodeProvenance. Prepared as an institutional evidence packet for academic integrity review; decision fields require authorized institutional sign-off.
-    </footer>
-</div>
-</body>
-</html>"""
+        js = (
+            "function downloadPDF(el){"
+            "var jobId=el.getAttribute('data-job-id');"
+            "var url='/report/'+jobId+'/download-pdf';"
+            "var orig=el.innerHTML;"
+            "el.textContent='Generating\u2026';"
+            "el.style.opacity='0.7';el.style.pointerEvents='none';"
+            "fetch(url)"
+            ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
+            ".then(function(blob){"
+            "var a=document.createElement('a');"
+            "a.href=URL.createObjectURL(blob);"
+            "a.download='integritydesk_report_'+jobId+'.pdf';"
+            "document.body.appendChild(a);a.click();"
+            "document.body.removeChild(a);URL.revokeObjectURL(a.href);})"
+            ".catch(function(err){alert('PDF generation failed: '+err.message+'\\nTry the Print button instead.');})"
+            ".finally(function(){el.innerHTML=orig;el.style.opacity='';el.style.pointerEvents='';});}"
+        )
 
-        return html
+        return (
+            f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+            f'<meta charset="UTF-8">\n'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+            f"<title>IntegrityDesk Originality Report \u2014 {escape(self.institution_name)}</title>\n"
+            f'<style>{css}</style>\n</head>\n<body>\n<div class="shell">\n\n'
+            f'<div class="conf-banner">Confidential \u2014 Academic Integrity Evidence Report \u2014 Authorized Use Only</div>\n\n'
+            f'<header class="rpt-header">\n'
+            f'  <div class="rpt-header-top">\n'
+            f'    <div class="rpt-brand">\n'
+            f'      <div class="rpt-logo">ID</div>\n'
+            f'      <div class="rpt-title-block">\n'
+            f'        <div class="eyebrow">{escape(self.institution_name)} \u2014 Evidence Packet</div>\n'
+            f"        <h1>IntegrityDesk Originality Report</h1>\n"
+            f'        <div class="subtitle">Seven-engine fusion analysis &middot; {tools_str}</div>\n'
+            f"      </div>\n    </div>\n"
+            f'    <div class="rpt-meta-block">\n'
+            f"      <div><strong>Generated</strong><br>{timestamp}</div>\n"
+            f'      <div style="margin-top:6px"><strong>Report ID</strong><br>{escape(report_id)}</div>\n'
+            f"    </div>\n  </div>\n"
+            f'  <div class="action-bar no-print">\n'
+            f'    <a href="/report/{escape(report_id)}/download-pdf"\n'
+            f'       class="btn btn-dl"\n'
+            f'       onclick="event.preventDefault();downloadPDF(this)"\n'
+            f'       data-job-id="{escape(report_id)}">\n'
+            f'      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>\n'
+            f"      Download PDF\n    </a>\n"
+            f'    <button class="btn btn-pr" onclick="window.print()">\n'
+            f'      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>\n'
+            f"      Print Report\n    </button>\n  </div>\n</header>\n\n"
+            f'<div class="score-banner">\n'
+            f'  <div class="score-circle"><span>{score_pct}</span></div>\n'
+            f'  <div class="score-info">\n'
+            f"    <h2>{risk_label} \u2014 Highest Pair Score</h2>\n"
+            f'    <p>{escape(str(top_pair.get("file_a","—")))} vs {escape(str(top_pair.get("file_b","—")))}<br>\n'
+            f"    Fused score from all active detection engines. This is a triage signal \u2014 review the evidence blocks before taking action.</p>\n"
+            f"  </div>\n"
+            f'  <div class="score-chips">\n'
+            f'    <div class="chip"><span class="chip-val">{total_files}</span><span class="chip-lbl">Files</span></div>\n'
+            f'    <div class="chip"><span class="chip-val">{total_pairs_count}</span><span class="chip-lbl">Pairs</span></div>\n'
+            f'    <div class="chip"><span class="chip-val">{flagged}</span><span class="chip-lbl">Flagged</span></div>\n'
+            f'    <div class="chip"><span class="chip-val">{avg_pct}</span><span class="chip-lbl">Avg Score</span></div>\n'
+            f"  </div>\n</div>\n\n"
+            f"<main>\n\n{exec_html}\n\n{custody_html}\n\n"
+            f'<div class="sec">\n'
+            f'  <div class="sec-head"><h2>Detection Methodology</h2><span class="note">Multi-engine corroboration</span></div>\n'
+            f'  <div class="sec-body">\n'
+            f'    <div class="method-grid">\n'
+            f'      <div class="method-card"><strong>Lexical &amp; Token Analysis</strong>Token normalization, n-gram fingerprinting, and Winnowing find copied or lightly edited source even when spacing, comments, and variable names change.</div>\n'
+            f'      <div class="method-card"><strong>Structural &amp; AST Analysis</strong>Abstract Syntax Tree and control-flow graph comparison detects structural plagiarism where code has been reorganized or identifiers renamed.</div>\n'
+            f'      <div class="method-card"><strong>Semantic Embedding</strong>CodeBERT-style embeddings capture functional equivalence \u2014 code that does the same thing differently is still flagged even after heavy rewriting.</div>\n'
+            f"    </div>\n  </div>\n</div>\n\n"
+            f"{ai_html}\n\n"
+            f'<div class="sec">\n'
+            f'  <div class="sec-head"><h2>Similarity Heatmap \u2014 Top Pairs</h2><span class="note">Sorted by fused score</span></div>\n'
+            f'  <div class="sec-body">{heatmap_html}</div>\n</div>\n\n'
+            f'<div class="sec">\n'
+            f'  <div class="sec-head"><h2>Detailed Findings &amp; Evidence</h2>'
+            f'<span class="note">{len(pairs)} pair(s) \u2014 click a row to expand</span></div>\n'
+            f"  {pairs_html}\n</div>\n\n"
+            f"{signoff_html}\n\n</main>\n\n"
+            f"<footer>\n"
+            f'  <span class="footer-brand">IntegrityDesk</span>\n'
+            f"  <span>Report ID: {escape(report_id)} &middot; {timestamp}</span>\n"
+            f"  <span>Prepared as an institutional evidence packet. Decision fields require authorized sign-off.</span>\n"
+            f"</footer>\n\n</div>\n<script>{js}</script>\n</body>\n</html>"
+        )
 
     def generate_json_report(self, results: Dict[str, Any]) -> str:
         """Generate a JSON report for API consumption.
@@ -370,12 +439,18 @@ class ReportGenerator:
         """
 
     def _generate_chain_of_custody(
-        self, results: Dict[str, Any], timestamp: str
+        self, results: Dict[str, Any], timestamp: str, report_id: str = ""
     ) -> str:
         """Render chain-of-custody and reproducibility fields."""
-        report_id = escape(str(results.get("report_id", "N/A")))
+        # Accept report_id as explicit param (preferred) or fall back to results
+        if not report_id:
+            report_id = str(
+                results.get("report_id")
+                or results.get("metadata", {}).get("report_id")
+                or "—"
+            )
         selected_tools = results.get("selected_tools", [])
-        tool_names = ", ".join(str(tool) for tool in selected_tools) or "CodeProvenance"
+        tool_names = ", ".join(str(tool) for tool in selected_tools) or "IntegrityDesk"
         reproducibility = results.get("reproducibility", {})
         submission_hash = str(
             reproducibility.get("submission_set_hash")
@@ -388,20 +463,22 @@ class ReportGenerator:
         )
 
         return f"""
-        <section class="section">
-            <div class="section-head">
-                <h2>Chain Of Custody</h2>
-                <span class="meta">Reproducibility and audit metadata</span>
+        <div class="sec">
+            <div class="sec-head">
+                <h2>Chain of Custody</h2>
+                <span class="note">Reproducibility and audit metadata</span>
             </div>
-            <div class="section-body audit-grid">
-                <div class="audit-item"><div class="label">Report ID</div><div class="hash">{report_id}</div></div>
-                <div class="audit-item"><div class="label">Generated</div><div class="hash">{escape(timestamp)}</div></div>
-                <div class="audit-item"><div class="label">Assignment Mode</div><div class="hash">{escape(mode_name)}</div></div>
-                <div class="audit-item"><div class="label">Tools Used</div><div class="hash">{escape(tool_names)}</div></div>
-                <div class="audit-item"><div class="label">Submission Set Hash</div><div class="hash">{escape(submission_hash[:64])}</div></div>
-                <div class="audit-item"><div class="label">Evidence Policy</div><div class="hash">Score is triage; decision is based on listed evidence blocks and external-tool support.</div></div>
+            <div class="sec-body">
+                <div class="audit-grid">
+                    <div class="audit-item"><div class="a-lbl">Report ID</div><div class="a-val">{escape(report_id)}</div></div>
+                    <div class="audit-item"><div class="a-lbl">Generated</div><div class="a-val">{escape(timestamp)}</div></div>
+                    <div class="audit-item"><div class="a-lbl">Assignment Mode</div><div class="a-val">{escape(mode_name)}</div></div>
+                    <div class="audit-item"><div class="a-lbl">Tools Used</div><div class="a-val">{escape(tool_names)}</div></div>
+                    <div class="audit-item"><div class="a-lbl">Submission Set Hash</div><div class="a-val">{escape(submission_hash[:64])}</div></div>
+                    <div class="audit-item"><div class="a-lbl">Evidence Policy</div><div class="a-val">Score is triage; decision is based on listed evidence blocks and external-tool support.</div></div>
+                </div>
             </div>
-        </section>
+        </div>
         """
 
     def _generate_signoff_section(self) -> str:
@@ -457,52 +534,44 @@ class ReportGenerator:
     def _generate_heatmap(self, pairs: List[Dict[str, Any]]) -> str:
         """Generate similarity heatmap visualization."""
         if not pairs:
-            return "<p class='text-gray-500'>No pairs to display.</p>"
-
-        # Sort by similarity score
-        sorted_pairs = sorted(
-            pairs, key=lambda x: x.get("similarity_score", 0), reverse=True
-        )
+            return "<p class='note'>No pairs to display.</p>"
 
         rows = []
-        for i, pair in enumerate(sorted_pairs[:20]):  # Top 20
+        for i, pair in enumerate(pairs[:20]):  # already sorted by caller
             score = pair.get("similarity_score", 0)
             file_a = pair.get("file_a", "Unknown")
             file_b = pair.get("file_b", "Unknown")
             review_label = self._review_label(pair)
-
+            bar_color = (
+                "#dc2626"
+                if score >= 0.85
+                else (
+                    "#ea580c"
+                    if score >= 0.65
+                    else "#d97706" if score >= 0.40 else "#16a34a"
+                )
+            )
             rows.append(
-                f"""
-            <div class="heat-row">
-                <div class="rank">{i+1}</div>
-                <div class="flex-1">
-                    <div>
-                        <strong>{escape(str(file_a))}</strong> vs <strong>{escape(str(file_b))}</strong>
-                    </div>
-                    <div class="bar"><span style="width: {score*100:.1f}%"></span></div>
-                </div>
-                <strong>{score:.1%}</strong>
-                <span class="badge {self._risk_class(review_label)}">{escape(review_label)}</span>
-            </div>
-            """
+                f'<div class="heat-row">'
+                f'<div class="rank-badge">{i+1}</div>'
+                f'<div class="heat-files">'
+                f'<div class="pair-names">{escape(str(file_a))} &nbsp;vs&nbsp; {escape(str(file_b))}</div>'
+                f'<div class="heat-bar"><span style="width:{score*100:.1f}%;background:{bar_color}"></span></div>'
+                f"</div>"
+                f'<strong class="heat-score">{score:.1%}</strong>'
+                f'<span class="badge {self._risk_class(review_label)}">{escape(review_label)}</span>'
+                f"</div>"
             )
 
-        return f"""
-        <div>
-            {''.join(rows)}
-        </div>
-        """
+        return "<div>" + "".join(rows) + "</div>"
 
     def _generate_pair_details(self, pairs: List[Dict[str, Any]]) -> str:
         """Generate detailed pair comparison sections."""
         if not pairs:
-            return "<div class='section-body meta'>No pairs to display.</div>"
+            return "<div class='sec-body note'>No pairs to display.</div>"
 
         details = []
-        sorted_pairs = sorted(
-            pairs, key=lambda item: item.get("similarity_score", 0), reverse=True
-        )
-        for pair in sorted_pairs:
+        for pair in pairs:  # already sorted by caller
             file_a = pair.get("file_a", "Unknown")
             file_b = pair.get("file_b", "Unknown")
             score = pair.get("similarity_score", 0)
@@ -516,57 +585,69 @@ class ReportGenerator:
                 code_a, code_b, file_a, file_b
             )
             ai_html = self._render_ai_details(ai_info)
-            signal_html = self._render_engine_scores(engines)
+            signal_html = self._render_engine_scores_new(engines)
             external_html = self._render_external_evidence(external_evidence)
             decision_html = self._render_pair_decision_box(pair)
             provenance_html = self._render_pair_provenance(pair)
 
             details.append(
-                f"""
-            <details class="finding">
-                <summary>
-                    <div>
-                        <h3>{escape(str(file_a))} vs {escape(str(file_b))}</h3>
-                        <div class="meta">Open details for matching line spans, external-tool evidence, and engine agreement.</div>
-                    </div>
-                    <strong>{score:.1%}</strong>
-                    <span class="badge {self._risk_class(review_label)}">{escape(review_label)}</span>
-                </summary>
-                <div class="finding-body">
-                    {decision_html}
-                    <div class="signals">
-                        <div class="signal">
-                            <h3>Engine Agreement</h3>
-                            {signal_html}
-                        </div>
-                        <div class="signal">
-                            <h3>Interpretation</h3>
-                            <p class="note">{self._pair_interpretation(score, engines)}</p>
-                            {ai_html}
-                        </div>
-                    </div>
-                    {external_html}
-                    {provenance_html}
-                    {evidence_html}
-                </div>
-            </details>
-            """
+                f'<details class="finding">'
+                f"<summary>"
+                f'<div><strong style="font-size:13px">{escape(str(file_a))} vs {escape(str(file_b))}</strong>'
+                f'<div class="note" style="font-size:11px;margin-top:2px">Click to expand evidence, engine scores, and code spans</div></div>'
+                f'<strong style="font-size:15px">{score:.1%}</strong>'
+                f'<span class="badge {self._risk_class(review_label)}">{escape(review_label)}</span>'
+                f"</summary>"
+                f'<div class="finding-body">'
+                f"{decision_html}"
+                f'<div class="signals">'
+                f'<div class="signal-card"><h3>Engine Agreement</h3>{signal_html}</div>'
+                f'<div class="signal-card"><h3>Interpretation</h3>'
+                f'<p class="note">{self._pair_interpretation(score, engines)}</p>'
+                f"{ai_html}</div>"
+                f"</div>"
+                f"{external_html}"
+                f"{provenance_html}"
+                f"{evidence_html}"
+                f"</div></details>"
             )
 
         return "".join(details)
 
     def _risk_class(self, risk: Any) -> str:
-        """Return a CSS class for a risk label."""
+        """Return a CSS badge class for a risk label."""
         normalized = str(risk or "").strip().lower()
         if "evidence" in normalized or "review" in normalized:
-            return "risk-review"
+            return "badge-review"
         if normalized in {"critical", "high"}:
-            return "risk-high"
+            return "badge-critical"
         if normalized == "medium":
-            return "risk-medium"
+            return "badge-medium"
         if normalized == "low":
-            return "risk-low"
-        return "risk-medium"
+            return "badge-low"
+        return "badge-medium"
+
+    def _render_engine_scores_new(self, engines: Dict[str, Any]) -> str:
+        """Render per-engine scores with mini bar charts."""
+        if not engines:
+            return "<p class='note'>No engine breakdown stored for this pair.</p>"
+        rows = []
+        for name, val in sorted(engines.items(), key=lambda x: -self._safe_float(x[1])):
+            try:
+                score = float(val)
+                pct = f"{score:.1%}"
+                bar_w = f"{min(score * 100, 100):.1f}%"
+            except (TypeError, ValueError):
+                pct = escape(str(val))
+                bar_w = "0%"
+            rows.append(
+                f'<div class="sig-row">'
+                f'<span class="engine-name">{escape(str(name).replace("_", " "))}</span>'
+                f'<div class="sig-bar-wrap"><div class="sig-bar" style="width:{bar_w}"></div></div>'
+                f'<span class="engine-score">{pct}</span>'
+                f"</div>"
+            )
+        return "".join(rows)
 
     def _review_label(self, pair: Dict[str, Any]) -> str:
         """Return evidence-supported review wording for a pair."""
@@ -818,52 +899,60 @@ class ReportGenerator:
         """Render concrete matching code spans for a pair."""
         if not code_a or not code_b:
             return (
-                "<p class='note'>Submitted code was not available in this stored report. "
+                "<p class='note' style='margin-top:10px'>Submitted code was not available in this stored report. "
                 "Run a new analysis to include line-level evidence.</p>"
             )
 
-        matcher = CodeHighlighter(min_match_length=3, token_threshold=0.8)
-        match_result = matcher.find_matching_segments(code_a, code_b)
-        segments = match_result.segments[:3]
+        try:
+            matcher = CodeHighlighter(min_match_length=3, token_threshold=0.8)
+            match_result = matcher.find_matching_segments(code_a, code_b)
+            segments = match_result.segments[:3]
+        except Exception:
+            segments = []
+
         if not segments:
             return (
-                "<p class='note'>No exact three-line copied block was found. The score "
-                "may be driven by token, AST, semantic, or external-tool evidence rather "
+                "<p class='note' style='margin-top:10px'>No exact three-line copied block was found. "
+                "The score may be driven by token, AST, semantic, or external-tool evidence rather "
                 "than a contiguous paste.</p>"
             )
 
         rendered = []
         for index, segment in enumerate(segments, 1):
             rendered.append(
-                f"""
-                <div class="section-body">
-                    <h3>Evidence Block {index}: lines {segment.start_line_a}-{segment.end_line_a} match lines {segment.start_line_b}-{segment.end_line_b}</h3>
-                    <p class="note">Clone type: {escape(segment.clone_type.value)} · local segment similarity {segment.similarity:.1%}</p>
-                    <div class="evidence-grid">
-                        {self._render_code_card(file_a, segment.text_a, segment.start_line_a)}
-                        {self._render_code_card(file_b, segment.text_b, segment.start_line_b)}
-                    </div>
-                </div>
-                """
+                f'<div style="margin-top:14px">'
+                f'<p style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px">'
+                f"Evidence Block {index} &mdash; "
+                f"lines {segment.start_line_a}&ndash;{segment.end_line_a} match "
+                f"lines {segment.start_line_b}&ndash;{segment.end_line_b}</p>"
+                f'<p class="note" style="margin-bottom:8px">Clone type: {escape(segment.clone_type.value)} '
+                f"&middot; local similarity {segment.similarity:.1%}</p>"
+                f'<div class="evidence-grid">'
+                f"{self._render_code_card(file_a, segment.text_a, segment.start_line_a)}"
+                f"{self._render_code_card(file_b, segment.text_b, segment.start_line_b)}"
+                f"</div></div>"
             )
         return "".join(rendered)
 
     def _render_code_card(self, filename: Any, code: str, start_line: int) -> str:
-        """Render a line-numbered code snippet."""
+        """Render a line-numbered code snippet with new CSS classes."""
         rows = []
         for offset, line in enumerate(code.splitlines()):
             line_number = start_line + offset
             rows.append(
-                "<tr class='matched'>"
+                f"<tr class='matched'>"
                 f"<td class='ln'>{line_number}</td>"
                 f"<td class='src'>{escape(line)}</td>"
-                "</tr>"
+                f"</tr>"
             )
         return (
-            "<div class='code-card'>"
-            f"<div class='code-title'>{escape(str(filename))}</div>"
-            f"<table class='code'><tbody>{''.join(rows)}</tbody></table>"
-            "</div>"
+            f"<div class='code-card'>"
+            f"<div class='code-card-header'>"
+            f"<span class='file-name'>{escape(str(filename))}</span>"
+            f"<span class='line-range'>L{start_line}&ndash;{start_line + len(rows) - 1}</span>"
+            f"</div>"
+            f"<table class='code-tbl'><tbody>{''.join(rows)}</tbody></table>"
+            f"</div>"
         )
 
     def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:

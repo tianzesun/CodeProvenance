@@ -9717,6 +9717,12 @@ def _refresh_html_report_from_json(job_id: str) -> None:
         logger.exception("Failed to read stored report JSON for %s", job_id)
         return
 
+    # Hoist report_id from metadata to top-level so generate_html_report can find it
+    if not report_payload.get("report_id"):
+        report_payload["report_id"] = (
+            report_payload.get("metadata", {}).get("report_id") or job_id
+        )
+
     institution_name = str(
         report_payload.get("metadata", {}).get("institution")
         or report_payload.get("course_name")
@@ -10263,32 +10269,74 @@ async def download_committee_report(request: Request, job_id: str):
 
 @app.get("/report/{job_id}/download-pdf")
 async def download_report_pdf(job_id: str, request: Request):
+    """Generate and return a PDF version of the originality report."""
     _require_job_access(job_id, request)
+
+    # Always regenerate HTML from JSON so report_id and all fields are current
+    _refresh_html_report_from_json(job_id)
+
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
 
     html_content = rp.read_text(encoding="utf-8")
 
+    # Strip the in-page Download PDF / Print buttons — they make no sense in a PDF
+    html_content = html_content.replace(
+        'class="action-buttons no-print"',
+        'class="action-buttons no-print" style="display:none"',
+    )
+
     try:
         import weasyprint
 
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-
-        response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = (
-            f"attachment; filename=integritydesk_report_{job_id}.pdf"
+        # base_url lets WeasyPrint resolve any relative asset references
+        base_url = str(rp.parent.as_uri())
+        pdf_bytes = weasyprint.HTML(string=html_content, base_url=base_url).write_pdf(
+            stylesheets=[
+                weasyprint.CSS(
+                    string="""
+                    @page {
+                        size: A4;
+                        margin: 15mm 12mm 18mm 12mm;
+                        @bottom-center {
+                            content: "IntegrityDesk Originality Report  ·  Page " counter(page) " of " counter(pages);
+                            font-size: 9pt;
+                            color: #64748b;
+                        }
+                    }
+                    body { background: #fff !important; }
+                    .shell { box-shadow: none !important; max-width: 100% !important; }
+                    .no-print, .action-buttons { display: none !important; }
+                    details.finding { page-break-inside: avoid; }
+                    .code-card { page-break-inside: avoid; }
+                    summary::after { display: none !important; }
+                    details > .finding-body { display: block !important; }
+                    """
+                )
+            ]
         )
+
+        response = Response(content=pdf_bytes, media_type="application/pdf")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="integritydesk_report_{job_id}.pdf"'
+        )
+        response.headers["Cache-Control"] = "no-store"
         return response
+
     except ImportError:
-        # Fallback: send HTML with print friendly styling
+        logger.warning(
+            "weasyprint not available, returning print-ready HTML for %s", job_id
+        )
         styled_html = html_content.replace(
             "</head>",
             """<style>
             @media print {
-                body { background: white !important; }
-                .report-container { box-shadow: none !important; max-width: 100% !important; }
-                .no-print { display: none !important; }
+                body { background: #fff !important; }
+                .shell { box-shadow: none !important; max-width: 100% !important; }
+                .no-print, .action-buttons { display: none !important; }
+                details > .finding-body { display: block !important; }
+                details.finding { page-break-inside: avoid; }
             }
             </style></head>""",
         )
@@ -10296,21 +10344,15 @@ async def download_report_pdf(job_id: str, request: Request):
             content=styled_html,
             media_type="text/html",
             headers={
-                "Content-Disposition": f"attachment; filename=integritydesk_report_{job_id}.html"
+                "Content-Disposition": f'attachment; filename="integritydesk_report_{job_id}.html"'
             },
         )
     except Exception as exc:
-        logger.warning(
-            "Report PDF export fell back to minimal PDF for %s: %s", job_id, exc
+        logger.exception("PDF generation failed for %s: %s", job_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"PDF generation failed: {exc}. Try using the Print button in your browser instead.",
         )
-        response = Response(
-            content=_minimal_pdf_bytes(f"IntegrityDesk Report {job_id}"),
-            media_type="application/pdf",
-        )
-        response.headers["Content-Disposition"] = (
-            f"attachment; filename=integritydesk_report_{job_id}.pdf"
-        )
-        return response
 
 
 def _build_ai_originality_report_html(job: Dict[str, Any]) -> str:
