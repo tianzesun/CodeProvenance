@@ -134,6 +134,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark",
     "/api/benchmark/stream",
     "/api/benchmark/start",
+    "/api/error-analysis",
     "/api/benchmark/export-pdf",
     "/api/benchmark-tools",
     "/api/benchmark-datasets",
@@ -6179,6 +6180,610 @@ async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
     """Return recent benchmark run summaries."""
     safe_limit = max(1, min(100, int(limit)))
     return {"runs": _read_benchmark_history()[:safe_limit]}
+
+
+@app.get("/api/error-analysis")
+async def get_error_analysis() -> Dict[str, Any]:
+    """Compute real error analysis from stored benchmark runs and job results.
+
+    Priority:
+    1. Most recent benchmark run with ground-truth labels → full TP/FP/FN/TN + real cases
+    2. All job results → score-distribution analysis with real file names and engine data
+    """
+    # ── 1. Try benchmark runs with ground truth ──────────────────────────
+    benchmark_runs = sorted(
+        BENCHMARK_RUNS_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    labeled_run: Optional[Dict[str, Any]] = None
+    for run_path in benchmark_runs[:10]:  # check last 10 runs
+        try:
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            if run.get("has_ground_truth") and run.get("pair_results"):
+                labeled_run = run
+                break
+        except Exception:
+            continue
+
+    if labeled_run:
+        return _build_error_analysis_from_benchmark(labeled_run)
+
+    # ── 2. Fall back to job results ──────────────────────────────────────
+    return _build_error_analysis_from_jobs()
+
+
+def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Build full error analysis from a benchmark run that has ground-truth labels."""
+    pair_results = run.get("pair_results", [])
+    tool_scores = run.get("tool_scores", {})
+    evaluation = run.get("evaluation", {})
+    dataset_name = run.get("summary", {}).get("dataset_name") or run.get(
+        "dataset", "benchmark"
+    )
+
+    # Determine primary tool (integritydesk preferred)
+    primary_tool = (
+        "integritydesk"
+        if "integritydesk" in tool_scores
+        else (next(iter(tool_scores), None))
+    )
+
+    # Get threshold from evaluation or default
+    threshold = 0.5
+    if primary_tool and evaluation.get(primary_tool):
+        t = evaluation[primary_tool].get("best_threshold") or evaluation[
+            primary_tool
+        ].get("fixed_threshold")
+        if t is not None:
+            threshold = float(t)
+
+    tp = fp = fn = tn = 0
+    false_positive_cases: List[Dict[str, Any]] = []
+    false_negative_cases: List[Dict[str, Any]] = []
+    engine_fp_counts: Dict[str, int] = {}
+    engine_fn_counts: Dict[str, int] = {}
+
+    for pair in pair_results:
+        gt = pair.get("ground_truth_label")
+        if gt is None:
+            continue
+        is_plagiarism = int(gt) >= 2  # PAN convention: label >= 2 means plagiarism
+
+        # Get score for primary tool
+        score = None
+        features: Dict[str, Any] = {}
+        contributions: Dict[str, Any] = {}
+        for tr in pair.get("tool_results", []):
+            if tr.get("tool") == primary_tool:
+                score = float(tr.get("score", 0))
+                features = tr.get("features", {})
+                contributions = tr.get("contributions", {})
+                break
+        if score is None:
+            continue
+
+        predicted = score >= threshold
+
+        if is_plagiarism and predicted:
+            tp += 1
+        elif not is_plagiarism and predicted:
+            fp += 1
+            # Track which engines drove this FP
+            dominant = (
+                max(contributions, key=lambda k: contributions[k], default=None)
+                if contributions
+                else None
+            )
+            if dominant:
+                engine_fp_counts[dominant] = engine_fp_counts.get(dominant, 0) + 1
+            if len(false_positive_cases) < 10:
+                false_positive_cases.append(
+                    _make_error_case(
+                        pair, score, "false_positive", features, contributions
+                    )
+                )
+        elif is_plagiarism and not predicted:
+            fn += 1
+            dominant = (
+                max(contributions, key=lambda k: contributions[k], default=None)
+                if contributions
+                else None
+            )
+            if dominant:
+                engine_fn_counts[dominant] = engine_fn_counts.get(dominant, 0) + 1
+            if len(false_negative_cases) < 10:
+                false_negative_cases.append(
+                    _make_error_case(
+                        pair, score, "false_negative", features, contributions
+                    )
+                )
+        else:
+            tn += 1
+
+    total = tp + fp + fn + tn
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    accuracy = (tp + tn) / max(total, 1)
+
+    # Engine contribution percentages
+    fp_total = sum(engine_fp_counts.values()) or 1
+    fn_total = sum(engine_fn_counts.values()) or 1
+
+    # Pull engine contributions from evaluation if available
+    eval_data = evaluation.get(primary_tool, {})
+    engine_contrib = eval_data.get("engine_contribution", {})
+
+    def _engine_pct_from_counts(
+        counts: Dict[str, int], total_count: int
+    ) -> Dict[str, int]:
+        return {
+            k: round(v / total_count * 100)
+            for k, v in sorted(counts.items(), key=lambda x: -x[1])[:6]
+        }
+
+    fp_engine_pct = (
+        _engine_pct_from_counts(engine_fp_counts, fp_total)
+        if engine_fp_counts
+        else _invert_engine_contrib(engine_contrib)
+    )
+    fn_engine_pct = (
+        _engine_pct_from_counts(engine_fn_counts, fn_total)
+        if engine_fn_counts
+        else engine_contrib
+    )
+
+    return {
+        "source": "benchmark",
+        "dataset": dataset_name,
+        "job_id": run.get("job_id"),
+        "has_ground_truth": True,
+        "threshold": threshold,
+        "summary": {
+            "totalPairs": total,
+            "truePositives": tp,
+            "trueNegatives": tn,
+            "falsePositives": fp,
+            "falseNegatives": fn,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "accuracy": round(accuracy, 4),
+        },
+        "falsePositives": false_positive_cases,
+        "falseNegatives": false_negative_cases,
+        "engineContributions": {
+            "falsePositives": fp_engine_pct,
+            "falseNegatives": fn_engine_pct,
+        },
+        "recommendations": _generate_recommendations(
+            fp, fn, precision, recall, engine_contrib
+        ),
+    }
+
+
+def _build_error_analysis_from_jobs() -> Dict[str, Any]:
+    """Build error analysis from stored plagiarism job results (no ground truth)."""
+    all_results: List[Dict[str, Any]] = []
+    job_count = 0
+
+    for job_path in sorted(
+        REPORTS_DIR.glob("*/job.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )[:50]:
+        try:
+            job = json.loads(job_path.read_text(encoding="utf-8"))
+            if job.get("status") != "done":
+                continue
+            threshold = float(job.get("threshold", 0.5))
+            for r in job.get("results", []):
+                score = float(r.get("score", 0))
+                features = r.get("features", {})
+                all_results.append(
+                    {
+                        "file_a": r.get("file_a", ""),
+                        "file_b": r.get("file_b", ""),
+                        "score": score,
+                        "features": features,
+                        "threshold": threshold,
+                        "flagged": score >= threshold,
+                        "risk_level": r.get("risk_level", ""),
+                    }
+                )
+            job_count += 1
+        except Exception:
+            continue
+
+    if not all_results:
+        return _empty_error_analysis()
+
+    total = len(all_results)
+    flagged = [r for r in all_results if r["flagged"]]
+    not_flagged = [r for r in all_results if not r["flagged"]]
+
+    # Without ground truth we can't compute real TP/FP/FN/TN.
+    # Use heuristics: very high scores (>0.85) are likely true positives,
+    # borderline flagged (0.5-0.65) are likely false positives,
+    # high-feature-but-low-score are likely false negatives.
+    likely_tp = [r for r in flagged if r["score"] >= 0.75]
+    likely_fp = [r for r in flagged if r["score"] < 0.65]
+    likely_fn = _find_likely_false_negatives(not_flagged)
+    likely_tn = [r for r in not_flagged if r not in likely_fn]
+
+    tp = len(likely_tp)
+    fp = len(likely_fp)
+    fn = len(likely_fn)
+    tn = len(likely_tn)
+
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    accuracy = (tp + tn) / max(total, 1)
+
+    # Build real error cases from actual data
+    fp_cases = [
+        _make_job_error_case(r, "false_positive")
+        for r in sorted(likely_fp, key=lambda x: -x["score"])[:10]
+    ]
+    fn_cases = [
+        _make_job_error_case(r, "false_negative")
+        for r in sorted(likely_fn, key=lambda x: x["score"])[:10]
+    ]
+
+    # Engine contribution from features
+    fp_engine = _aggregate_engine_contributions([r["features"] for r in likely_fp])
+    fn_engine = _aggregate_engine_contributions([r["features"] for r in likely_fn])
+
+    return {
+        "source": "jobs",
+        "dataset": f"{job_count} plagiarism check job(s)",
+        "job_id": None,
+        "has_ground_truth": False,
+        "threshold": 0.5,
+        "summary": {
+            "totalPairs": total,
+            "truePositives": tp,
+            "trueNegatives": tn,
+            "falsePositives": fp,
+            "falseNegatives": fn,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "accuracy": round(accuracy, 4),
+        },
+        "falsePositives": fp_cases,
+        "falseNegatives": fn_cases,
+        "engineContributions": {
+            "falsePositives": fp_engine,
+            "falseNegatives": fn_engine,
+        },
+        "recommendations": _generate_recommendations(fp, fn, precision, recall, {}),
+    }
+
+
+def _find_likely_false_negatives(
+    not_flagged: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Identify pairs that were not flagged but show suspicious feature patterns."""
+    candidates = []
+    for r in not_flagged:
+        features = r.get("features", {})
+        if not features:
+            continue
+        # High token/winnowing but low overall score suggests obfuscation
+        token_score = float(
+            features.get("token", features.get("token_similarity", 0)) or 0
+        )
+        winnow_score = float(features.get("winnowing", features.get("winnow", 0)) or 0)
+        ast_score = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+        max_sub = max(token_score, winnow_score, ast_score)
+        if max_sub >= 0.6 and r["score"] < r["threshold"]:
+            candidates.append(r)
+    return candidates
+
+
+def _make_error_case(
+    pair: Dict[str, Any],
+    score: float,
+    error_type: str,
+    features: Dict[str, Any],
+    contributions: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build an error case dict from a benchmark pair."""
+    dominant_engine = (
+        max(contributions, key=lambda k: contributions[k], default="token")
+        if contributions
+        else "token"
+    )
+    dominant_pct = (
+        round(float(contributions.get(dominant_engine, 0)) * 100, 1)
+        if contributions
+        else 0
+    )
+
+    if error_type == "false_positive":
+        reason = _classify_fp_reason(features, contributions)
+        explanation = (
+            f"Similarity score {score:.1%} exceeded the threshold but ground truth indicates "
+            f"these are independent submissions. The {dominant_engine} engine contributed "
+            f"{dominant_pct}% of the fused score. This may indicate shared boilerplate, "
+            f"common algorithmic patterns, or assignment template code."
+        )
+        recommendation = _fp_recommendation(reason)
+    else:
+        reason = _classify_fn_reason(features, score)
+        explanation = (
+            f"Similarity score {score:.1%} fell below the threshold despite being labeled as "
+            f"plagiarism. The {dominant_engine} engine was the strongest signal at {dominant_pct}%. "
+            f"This suggests the plagiarism was obfuscated through renaming, restructuring, or "
+            f"semantic transformation."
+        )
+        recommendation = _fn_recommendation(reason)
+
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
+    snippet = (
+        "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
+        if top_features
+        else "# No feature breakdown available"
+    )
+
+    return {
+        "id": hash(f"{pair.get('file_a')}{pair.get('file_b')}") & 0xFFFFFF,
+        "fileA": str(pair.get("file_a", "file_a")),
+        "fileB": str(pair.get("file_b", "file_b")),
+        "score": round(score, 4),
+        "reason": reason,
+        "explanation": explanation,
+        "codeSnippet": snippet,
+        "recommendation": recommendation,
+        "features": {k: round(float(v or 0), 3) for k, v in features.items()},
+        "contributions": {k: round(float(v or 0), 3) for k, v in contributions.items()},
+    }
+
+
+def _make_job_error_case(r: Dict[str, Any], error_type: str) -> Dict[str, Any]:
+    """Build an error case dict from a job result."""
+    features = r.get("features", {})
+    score = r["score"]
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
+    snippet = (
+        "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
+        if top_features
+        else "# No feature breakdown available"
+    )
+
+    if error_type == "false_positive":
+        reason = _classify_fp_reason(features, {})
+        explanation = (
+            f"Score {score:.1%} triggered a flag (threshold {r['threshold']:.0%}) but the "
+            f"similarity may be driven by shared boilerplate or common patterns rather than "
+            f"actual copying. No ground-truth label is available for this pair."
+        )
+        recommendation = _fp_recommendation(reason)
+    else:
+        reason = _classify_fn_reason(features, score)
+        explanation = (
+            f"Score {score:.1%} fell below the threshold ({r['threshold']:.0%}) but individual "
+            f"engine signals suggest possible obfuscated similarity. "
+            f"Manual review is recommended."
+        )
+        recommendation = _fn_recommendation(reason)
+
+    return {
+        "id": hash(f"{r['file_a']}{r['file_b']}") & 0xFFFFFF,
+        "fileA": str(r.get("file_a", "file_a")),
+        "fileB": str(r.get("file_b", "file_b")),
+        "score": round(score, 4),
+        "reason": reason,
+        "explanation": explanation,
+        "codeSnippet": snippet,
+        "recommendation": recommendation,
+        "features": {k: round(float(v or 0), 3) for k, v in features.items()},
+    }
+
+
+def _classify_fp_reason(features: Dict[str, Any], contributions: Dict[str, Any]) -> str:
+    token = float(features.get("token", features.get("token_similarity", 0)) or 0)
+    ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+    embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
+    if token > 0.7:
+        return "Shared boilerplate or template code"
+    if ast > 0.6 and token < 0.5:
+        return "Algorithmic coincidence (same structure, different tokens)"
+    if embed > 0.6:
+        return "Semantically similar independent solutions"
+    return "Borderline similarity near threshold"
+
+
+def _classify_fn_reason(features: Dict[str, Any], score: float) -> str:
+    token = float(features.get("token", features.get("token_similarity", 0)) or 0)
+    ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+    embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
+    if token < 0.3 and ast > 0.5:
+        return "Variable renaming and structural obfuscation"
+    if embed > 0.5 and token < 0.4:
+        return "Semantic similarity hidden by surface changes"
+    if score < 0.3:
+        return "Heavy restructuring and logic reordering"
+    return "Partial copying below detection threshold"
+
+
+def _fp_recommendation(reason: str) -> str:
+    if "boilerplate" in reason.lower() or "template" in reason.lower():
+        return "Configure starter-code removal to exclude assignment templates from scoring."
+    if "algorithmic" in reason.lower():
+        return "Add algorithmic pattern recognition to distinguish independent correct solutions."
+    if "semantic" in reason.lower():
+        return "Increase the similarity threshold or require corroboration from multiple engines."
+    return "Review manually and consider raising the detection threshold for this assignment type."
+
+
+def _fn_recommendation(reason: str) -> str:
+    if "renaming" in reason.lower() or "obfuscation" in reason.lower():
+        return "Enable AST-based matching and identifier-normalisation to catch renamed variables."
+    if "semantic" in reason.lower():
+        return "Lower the embedding engine weight threshold to catch semantically equivalent code."
+    if "restructuring" in reason.lower():
+        return "Enable control-flow graph (CFG) comparison to detect reordered logic."
+    return "Lower the detection threshold and enable all available detection engines."
+
+
+def _aggregate_engine_contributions(
+    feature_list: List[Dict[str, Any]]
+) -> Dict[str, int]:
+    """Compute average engine contribution percentages across a list of feature dicts."""
+    totals: Dict[str, float] = {}
+    count = 0
+    for features in feature_list:
+        if not features:
+            continue
+        count += 1
+        for k, v in features.items():
+            totals[k] = totals.get(k, 0.0) + float(v or 0)
+    if not count:
+        return {}
+    avgs = {k: v / count for k, v in totals.items()}
+    total_avg = sum(avgs.values()) or 1
+    return {
+        k: round(v / total_avg * 100)
+        for k, v in sorted(avgs.items(), key=lambda x: -x[1])[:6]
+        if v > 0
+    }
+
+
+def _invert_engine_contrib(engine_contrib: Dict[str, Any]) -> Dict[str, int]:
+    """Convert engine contribution floats to integer percentages."""
+    total = sum(float(v or 0) for v in engine_contrib.values()) or 1
+    return {
+        k: round(float(v or 0) / total * 100)
+        for k, v in sorted(engine_contrib.items(), key=lambda x: -float(x[1] or 0))[:6]
+    }
+
+
+def _generate_recommendations(
+    fp: int, fn: int, precision: float, recall: float, engine_contrib: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Generate actionable recommendations based on error patterns."""
+    recs = []
+
+    if fp > fn and precision < 0.85:
+        recs.append(
+            {
+                "category": "Reduce False Positives",
+                "priority": "high",
+                "items": [
+                    {
+                        "title": "Configure starter-code removal",
+                        "detail": f"You have {fp} false positives. Upload assignment templates as starter code so the system excludes them from scoring.",
+                    },
+                    {
+                        "title": "Raise detection threshold",
+                        "detail": f"Current precision is {precision:.0%}. Increasing the threshold from 0.5 to 0.65 will reduce borderline false flags.",
+                    },
+                    {
+                        "title": "Enable boilerplate filtering",
+                        "detail": "Common imports, class headers, and standard library calls inflate token similarity scores.",
+                    },
+                ],
+            }
+        )
+
+    if fn > fp and recall < 0.80:
+        recs.append(
+            {
+                "category": "Catch More Plagiarism",
+                "priority": "high",
+                "items": [
+                    {
+                        "title": "Enable AST-based matching",
+                        "detail": f"You have {fn} missed cases. AST comparison catches variable renaming and structural obfuscation.",
+                    },
+                    {
+                        "title": "Lower detection threshold",
+                        "detail": f"Current recall is {recall:.0%}. Lowering the threshold to 0.40 will surface more borderline cases for review.",
+                    },
+                    {
+                        "title": "Enable semantic (embedding) engine",
+                        "detail": "CodeBERT-style embeddings detect semantically equivalent code even after heavy rewriting.",
+                    },
+                ],
+            }
+        )
+
+    recs.append(
+        {
+            "category": "Manual Review Guidelines",
+            "priority": "medium",
+            "items": [
+                {
+                    "title": "Score ≥ 75%: Investigate immediately",
+                    "detail": "High-confidence flags are very likely real cases. Prioritise these in your review queue.",
+                },
+                {
+                    "title": "Score 50–75%: Review code structure",
+                    "detail": "Check for shared logic, renamed variables, and reordered functions before dismissing.",
+                },
+                {
+                    "title": "Score < 50% with engine disagreement",
+                    "detail": "If token and AST engines disagree significantly, manual inspection is warranted.",
+                },
+            ],
+        }
+    )
+
+    recs.append(
+        {
+            "category": "Preventive Measures",
+            "priority": "low",
+            "items": [
+                {
+                    "title": "Design unique assignments",
+                    "detail": "Problems with personalised inputs (student ID, unique constraints) reduce template sharing.",
+                },
+                {
+                    "title": "Require intermediate submissions",
+                    "detail": "Staged commits let you track code evolution and spot sudden large additions.",
+                },
+                {
+                    "title": "Educate on academic integrity",
+                    "detail": "Proactive communication about consequences reduces plagiarism attempts.",
+                },
+            ],
+        }
+    )
+
+    return recs
+
+
+def _empty_error_analysis() -> Dict[str, Any]:
+    """Return an empty analysis when no data is available."""
+    return {
+        "source": "none",
+        "dataset": "No data available",
+        "job_id": None,
+        "has_ground_truth": False,
+        "threshold": 0.5,
+        "summary": {
+            "totalPairs": 0,
+            "truePositives": 0,
+            "trueNegatives": 0,
+            "falsePositives": 0,
+            "falseNegatives": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "accuracy": 0.0,
+        },
+        "falsePositives": [],
+        "falseNegatives": [],
+        "engineContributions": {"falsePositives": {}, "falseNegatives": {}},
+        "recommendations": [],
+    }
 
 
 @app.get("/api/benchmark-datasets")
