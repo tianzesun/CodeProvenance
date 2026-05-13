@@ -138,6 +138,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark/export-pdf",
     "/api/benchmark-tools",
     "/api/benchmark-datasets",
+    "/api/ai-detect",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -3830,6 +3831,11 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+    """Run AI detection on all submissions and aggregate results.
+
+    Returns a rich summary including per-file signals, flagged lines,
+    annotated code snippets, and batch-level statistics.
+    """
     if not submissions:
         return {}
 
@@ -3842,13 +3848,15 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     signal_counts: Dict[str, int] = {}
 
     for name, code in submissions.items():
-        result = detector.analyze(code, language=_infer_language_from_filename(name))
+        language = _infer_language_from_filename(name)
+        result = detector.analyze(code, language=language)
         ai_probability = round(_coerce_float(result.get("ai_probability")), 3)
         confidence = round(_coerce_float(result.get("confidence")), 3)
         signals = {
             signal_name: round(_coerce_float(signal_value), 3)
             for signal_name, signal_value in (result.get("signals") or {}).items()
         }
+        signal_labels = result.get("signal_labels") or {}
 
         for signal_name, signal_value in signals.items():
             signal_totals[signal_name] = (
@@ -3859,18 +3867,29 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
             )
             signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
 
+        # Build annotated code snippet (first 60 lines, flagged lines marked)
+        flagged_lines = result.get("flagged_lines") or []
+        flagged_set = set(flagged_lines)
+        code_lines = code.splitlines()[:60]
+        annotated_snippet = [
+            {"line": i + 1, "text": ln, "flagged": (i + 1) in flagged_set}
+            for i, ln in enumerate(code_lines)
+        ]
+
         entries.append(
             {
                 "name": name,
-                "language": result.get("language")
-                or _infer_language_from_filename(name),
+                "language": language,
                 "ai_probability": ai_probability,
                 "confidence": confidence,
                 "status": _ai_status_label(ai_probability),
                 "signals": signals,
+                "signal_labels": signal_labels,
                 "indicators": [
                     str(indicator) for indicator in (result.get("indicators") or [])
-                ][:5],
+                ][:6],
+                "flagged_lines": flagged_lines[:30],
+                "annotated_snippet": annotated_snippet,
                 "error": str(result.get("error") or ""),
             }
         )
@@ -5528,8 +5547,11 @@ async def detect_ai_generated_code(
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
 ):
-    """Run AI-generated code detection for one or more uploaded submissions."""
-    current_user = _require_current_user(request)
+    """Run AI-generated code detection for one or more uploaded submissions.
+
+    Accessible to both authenticated users and guests.
+    """
+    current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -5576,13 +5598,14 @@ async def detect_ai_generated_code(
         "review_status": "unreviewed",
         "review_notes": "",
         "review_updated_at": None,
-        "tenant_id": current_user.get("tenant_id"),
-        "owner_user_id": current_user.get("id"),
-        "owner_user_email": current_user.get("email"),
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": ["ai_detector"],
         "selected_tools": ["AI Detector"],
         "ai_detection": ai_detection,
-        "submissions": {k: v[:3000] for k, v in submissions.items()},
+        # Store first 4 KB of each file for the report code preview
+        "submissions": {k: v[:4096] for k, v in submissions.items()},
     }
     _persist_job(job_id)
     return JSONResponse(
@@ -10356,74 +10379,12 @@ async def download_report_pdf(job_id: str, request: Request):
 
 
 def _build_ai_originality_report_html(job: Dict[str, Any]) -> str:
-    """Build a compact printable AI Detector originality report."""
-    import html
-
-    ai_detection = (
-        job.get("ai_detection") if isinstance(job.get("ai_detection"), dict) else {}
-    )
-    submissions = (
-        ai_detection.get("submissions")
-        if isinstance(ai_detection.get("submissions"), list)
-        else []
+    """Build a Turnitin-grade printable AI Detector originality report."""
+    from src.backend.infrastructure.ai_report_generator import (
+        build_ai_originality_report_html,
     )
 
-    rows = []
-    for entry in submissions:
-        if not isinstance(entry, dict):
-            continue
-        indicators = ", ".join(
-            str(item) for item in (entry.get("indicators") or [])[:5]
-        )
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(entry.get('name') or 'Submission'))}</td>"
-            f"<td>{_format_report_percent(_coerce_float(entry.get('ai_probability')))}</td>"
-            f"<td>{_format_report_percent(_coerce_float(entry.get('confidence')))}</td>"
-            f"<td>{html.escape(str(entry.get('status') or 'Review Signal'))}</td>"
-            f"<td>{html.escape(indicators or 'No notable indicators')}</td>"
-            "</tr>"
-        )
-
-    return f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>IntegrityDesk Originality Report</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; color: #0f172a; margin: 32px; }}
-    h1 {{ margin: 0 0 8px; font-size: 28px; }}
-    .muted {{ color: #64748b; font-size: 13px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }}
-    .card {{ border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }}
-    .label {{ color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }}
-    .value {{ font-size: 22px; font-weight: 700; margin-top: 6px; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }}
-    th, td {{ border-bottom: 1px solid #e2e8f0; padding: 10px; text-align: left; vertical-align: top; }}
-    th {{ background: #f8fafc; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: .08em; }}
-    .notice {{ border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 12px; padding: 12px; margin-top: 18px; color: #1e40af; }}
-  </style>
-</head>
-<body>
-  <h1>IntegrityDesk Originality Report</h1>
-  <div class="muted">
-    {html.escape(str(job.get("assignment_name") or "AI Generated Code Review"))}
-    · {html.escape(str(job.get("course_name") or "Course"))}
-    · Report ID {html.escape(str(job.get("id") or ""))}
-  </div>
-  <div class="grid">
-    <div class="card"><div class="label">Files</div><div class="value">{int(ai_detection.get("total_files") or job.get("file_count") or 0)}</div></div>
-    <div class="card"><div class="label">Flagged</div><div class="value">{int(ai_detection.get("flagged_count") or 0)}</div></div>
-    <div class="card"><div class="label">Highest AI Probability</div><div class="value">{_format_report_percent(_coerce_float(ai_detection.get("highest_score")))}</div></div>
-    <div class="card"><div class="label">Average</div><div class="value">{_format_report_percent(_coerce_float(ai_detection.get("average_score")))}</div></div>
-  </div>
-  <div class="notice">AI Detector results are review signals and should not be used as standalone misconduct findings.</div>
-  <table>
-    <thead><tr><th>Submission</th><th>AI Probability</th><th>Confidence</th><th>Status</th><th>Indicators</th></tr></thead>
-    <tbody>{''.join(rows) or '<tr><td colspan="5">No AI evidence stored.</td></tr>'}</tbody>
-  </table>
-</body>
-</html>"""
+    return build_ai_originality_report_html(job)
 
 
 @app.get("/report/{job_id}/ai-originality-pdf")
