@@ -61,6 +61,7 @@ const SIGNAL_LABELS = {
   vocabulary_richness: 'Vocabulary Diversity',
   whitespace_rhythm: 'Whitespace Rhythm',
   docstring_density: 'Docstring Density',
+  binoculars: 'Binoculars (Zero-shot)',
 };
 
 const SIGNAL_DESCRIPTIONS = {
@@ -72,6 +73,7 @@ const SIGNAL_DESCRIPTIONS = {
   vocabulary_richness: 'Type-Token Ratio. LLMs reuse a smaller vocabulary of "safe" tokens.',
   whitespace_rhythm: 'LLMs produce very regular blank-line spacing between functions.',
   docstring_density: 'LLMs add docstrings to almost every function, including trivial ones.',
+  binoculars: 'State-of-the-art zero-shot detector (ICML 2024). Very low false-positive rate.',
 };
 
 function SignalBar({ name, value, label }) {

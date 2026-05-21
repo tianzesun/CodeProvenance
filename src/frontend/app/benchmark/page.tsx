@@ -11,7 +11,7 @@ import {
   Zap, Layers, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, Square, Check,
   ChevronRight, UploadCloud, Database, Settings2, ClipboardList, Plus,
-  GitCompare, Eye,
+  GitCompare, Eye, ShieldCheck,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -2313,14 +2313,164 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 </ReportErrorBoundary>
               )}
             </div>
-          </div>
-        </div>
-      </div>
-    </DashboardLayout>
-  );
-}
+
+            {/* New: Real FPR Validation for Professor Release */}
+            <div className="mt-8 px-1">
+              <RealFprValidationPanel />
+            </div>
+
+           </div>
+         </div>
+       </div>
+     </DashboardLayout>
+   );
+ }
 
 // ── Route Page ─────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
   return <BenchmarkWorkbench modeScope="benchmark" />;
+}
+
+// ── Real FPR Validation Panel (Professor-facing clean corpus test) ──────────
+function RealFprValidationPanel() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const handleFiles = (selected: FileList | null) => {
+    if (!selected) return;
+    setFiles(Array.from(selected));
+    setResult(null);
+    setError('');
+  };
+
+  const runAnalysis = async () => {
+    if (files.length < 2) {
+      setError('Please select at least 2 clean submissions.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setResult(null);
+
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+
+    try {
+      // Do NOT manually set Content-Type for FormData — let Axios set the correct boundary
+      const res = await apiClient.post('/api/benchmark/real-fpr', form);
+      setResult(res.data);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
+      setError(`Failed to compute FPR: ${detail}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reset = () => {
+    setFiles([]);
+    setResult(null);
+    setError('');
+  };
+
+  return (
+    <div className="mt-8 rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
+      <div className="flex items-center gap-3 mb-4">
+        <ShieldCheck className="text-emerald-600" size={22} />
+        <div>
+          <div className="font-semibold text-lg text-emerald-800">Real FPR Validation on Clean Student Data</div>
+          <div className="text-sm text-emerald-600">Upload known-clean submissions to measure actual false positive rate before releasing to professors.</div>
+        </div>
+      </div>
+
+      <div className="border border-dashed border-emerald-300 rounded-xl p-6 text-center mb-4">
+        <input
+          type="file"
+          multiple
+          onChange={(e) => handleFiles(e.target.files)}
+          className="hidden"
+          id="fpr-files"
+        />
+        <label htmlFor="fpr-files" className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+          <UploadCloud size={16} /> Select Clean Submissions (multiple files)
+        </label>
+        <p className="text-xs text-emerald-600 mt-2">Best: 50+ real submissions from past semesters with no plagiarism</p>
+      </div>
+
+      {files.length > 0 && (
+        <div className="text-sm mb-3 text-slate-600">
+          Selected {files.length} files. Ready to analyze.
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button
+          onClick={runAnalysis}
+          disabled={loading || files.length < 2}
+          className="px-5 py-2 bg-emerald-600 text-white rounded-lg font-semibold disabled:opacity-50 flex items-center gap-2"
+        >
+          {loading ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
+          Run Real FPR Analysis
+        </button>
+        <button onClick={reset} className="px-4 py-2 border rounded-lg">Reset</button>
+      </div>
+
+      {error && <div className="mt-3 text-red-600 text-sm">{error}</div>}
+
+      {result && (
+        <div className="mt-6 border-t pt-6">
+          <div className="font-semibold mb-3 text-emerald-800">Results on Your Clean Corpus</div>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 text-sm">
+            <div className="bg-emerald-50 p-3 rounded-lg">
+              <div className="text-emerald-600">Submissions</div>
+              <div className="text-2xl font-semibold">{result.num_submissions}</div>
+            </div>
+            <div className="bg-emerald-50 p-3 rounded-lg">
+              <div className="text-emerald-600">Pairs Analyzed</div>
+              <div className="text-2xl font-semibold">{result.num_pairs}</div>
+            </div>
+            <div className="bg-emerald-50 p-3 rounded-lg">
+              <div className="text-emerald-600">Mean Score</div>
+              <div className="text-2xl font-semibold">{(result.mean_score * 100).toFixed(1)}%</div>
+            </div>
+            <div className="bg-emerald-50 p-3 rounded-lg">
+              <div className="text-emerald-600">Max Score</div>
+              <div className="text-2xl font-semibold">{(result.max_score * 100).toFixed(1)}%</div>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <div className="font-medium mb-2">False Positive Rate at Key Thresholds</div>
+            <table className="w-full text-sm border">
+              <thead className="bg-emerald-100">
+                <tr>
+                  <th className="p-2 text-left">Threshold</th>
+                  <th className="p-2 text-left">FPR</th>
+                  <th className="p-2 text-left">Assessment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.fpr_table.map((row: any, i: number) => (
+                  <tr key={i} className="border-t">
+                    <td className="p-2 font-mono">{(row.threshold * 100).toFixed(0)}%</td>
+                    <td className="p-2 font-semibold">{row.fpr_percent}%</td>
+                    <td className="p-2 text-xs">{row.label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="p-4 bg-emerald-50 rounded-xl text-sm">
+            <div className="font-semibold text-emerald-800 mb-1">Professor Recommendation</div>
+            <div className="text-emerald-700">{result.recommendation}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

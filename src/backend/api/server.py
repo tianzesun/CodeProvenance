@@ -3839,9 +3839,9 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     if not submissions:
         return {}
 
-    from src.backend.engines.similarity.ai_detection import AIDetectionEngine
+    from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
-    detector = AIDetectionEngine()
+    detector = AIDetectionOrchestrator()
     entries: List[Dict[str, Any]] = []
     signal_totals: Dict[str, float] = {}
     signal_peaks: Dict[str, float] = {}
@@ -5953,6 +5953,96 @@ async def get_benchmark_tools():
     for tool in tools:
         tool["available"] = tool.get("runnable", False)
     return JSONResponse(content={"tools": tools})
+
+
+@app.post("/api/benchmark/real-fpr")
+async def compute_real_fpr_on_clean_corpus(
+    files: List[UploadFile] = File(...),
+):
+    """
+    Compute real False Positive Rate on a set of known-clean submissions.
+    Used for professor-release validation of the plagiarism checker.
+    """
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 submissions are required to compute FPR.")
+
+    submissions: Dict[str, str] = {}
+    for upload in files:
+        try:
+            content = (await upload.read()).decode("utf-8", errors="ignore")
+            if len(content.strip()) > 30:
+                submissions[upload.filename] = content
+        except Exception:
+            continue
+
+    if len(submissions) < 2:
+        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
+
+    try:
+        # Use very low threshold to capture full distribution
+        service = BatchDetectionService(threshold=0.0)
+        pair_results = service.compare_all_pairs(submissions)
+
+        scores = [float(r.score) for r in pair_results]
+        num_pairs = len(scores)
+        num_submissions = len(submissions)
+    except Exception as e:
+        logger.exception("Real FPR computation failed")
+        raise HTTPException(status_code=500, detail=f"Internal error during FPR computation: {str(e)}") from e
+
+    # Standard thresholds we care about for professor use
+    thresholds_to_evaluate = [0.50, 0.55, 0.60, 0.65, 0.70, 0.72, 0.75, 0.80, 0.85, 0.90]
+
+    fpr_table = []
+    for t in thresholds_to_evaluate:
+        above = sum(1 for s in scores if s >= t)
+        fpr = above / num_pairs if num_pairs > 0 else 0.0
+
+        if fpr <= 0.02:
+            label = "Excellent - very safe"
+        elif fpr <= 0.04:
+            label = "Good - acceptable for professors"
+        elif fpr <= 0.07:
+            label = "Borderline - review carefully"
+        else:
+            label = "High risk - too many false positives"
+
+        fpr_table.append({
+            "threshold": round(t, 2),
+            "fpr": round(fpr, 4),
+            "fpr_percent": round(fpr * 100, 2),
+            "label": label,
+            "flagged_pairs": above,
+        })
+
+    # Simple recommendation
+    best = next((row for row in reversed(fpr_table) if row["fpr"] <= 0.04), fpr_table[-1])
+    recommendation = f"At {best['threshold']*100:.0f}% similarity the measured FPR on your clean data is {best['fpr_percent']:.1f}%. "
+
+    if best["fpr"] <= 0.03:
+        recommendation += "This is considered safe for professor use with the current evidence display."
+    elif best["fpr"] <= 0.05:
+        recommendation += "Acceptable if you require reviewers to look at the detailed evidence."
+    else:
+        recommendation += "Consider raising the default threshold or improving starter-code filtering before release."
+
+    # Basic histogram (10 bins)
+    bins = [0] * 10
+    for s in scores:
+        idx = min(int(s * 10), 9)
+        bins[idx] += 1
+
+    histogram = [{"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)]
+
+    return JSONResponse(content={
+        "num_submissions": num_submissions,
+        "num_pairs": num_pairs,
+        "fpr_table": fpr_table,
+        "score_histogram": histogram,
+        "recommendation": recommendation,
+        "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
+        "max_score": round(max(scores), 4) if scores else 0,
+    })
 
 
 BENCHMARK_DATASETS = []

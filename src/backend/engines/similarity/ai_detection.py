@@ -28,8 +28,20 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.backend.engines.features.code_stylometry import StylometryExtractor
+from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 
 logger = logging.getLogger(__name__)
+
+# Singleton instance so we don't reload the (heavy) Binoculars models on every request
+_binoculars_detector: Optional[BinocularsDetector] = None
+
+
+def _get_binoculars() -> BinocularsDetector:
+    """Return a cached BinocularsDetector instance (lazy + singleton)."""
+    global _binoculars_detector
+    if _binoculars_detector is None:
+        _binoculars_detector = BinocularsDetector()
+    return _binoculars_detector
 
 # ---------------------------------------------------------------------------
 # LLM fingerprint patterns — curated from GPT-4 / Claude / Copilot output
@@ -130,14 +142,15 @@ class AIDetectionEngine:
 
     # Signal weights — tuned empirically
     _WEIGHTS: Dict[str, float] = {
-        "perplexity": 0.18,
-        "burstiness": 0.14,
-        "stylometry": 0.16,
-        "pattern_library": 0.20,
-        "structural_entropy": 0.12,
-        "vocabulary_richness": 0.08,
-        "whitespace_rhythm": 0.06,
-        "docstring_density": 0.06,
+        "binoculars": 0.32,          # Highest weight: zero-shot SOTA with excellent FPR
+        "perplexity": 0.14,
+        "burstiness": 0.11,
+        "stylometry": 0.12,
+        "pattern_library": 0.15,
+        "structural_entropy": 0.08,
+        "vocabulary_richness": 0.04,
+        "whitespace_rhythm": 0.02,
+        "docstring_density": 0.02,
     }
 
     # Human-code baseline n-gram frequencies (bigrams of common tokens)
@@ -230,8 +243,8 @@ class AIDetectionEngine:
     # ------------------------------------------------------------------
 
     def _compute_all_signals(self, code: str, language: str) -> Dict[str, float]:
-        """Compute all eight detection signals."""
-        return {
+        """Compute all detection signals, including the new Binoculars zero-shot layer."""
+        signals: Dict[str, float] = {
             "perplexity": self._signal_perplexity(code),
             "burstiness": self._signal_burstiness(code),
             "stylometry": self._signal_stylometry(code),
@@ -241,6 +254,13 @@ class AIDetectionEngine:
             "whitespace_rhythm": self._signal_whitespace_rhythm(code),
             "docstring_density": self._signal_docstring_density(code),
         }
+
+        # Layer 1: Binoculars (zero-shot, high-precision)
+        bino_result = _get_binoculars().analyze(code, language=language)
+        if bino_result.get("available"):
+            signals["binoculars"] = float(bino_result["ai_probability"])
+
+        return signals
 
     def _signal_perplexity(self, code: str) -> float:
         """N-gram perplexity signal.
@@ -638,6 +658,7 @@ class AIDetectionEngine:
             "vocabulary_richness": "Vocabulary Diversity",
             "whitespace_rhythm": "Whitespace Rhythm",
             "docstring_density": "Docstring Density",
+            "binoculars": "Binoculars (Zero-shot)",
         }
         return {k: labels.get(k, k) for k in signals}
 
