@@ -301,7 +301,7 @@ export default function LoginPage() {
                     ? 'If the account exists, password reset instructions have been sent.'
                     : 'Enter your email address and we’ll send reset instructions.'
                   : bootstrapped
-                    ? 'Use your organization credentials to continue.'
+                    ? ''
                     : 'Set up the first administrator account for this workspace.'}
               </p>
             </div>
@@ -574,10 +574,10 @@ export default function LoginPage() {
                       ? 'Sign in'
                       : 'Create administrator account'}
                 </button>
-              </form>
-            )}
-          </div>
-        </section>
+               </form>
+             )}
+           </div>
+         </section>
       </div>
     </div>
   );
