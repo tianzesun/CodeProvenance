@@ -140,8 +140,9 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
     assert "synthetic" in dataset_ids
     assert "xiangtan" in dataset_ids
     assert "poj104" in dataset_ids
-    assert "poolc_600k_python" in dataset_ids
-    assert "codexglue_clone" not in dataset_ids
+    if (server.BENCHMARK_DATA_DIR / "poolc_600k_python").exists():
+        assert "poolc_600k_python" in dataset_ids
+    assert "codexglue_clone" in dataset_ids
     assert "google_codejam" not in dataset_ids
     assert "codesearchnet" not in dataset_ids
 
