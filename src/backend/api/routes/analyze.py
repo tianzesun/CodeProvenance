@@ -104,6 +104,7 @@ async def analyze_submissions(
         db=db,
         tenant_id=tenant_id,
         name=analysis_data.get("name", "Unnamed Analysis"),
+        assignment_id=analysis_data.get("assignment_id"),  # NEW - wiring to normalized Assignment
         threshold=analysis_data.get("threshold", 0.2),
         webhook_url=analysis_data.get("webhook_url"),
         options=analysis_data.get("options", {})

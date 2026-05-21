@@ -31,6 +31,7 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     echo=False,
+    connect_args={"connect_timeout": 15},  # fail fast instead of hanging on unreachable DB
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

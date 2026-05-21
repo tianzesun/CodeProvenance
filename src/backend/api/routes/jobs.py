@@ -44,6 +44,7 @@ async def create_job(
         db=db,
         tenant_id=tenant_id,
         name=job_data.name,
+        assignment_id=job_data.assignment_id,  # NEW
         threshold=job_data.threshold,
         webhook_url=job_data.webhook_url,
         idempotency_key=job_data.idempotency_key,

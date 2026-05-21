@@ -13,7 +13,8 @@ import uuid
 
 from src.backend.models.database import (
     Tenant, ApiKey, Job, Submission, SimilarityResult,
-    WebhookEvent, UsageMetric, AuditLog
+    WebhookEvent, UsageMetric, AuditLog,
+    Course, Assignment
 )
 from src.backend.config.settings import DEFAULT_DETECTION_MODES
 from src.backend.config.database import get_db, set_tenant_context, clear_tenant_context, SessionLocal
@@ -87,6 +88,7 @@ class JobService:
         db: Session,
         tenant_id: str,
         name: str,
+        assignment_id: Optional[str] = None,   # NEW: link to normalized Assignment
         threshold: float = 0.7,
         webhook_url: Optional[str] = None,
         idempotency_key: Optional[str] = None,
@@ -117,6 +119,7 @@ class JobService:
         """
         job = Job(
             tenant_id=tenant_id,
+            assignment_id=assignment_id,           # NEW
             name=name,
             threshold=threshold,
             webhook_url=webhook_url,
@@ -625,3 +628,63 @@ class AuditLogService:
         db.commit()
         db.refresh(log)
         return log
+
+
+class AcademicService:
+    """
+    Service for resolving/creating academic entities (Course, Assignment)
+    from free-text names provided during upload/analysis. This bridges the
+    legacy string-based flow with the new normalized schema.
+    """
+
+    @staticmethod
+    def get_or_create_assignment(
+        db: Session,
+        tenant_id: str,
+        course_name: str,
+        assignment_name: str,
+        assignment_mode: Optional[str] = None,
+    ) -> Assignment:
+        """
+        Get or create a Course + Assignment for the given tenant based on names.
+        Used during upload to wire the new schema.
+        """
+        if not course_name:
+            course_name = "Unnamed Course"
+        if not assignment_name:
+            assignment_name = course_name
+
+        # Find or create Course
+        course = db.query(Course).filter(
+            Course.tenant_id == tenant_id,
+            Course.name == course_name
+        ).first()
+
+        if not course:
+            course = Course(
+                tenant_id=tenant_id,
+                name=course_name,
+            )
+            db.add(course)
+            db.flush()
+
+        # Find or create Assignment under the Course
+        assignment = db.query(Assignment).filter(
+            Assignment.tenant_id == tenant_id,
+            Assignment.course_id == course.id,
+            Assignment.name == assignment_name
+        ).first()
+
+        if not assignment:
+            assignment = Assignment(
+                tenant_id=tenant_id,
+                course_id=course.id,
+                name=assignment_name,
+                assignment_mode=assignment_mode,
+            )
+            db.add(assignment)
+            db.flush()
+
+        db.commit()
+        db.refresh(assignment)
+        return assignment

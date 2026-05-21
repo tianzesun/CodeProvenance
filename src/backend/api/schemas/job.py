@@ -12,6 +12,7 @@ from src.backend.config.settings import DEFAULT_DETECTION_MODES
 
 class JobBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    assignment_id: Optional[str] = Field(None, description="Link to normalized Assignment (Course/Assignment structure)")
     threshold: float = Field(0.7, ge=0.0, le=1.0)
     webhook_url: Optional[str] = None
     idempotency_key: Optional[str] = Field(None, max_length=255)

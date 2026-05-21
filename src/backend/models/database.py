@@ -121,6 +121,7 @@ class Job(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     )
     
     assignment_id = Column(String(36), ForeignKey("assignments.id"), nullable=True)
+    course_id = Column(String(36), ForeignKey("courses.id"), nullable=True)  # denormalized for query convenience
     name = Column(String(255), nullable=False)
     status = Column(String(20), default="pending")
     progress = Column(Integer, default=0)
@@ -133,9 +134,38 @@ class Job(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     execution_time_ms = Column(Integer, nullable=True)
     
     tenant = relationship("Tenant", back_populates="jobs")
+    course = relationship("Course")
     assignment = relationship("Assignment", back_populates="jobs")
     submissions = relationship("Submission", back_populates="job", lazy="dynamic")
     similarity_results = relationship("SimilarityResult", back_populates="job", lazy="dynamic")
+
+
+class Submitter(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
+    """Lightweight identity for people who submit code (typically students).
+
+    This allows tracking the same submitter across multiple jobs/assignments
+    without requiring them to have a full User account. Can optionally be linked
+    to a User when the student also has dashboard access.
+    """
+    __tablename__ = "submitters"
+    __table_args__ = (
+        Index("idx_submitters_tenant_identifier", "tenant_id", "identifier", unique=True),
+        Index("idx_submitters_tenant_student_id", "tenant_id", "student_id"),
+    )
+
+    identifier = Column(String(255), nullable=False)   # flexible lookup (email, username, or student_id)
+    student_id = Column(String(100), nullable=True)    # official student ID (clean, queryable)
+    full_name = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=True)
+    program = Column(String(255), nullable=True)       # e.g. "Computer Science", "Electrical Engineering"
+    cohort = Column(String(50), nullable=True)         # e.g. "2023", "Senior", "Cohort A"
+
+    # Optional link to a registered User account
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    submissions = relationship("Submission", back_populates="submitter", lazy="dynamic")
 
 
 class Submission(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
@@ -147,12 +177,38 @@ class Submission(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     __tablename__ = "submissions"
     
     job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    submitter_id = Column(String(36), ForeignKey("submitters.id"), nullable=True)
     name = Column(String(255), nullable=False)
     content = Column(Text, nullable=True)
     file_count = Column(Integer, default=1)
     language_detected = Column(String(50), nullable=True)
 
     job = relationship("Job", back_populates="submissions")
+    submitter = relationship("Submitter", back_populates="submissions")
+    files = relationship("SubmissionFile", back_populates="submission", lazy="dynamic")
+
+
+class SubmissionFile(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
+    """Individual file within a submission.
+
+    Supports multi-file submissions (ZIP uploads, folders, etc.) and cleanly
+    separates file metadata from actual storage location.
+    """
+    __tablename__ = "submission_files"
+    __table_args__ = (
+        Index("idx_submission_files_submission", "submission_id"),
+    )
+
+    submission_id = Column(String(36), ForeignKey("submissions.id"), nullable=False)
+
+    filename = Column(String(512), nullable=False)        # original filename as uploaded
+    storage_key = Column(String(1024), nullable=True)     # key/path in object storage or filesystem
+    mime_type = Column(String(100), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    language_detected = Column(String(50), nullable=True)
+    content = Column(Text, nullable=True)                 # optional extracted text (for small files)
+
+    submission = relationship("Submission", back_populates="files")
 
 
 class SimilarityResult(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
@@ -176,6 +232,12 @@ class SimilarityResult(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, B
     job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
     submission_a_id = Column(String(36), ForeignKey("submissions.id"), nullable=False)
     submission_b_id = Column(String(36), ForeignKey("submissions.id"), nullable=False)
+
+    # Denormalized submitter references for fast queries and UI display
+    # (avoids deep joins when listing results or building cases)
+    submitter_a_id = Column(String(36), ForeignKey("submitters.id"), nullable=True)
+    submitter_b_id = Column(String(36), ForeignKey("submitters.id"), nullable=True)
+
     similarity_score = Column(Float, nullable=False)
     confidence_lower = Column(Float, nullable=True)
     confidence_upper = Column(Float, nullable=True)
@@ -196,6 +258,8 @@ class SimilarityResult(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, B
     job = relationship("Job", back_populates="similarity_results")
     submission_a = relationship("Submission", foreign_keys=[submission_a_id])
     submission_b = relationship("Submission", foreign_keys=[submission_b_id])
+    submitter_a = relationship("Submitter", foreign_keys=[submitter_a_id])
+    submitter_b = relationship("Submitter", foreign_keys=[submitter_b_id])
 
 
 class WebhookEvent(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
@@ -307,6 +371,7 @@ class Case(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     )
 
     assignment_id = Column(String(36), ForeignKey("assignments.id"), nullable=False)
+    course_id = Column(String(36), ForeignKey("courses.id"), nullable=True)  # denormalized for filtering
     job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
     title = Column(String(255), nullable=True)
     status = Column(String(20), default="open")  # open, under_review, resolved, archived
@@ -315,11 +380,13 @@ class Case(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
 
     tenant = relationship("Tenant")
+    course = relationship("Course")
     assignment = relationship("Assignment")
     job = relationship("Job")
     results = relationship("CaseResult", back_populates="case", lazy="dynamic")
     comments = relationship("CaseComment", back_populates="case", lazy="dynamic")
     events = relationship("CaseEvent", back_populates="case", lazy="dynamic")
+    assignees = relationship("CaseAssignee", back_populates="case", lazy="dynamic")
 
 
 # =============================================================================
@@ -337,12 +404,20 @@ class CaseResult(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     case_id = Column(String(36), ForeignKey("cases.id"), nullable=False)
     similarity_result_id = Column(String(36), ForeignKey("similarity_results.id"), nullable=False)
+
+    # Denormalized submitter references for fast review UI and filtering
+    # (populated from the linked SimilarityResult at creation time)
+    submitter_a_id = Column(String(36), ForeignKey("submitters.id"), nullable=True)
+    submitter_b_id = Column(String(36), ForeignKey("submitters.id"), nullable=True)
+
     review_status = Column(String(20), default="pending")  # pending, confirmed, dismissed
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     case = relationship("Case", back_populates="results")
     similarity_result = relationship("SimilarityResult")
+    submitter_a = relationship("Submitter", foreign_keys=[submitter_a_id])
+    submitter_b = relationship("Submitter", foreign_keys=[submitter_b_id])
 
 
 class CaseComment(Base):
@@ -371,3 +446,27 @@ class CaseEvent(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     case = relationship("Case", back_populates="events")
+
+
+class CaseAssignee(Base):
+    """Assignment of a reviewer (or moderator) to a review Case.
+
+    A Case can have multiple assignees (e.g., primary reviewer + secondary).
+    """
+    __tablename__ = "case_assignees"
+    __table_args__ = (
+        UniqueConstraint("case_id", "user_id", name="uq_case_assignee"),
+        Index("idx_case_assignees_case", "case_id"),
+        Index("idx_case_assignees_user", "user_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id = Column(String(36), ForeignKey("cases.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    role = Column(String(30), default="reviewer")   # reviewer, primary, secondary, moderator
+    assigned_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    assigned_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+
+    case = relationship("Case", back_populates="assignees")
+    user = relationship("User", foreign_keys=[user_id])
+    assigned_by_user = relationship("User", foreign_keys=[assigned_by])

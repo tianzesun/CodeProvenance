@@ -56,6 +56,7 @@ os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.backend.config.database import SessionLocal
+from src.backend.infrastructure.db import AcademicService
 from src.backend.infrastructure.professional_report_generator import ReportGenerator
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
@@ -4478,11 +4479,29 @@ async def _run_analysis(
     ]
     fusion_weights = _build_fusion_weights(engine_weights)
 
+    # === Wiring: resolve/create Assignment from names (new normalized schema) ===
+    assignment_id = None
+    tenant_id = current_user.get("tenant_id")
+    if tenant_id and (course_name or assignment_name):
+        try:
+            with SessionLocal() as db:
+                assignment = AcademicService.get_or_create_assignment(
+                    db,
+                    str(tenant_id),
+                    course_name or "",
+                    assignment_name or "",
+                    assignment_mode,
+                )
+                assignment_id = str(assignment.id) if assignment else None
+        except Exception as e:
+            logger.warning(f"Failed to resolve/create Assignment for upload: {e}")
+
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id,
         "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
+        "assignment_id": assignment_id,  # NEW - linked to normalized Assignment
         "assignment_mode": mode.mode_id,
         "assignment_mode_name": mode.name,
         "assignment_mode_version": mode.version,
