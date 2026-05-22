@@ -160,6 +160,11 @@ export default function AdminPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
 
+  // Course & Instructor management (new)
+  const [coursesWithInstructors, setCoursesWithInstructors] = useState<any[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(true);
+  const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({}); // courseId -> userId to assign
+
   const [form, setForm] = useState({
     full_name: '',
     email: '',
@@ -182,6 +187,18 @@ export default function AdminPage() {
     }
   }, [listUsers]);
 
+  const loadCoursesWithInstructors = useCallback(async () => {
+    setLoadingCourses(true);
+    try {
+      const res = await apiClient.get('/api/admin/courses-with-instructors');
+      setCoursesWithInstructors(res.data?.courses || []);
+    } catch (error) {
+      console.error('Failed to load courses with instructors', error);
+    } finally {
+      setLoadingCourses(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!bootstrapped || authLoading || status === 'loading') {
       return;
@@ -189,11 +206,13 @@ export default function AdminPage() {
 
     if (!user || user.role !== 'admin') {
       setLoadingUsers(false);
+      setLoadingCourses(false);
       return;
     }
 
     loadUsers();
-  }, [bootstrapped, authLoading, status, user, loadUsers]);
+    loadCoursesWithInstructors();
+  }, [bootstrapped, authLoading, status, user, loadUsers, loadCoursesWithInstructors]);
 
   useEffect(() => {
     if (showCreatePanel) {
@@ -296,6 +315,32 @@ export default function AdminPage() {
       setFormError(getErrorMessage(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // === Course Instructor Management handlers ===
+  const assignInstructor = async (courseId: string, userId: string, role = 'instructor') => {
+    try {
+      await apiClient.post('/api/admin/course-instructors', {
+        course_id: courseId,
+        user_id: userId,
+        role,
+      });
+      await loadCoursesWithInstructors();
+    } catch (error) {
+      alert(getErrorMessage(error));
+    }
+  };
+
+  const removeInstructor = async (courseId: string, userId: string) => {
+    if (!confirm('Remove this instructor from the course?')) return;
+    try {
+      await apiClient.delete('/api/admin/course-instructors', {
+        data: { course_id: courseId, user_id: userId },
+      });
+      await loadCoursesWithInstructors();
+    } catch (error) {
+      alert(getErrorMessage(error));
     }
   };
 
@@ -746,6 +791,102 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Course Instructor Management */}
+      <section className="mt-8 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Course &amp; Instructor Assignments</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Control which professors can see and upload to each course.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {loadingCourses ? (
+          <div className="p-8 text-center text-sm text-slate-500">Loading courses and instructors…</div>
+        ) : coursesWithInstructors.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-500">No courses found. Create courses first.</div>
+        ) : (
+          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+            {coursesWithInstructors.map((course: any) => {
+              const professors = users.filter((u) => u.role === 'professor' || u.role === 'admin');
+              const currentInstructorIds = course.instructors.map((i: any) => i.id);
+
+              return (
+                <div key={course.id} className="p-5">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="font-semibold text-slate-900 dark:text-white">
+                        {course.name} {course.code ? `(${course.code})` : ''}
+                      </div>
+                      <div className="text-xs text-slate-500">{course.organization_name || 'No organization'}</div>
+                    </div>
+
+                    {/* Assign new instructor */}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedProfessorForCourse[course.id] || ''}
+                        onChange={(e) => setSelectedProfessorForCourse(prev => ({ ...prev, [course.id]: e.target.value }))}
+                        className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm dark:bg-slate-900"
+                      >
+                        <option value="">Select professor…</option>
+                        {professors
+                          .filter((p) => !currentInstructorIds.includes(p.id))
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.full_name} ({p.email})
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          const uid = selectedProfessorForCourse[course.id];
+                          if (uid) {
+                            assignInstructor(course.id, uid);
+                            setSelectedProfessorForCourse(prev => ({ ...prev, [course.id]: '' }));
+                          }
+                        }}
+                        disabled={!selectedProfessorForCourse[course.id]}
+                        className="rounded-xl bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                      >
+                        Assign
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Current instructors */}
+                  <div className="mt-3">
+                    {course.instructors.length === 0 ? (
+                      <div className="text-sm text-amber-600">No instructors assigned yet.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {course.instructors.map((inst: any) => (
+                          <div
+                            key={inst.id}
+                            className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm dark:bg-slate-800"
+                          >
+                            <span>{inst.full_name}</span>
+                            <button
+                              onClick={() => removeInstructor(course.id, inst.id)}
+                              className="text-red-500 hover:text-red-600"
+                              title="Remove"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </DashboardLayout>
   );
 }

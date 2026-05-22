@@ -57,7 +57,7 @@ from fastapi.responses import (
 from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import joinedload
 
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
@@ -75,7 +75,10 @@ from src.backend.infrastructure.professional_report_generator import ReportGener
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
 )
-from src.backend.models.database import Tenant, User
+from src.backend.models.database import (
+    Tenant, User, ApiKey, Job, Submission, SimilarityResult,
+    WebhookEvent, UsageMetric, AuditLog, Course, Assignment, CourseInstructor
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -3735,6 +3738,28 @@ def _persist_job(job_id: str) -> None:
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
+def _update_job_status_in_db(job_id: str, status: str, error_message: str | None = None) -> None:
+    """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
+    try:
+        with SessionLocal() as db:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            if not db_job:
+                return
+            db_job.status = status
+            now = datetime.now()
+            if status == "analyzing" and not db_job.started_at:
+                db_job.started_at = now
+            if status == "completed":
+                db_job.completed_at = now
+            if status == "failed":
+                db_job.failed_at = now
+                if error_message:
+                    db_job.error_message = error_message[:2000]
+            db.commit()
+    except Exception:
+        logger.warning(f"Failed to update job {job_id} status in DB")
+
+
 def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
     report_json_path = _job_report_dir(job_id) / "report.json"
     if not report_json_path.exists():
@@ -3827,7 +3852,115 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     if job_id in _jobs:
         _jobs[job_id] = _normalize_job(_jobs[job_id])
         return _jobs[job_id]
-    return _load_persisted_job(job_id)
+    loaded = _load_persisted_job(job_id)
+    if loaded:
+        return loaded
+    # DB fallback so results/[id] page can load jobs persisted via ORM (B1)
+    return _load_job_from_db(job_id)
+
+
+def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
+    """Minimal loader for jobs persisted to the database via the ORM wiring.
+
+    Reconstructs a dict shape compatible with the in-memory job format
+    so the results/[id] frontend page and existing endpoints can render it.
+    """
+    try:
+        with SessionLocal() as db:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            if not db_job:
+                return None
+
+            subs = (
+                db.query(Submission)
+                .filter(Submission.job_id == job_id)
+                .order_by(Submission.created_at)
+                .all()
+            )
+            sim_results = (
+                db.query(SimilarityResult)
+                .filter(SimilarityResult.job_id == job_id)
+                .order_by(SimilarityResult.similarity_score.desc())
+                .limit(200)
+                .all()
+            )
+
+            job_dict: Dict[str, Any] = {
+                "id": job_id,
+                "status": db_job.status or "completed",
+                "assignment_name": db_job.name or f"Job {job_id}",
+                "threshold": float(db_job.threshold) if db_job.threshold is not None else 0.5,
+                "file_count": db_job.file_count or len(subs),
+                "created_at": db_job.created_at.isoformat() if db_job.created_at else None,
+                "tenant_id": db_job.tenant_id,
+                "results": [
+                    {
+                        "file_a": r.submission_a_id,
+                        "file_b": r.submission_b_id,
+                        "score": float(r.similarity_score) if r.similarity_score is not None else 0.0,
+                        "risk_level": (
+                            "CRITICAL"
+                            if float(r.similarity_score or 0) >= 0.85
+                            else "HIGH"
+                            if float(r.similarity_score or 0) >= 0.7
+                            else "MEDIUM"
+                            if float(r.similarity_score or 0) >= 0.5
+                            else "LOW"
+                        ),
+                        "confidence": float(r.confidence_level) if r.confidence_level is not None else None,
+                        "matching_blocks": r.matching_blocks or [],
+                        "features": r.algorithm_scores or {},
+                        "external_evidence": (r.algorithm_scores or {}).get("external_evidence", {}),
+                        "review_status": r.review_status or "unreviewed",
+                        "review_notes": r.review_notes or "",
+                    }
+                    for r in sim_results
+                ],
+                "submissions": {s.name: "" for s in subs},
+                "summary": {"total_pairs": len(sim_results)},
+                "review_status": "unreviewed",
+                "review_notes": "",
+                "submission_count": len(subs),
+                "review_summary": {
+                    (s.review_status or "unreviewed"): 0 for s in sim_results
+                } if sim_results else {},
+            }
+
+            # Compute actual review counts from DB
+            if sim_results:
+                review_summary = {}
+                for s in sim_results:
+                    st = s.review_status or "unreviewed"
+                    review_summary[st] = review_summary.get(st, 0) + 1
+                job_dict["review_summary"] = review_summary
+
+            job_dict = _enrich_job_from_report(job_dict, job_id)
+            _jobs[job_id] = job_dict
+            return job_dict
+    except Exception:
+        logger.warning(f"_load_job_from_db failed for {job_id}")
+        return None
+
+
+def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+    """Merge richer data from the on-disk report.json into a DB-loaded job (for C)."""
+    try:
+        report_path = REPORTS_DIR / job_id / "report.json"
+        if report_path.exists():
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+            # Merge common rich fields the results page expects
+            for key in ("summary", "calibration_report", "reproducibility", "ai_detection",
+                        "web_analysis", "ai_text_trust", "assignment_mode", "assignment_mode_name"):
+                if key in data and key not in job_dict:
+                    job_dict[key] = data[key]
+            if "external_tool_results" in data:
+                job_dict["external_tool_results"] = data["external_tool_results"]
+            if "pairs" in data:
+                # Prefer the full rich pairs from the generated report (best for Results page)
+                job_dict["results"] = data["pairs"]
+    except Exception:
+        pass
+    return job_dict
 
 
 def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
@@ -4217,6 +4350,22 @@ def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
         if _job_is_accessible(normalized, current_user):
             jobs_by_id[job_id] = normalized
 
+    # DB-backed listing (D) – pick up jobs persisted via ORM even without local report dir
+    try:
+        with SessionLocal() as db:
+            tenant_id = current_user.get("tenant_id") if current_user else None
+            q = db.query(Job)
+            if tenant_id:
+                q = q.filter(Job.tenant_id == tenant_id)
+            db_jobs = q.order_by(Job.created_at.desc()).limit(200).all()
+            for db_job in db_jobs:
+                if db_job.id not in jobs_by_id:
+                    loaded = _get_job(db_job.id)  # will hit _load_job_from_db
+                    if loaded and _job_is_accessible(loaded, current_user):
+                        jobs_by_id[db_job.id] = loaded
+    except Exception:
+        logger.warning("DB job listing fallback failed")
+
     return sorted(
         jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True
     )
@@ -4432,6 +4581,122 @@ async def create_user(request: Request):
                 "created_by": current_user["email"],
             },
         )
+
+
+# ============================================================
+# Admin - Course Instructor Management (new many-to-many)
+# ============================================================
+
+@app.get("/api/admin/courses-with-instructors")
+async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any]:
+    """Admin view: all courses with their assigned instructors."""
+    current_user = _require_current_user(request, admin_only=True)
+
+    try:
+        with SessionLocal() as db:
+            courses = (
+                db.query(Course)
+                .options(joinedload(Course.organization))
+                .order_by(Course.name)
+                .all()
+            )
+
+            result = []
+            for course in courses:
+                instructors = (
+                    db.query(User)
+                    .join(CourseInstructor)
+                    .filter(CourseInstructor.course_id == course.id)
+                    .all()
+                )
+
+                result.append({
+                    "id": course.id,
+                    "name": course.name,
+                    "code": course.code,
+                    "organization_id": course.organization_id,
+                    "organization_name": course.organization.name if course.organization else None,
+                    "instructors": [
+                        {
+                            "id": u.id,
+                            "email": u.email,
+                            "full_name": u.full_name,
+                            "role": u.role,
+                        }
+                        for u in instructors
+                    ],
+                })
+
+            return {"courses": result}
+    except Exception:
+        logger.exception("Failed to load courses with instructors for admin")
+        return {"courses": []}
+
+
+@app.post("/api/admin/course-instructors")
+async def admin_assign_instructor_to_course(request: Request):
+    """Assign a user as instructor to a course."""
+    current_user = _require_current_user(request, admin_only=True)
+    data = await request.json()
+
+    course_id = data.get("course_id")
+    user_id = data.get("user_id")
+    role = data.get("role", "instructor")
+
+    if not course_id or not user_id:
+        return JSONResponse(status_code=400, content={"error": "course_id and user_id are required"})
+
+    try:
+        with SessionLocal() as db:
+            # Check if already exists
+            existing = db.query(CourseInstructor).filter(
+                CourseInstructor.course_id == course_id,
+                CourseInstructor.user_id == user_id
+            ).first()
+
+            if existing:
+                existing.role = role
+                db.commit()
+                return {"success": True, "message": "Role updated"}
+
+            assignment = CourseInstructor(
+                course_id=course_id,
+                user_id=user_id,
+                role=role
+            )
+            db.add(assignment)
+            db.commit()
+
+            return {"success": True, "message": "Instructor assigned"}
+    except Exception:
+        logger.exception("Failed to assign instructor")
+        return JSONResponse(status_code=500, content={"error": "Failed to assign instructor"})
+
+
+@app.delete("/api/admin/course-instructors")
+async def admin_remove_instructor_from_course(request: Request):
+    """Remove an instructor assignment from a course."""
+    current_user = _require_current_user(request, admin_only=True)
+    data = await request.json()
+
+    course_id = data.get("course_id")
+    user_id = data.get("user_id")
+
+    if not course_id or not user_id:
+        return JSONResponse(status_code=400, content={"error": "course_id and user_id are required"})
+
+    try:
+        with SessionLocal() as db:
+            deleted = db.query(CourseInstructor).filter(
+                CourseInstructor.course_id == course_id,
+                CourseInstructor.user_id == user_id
+            ).delete()
+            db.commit()
+
+            return {"success": True, "removed": deleted > 0}
+    except Exception:
+        logger.exception("Failed to remove instructor")
+        return JSONResponse(status_code=500, content={"error": "Failed to remove instructor"})
 
 
 @app.post("/api/admin/create-demo-dataset")
@@ -5425,6 +5690,7 @@ async def upload_files(
     starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_id: Optional[str] = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
@@ -5469,6 +5735,7 @@ async def upload_files(
         job_dir,
         course_name,
         assignment_name,
+        assignment_id,
         assignment_mode,
         threshold,
         current_user,
@@ -5485,6 +5752,7 @@ async def upload_zip(
     starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_id: Optional[str] = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
@@ -5530,6 +5798,7 @@ async def upload_zip(
         job_dir,
         course_name,
         assignment_name,
+        assignment_id,
         assignment_mode,
         threshold,
         current_user,
@@ -5618,9 +5887,10 @@ async def _run_analysis(
     job_dir,
     course_name,
     assignment_name,
-    assignment_mode,
-    threshold,
-    current_user: Dict[str, Any],
+    assignment_id: Optional[str] = None,
+    assignment_mode: str = "",
+    threshold: float = 0.5,
+    current_user: Dict[str, Any] = None,
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
     starter_sources: List[str] = None,
@@ -5628,6 +5898,27 @@ async def _run_analysis(
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
 
     mode = get_assignment_mode(assignment_mode)
+
+    # Resolve authoritative course/assignment names from DB when assignment_id is provided.
+    # This wires the new Organization → Course → Assignment hierarchy into the upload flow
+    # (DB link takes precedence even if free-text fields were left blank).
+    if assignment_id:
+        try:
+            with SessionLocal() as db:
+                assignment = (
+                    db.query(Assignment)
+                    .options(joinedload(Assignment.course))
+                    .filter(Assignment.id == assignment_id)
+                    .first()
+                )
+                if assignment:
+                    if getattr(assignment, "name", None):
+                        assignment_name = assignment.name
+                    if getattr(assignment, "course", None) and getattr(assignment.course, "name", None):
+                        course_name = assignment.course.name
+        except Exception:
+            logger.warning(f"Failed to resolve assignment_id={assignment_id} for name lookup")
+
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
         requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
@@ -5654,6 +5945,7 @@ async def _run_analysis(
         "id": job_id,
         "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
+        "assignment_id": assignment_id,
         "assignment_mode": mode.mode_id,
         "assignment_mode_name": mode.name,
         "assignment_mode_version": mode.version,
@@ -5707,6 +5999,50 @@ async def _run_analysis(
         _jobs[job_id]["file_count"] = len(submissions)
         _jobs[job_id]["status"] = "analyzing"
         _persist_job(job_id)
+        _update_job_status_in_db(job_id, "analyzing")
+
+        # Minimal DB wiring for upload flow — persist Job + Submission rows
+        # (non-fatal; file-based storage remains primary for now)
+        try:
+            with SessionLocal() as db:
+                if not db.query(Job).filter(Job.id == job_id).first():
+                    tenant_id = _jobs[job_id].get("tenant_id")
+                    if not tenant_id:
+                        # Fallback for public/demo uploads (no logged-in user):
+                        # attribute the job to the first existing tenant so the new
+                        # hierarchy (assignment_id) and results pages can see the data.
+                        fallback = db.query(Tenant).first()
+                        if fallback:
+                            tenant_id = fallback.id
+                            _jobs[job_id]["tenant_id"] = tenant_id
+
+                    if tenant_id:
+                        db_job = Job(
+                            id=job_id,
+                            tenant_id=tenant_id,
+                            assignment_id=_jobs[job_id].get("assignment_id"),
+                            name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
+                            status=_jobs[job_id].get("status", "analyzing"),
+                            threshold=_jobs[job_id].get("threshold", 0.5),
+                            created_at=datetime.now(),
+                            file_count=len(submissions),
+                        )
+                        db.add(db_job)
+                        for sub_name in list(submissions.keys())[:100]:
+                            db.add(
+                                Submission(
+                                    id=str(uuid.uuid4()),
+                                    job_id=job_id,
+                                    name=sub_name,
+                                    file_count=1,
+                                    created_at=datetime.now(),
+                                )
+                            )
+                        db.commit()
+                    else:
+                        logger.warning(f"DB persist skipped for job {job_id} - no tenant available")
+        except Exception:
+            logger.warning(f"DB persist skipped for job {job_id} (file storage still used)")
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -5869,6 +6205,42 @@ async def _run_analysis(
             }
         )
         _persist_job(job_id)
+        _update_job_status_in_db(job_id, "completed")
+
+        # Persist SimilarityResult rows to DB (minimal wiring for results/[id] page)
+        try:
+            with SessionLocal() as db:
+                for r in results:
+                    external_ev = _external_evidence_for_pair(
+                        r.file_a, r.file_b, external_tool_results
+                    )
+                    mb = getattr(r, "matching_blocks", None) or getattr(r, "features", {}).get("matching_blocks", [])
+                    conf = getattr(r, "confidence", None) or getattr(r, "confidence_level", None)
+
+                    db.add(
+                        SimilarityResult(
+                            id=str(uuid.uuid4()),
+                            job_id=job_id,
+                            submission_a_id=r.file_a,
+                            submission_b_id=r.file_b,
+                            similarity_score=r.score,
+                            confidence_level=conf,
+                            confidence_lower=getattr(r, "confidence_lower", None),
+                            confidence_upper=getattr(r, "confidence_upper", None),
+                            matching_blocks=mb if isinstance(mb, (list, dict)) else [],
+                            excluded_matches=getattr(r, "excluded_matches", None) or {},
+                            algorithm_scores={
+                                **dict(getattr(r, "features", {})),
+                                "external_evidence": external_ev or {},
+                                "contributions": dict(getattr(r, "contributions", {})),
+                            },
+                            created_at=datetime.now(),
+                        )
+                    )
+                db.commit()
+        except Exception:
+            logger.exception(f"DB results persist skipped for job {job_id}")  # shows full traceback in logs
+
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
@@ -5876,6 +6248,7 @@ async def _run_analysis(
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(e)
             _persist_job(job_id)
+            _update_job_status_in_db(job_id, "failed", str(e))
         return JSONResponse(
             status_code=500, content={"error": f"Analysis failed: {str(e)}"}
         )
@@ -5902,7 +6275,7 @@ async def update_job_review(job_id: str, request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid review payload")
 
-    if "review_status" not in payload and "review_notes" not in payload:
+    if "review_status" not in payload and "review_notes" not in payload and "pair_reviews" not in payload:
         raise HTTPException(status_code=400, detail="No review updates provided")
 
     if "review_status" in payload:
@@ -5916,6 +6289,41 @@ async def update_job_review(job_id: str, request: Request):
         if not isinstance(review_notes, str):
             raise HTTPException(status_code=400, detail="Review notes must be a string")
         job["review_notes"] = review_notes.strip()
+
+    # Per-pair review persistence to database (SimilarityResult rows)
+    if "pair_reviews" in payload and isinstance(payload.get("pair_reviews"), dict):
+        try:
+            with SessionLocal() as db:
+                for pair_key, review_data in payload["pair_reviews"].items():
+                    if not isinstance(review_data, dict):
+                        continue
+                    parts = str(pair_key).split("::") if "::" in str(pair_key) else str(pair_key).split(":")
+                    if len(parts) >= 2:
+                        a_id, b_id = parts[0], parts[1]
+                        sim = db.query(SimilarityResult).filter(
+                            SimilarityResult.job_id == job_id,
+                            SimilarityResult.submission_a_id == a_id,
+                            SimilarityResult.submission_b_id == b_id
+                        ).first()
+                        if sim:
+                            if "status" in review_data or "review_status" in review_data:
+                                sim.review_status = review_data.get("status") or review_data.get("review_status")
+                            if "notes" in review_data or "review_notes" in review_data:
+                                sim.review_notes = (review_data.get("notes") or review_data.get("review_notes") or "").strip() or None
+                db.commit()
+        except Exception:
+            logger.warning(f"Failed to persist per-pair reviews for job {job_id}")
+
+    # Also reflect in in-memory results if present
+    if "results" in job and isinstance(job["results"], list) and "pair_reviews" in payload:
+        for r in job["results"]:
+            k = f"{r.get('file_a')}::{r.get('file_b')}"
+            if k in payload["pair_reviews"]:
+                rd = payload["pair_reviews"][k]
+                if "status" in rd or "review_status" in rd:
+                    r["review_status"] = rd.get("status") or rd.get("review_status")
+                if "notes" in rd or "review_notes" in rd:
+                    r["review_notes"] = rd.get("notes") or rd.get("review_notes")
 
     job["review_updated_at"] = datetime.now().isoformat()
     _jobs[job_id] = job
@@ -6243,6 +6651,41 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
     history = [item for item in history if item.get("job_id") != summary["job_id"]]
     history.insert(0, summary)
     _write_benchmark_history(history)
+
+    # Wire benchmark run metadata to DB (so benchmark/page.tsx + Admin can list/reload from DB)
+    try:
+        with SessionLocal() as db:
+            job_id = summary.get("job_id")
+            if job_id:
+                db_job = db.query(Job).filter(Job.id == job_id).first()
+                benchmark_settings = {
+                    "type": "benchmark",
+                    "dataset": summary.get("dataset"),
+                    "tools": summary.get("tools"),
+                    "summary": summary,
+                }
+                if not db_job:
+                    run_at = summary.get("run_at")
+                    try:
+                        created_at = datetime.fromisoformat(run_at) if run_at else datetime.now()
+                    except Exception:
+                        created_at = datetime.now()
+
+                    db_job = Job(
+                        id=job_id,
+                        name=f"Benchmark: {summary.get('dataset', 'unknown')}",
+                        status="completed",
+                        settings=benchmark_settings,
+                        created_at=created_at,
+                    )
+                    db.add(db_job)
+                else:
+                    db_job.settings = {**(db_job.settings or {}), **benchmark_settings}
+                    db_job.status = "completed"
+                db.commit()
+    except Exception:
+        logger.warning(f"Failed to persist benchmark run {summary.get('job_id')} to DB")
+
     return response
 
 
@@ -6290,9 +6733,135 @@ async def get_benchmark_presets() -> Dict[str, Any]:
 
 @app.get("/api/benchmark-history")
 async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
-    """Return recent benchmark run summaries."""
+    """Return recent benchmark run summaries (file + DB for native persistence)."""
     safe_limit = max(1, min(100, int(limit)))
-    return {"runs": _read_benchmark_history()[:safe_limit]}
+    runs = _read_benchmark_history()[:safe_limit]
+
+    # DB-backed benchmark runs (so benchmark/page.tsx can list/reload from DB)
+    try:
+        with SessionLocal() as db:
+            db_benchmarks = (
+                db.query(Job)
+                .filter(Job.settings.op("->>")("type") == "benchmark")
+                .order_by(Job.created_at.desc())
+                .limit(safe_limit)
+                .all()
+            )
+            for j in db_benchmarks:
+                s = (j.settings or {}).get("summary") or {}
+                if s and not any(r.get("job_id") == j.id for r in runs):
+                    runs.append(s)
+    except Exception:
+        logger.warning("Failed to load benchmark runs from DB")
+
+    return {"runs": runs[:safe_limit]}
+
+
+@app.get("/api/courses")
+async def get_courses(request: Request) -> Dict[str, Any]:
+    """Return courses visible to the current user.
+
+    A user can see a course if:
+    - They are explicitly assigned as an instructor (via course_instructors), or
+    - They belong to the same organization as the course.
+    """
+    try:
+        try:
+            current_user = _require_current_user(request, admin_only=False)
+            user_id = current_user.get("id")
+            user_org_id = current_user.get("organization_id")
+        except Exception:
+            return {"courses": []}
+
+        with SessionLocal() as db:
+            q = db.query(Course)
+
+            # Build OR condition: direct instructor OR same organization
+            filters = []
+            if user_id:
+                filters.append(
+                    Course.id.in_(
+                        db.query(CourseInstructor.course_id)
+                        .filter(CourseInstructor.user_id == user_id)
+                    )
+                )
+            if user_org_id:
+                filters.append(Course.organization_id == user_org_id)
+
+            if filters:
+                q = q.filter(or_(*filters))
+            else:
+                # No org and no assignments → return nothing
+                return {"courses": []}
+
+            courses = q.order_by(Course.name).all()
+            return {
+                "courses": [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "code": c.code,
+                        "organization_id": c.organization_id,
+                    }
+                    for c in courses
+                ]
+            }
+    except Exception:
+        logger.warning("Failed to fetch courses (instructor + org scoped)")
+        return {"courses": []}
+
+
+@app.get("/api/assignments")
+async def get_assignments(course_id: Optional[str] = None, request: Request = None) -> Dict[str, Any]:
+    """Return assignments visible to the current user (instructor + org scoped)."""
+    try:
+        try:
+            current_user = _require_current_user(request, admin_only=False)
+            user_id = current_user.get("id")
+            user_org_id = current_user.get("organization_id")
+        except Exception:
+            return {"assignments": []}
+
+        with SessionLocal() as db:
+            q = db.query(Assignment)
+
+            # Join to Course to apply visibility rules
+            q = q.join(Course)
+
+            filters = []
+            if user_id:
+                filters.append(
+                    Course.id.in_(
+                        db.query(CourseInstructor.course_id)
+                        .filter(CourseInstructor.user_id == user_id)
+                    )
+                )
+            if user_org_id:
+                filters.append(Course.organization_id == user_org_id)
+
+            if filters:
+                q = q.filter(or_(*filters))
+            else:
+                return {"assignments": []}
+
+            if course_id:
+                q = q.filter(Assignment.course_id == course_id)
+
+            assignments = q.order_by(Assignment.name).all()
+            return {
+                "assignments": [
+                    {
+                        "id": a.id,
+                        "name": a.name,
+                        "course_id": a.course_id,
+                        "due_at": a.due_at.isoformat() if a.due_at else None,
+                    }
+                    for a in assignments
+                ]
+            }
+    except Exception:
+        logger.warning("Failed to fetch assignments (instructor + org scoped)")
+        return {"assignments": []}
 
 
 @app.get("/api/error-analysis")

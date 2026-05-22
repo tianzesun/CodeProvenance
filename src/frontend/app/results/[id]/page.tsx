@@ -188,7 +188,7 @@ export default function ResultsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [minSimilarity, setMinSimilarity] = useState(0.5);
   const [statusFilter, setStatusFilter] = useState('all'); // all | unreviewed | needs_review | dismissed
-  const [sortMode, setSortMode] = useState('similarity'); // similarity | confidence | evidence | unreviewed
+  const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
 
@@ -206,13 +206,14 @@ export default function ResultsPage() {
         setJob(res.data);
         setError(null);
         setLoading(false);
-        // Seed local pair statuses from job-level status for initial table view
-        const initialStatus = res.data?.review_status || 'unreviewed';
+        // Seed local pair statuses — prefer per-result review_status from backend (now persisted in DB)
         const pairs = Array.isArray(res.data?.results) ? res.data.results : [];
         const seeded = {};
         pairs.forEach((r) => {
           const k = pairKey(r);
-          if (k) seeded[k] = initialStatus;
+          if (k) {
+            seeded[k] = r.review_status || res.data?.review_status || 'unreviewed';
+          }
         });
         setPairStatuses(seeded);
       })
@@ -239,13 +240,21 @@ export default function ResultsPage() {
     }
   };
 
-  // Update both the backend job-level status (existing) and the local per-pair status for the table
+  // Update both the backend job-level status (existing) + per-pair review in DB via pair_reviews
   const updateActivePairStatus = async (newStatus) => {
     const key = pairKey(activeResult);
     if (key) {
       setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
     }
-    await updateReview({ review_status: newStatus });
+
+    const payload = {
+      review_status: newStatus, // keep job-level for backward compat
+      pair_reviews: {
+        [key]: { status: newStatus }
+      }
+    };
+
+    await updateReview(payload);
   };
 
 
@@ -378,77 +387,60 @@ export default function ResultsPage() {
   return (
     <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <div className="max-w-none space-y-6">
-          {/* KPI Summary Bar */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Submissions</div>
-              <div className="mt-1 text-3xl font-semibold text-slate-950">{job?.file_count || Object.keys(submissions).length || 0}</div>
-              <div className="text-xs text-slate-500">analyzed for this assignment</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Suspicious pairs</div>
-              <div className="mt-1 text-3xl font-semibold text-slate-950">{results.length}</div>
-              <div className="text-xs text-slate-500">above engine fusion threshold</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">High-risk unreviewed</div>
-              <div className="mt-1 text-3xl font-semibold text-red-600">
-                {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length}
-              </div>
-              <div className="text-xs text-slate-500">priority triage targets</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Showing now</div>
-              <div className="mt-1 text-3xl font-semibold text-slate-950">{tableData.length}</div>
-              <div className="text-xs text-slate-500">after current filters</div>
-            </div>
-          </div>
-
-          {/* Filter toolbar + helper text */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3">
-              {/* Primary row: Search + Sort + Reset on the same line */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-xs">
-                  <Search size={14} className="absolute left-3 top-3 text-slate-400" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search student or submission name"
-                    className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none"
-                  />
+        <div className="max-w-none space-y-4">
+          {/* Results Header — Summary first, then Sort, then Filters */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {/* Assignment context (from DB wiring) */}
+            <div className="mb-3 flex items-start justify-between">
+              <div>
+                <div className="text-xl font-semibold text-slate-950">
+                  {getAssignmentTitle(job)}
                 </div>
+                {job?.course_name && (
+                  <div className="text-sm text-slate-500">{job.course_name}</div>
+                )}
+              </div>
+              <div className="text-right text-xs text-slate-500">
+                {job?.created_at ? new Date(job.created_at).toLocaleString() : ''}
+              </div>
+            </div>
 
+            {/* 1. Summary chips (understand the result set first) */}
+            <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                {job?.file_count || Object.keys(submissions).length || 0} submissions
+              </div>
+              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                {results.length} pair{results.length === 1 ? '' : 's'}
+              </div>
+              <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
+                {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
+              </div>
+              <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
+                {tableData.length} shown
+              </div>
+            </div>
+
+            {/* 2. Sort + 3. Filters + 4. Reset — grouped cleanly */}
+            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+              {/* Sort (most important action after seeing summary) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Sort by</span>
                 <select
                   value={sortMode}
                   onChange={(e) => setSortMode(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
                 >
-                  <option value="similarity">Sort: Highest similarity</option>
-                  <option value="evidence">Sort: Most engine signals</option>
-                  <option value="unreviewed">Sort: Unreviewed first</option>
+                  <option value="unreviewed">Unreviewed first</option>
+                  <option value="similarity">Highest similarity</option>
+                  <option value="evidence">Most evidence</option>
                 </select>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setMinSimilarity(threshold);
-                    setStatusFilter('all');
-                    setSortMode('similarity');
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                >
-                  <Filter size={14} /> Reset
-                </button>
               </div>
 
-              {/* Secondary filters */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm">
-                  <span className="text-slate-500">Min sim</span>
+              {/* Min similarity filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Min similarity</span>
+                <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
                   <input
                     type="range"
                     min={0}
@@ -456,15 +448,19 @@ export default function ResultsPage() {
                     step={0.05}
                     value={minSimilarity}
                     onChange={(e) => setMinSimilarity(Number(e.target.value))}
-                    className="w-28 accent-blue-600"
+                    className="w-24 accent-blue-600"
                   />
-                  <span className="w-10 text-right font-mono text-xs">{Math.round(minSimilarity * 100)}%</span>
+                  <span className="w-10 text-right font-mono text-xs font-medium">{Math.round(minSimilarity * 100)}%</span>
                 </div>
+              </div>
 
+              {/* Status filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Status</span>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
                 >
                   <option value="all">All statuses</option>
                   <option value="unreviewed">Unreviewed</option>
@@ -472,6 +468,32 @@ export default function ResultsPage() {
                   <option value="dismissed">Dismissed</option>
                 </select>
               </div>
+
+              {/* Search (secondary) */}
+              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                <Search size={13} className="absolute left-3 top-2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search files..."
+                  className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none"
+                />
+              </div>
+
+              {/* Reset — last and secondary */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setMinSimilarity(0.5);
+                  setStatusFilter('all');
+                  setSortMode('unreviewed');
+                }}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                <Filter size={12} /> Reset filters
+              </button>
             </div>
           </div>
 

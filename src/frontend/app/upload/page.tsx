@@ -204,6 +204,12 @@ export default function UploadPage() {
   const [isStarterDragOver, setIsStarterDragOver] = useState(false);
   const [courseName, setCourseName] = useState('');
   const [assignmentName, setAssignmentName] = useState('');
+  const [assignmentId, setAssignmentId] = useState('');
+  const [courses, setCourses] = useState<any[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(0.5);
@@ -323,6 +329,7 @@ export default function UploadPage() {
       const p = JSON.parse(raw);
       if (typeof p.course_name === 'string') setCourseName(p.course_name);
       if (typeof p.assignment_name === 'string') setAssignmentName(p.assignment_name);
+      if (typeof p.assignment_id === 'string') setAssignmentId(p.assignment_id);
       if (typeof p.assignment_mode === 'string') setSelectedAssignmentModeId(p.assignment_mode);
     } catch { }
   }, [authLoading, uploadFormStorageKey]);
@@ -330,9 +337,33 @@ export default function UploadPage() {
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') return;
     window.localStorage.setItem(uploadFormStorageKey, JSON.stringify({
-      course_name: courseName, assignment_name: assignmentName, assignment_mode: selectedAssignmentModeId,
+      course_name: courseName, assignment_name: assignmentName, assignment_id: assignmentId, assignment_mode: selectedAssignmentModeId,
     }));
-  }, [assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
+  }, [assignmentId, assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
+
+  // Fetch courses for the new hierarchy selector
+  useEffect(() => {
+    if (authLoading) return;
+    setCoursesLoading(true);
+    apiClient.get('/api/courses')
+      .then((res) => setCourses(res.data?.courses || []))
+      .catch(() => setCourses([]))
+      .finally(() => setCoursesLoading(false));
+  }, [authLoading]);
+
+  // Fetch assignments when a course is selected
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setAssignments([]);
+      setAssignmentId('');
+      return;
+    }
+    setAssignmentsLoading(true);
+    apiClient.get(`/api/assignments?course_id=${selectedCourseId}`)
+      .then((res) => setAssignments(res.data?.assignments || []))
+      .catch(() => setAssignments([]))
+      .finally(() => setAssignmentsLoading(false));
+  }, [selectedCourseId]);
 
   useEffect(() => {
     if (modesLoading || assignmentModes.length === 0) return;
@@ -374,6 +405,7 @@ export default function UploadPage() {
     starterFiles.forEach((f) => fd.append('starter_files', f));
     fd.append('course_name', courseName || assignmentName || 'Assignment Check');
     fd.append('assignment_name', assignmentName || courseName || 'Assignment Check');
+    if (assignmentId) fd.append('assignment_id', assignmentId);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_keys', JSON.stringify(activeEngines));
@@ -473,31 +505,64 @@ export default function UploadPage() {
             </section>
           )}
 
-          {/* Context Fields */}
-          <div className="grid gap-4 lg:grid-cols-2 mb-4">
-            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Course</label>
-              <input
-                type="text"
-                placeholder="e.g. CS 101 - Introduction to Programming"
-                value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
-                className="w-full h-11 px-4 rounded-xl border text-sm outline-none transition-all"
-                style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-              />
-            </div>
-            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assignment</label>
-              <input
-                type="text"
-                placeholder="e.g. Assignment 3 - Sorting Algorithms"
-                value={assignmentName}
-                onChange={(e) => setAssignmentName(e.target.value)}
-                className="w-full h-11 px-4 rounded-xl border text-sm outline-none transition-all"
-                style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-              />
-            </div>
-          </div>
+           {/* Context Fields - DB-backed hierarchy only (legacy free-text inputs removed) */}
+           <div className="mb-4">
+             <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Course</label>
+                   <select
+                     value={selectedCourseId}
+                     onChange={(e) => {
+                       const cid = e.target.value;
+                       setSelectedCourseId(cid);
+                       const found = courses.find((c: any) => c.id === cid);
+                       if (found) setCourseName(found.name);
+                       setAssignmentId('');
+                       setAssignments([]);
+                     }}
+                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white"
+                     disabled={coursesLoading}
+                   >
+                     <option value="">
+                       {coursesLoading ? 'Loading courses...' : courses.length === 0 ? '-- No courses yet --' : '-- Select Course --'}
+                     </option>
+                     {courses.map((c: any) => (
+                       <option key={c.id} value={c.id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
+                     ))}
+                   </select>
+                    {courses.length === 0 && !coursesLoading && (
+                      <p className="text-[10px] text-amber-600 mt-1">
+                        No courses assigned. Ask an admin to add you as instructor.
+                      </p>
+                    )}
+                 </div>
+
+                 <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assignment</label>
+                   <select
+                     value={assignmentId}
+                     onChange={(e) => {
+                       const aid = e.target.value;
+                       setAssignmentId(aid);
+                       const found = assignments.find((a: any) => a.id === aid);
+                       if (found) setAssignmentName(found.name);
+                     }}
+                     disabled={!selectedCourseId || assignmentsLoading}
+                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white disabled:opacity-60"
+                   >
+                     <option value="">
+                       {assignmentsLoading ? 'Loading assignments...' : !selectedCourseId ? 'Select a course first' : assignments.length === 0 ? '-- No assignments for this course --' : '-- Select Assignment --'}
+                     </option>
+                     {assignments.map((a: any) => (
+                       <option key={a.id} value={a.id}>{a.name}</option>
+                     ))}
+                   </select>
+                 </div>
+               </div>
+               <p className="text-[10px] text-slate-500 mt-2">Selecting an Assignment links this upload in the database for reporting and review.</p>
+             </div>
+           </div>
 
           {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">
