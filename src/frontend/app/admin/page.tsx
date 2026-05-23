@@ -17,6 +17,7 @@ import {
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { AuthRole, AuthUser, useAuth } from '@/components/AuthProvider';
+import { apiClient } from '@/lib/apiClient';
 
 function formatDate(value: string | null) {
   if (!value) return 'Never';
