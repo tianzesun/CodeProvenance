@@ -35,7 +35,11 @@ class Tenant(Base):
     jobs = relationship("Job", back_populates="tenant", lazy="dynamic")
     api_keys = relationship("ApiKey", back_populates="tenant", lazy="dynamic")
     users = relationship("User", back_populates="tenant", lazy="dynamic")
-
+    
+    # New relationships for production tables
+    reports = relationship("Report", back_populates="tenant")
+    notifications = relationship("Notification", back_populates="tenant")
+    subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
 
 class User(Base):
     """Dashboard user account."""
@@ -44,6 +48,7 @@ class User(Base):
         Index("idx_users_email", "email"),
         Index("idx_users_role", "role"),
         Index("idx_users_tenant_role", "tenant_id", "role"),
+        Index("idx_users_organization", "organization_id"),
     )
 
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
@@ -63,11 +68,17 @@ class User(Base):
     tenant = relationship("Tenant", back_populates="users")
     organization = relationship("Organization", back_populates="users")
     courses = relationship("CourseInstructor", back_populates="user", lazy="dynamic")
-
+        # New relationships
+    notifications = relationship("Notification", back_populates="user")
+    behavioral_sessions = relationship("BehavioralSession", back_populates="user")
 
 class ApiKey(Base):
     """API key management model."""
     __tablename__ = "api_keys"
+
+    __table_args__ = (
+        Index("idx_api_keys_tenant", "tenant_id"),
+    )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
@@ -90,6 +101,12 @@ class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("idx_jobs_tenant_status", "tenant_id", "status"),
+        Index("idx_jobs_assignment", "assignment_id"),
+        Index("idx_jobs_created_at", "created_at"),
+        Index("idx_jobs_tenant_created_at", "tenant_id", "created_at"),
+        Index("idx_jobs_status", "status"),
+        Index("idx_jobs_status_created_at", "status", "created_at"),
+        Index("idx_jobs_tenant_status_created_at", "tenant_id", "status", "created_at"),
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
@@ -120,11 +137,18 @@ class Job(Base):
     assignment = relationship("Assignment", back_populates="jobs")
     submissions = relationship("Submission", back_populates="job", lazy="dynamic")
     similarity_results = relationship("SimilarityResult", back_populates="job", lazy="dynamic")
-
+        # New relationships
+    reports = relationship("Report", back_populates="job")
+    behavioral_sessions = relationship("BehavioralSession", back_populates="job")
 
 class Submission(Base):
     """Code submission model."""
     __tablename__ = "submissions"
+
+    __table_args__ = (
+        Index("idx_submissions_job", "job_id"),
+        Index("idx_submissions_created_at", "created_at"),
+    )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
@@ -142,13 +166,20 @@ class Submission(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
     
     job = relationship("Job", back_populates="submissions")
-
+        # New relationship
+    behavioral_sessions = relationship("BehavioralSession", back_populates="submission")
 
 class SimilarityResult(Base):
     """Similarity analysis result model."""
     __tablename__ = "similarity_results"
     __table_args__ = (
         Index("idx_results_job_score", "job_id", "similarity_score"),
+        Index("idx_similarity_results_review_status", "review_status"),
+        Index("idx_similarity_results_created_at", "created_at"),
+        Index("idx_similarity_results_submission_a", "submission_a_id"),
+        Index("idx_similarity_results_submission_b", "submission_b_id"),
+        Index("idx_similarity_results_job_review", "job_id", "review_status"),
+        Index("idx_similarity_results_review_created_at", "review_status", "created_at"),
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
@@ -173,6 +204,13 @@ class SimilarityResult(Base):
 class WebhookEvent(Base):
     """Webhook event tracking model."""
     __tablename__ = "webhook_events"
+
+    __table_args__ = (
+        Index("idx_webhook_events_job", "job_id"),
+        Index("idx_webhook_events_status", "status"),
+        Index("idx_webhook_events_next_attempt", "next_attempt_at"),
+        Index("idx_webhook_events_status_next_attempt", "status", "next_attempt_at"),
+    )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
@@ -219,6 +257,11 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (
         Index("idx_audit_logs_tenant_action", "tenant_id", "action"),
+        Index("idx_audit_logs_job", "job_id"),
+        Index("idx_audit_logs_user", "user_id"),
+        Index("idx_audit_logs_created_at", "created_at"),
+        Index("idx_audit_logs_tenant_created_at", "tenant_id", "created_at"),
+        Index("idx_audit_logs_action", "action"),
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
@@ -246,12 +289,17 @@ class Organization(Base):
 
     courses = relationship("Course", back_populates="organization", lazy="dynamic")
     users = relationship("User", back_populates="organization", lazy="dynamic")
-
+        # New relationship
+    reports = relationship("Report", back_populates="organization")
 
 class Course(Base):
     """Course within an organization."""
     __tablename__ = "courses"
 
+    __table_args__ = (
+        Index("idx_courses_organization", "organization_id"),
+    )
+    
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     organization_id = Column(UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
     name = Column(String(255), nullable=False)
@@ -269,6 +317,10 @@ class Assignment(Base):
     """Assignment within a course."""
     __tablename__ = "assignments"
 
+    __table_args__ = (
+        Index("idx_assignments_course", "course_id"),
+    )
+    
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     course_id = Column(UUID(as_uuid=False), ForeignKey("courses.id"), nullable=False)
     name = Column(String(255), nullable=False)
@@ -305,6 +357,16 @@ class Case(Base):
     """Instructor review case for grouping similarity results."""
     __tablename__ = "cases"
 
+    __table_args__ = (
+        Index("idx_cases_organization", "organization_id"),
+        Index("idx_cases_assignment", "assignment_id"),
+        Index("idx_cases_created_by", "created_by_id"),
+        Index("idx_cases_status", "status"),
+        Index("idx_cases_created_at", "created_at"),
+        Index("idx_cases_org_created_at", "organization_id", "created_at"),
+        Index("idx_cases_org_status", "organization_id", "status"),
+    )
+    
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     organization_id = Column(UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
     assignment_id = Column(UUID(as_uuid=False), ForeignKey("assignments.id"), nullable=True)
@@ -325,6 +387,11 @@ class CaseResultLink(Base):
     """Link between a Case and a SimilarityResult."""
     __tablename__ = "case_result_links"
 
+    __table_args__ = (
+        Index("idx_case_result_links_case", "case_id"),
+        Index("idx_case_result_links_similarity_result", "similarity_result_id"),
+    )
+    
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=False)
     similarity_result_id = Column(UUID(as_uuid=False), ForeignKey("similarity_results.id"), nullable=False)
@@ -338,6 +405,11 @@ class CaseComment(Base):
     """Comment on a review Case."""
     __tablename__ = "case_comments"
 
+    __table_args__ = (
+        Index("idx_case_comments_case", "case_id"),
+        Index("idx_case_comments_user", "user_id"),
+    )
+    
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=False)
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
@@ -346,3 +418,158 @@ class CaseComment(Base):
 
     case = relationship("Case", back_populates="comments")
     user = relationship("User")
+
+# ============================================================
+# NEW MODELS - Added for production readiness
+# ============================================================
+
+class Report(Base):
+    """Generated professional reports (PDF, HTML, JSON, etc.)."""
+    __tablename__ = "reports"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    organization_id = Column(UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=True)
+
+    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+
+    report_type = Column(String(50), nullable=False)
+    format = Column(String(20), nullable=False)
+    version = Column(String(20), nullable=False, default="1.0")
+
+    status = Column(String(20), nullable=False, default="generating")
+    file_path = Column(String(500), nullable=True)
+    file_size_bytes = Column(BigInteger, nullable=True)
+
+    generated_by_user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    generated_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # ← Fixed: renamed from 'metadata' to 'report_metadata'
+    report_metadata = Column("metadata", JSONB, nullable=False, default=dict)
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), onupdate=text('now()'))
+
+    __table_args__ = (
+        Index("idx_reports_tenant_status", "tenant_id", "status"),
+        Index("idx_reports_job", "job_id"),
+        Index("idx_reports_case", "case_id"),
+        Index("idx_reports_generated_at", "generated_at"),
+        Index("idx_reports_tenant_type", "tenant_id", "report_type"),
+    )
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="reports")
+    organization = relationship("Organization", back_populates="reports")
+    job = relationship("Job", back_populates="reports")
+    case = relationship("Case", back_populates="reports")
+    generated_by = relationship("User", foreign_keys=[generated_by_user_id])
+
+
+class Notification(Base):
+    """User notifications (in-app, email, Slack, etc.)."""
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+
+    type = Column(String(50), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+
+    related_job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    related_case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+    related_report_id = Column(UUID(as_uuid=False), ForeignKey("reports.id"), nullable=True)
+
+    channel = Column(String(20), nullable=False, default="in_app")
+    priority = Column(String(20), nullable=False, default="normal")
+
+    status = Column(String(20), nullable=False, default="pending")
+    read_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    payload = Column(JSONB, nullable=False, default=dict)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+
+    __table_args__ = (
+        Index("idx_notifications_user_status", "user_id", "status"),
+        Index("idx_notifications_tenant_created", "tenant_id", "created_at"),
+        Index("idx_notifications_type", "type"),
+    )
+
+    # Relationships
+    user = relationship("User", back_populates="notifications")
+    tenant = relationship("Tenant", back_populates="notifications")
+    job = relationship("Job")
+    case = relationship("Case")
+    report = relationship("Report")
+
+
+class BehavioralSession(Base):
+    """Behavioral / keystroke data for plagiarism detection."""
+    __tablename__ = "behavioral_sessions"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    submission_id = Column(UUID(as_uuid=False), ForeignKey("submissions.id"), nullable=False)
+    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+
+    session_id = Column(String(100), nullable=True)
+    keystroke_count = Column(Integer, default=0)
+    paste_count = Column(Integer, default=0)
+    focus_loss_count = Column(Integer, default=0)
+    typing_speed_wpm = Column(Float, nullable=True)
+
+    risk_score = Column(Numeric(4, 3), nullable=True)
+    patterns = Column(JSONB, nullable=False, default=dict)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+
+    __table_args__ = (
+        Index("idx_behavioral_sessions_submission", "submission_id"),
+        Index("idx_behavioral_sessions_job", "job_id"),
+        Index("idx_behavioral_sessions_user", "user_id"),
+        Index("idx_behavioral_sessions_risk", "risk_score"),
+    )
+
+    # Relationships
+    submission = relationship("Submission", back_populates="behavioral_sessions")
+    job = relationship("Job", back_populates="behavioral_sessions")
+    user = relationship("User", back_populates="behavioral_sessions")
+
+
+class TenantSubscription(Base):
+    """Subscription and plan management per tenant."""
+    __tablename__ = "tenant_subscriptions"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, unique=True)
+
+    plan = Column(String(50), nullable=False)
+    status = Column(String(20), nullable=False)
+
+    current_period_start = Column(TIMESTAMP(timezone=True), nullable=True)
+    current_period_end = Column(TIMESTAMP(timezone=True), nullable=True)
+    trial_end = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    job_limit = Column(Integer, nullable=True)
+    storage_limit_mb = Column(Integer, nullable=True)
+    features = Column(JSONB, nullable=False, default=dict)
+
+    stripe_customer_id = Column(String(100), nullable=True)
+    stripe_subscription_id = Column(String(100), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), onupdate=text('now()'))
+
+    __table_args__ = (
+        Index("idx_tenant_subscriptions_status", "status"),
+    )
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="subscription")

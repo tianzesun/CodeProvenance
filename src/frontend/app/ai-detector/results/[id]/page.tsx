@@ -316,7 +316,7 @@ export default function AIDetectorReportPage() {
     axios
       .get(`${API}/api/job/${id}`)
       .then((res) => {
-        if (res.data?.job_type !== 'ai_detector') {
+        if (res.data?.job_type && res.data.job_type !== 'ai_detector' && !res.data?.ai_detection) {
           router.replace(`/results/${id}`);
           return;
         }
@@ -330,7 +330,7 @@ export default function AIDetectorReportPage() {
   }, [id, router]);
 
   const ai = job?.ai_detection || {};
-  const submissions = useMemo(() => ai.submissions || [], [ai.submissions]);
+  const submissions = useMemo(() => (Array.isArray(ai.submissions) ? ai.submissions : []), [ai.submissions]);
   const highestScore = Number(ai.highest_score) || 0;
   const overallTone = riskTone(highestScore);
 
