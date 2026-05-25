@@ -62,7 +62,7 @@ echo "Ensuring Python dependencies..."
 "$VENV_PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt" >/dev/null
 
 # ----------------------------
-# Database init
+# Database init (hardened for remote DB flakiness)
 # ----------------------------
 if lsof -i :$BACKEND_PORT >/dev/null 2>&1; then
     echo "✔ Backend already running; skipping database init"
@@ -71,7 +71,28 @@ elif [ "${SKIP_DB_INIT:-}" = "1" ]; then
 else
     echo "Initializing database..."
     cd "$PROJECT_DIR"
-    "$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()"
+
+    DB_INIT_ATTEMPTS=3
+    DB_INIT_SUCCESS=0
+    for attempt in $(seq 1 $DB_INIT_ATTEMPTS); do
+        if "$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()" 2>&1; then
+            DB_INIT_SUCCESS=1
+            break
+        else
+            echo "  Database init attempt $attempt/$DB_INIT_ATTEMPTS failed"
+            if [ $attempt -lt $DB_INIT_ATTEMPTS ]; then
+                echo "  Retrying in 3s..."
+                sleep 3
+            fi
+        fi
+    done
+
+    if [ $DB_INIT_SUCCESS -eq 1 ]; then
+        echo "✔ Database initialized"
+    else
+        echo "⚠️  Database init failed after $DB_INIT_ATTEMPTS attempts (continuing anyway)"
+        echo "    You can set SKIP_DB_INIT=1 to skip this step"
+    fi
     echo ""
 fi
 
@@ -136,17 +157,26 @@ export NEXT_PUBLIC_API_URL="$BACKEND_URL"
 if [ ! -d "node_modules" ]; then
     echo "Installing frontend dependencies..."
     npm install
+else
+    # After React 19 upgrade, ensure we are not running on stale React 18 modules
+    REACT_VERSION=$(node -e "console.log(require('react/package.json').version)" 2>/dev/null || echo "0.0.0")
+    if [[ "$REACT_VERSION" == 18.* ]]; then
+        echo "⚠️  Detected React $REACT_VERSION in node_modules (expected 19.x after upgrade)"
+        echo "   Running clean install for React 19..."
+        rm -rf node_modules package-lock.json
+        npm install
+    fi
 fi
 
 if [ "${DASHBOARD_MODE:-prod}" = "dev" ]; then
-    echo "Running Next.js in DEV mode..."
-    nohup npx next dev -p "$DASHBOARD_PORT" > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
+    echo "Running Next.js in DEV mode (Next 16 + React 19)..."
+    nohup npx next dev --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
 else
     echo "Building Next.js..."
     npx next build
 
     echo "Running Next.js in PROD mode..."
-    nohup npx next start -p "$DASHBOARD_PORT" > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
+    nohup npx next start --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
 fi
 
 sleep 2
