@@ -27,23 +27,39 @@ import time
 import math
 import subprocess
 import csv
-import xml.etree.ElementTree as ET
-import urllib.request
-from collections import Counter
+import asyncio
+from collections import Counter, defaultdict
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
 import numpy as np
 
-from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
+from fastapi import (
+    FastAPI,
+    Request,
+    Response,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    BackgroundTasks,
+)
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import (
+    HTMLResponse,
+    FileResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 
 from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import func, select
+from pydantic import BaseModel
+from sqlalchemy import func, select, or_
+from sqlalchemy.orm import joinedload
 
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
 from src.backend.application.services.batch_detection_service import (
@@ -56,12 +72,25 @@ os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.backend.config.database import SessionLocal
-from src.backend.infrastructure.db import AcademicService
 from src.backend.infrastructure.professional_report_generator import ReportGenerator
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
 )
-from src.backend.models.database import Tenant, User
+from src.backend.models.database import (
+    Tenant,
+    User,
+    ApiKey,
+    Job,
+    Submission,
+    SimilarityResult,
+    WebhookEvent,
+    UsageMetric,
+    AuditLog,
+    Course,
+    Assignment,
+    CourseInstructor,
+    FprValidationRun,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -85,8 +114,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(frontend_origin_candidates),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "content-type",
+        "authorization",
+        "accept",
+        "accept-language",
+        "content-language",
+        "*",
+    ],
 )
 
 REPORTS_DIR = project_root / "reports"
@@ -107,16 +143,38 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/status",
     "/api/auth/login",
     "/api/auth/bootstrap-admin",
-    "/api/benchmark-datasets",
-    "/api/benchmark-tools",
-    "/api/benchmark",
-    "/api/benchmark/export-pdf",
-    # Temporarily exempt upload endpoints for testing
     "/api/upload",
     "/api/upload-zip",
+    "/api/upload-settings",
+    "/api/benchmark",
+    "/api/benchmark/stream",
+    "/api/benchmark/start",
+    "/api/error-analysis",
+    "/api/benchmark/export-pdf",
+    "/api/benchmark-tools",
+    "/api/benchmark-datasets",
+    "/api/ai-detect",
 }
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+# In-memory progress tracking for benchmark jobs
+import threading
+
+BENCHMARK_PROGRESS: Dict[str, List[str]] = {}
+
+# Rate limiting for login attempts
+LOGIN_ATTEMPTS: Dict[str, List[datetime]] = defaultdict(list)
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+BENCHMARK_RESULTS: Dict[str, Any] = {}
+BENCHMARK_LOCK = threading.Lock()
+
+
+def _append_progress(job_id: str, line: str) -> None:
+    with BENCHMARK_LOCK:
+        BENCHMARK_PROGRESS.setdefault(job_id, []).append(line)
+
 
 REAL_BENCHMARK_TOOL_IDS = {
     "integritydesk",
@@ -302,12 +360,13 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
 
 ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
     "fingerprint": "token",
-    "embedding": "semantic",
-    "unixcoder": "semantic",
+    "semantic": "embedding",
+    "unixcoder": "embedding",
     "ngram": "gst",
     "structural": "gst",
-    "graph": "execution_cfg",
-    "execution": "execution_cfg",
+    "string_tiling": "gst",
+    "execution": "graph",
+    "llm": "embedding",
 }
 
 
@@ -537,6 +596,10 @@ def _dataset_default_language(dataset_id: str) -> str:
         "codesearchnet": "mixed",
         "codexglue_clone": "java",
         "codexglue_defect": "c",
+        "CodeSimilarityDataset": "python",
+        "bigclonebench": "java",
+        "conplag": "java",
+        "conplag_classroom_java": "java",
         "google_codejam": "python",
         "human_eval": "python",
         "mbpp": "python",
@@ -549,7 +612,7 @@ def _dataset_default_language(dataset_id: str) -> str:
 
 def _resolve_benchmark_dataset_dir(dataset_id: str) -> Optional[PathLib]:
     """Resolve the on-disk directory for a benchmark dataset."""
-    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    dataset_root = _resolve_benchmark_dataset_root(dataset_id)
     if not dataset_root.exists():
         return None
 
@@ -595,11 +658,6 @@ def _infer_dataset_language(
         and default_language == "mixed"
     ):
         return "mixed"
-
-    if dataset_dir is not None and dataset_dir.exists():
-        inferred = _infer_language_from_directory(dataset_dir)
-        if inferred:
-            return inferred
 
     return default_language
 
@@ -650,6 +708,32 @@ def _infer_dataset_size_label(
         except OSError:
             pass
 
+    conplag_labels = dataset_dir / "versions" / "labels.csv"
+    if conplag_labels.exists():
+        try:
+            with conplag_labels.open("r", encoding="utf-8", newline="") as csv_file:
+                pair_count = max(0, sum(1 for _ in csv_file) - 1)
+            if pair_count > 0:
+                return f"{pair_count:,} labeled pairs"
+        except OSError:
+            pass
+
+    full_metadata_csv = dataset_dir / "full_metadata.csv"
+    if full_metadata_csv.exists():
+        try:
+            with full_metadata_csv.open("r", encoding="utf-8", newline="") as csv_file:
+                snippet_count = max(0, sum(1 for _ in csv_file) - 1)
+            if snippet_count > 0:
+                return f"{snippet_count:,} snippets"
+        except OSError:
+            pass
+
+    reduced_bcb = dataset_dir / "bcb_reduced"
+    if reduced_bcb.exists():
+        java_count = sum(1 for _ in reduced_bcb.rglob("*.java"))
+        if java_count > 0:
+            return f"{java_count:,} Java files"
+
     parquet_files = sorted((dataset_dir / "data").glob("*.parquet"))
     if parquet_files:
         return f"{len(parquet_files):,} parquet shard{'s' if len(parquet_files) != 1 else ''}"
@@ -663,7 +747,7 @@ def _infer_dataset_size_label(
                 total_files = num_examples * _dataset_snippets_per_row(dataset_info)
                 return f"{total_files:,} files"
 
-    return f"{_count_unique_code_files(dataset_dir)} files"
+    return "Dataset files"
 
 
 def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
@@ -716,6 +800,45 @@ def _count_generated_pair_labels(dataset_root: PathLib) -> tuple[int, int, int]:
         if _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) >= 2
     )
     return len(raw_pairs), positives, len(raw_pairs) - positives
+
+
+def _count_conplag_labels(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Count total, positive, and negative CONPLAG labels."""
+    return _count_csv_binary_labels(dataset_root / "versions" / "labels.csv", "verdict")
+
+
+def _count_code_similarity_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Estimate balanced pair counts for CodeSimilarityDataset."""
+    grouped = _code_similarity_snippet_groups(dataset_root)
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in grouped.values()
+    )
+    group_sizes = [len(files) for files in grouped.values()]
+    negative_pairs = 0
+    for left_index, left_size in enumerate(group_sizes):
+        for right_size in group_sizes[left_index + 1 :]:
+            negative_pairs += left_size * right_size
+    cap_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+    positives = min(positive_pairs, cap_each)
+    negatives = min(negative_pairs, cap_each)
+    return positives + negatives, positives, negatives
+
+
+def _count_bigclonebench_reduced_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
+    """Estimate balanced pair counts from BigCloneBench reduced functionality folders."""
+    groups = _bigclonebench_reduced_groups(dataset_root)
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in groups.values()
+    )
+    group_sizes = [len(files) for files in groups.values()]
+    negative_pairs = 0
+    for left_index, left_size in enumerate(group_sizes):
+        for right_size in group_sizes[left_index + 1 :]:
+            negative_pairs += left_size * right_size
+    cap_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+    positives = min(positive_pairs, cap_each)
+    negatives = min(negative_pairs, cap_each)
+    return positives + negatives, positives, negatives
 
 
 def _has_loadable_huggingface_dataset(dataset_root: PathLib) -> bool:
@@ -790,10 +913,50 @@ def _build_benchmark_dataset_readiness(
         return {
             "runnable": runnable,
             "status": "ready" if runnable else "missing_labeled_csv",
-            "reason": f"{positives} positive and {negatives} negative labeled pairs.",
+            "reason": f"Found {positives} positive and {negatives} negative pairs in CSV.",
             "pair_count": total,
             "positive_pairs": positives,
             "negative_pairs": negatives,
+        }
+
+    if dataset_id == "CodeSimilarityDataset":
+        total, positives, negatives = _count_code_similarity_pairs(dataset_root)
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_snippet_groups",
+            "reason": (
+                f"CodeSimilarityDataset can create {positives} same-task positives and {negatives} cross-task negatives."
+                if runnable
+                else "CodeSimilarityDataset needs full_metadata.csv and snippet files."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
+        }
+
+    if dataset_id == "google_codejam":
+        gt_path = dataset_root / "ground_truth.json"
+        runnable = gt_path.exists()
+        if runnable:
+            try:
+                gt = json.loads(gt_path.read_text())
+                total = len(gt)
+                positives = sum(1 for v in gt.values() if v.get("plagiarism", False))
+                negatives = total - positives
+            except Exception:
+                runnable = False
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_ground_truth",
+            "reason": (
+                "Google Code Jam dataset with ground truth labels."
+                if runnable
+                else "Missing ground_truth.json file."
+            ),
+            "pair_count": total if runnable else 0,
+            "positive_pairs": positives if runnable else 0,
+            "negative_pairs": negatives if runnable else 0,
         }
 
     if dataset_id == "xiangtan":
@@ -803,17 +966,35 @@ def _build_benchmark_dataset_readiness(
             max(0, sum(1 for _ in pairs_csv.open()) - 1) if pairs_csv.exists() else 0
         )
         source_files = list(source_dir.rglob("*.java")) if source_dir.exists() else []
-        runnable = positive_pairs > 0 and len(source_files) >= 4
+        negative_pairs = min(positive_pairs, max(0, len(source_files) - 1))
+        runnable = positive_pairs > 0 and negative_pairs > 0
         return {
             "runnable": runnable,
             "status": "ready" if runnable else "missing_xiangtan_sources",
             "reason": (
-                f"{positive_pairs} positive pairs plus generated negative pairs."
+                f"{positive_pairs} positive pairs plus {negative_pairs} generated negative pairs."
                 if runnable
                 else "Xiangtan needs pairs.csv and Java source files."
             ),
-            "pair_count": positive_pairs,
+            "pair_count": positive_pairs + negative_pairs,
             "positive_pairs": positive_pairs,
+            "negative_pairs": negative_pairs,
+        }
+
+    if dataset_id == "bigclonebench":
+        total, positives, negatives = _count_bigclonebench_reduced_pairs(dataset_root)
+        runnable = positives > 0 and negatives > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_reduced_bcb_sources",
+            "reason": (
+                f"BigCloneBench reduced sample can create {positives} same-functionality positives and {negatives} cross-functionality negatives."
+                if runnable
+                else "BigCloneBench needs bcb_reduced functionality folders with Java files."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
         }
 
     if dataset_id == "poj104":
@@ -851,6 +1032,123 @@ def _build_benchmark_dataset_readiness(
                 if runnable
                 else "CodeXGLUE clone dataset is incomplete; download all splits first."
             ),
+        }
+
+    if dataset_id == "IR-Plag-Dataset":
+        # Check for case-* directories with required subdirs
+        case_dirs = [
+            d
+            for d in dataset_root.iterdir()
+            if d.is_dir() and d.name.startswith("case-")
+        ]
+        if not case_dirs:
+            return {
+                "runnable": False,
+                "status": "missing_case_dirs",
+                "reason": "IR-Plag dataset needs case-* directories.",
+            }
+        total_pairs = 0
+        for case_dir in case_dirs:
+            original_dir = case_dir / "original"
+            plagiarized_dir = case_dir / "plagiarized"
+            non_plagiarized_dir = case_dir / "non-plagiarized"
+            if not (
+                original_dir.exists()
+                and plagiarized_dir.exists()
+                and non_plagiarized_dir.exists()
+            ):
+                return {
+                    "runnable": False,
+                    "status": "incomplete_case_structure",
+                    "reason": f"Case {case_dir.name} missing required subdirectories.",
+                }
+            # Count potential pairs: original files vs plagiarized/non-plagiarized
+            original_files = list(original_dir.glob("*.java"))
+            plagiarized_files = sum(1 for _ in plagiarized_dir.rglob("*.java"))
+            non_plagiarized_files = sum(1 for _ in non_plagiarized_dir.rglob("*.java"))
+            total_pairs += len(original_files) * (
+                plagiarized_files + non_plagiarized_files
+            )
+        runnable = total_pairs > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "no_java_files",
+            "reason": (
+                f"IR-Plag dataset with {total_pairs} labeled pairs across {len(case_dirs)} cases."
+                if runnable
+                else "No Java files found in IR-Plag dataset structure."
+            ),
+            "pair_count": total_pairs,
+            "positive_pairs": total_pairs // 2,  # Approximate: assuming balanced
+            "negative_pairs": total_pairs // 2,
+        }
+
+    if dataset_id == "conplag":
+        total, positives, negatives = _count_conplag_labels(dataset_root)
+        version_dir = dataset_root / "versions" / "version_1"
+        runnable = (
+            total > 0 and positives > 0 and negatives > 0 and version_dir.exists()
+        )
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "missing_conplag_files",
+            "reason": (
+                f"CONPLAG dataset with {total} labeled Java contest pairs ({positives} positive, {negatives} negative)."
+                if runnable
+                else "CONPLAG needs versions/labels.csv and versions/version_1 Java pair folders."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
+        }
+
+    if dataset_id == "conplag_classroom_java":
+        # Map to conplag directory
+        conplag_root = BENCHMARK_DATA_DIR / "conplag"
+        if not conplag_root.exists():
+            return {
+                "runnable": False,
+                "status": "missing_conplag_dir",
+                "reason": "CONPLAG dataset directory not found.",
+            }
+        labels_csv = conplag_root / "versions" / "labels.csv"
+        version_1_dir = conplag_root / "versions" / "version_1"
+        if not (labels_csv.exists() and version_1_dir.exists()):
+            return {
+                "runnable": False,
+                "status": "missing_conplag_files",
+                "reason": "CONPLAG dataset missing labels.csv or version_1 directory.",
+            }
+        try:
+            import csv
+
+            with open(labels_csv, "r") as f:
+                reader = csv.DictReader(f)
+                total = sum(1 for row in reader)
+            positives = sum(
+                1
+                for row in csv.DictReader(open(labels_csv, "r"))
+                if row.get("verdict") == "1"
+            )
+            negatives = total - positives
+        except Exception:
+            return {
+                "runnable": False,
+                "status": "invalid_labels_csv",
+                "reason": "Could not parse CONPLAG labels.csv.",
+            }
+        runnable = total > 0
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "no_pairs",
+            "reason": (
+                f"CONPLAG dataset with {total} labeled pairs ({positives} positive, {negatives} negative)."
+                if runnable
+                else "No pairs found in CONPLAG labels.csv."
+            ),
+            "pair_count": total,
+            "positive_pairs": positives,
+            "negative_pairs": negatives,
         }
 
     return {
@@ -1504,44 +1802,9 @@ def _is_dolos_plagiarism_cli(candidate: PathLib) -> bool:
 
 def _find_moss_script() -> Optional[PathLib]:
     """Find the MOSS Perl script in the configured tool location."""
-    moss_dir = _find_tool_dir("moss")
-    if not moss_dir:
-        return None
-    return _first_existing_path([moss_dir / "moss.pl"])
+    from src.backend.benchmark.adapters.moss_adapter import MossAdapter
 
-
-def _prepare_moss_script(
-    script_path: PathLib, run_dir: PathLib, moss_user_id: str
-) -> PathLib:
-    """Create a job-local MOSS script that uses app settings and writable logs."""
-    run_dir.mkdir(parents=True, exist_ok=True)
-    patched_script = run_dir / script_path.name
-    log_path = run_dir / "moss.log"
-    script_text = script_path.read_text(encoding="utf-8")
-    log_literal = repr(str(log_path))
-    safe_user_id = re.sub(r"[^0-9]", "", moss_user_id) or "0"
-
-    script_text = re.sub(
-        r"my\s+\$logfile\s*=\s*[^;]+;",
-        f"my $logfile = $ENV{{'MOSS_LOGFILE'}} || {log_literal};",
-        script_text,
-        count=1,
-    )
-    script_text = re.sub(
-        r"\$userid\s*=\s*[^;]+;",
-        "$userid = $ENV{'MOSS_USER_ID'} || " f"{safe_user_id};",
-        script_text,
-        count=1,
-    )
-    script_text = script_text.replace(
-        'system("bash", "save_moss_report.sh","$logfile");',
-        'system("bash", "save_moss_report.sh", "$logfile") '
-        'if -e "save_moss_report.sh";',
-    )
-
-    patched_script.write_text(script_text, encoding="utf-8")
-    patched_script.chmod(0o700)
-    return patched_script
+    return MossAdapter.SCRIPT_PATH if MossAdapter.SCRIPT_PATH.exists() else None
 
 
 def _find_nicad_executable() -> Optional[PathLib]:
@@ -1842,34 +2105,45 @@ def _merge_external_features_into_results(
             result.features[tool_id] = lookup.get(pair_key, 0.0)
 
 
+def _external_evidence_for_pair(
+    file_a: str,
+    file_b: str,
+    tool_results: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return external-tool evidence rows for one comparison pair."""
+    pair_key = _pair_key(file_a, file_b)
+    evidence: List[Dict[str, Any]] = []
+    for tool_id, data in tool_results.items():
+        if "pairs" not in data:
+            continue
+        for pair in data.get("pairs", []):
+            pair_file_a = str(pair.get("file_a") or "")
+            pair_file_b = str(pair.get("file_b") or "")
+            if _pair_key(pair_file_a, pair_file_b) != pair_key:
+                continue
+            evidence.append(
+                {
+                    "tool": tool_id,
+                    "score": _coerce_float(pair.get("score")),
+                    "file_a_percent": pair.get("file_a_percent"),
+                    "file_b_percent": pair.get("file_b_percent"),
+                    "report_url": pair.get("report_url") or data.get("report_url"),
+                }
+            )
+            break
+    return evidence
+
+
 def _run_selected_external_tools(
     selected_tool_ids: List[str],
     submissions: Dict[str, str],
     pairs: List[tuple],
 ) -> Dict[str, Dict[str, Any]]:
     """Run selected non-IntegrityDesk tools and preserve per-tool failures."""
-    tool_results: Dict[str, Dict[str, Any]] = {}
-    for tool_id in selected_tool_ids:
-        if tool_id == "integritydesk":
-            continue
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
-        started = time.perf_counter()
-        try:
-            score_data = _run_competitor_tool(tool_id, submissions, pairs)
-            if score_data:
-                tool_results[tool_id] = score_data
-            else:
-                tool_results[tool_id] = {"error": _unavailable_tool_reason(tool_id)}
-        except Exception as exc:
-            logger.exception("External tool %s failed during upload analysis", tool_id)
-            tool_results[tool_id] = {"error": str(exc)}
-        finally:
-            tool_results.setdefault(tool_id, {})
-            tool_results[tool_id]["runtime_seconds"] = round(
-                time.perf_counter() - started, 4
-            )
-
-    return tool_results
+    runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
+    return runner.run_selected_tools(selected_tool_ids, submissions, pairs)
 
 
 def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
@@ -1878,14 +2152,39 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
         for member in zf.namelist():
             if member.endswith("/"):
                 continue
-            filename = PathLib(member).name
-            if _is_code_file(filename):
-                target = target_dir / filename
+            member_path = PathLib(member)
+            if _is_code_file(member_path.name):
+                safe_parts = [
+                    part
+                    for part in member_path.parts
+                    if part not in {"", ".", ".."} and not PathLib(part).is_absolute()
+                ]
+                relative_path = (
+                    PathLib(*safe_parts) if safe_parts else PathLib(member_path.name)
+                )
+                target = _unique_child_path(target_dir, relative_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src, open(target, "wb") as dst:
                     dst.write(src.read())
                 extracted.append(str(target))
     return extracted
+
+
+def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
+    """Return a child path under root_dir without overwriting existing uploads."""
+    target = root_dir / relative_path
+    if not target.exists():
+        return target
+
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    counter = 2
+    while True:
+        candidate = parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
@@ -1924,12 +2223,47 @@ async def _store_benchmark_uploads(
 
 # Dataset location: All datasets are stored in data/datasets/
 # Note: benchmark/data is a symlink to data/datasets/ for backward compatibility
-BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
+DEFAULT_BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
+BENCHMARK_DATA_DIR = DEFAULT_BENCHMARK_DATA_DIR
+BENCHMARK_ARCHIVE_DATA_DIR = project_root.parent / "archive" / "unused_datasets"
 BUILTIN_PAIR_DATASET_DIR = (
     project_root / "backend" / "benchmark" / "datasets" / "fixtures"
 )
 BUILTIN_PAIR_DATASET_IDS = {"clough_stevenson_style"}
 PAIR_BENCHMARK_MAX_PAIRS = 400
+
+
+def _benchmark_archive_enabled() -> bool:
+    """Return true when local archived datasets should supplement the main data dir."""
+    return BENCHMARK_DATA_DIR == DEFAULT_BENCHMARK_DATA_DIR
+
+
+def _iter_benchmark_dataset_roots() -> List[PathLib]:
+    """Return benchmark dataset roots in precedence order without duplicate ids."""
+    roots: List[PathLib] = []
+    seen: set[str] = set()
+    for parent in (BENCHMARK_DATA_DIR, BENCHMARK_ARCHIVE_DATA_DIR):
+        if parent == BENCHMARK_ARCHIVE_DATA_DIR and not _benchmark_archive_enabled():
+            continue
+        if not parent.exists():
+            continue
+        for item in sorted(parent.iterdir()):
+            if item.is_dir() and item.name not in seen:
+                roots.append(item)
+                seen.add(item.name)
+    return roots
+
+
+def _resolve_benchmark_dataset_root(dataset_id: str) -> PathLib:
+    """Resolve a dataset id to its preferred local root."""
+    primary_root = BENCHMARK_DATA_DIR / dataset_id
+    if primary_root.exists() or not _benchmark_archive_enabled():
+        return primary_root
+
+    archived_root = BENCHMARK_ARCHIVE_DATA_DIR / dataset_id
+    if archived_root.exists():
+        return archived_root
+    return primary_root
 
 
 def _label_to_clone_grade(label: Any, clone_type: Any = None) -> int:
@@ -1963,6 +2297,132 @@ def _write_pair_submission(
     return safe_name
 
 
+def _pair_label_value(pair: Dict[str, Any]) -> int:
+    """Return the normalized benchmark label for a pair record."""
+    return _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
+
+
+def _stable_pair_sort_key(dataset_id: str, pair: Dict[str, Any]) -> str:
+    """Return a deterministic pseudo-random sort key for benchmark pairs."""
+    key = "|".join(
+        [
+            str(dataset_id or "custom"),
+            str(pair.get("file_a", "")),
+            str(pair.get("file_b", "")),
+            str(pair.get("label", "")),
+            str(pair.get("case_category", "")),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _build_pair_sampling_audit(
+    dataset_id: str,
+    original_pairs: List[Dict[str, Any]],
+    selected_pairs: List[Dict[str, Any]],
+    *,
+    balanced: bool,
+) -> Dict[str, Any]:
+    """Describe how labeled benchmark pairs were selected for this run."""
+
+    def counts_for(pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        positive = sum(1 for pair in pairs if _pair_label_value(pair) >= 2)
+        negative = len(pairs) - positive
+        categories = Counter(
+            str(pair.get("case_category") or "unspecified") for pair in pairs
+        )
+        splits = Counter(str(pair.get("split") or "unspecified") for pair in pairs)
+        return {
+            "total_pairs": len(pairs),
+            "positive_pairs": positive,
+            "negative_pairs": negative,
+            "class_balance_ratio": round(
+                min(positive, negative) / max(positive, negative, 1), 4
+            ),
+            "case_categories": dict(sorted(categories.items())),
+            "splits": dict(sorted(splits.items())),
+        }
+
+    original_counts = counts_for(original_pairs)
+    selected_counts = counts_for(selected_pairs)
+    warnings: List[str] = []
+    blockers: List[str] = []
+    if selected_counts["positive_pairs"] == 0 or selected_counts["negative_pairs"] == 0:
+        blockers.append(
+            "Selected benchmark sample lacks both positive and negative pairs."
+        )
+    if selected_counts["class_balance_ratio"] < 0.5:
+        warnings.append("Selected benchmark sample is class-imbalanced.")
+    if original_counts["class_balance_ratio"] < 0.5:
+        warnings.append("Original dataset pair list is class-imbalanced.")
+
+    synthetic_negative_datasets = {
+        "CodeSimilarityDataset",
+        "bigclonebench",
+        "poolc_600k_python",
+        "poj104",
+        "xiangtan",
+    }
+    if dataset_id in synthetic_negative_datasets:
+        warnings.append(
+            "Negative pairs are generated by the loader; validate them before certification."
+        )
+
+    return {
+        "dataset": dataset_id or "custom",
+        "sampling_policy": (
+            "deterministic_balanced_shuffle"
+            if balanced
+            else "deterministic_shuffle_unbalanced"
+        ),
+        "random_seed_source": "sha256(dataset,file_a,file_b,label,case_category)",
+        "original": original_counts,
+        "selected": selected_counts,
+        "dropped_pairs": max(0, len(original_pairs) - len(selected_pairs)),
+        "warnings": warnings,
+        "blockers": blockers,
+    }
+
+
+def _select_reliable_explicit_pairs(
+    dataset_id: str, explicit_pairs: List[Dict[str, Any]]
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Select a deterministic balanced labeled sample for benchmark scoring."""
+    if not explicit_pairs:
+        return [], _build_pair_sampling_audit(dataset_id, [], [], balanced=False)
+
+    positives = [pair for pair in explicit_pairs if _pair_label_value(pair) >= 2]
+    negatives = [pair for pair in explicit_pairs if _pair_label_value(pair) < 2]
+    positives = sorted(
+        positives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
+    negatives = sorted(
+        negatives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
+
+    if positives and negatives:
+        per_class = min(
+            len(positives),
+            len(negatives),
+            max(1, PAIR_BENCHMARK_MAX_PAIRS // 2),
+        )
+        selected = positives[:per_class] + negatives[:per_class]
+        balanced = True
+    else:
+        selected = sorted(
+            explicit_pairs, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+        )[:PAIR_BENCHMARK_MAX_PAIRS]
+        balanced = False
+
+    selected = sorted(
+        selected, key=lambda pair: _stable_pair_sort_key(f"{dataset_id}:eval", pair)
+    )
+    audit = _build_pair_sampling_audit(
+        dataset_id, explicit_pairs, selected, balanced=balanced
+    )
+    return selected, audit
+
+
 def _pair_language_extension(language: Any) -> str:
     """Return a source-code filename extension for a pair fixture language."""
     language_key = str(language or "python").strip().lower()
@@ -1985,21 +2445,33 @@ def _load_pair_labeled_benchmark_dataset(
     dataset_id: str, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
     """Load datasets that already define explicit labeled comparison pairs."""
-    dataset_root = BENCHMARK_DATA_DIR / dataset_id
+    dataset_root = _resolve_benchmark_dataset_root(dataset_id)
     if (dataset_root / "generated_pairs.jsonl").exists() or (
         dataset_id in BUILTIN_PAIR_DATASET_IDS
     ):
         return _load_synthetic_pair_dataset(dataset_root, target_dir)
     if dataset_id == "kaggle_student_code":
         return _load_kaggle_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "CodeSimilarityDataset":
+        return _load_code_similarity_pair_dataset(dataset_root, target_dir)
     if dataset_id == "xiangtan":
         return _load_xiangtan_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "bigclonebench":
+        return _load_bigclonebench_reduced_pair_dataset(dataset_root, target_dir)
     if dataset_id == "codexglue_clone":
         return _load_codexglue_pair_dataset(dataset_root, target_dir)
     if dataset_id == "poj104":
         return _load_poj104_pair_dataset(dataset_root, target_dir)
     if dataset_id == "poolc_600k_python":
         return _load_poolc_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "google_codejam":
+        return _load_google_codejam_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "IR-Plag-Dataset":
+        return _load_ir_plag_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "conplag":
+        return _load_conplag_pair_dataset(dataset_root, target_dir)
+    if dataset_id == "conplag_classroom_java":
+        return _load_conplag_pair_dataset(dataset_root, target_dir)
     return {}, []
 
 
@@ -2087,6 +2559,452 @@ def _load_kaggle_pair_dataset(
     return submissions, explicit_pairs
 
 
+def _code_similarity_snippet_groups(dataset_root: PathLib) -> Dict[str, List[PathLib]]:
+    """Group CodeSimilarityDataset snippets by programming task."""
+    metadata_csv = dataset_root / "full_metadata.csv"
+    if not metadata_csv.exists():
+        return {}
+
+    groups: Dict[str, List[PathLib]] = {}
+    with metadata_csv.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            problem_type = str(row.get("problem_type", "")).strip()
+            filename = str(row.get("filename", "")).strip()
+            if not problem_type or not filename:
+                continue
+            source = dataset_root / problem_type / "snippets" / filename
+            if source.exists():
+                groups.setdefault(problem_type, []).append(source)
+
+    return {key: sorted(value) for key, value in groups.items() if len(value) >= 2}
+
+
+def _load_code_similarity_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load CodeSimilarityDataset as same-task positives and cross-task negatives."""
+    grouped = _code_similarity_snippet_groups(dataset_root)
+    if not grouped:
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+
+    positive_count = 0
+    for problem_type, files in grouped.items():
+        if positive_count >= max_each:
+            break
+        for left_index, source_a in enumerate(files):
+            if positive_count >= max_each:
+                break
+            for source_b in files[left_index + 1 :]:
+                if positive_count >= max_each:
+                    break
+                pair_id = f"codesim_pos_{positive_count:05d}_{problem_type}"
+                file_a = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_a.py",
+                    source_a.read_text(encoding="utf-8", errors="ignore"),
+                )
+                file_b = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_b.py",
+                    source_b.read_text(encoding="utf-8", errors="ignore"),
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "label": _label_to_clone_grade(1, 4),
+                        "case_category": "true_positive",
+                        "split": "test",
+                    }
+                )
+                positive_count += 1
+
+    group_items = list(grouped.items())
+    negative_count = 0
+    for left_index, (left_problem, left_files) in enumerate(group_items):
+        if negative_count >= max_each:
+            break
+        for right_problem, right_files in group_items[left_index + 1 :]:
+            if negative_count >= max_each:
+                break
+            for source_a in left_files:
+                if negative_count >= max_each:
+                    break
+                for source_b in right_files:
+                    if negative_count >= max_each:
+                        break
+                    pair_id = f"codesim_neg_{negative_count:05d}_{left_problem}_{right_problem}"
+                    file_a = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_a.py",
+                        source_a.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    file_b = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_b.py",
+                        source_b.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    explicit_pairs.append(
+                        {
+                            "file_a": file_a,
+                            "file_b": file_b,
+                            "label": 0,
+                            "case_category": "true_negative",
+                            "split": "test",
+                        }
+                    )
+                    negative_count += 1
+
+    return submissions, explicit_pairs
+
+
+def _load_google_codejam_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load Google Code Jam pairs from ground_truth.json."""
+    gt_path = dataset_root / "ground_truth.json"
+    submissions_dir = dataset_root / "submissions"
+    if not gt_path.exists() or not submissions_dir.exists():
+        return {}, []
+
+    try:
+        gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+
+    for pair_key, info in gt_data.items():
+        if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
+            break
+        # Parse pair_key like "A_0_1" -> problem A, solutions 0 and 1
+        parts = pair_key.split("_")
+        if len(parts) != 3:
+            continue
+        problem, sol_a, sol_b = parts
+        problem_dir = submissions_dir / f"problem_{problem}" / "python"
+        source_a = problem_dir / f"solution_{sol_a}.py"
+        source_b = problem_dir / f"solution_{sol_b}.py"
+        if not source_a.exists() or not source_b.exists():
+            continue
+
+        plagiarism = info.get("plagiarism", False)
+        pair_id = f"codejam_{problem}_{sol_a}_{sol_b}"
+        source_a_code = source_a.read_text(encoding="utf-8", errors="ignore")
+        source_b_code = source_b.read_text(encoding="utf-8", errors="ignore")
+        file_a = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_a.py",
+            source_a_code,
+        )
+        file_b = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_b.py",
+            source_b_code,
+        )
+        explicit_pairs.append(
+            {
+                "file_a": file_a,
+                "file_b": file_b,
+                "label": _label_to_clone_grade(1 if plagiarism else 0),
+                "case_category": "true_positive" if plagiarism else "true_negative",
+            }
+        )
+
+    return submissions, explicit_pairs
+
+
+def _load_ir_plag_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load IR-Plag dataset pairs: original vs plagiarized (positive), original vs non-plagiarized (negative)."""
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+
+    case_dirs = sorted(
+        [d for d in dataset_root.iterdir() if d.is_dir() and d.name.startswith("case-")]
+    )
+    for case_dir in case_dirs:
+        original_dir = case_dir / "original"
+        plagiarized_dir = case_dir / "plagiarized"
+        non_plagiarized_dir = case_dir / "non-plagiarized"
+
+        if not (
+            original_dir.exists()
+            and plagiarized_dir.exists()
+            and non_plagiarized_dir.exists()
+        ):
+            continue
+
+        # Get original file (should be one per case)
+        original_files = list(original_dir.glob("*.java"))
+        if not original_files:
+            continue
+        original_file = original_files[0]  # Take first one
+        original_code = original_file.read_text(encoding="utf-8", errors="ignore")
+        original_submission = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"ir_plag_{case_dir.name}_original.java",
+            original_code,
+        )
+
+        # Generate positive pairs: original vs each plagiarized variant
+        for level_dir in sorted(plagiarized_dir.iterdir()):
+            if not level_dir.is_dir():
+                continue
+            for variant_dir in sorted(level_dir.iterdir()):
+                if not variant_dir.is_dir():
+                    continue
+                plag_files = list(variant_dir.glob("*.java"))
+                for plag_file in plag_files:
+                    if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
+                        return submissions, explicit_pairs
+                    plag_code = plag_file.read_text(encoding="utf-8", errors="ignore")
+
+                    pair_id = f"ir_plag_{case_dir.name}_{level_dir.name}_{variant_dir.name}_{plag_file.stem}"
+                    file_b = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_plagiarized.java",
+                        plag_code,
+                    )
+                    explicit_pairs.append(
+                        {
+                            "file_a": original_submission,
+                            "file_b": file_b,
+                            "label": _label_to_clone_grade(1),  # Positive
+                            "case_category": "true_positive",
+                        }
+                    )
+
+        # Generate negative pairs: original vs each non-plagiarized
+        for non_plag_dir in sorted(non_plagiarized_dir.iterdir()):
+            if not non_plag_dir.is_dir():
+                continue
+            non_plag_files = list(non_plag_dir.glob("*.java"))
+            for non_plag_file in non_plag_files:
+                if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
+                    return submissions, explicit_pairs
+                non_plag_code = non_plag_file.read_text(
+                    encoding="utf-8", errors="ignore"
+                )
+
+                pair_id = f"ir_plag_{case_dir.name}_nonplag_{non_plag_dir.name}_{non_plag_file.stem}"
+                file_b = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_nonplagiarized.java",
+                    non_plag_code,
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": original_submission,
+                        "file_b": file_b,
+                        "label": _label_to_clone_grade(0),  # Negative
+                        "case_category": "true_negative",
+                    }
+                )
+
+    return submissions, explicit_pairs
+
+
+def _bigclonebench_reduced_groups(
+    dataset_root: PathLib, max_files_per_group: int = 8
+) -> Dict[str, List[PathLib]]:
+    """Group a bounded BigCloneBench reduced sample by functionality id."""
+    reduced_root = dataset_root / "bcb_reduced"
+    if not reduced_root.exists():
+        return {}
+
+    groups: Dict[str, List[PathLib]] = {}
+    for function_dir in sorted(
+        path for path in reduced_root.iterdir() if path.is_dir()
+    ):
+        files: List[PathLib] = []
+        for subdir_name in ("sample", "selected", "default"):
+            subdir = function_dir / subdir_name
+            if subdir.exists():
+                for source_file in sorted(subdir.glob("*.java")):
+                    files.append(source_file)
+                    if len(files) >= max_files_per_group:
+                        break
+            if len(files) >= max_files_per_group:
+                break
+        if len(files) >= 2:
+            groups[function_dir.name] = files
+
+    return groups
+
+
+def _load_bigclonebench_reduced_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced pair sample from BigCloneBench reduced functionality folders."""
+    grouped = _bigclonebench_reduced_groups(dataset_root)
+    if not grouped:
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+
+    positive_count = 0
+    for function_id, files in grouped.items():
+        if positive_count >= max_each:
+            break
+        for left_index, source_a in enumerate(files):
+            if positive_count >= max_each:
+                break
+            for source_b in files[left_index + 1 :]:
+                if positive_count >= max_each:
+                    break
+                pair_id = f"bcb_pos_{positive_count:05d}_{function_id}"
+                file_a = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_a.java",
+                    source_a.read_text(encoding="utf-8", errors="ignore"),
+                )
+                file_b = _write_pair_submission(
+                    submissions,
+                    target_dir,
+                    f"{pair_id}_b.java",
+                    source_b.read_text(encoding="utf-8", errors="ignore"),
+                )
+                explicit_pairs.append(
+                    {
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "label": _label_to_clone_grade(1, 4),
+                        "case_category": "true_positive",
+                        "split": "test",
+                    }
+                )
+                positive_count += 1
+
+    group_items = list(grouped.items())
+    negative_count = 0
+    for left_index, (left_function, left_files) in enumerate(group_items):
+        if negative_count >= max_each:
+            break
+        for right_function, right_files in group_items[left_index + 1 :]:
+            if negative_count >= max_each:
+                break
+            for source_a in left_files[:3]:
+                if negative_count >= max_each:
+                    break
+                for source_b in right_files[:3]:
+                    if negative_count >= max_each:
+                        break
+                    pair_id = (
+                        f"bcb_neg_{negative_count:05d}_{left_function}_{right_function}"
+                    )
+                    file_a = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_a.java",
+                        source_a.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    file_b = _write_pair_submission(
+                        submissions,
+                        target_dir,
+                        f"{pair_id}_b.java",
+                        source_b.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    explicit_pairs.append(
+                        {
+                            "file_a": file_a,
+                            "file_b": file_b,
+                            "label": 0,
+                            "case_category": "true_negative",
+                            "split": "test",
+                        }
+                    )
+                    negative_count += 1
+
+    return submissions, explicit_pairs
+
+
+def _load_conplag_pair_dataset(
+    dataset_root: PathLib, target_dir: PathLib
+) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Load a balanced CONPLAG sample from labels.csv and version_1 directories."""
+    if dataset_root.name == "conplag_classroom_java":
+        dataset_root = BENCHMARK_DATA_DIR / "conplag"
+    labels_csv = dataset_root / "versions" / "labels.csv"
+    version_1_dir = dataset_root / "versions" / "version_1"
+
+    if not (labels_csv.exists() and version_1_dir.exists()):
+        return {}, []
+
+    submissions: Dict[str, str] = {}
+    explicit_pairs: List[Dict[str, Any]] = []
+    max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
+
+    try:
+        with labels_csv.open("r", encoding="utf-8", newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+    except OSError:
+        return {}, []
+
+    positives = [row for row in rows if str(row.get("verdict", "")).strip() == "1"]
+    negatives = [row for row in rows if str(row.get("verdict", "")).strip() != "1"]
+    selected_rows = positives[:max_each] + negatives[:max_each]
+
+    for idx, row in enumerate(selected_rows):
+        sub1 = str(row.get("sub1", "")).strip()
+        sub2 = str(row.get("sub2", "")).strip()
+        problem = str(row.get("problem", "")).strip()
+        verdict = str(row.get("verdict", "")).strip()
+        if not sub1 or not sub2:
+            continue
+
+        pair_dir = version_1_dir / f"{sub1}_{sub2}"
+        java_files = sorted(pair_dir.glob("*.java")) if pair_dir.exists() else []
+        if len(java_files) != 2:
+            continue
+
+        source_a, source_b = java_files
+        pair_id = f"conplag_{idx:05d}_{sub1}_{sub2}"
+        file_a = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_a.java",
+            source_a.read_text(encoding="utf-8", errors="ignore"),
+        )
+        file_b = _write_pair_submission(
+            submissions,
+            target_dir,
+            f"{pair_id}_b.java",
+            source_b.read_text(encoding="utf-8", errors="ignore"),
+        )
+        explicit_pairs.append(
+            {
+                "file_a": file_a,
+                "file_b": file_b,
+                "label": _label_to_clone_grade(1 if verdict == "1" else 0),
+                "case_category": "true_positive" if verdict == "1" else "true_negative",
+                "problem": problem,
+                "split": "test",
+            }
+        )
+
+    return submissions, explicit_pairs
+
+
 def _load_xiangtan_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
 ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
@@ -2099,6 +3017,7 @@ def _load_xiangtan_pair_dataset(
     submissions: Dict[str, str] = {}
     explicit_pairs: List[Dict[str, Any]] = []
     positive_originals: List[PathLib] = []
+    behavior_signatures: Dict[PathLib, str] = {}
 
     with pairs_csv.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -2114,17 +3033,20 @@ def _load_xiangtan_pair_dataset(
                 continue
 
             pair_id = f"xiangtan_pos_{idx:05d}"
+            source_a_code = source_a.read_text(encoding="utf-8", errors="ignore")
+            source_b_code = source_b.read_text(encoding="utf-8", errors="ignore")
+            behavior_signatures[source_a] = _java_behavior_signature(source_a_code)
             file_a = _write_pair_submission(
                 submissions,
                 target_dir,
                 f"{pair_id}_a.java",
-                source_a.read_text(encoding="utf-8", errors="ignore"),
+                source_a_code,
             )
             file_b = _write_pair_submission(
                 submissions,
                 target_dir,
                 f"{pair_id}_b.java",
-                source_b.read_text(encoding="utf-8", errors="ignore"),
+                source_b_code,
             )
             positive_originals.append(source_a)
             explicit_pairs.append(
@@ -2149,6 +3071,8 @@ def _load_xiangtan_pair_dataset(
             if source_a.stem.replace("_original", "") == source_b.stem.replace(
                 "_original", ""
             ):
+                continue
+            if behavior_signatures.get(source_a) == behavior_signatures.get(source_b):
                 continue
 
             pair_id = f"xiangtan_neg_{negative_count:05d}"
@@ -2176,6 +3100,77 @@ def _load_xiangtan_pair_dataset(
             negative_count += 1
 
     return submissions, explicit_pairs
+
+
+def _java_behavior_signature(code: str) -> str:
+    """Return a name-insensitive Java signature for avoiding mislabeled negatives."""
+    without_comments = re.sub(
+        r"/\*.*?\*/|//.*?$", "", code, flags=re.DOTALL | re.MULTILINE
+    )
+    tokens = re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\S", without_comments)
+    java_keywords = {
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
+    }
+    normalized = []
+    for token in tokens:
+        if re.fullmatch(r"\d+", token):
+            normalized.append("NUM")
+        elif token in {"for", "while", "do"}:
+            normalized.append("ITERATIVE_BLOCK")
+        elif re.fullmatch(r"[A-Za-z_]\w*", token) and token not in java_keywords:
+            normalized.append("ID")
+        else:
+            normalized.append(token)
+    return hashlib.sha256(" ".join(normalized).encode("utf-8")).hexdigest()
 
 
 def _load_codexglue_pair_dataset(
@@ -2527,12 +3522,31 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a single per-submission AI detection result.
+
+    Preserves the richer fields added by the new engine (signal_labels,
+    flagged_lines, annotated_snippet) so the results page can display them.
+    """
     signals = {
         name: round(_coerce_float(value), 3)
         for name, value in (entry.get("signals") or {}).items()
     }
     indicators = [
         str(indicator) for indicator in (entry.get("indicators") or []) if indicator
+    ]
+    signal_labels = {
+        str(k): str(v) for k, v in (entry.get("signal_labels") or {}).items()
+    }
+    flagged_lines = [int(ln) for ln in (entry.get("flagged_lines") or []) if ln]
+    # annotated_snippet: list of {line, text, flagged} — pass through as-is
+    annotated_snippet = [
+        {
+            "line": int(item.get("line", 0)),
+            "text": str(item.get("text", "")),
+            "flagged": bool(item.get("flagged", False)),
+        }
+        for item in (entry.get("annotated_snippet") or [])
+        if isinstance(item, dict)
     ]
 
     return {
@@ -2542,7 +3556,10 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         "confidence": round(_coerce_float(entry.get("confidence")), 3),
         "status": str(entry.get("status") or "Low Risk"),
         "signals": signals,
-        "indicators": indicators[:5],
+        "signal_labels": signal_labels,
+        "indicators": indicators[:6],
+        "flagged_lines": flagged_lines[:30],
+        "annotated_snippet": annotated_snippet,
         "error": str(entry.get("error") or ""),
     }
 
@@ -2755,6 +3772,30 @@ def _persist_job(job_id: str) -> None:
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
+def _update_job_status_in_db(
+    job_id: str, status: str, error_message: str | None = None
+) -> None:
+    """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
+    try:
+        with SessionLocal() as db:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            if not db_job:
+                return
+            db_job.status = status
+            now = datetime.now()
+            if status == "analyzing" and not db_job.started_at:
+                db_job.started_at = now
+            if status == "completed":
+                db_job.completed_at = now
+            if status == "failed":
+                db_job.failed_at = now
+                if error_message:
+                    db_job.error_message = error_message[:2000]
+            db.commit()
+    except Exception:
+        logger.warning(f"Failed to update job {job_id} status in DB")
+
+
 def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
     report_json_path = _job_report_dir(job_id) / "report.json"
     if not report_json_path.exists():
@@ -2847,29 +3888,172 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     if job_id in _jobs:
         _jobs[job_id] = _normalize_job(_jobs[job_id])
         return _jobs[job_id]
-    return _load_persisted_job(job_id)
+    loaded = _load_persisted_job(job_id)
+    if loaded:
+        return loaded
+    # DB fallback so results/[id] page can load jobs persisted via ORM (B1)
+    return _load_job_from_db(job_id)
+
+
+def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
+    """Minimal loader for jobs persisted to the database via the ORM wiring.
+
+    Reconstructs a dict shape compatible with the in-memory job format
+    so the results/[id] frontend page and existing endpoints can render it.
+    """
+    try:
+        with SessionLocal() as db:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            if not db_job:
+                return None
+
+            subs = (
+                db.query(Submission)
+                .filter(Submission.job_id == job_id)
+                .order_by(Submission.created_at)
+                .all()
+            )
+            sim_results = (
+                db.query(SimilarityResult)
+                .filter(SimilarityResult.job_id == job_id)
+                .order_by(SimilarityResult.similarity_score.desc())
+                .limit(200)
+                .all()
+            )
+
+            job_dict: Dict[str, Any] = {
+                "id": job_id,
+                "status": db_job.status or "completed",
+                "assignment_name": db_job.name or f"Job {job_id}",
+                "threshold": (
+                    float(db_job.threshold) if db_job.threshold is not None else 0.5
+                ),
+                "file_count": db_job.file_count or len(subs),
+                "created_at": (
+                    db_job.created_at.isoformat() if db_job.created_at else None
+                ),
+                "tenant_id": db_job.tenant_id,
+                "results": [
+                    {
+                        "file_a": r.submission_a_id,
+                        "file_b": r.submission_b_id,
+                        "score": (
+                            float(r.similarity_score)
+                            if r.similarity_score is not None
+                            else 0.0
+                        ),
+                        "risk_level": (
+                            "CRITICAL"
+                            if float(r.similarity_score or 0) >= 0.85
+                            else (
+                                "HIGH"
+                                if float(r.similarity_score or 0) >= 0.7
+                                else (
+                                    "MEDIUM"
+                                    if float(r.similarity_score or 0) >= 0.5
+                                    else "LOW"
+                                )
+                            )
+                        ),
+                        "confidence": (
+                            float(r.confidence_level)
+                            if r.confidence_level is not None
+                            else None
+                        ),
+                        "matching_blocks": r.matching_blocks or [],
+                        "features": r.algorithm_scores or {},
+                        "external_evidence": (r.algorithm_scores or {}).get(
+                            "external_evidence", {}
+                        ),
+                        "review_status": r.review_status or "unreviewed",
+                        "review_notes": r.review_notes or "",
+                    }
+                    for r in sim_results
+                ],
+                "submissions": {s.name: "" for s in subs},
+                "summary": {"total_pairs": len(sim_results)},
+                "review_status": "unreviewed",
+                "review_notes": "",
+                "submission_count": len(subs),
+                "review_summary": (
+                    {(s.review_status or "unreviewed"): 0 for s in sim_results}
+                    if sim_results
+                    else {}
+                ),
+            }
+
+            # Compute actual review counts from DB
+            if sim_results:
+                review_summary = {}
+                for s in sim_results:
+                    st = s.review_status or "unreviewed"
+                    review_summary[st] = review_summary.get(st, 0) + 1
+                job_dict["review_summary"] = review_summary
+
+            job_dict = _enrich_job_from_report(job_dict, job_id)
+            _jobs[job_id] = job_dict
+            return job_dict
+    except Exception:
+        logger.warning(f"_load_job_from_db failed for {job_id}")
+        return None
+
+
+def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+    """Merge richer data from the on-disk report.json into a DB-loaded job (for C)."""
+    try:
+        report_path = REPORTS_DIR / job_id / "report.json"
+        if report_path.exists():
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+            # Merge common rich fields the results page expects
+            for key in (
+                "summary",
+                "calibration_report",
+                "reproducibility",
+                "ai_detection",
+                "web_analysis",
+                "ai_text_trust",
+                "assignment_mode",
+                "assignment_mode_name",
+            ):
+                if key in data and key not in job_dict:
+                    job_dict[key] = data[key]
+            if "external_tool_results" in data:
+                job_dict["external_tool_results"] = data["external_tool_results"]
+            if "pairs" in data:
+                # Prefer the full rich pairs from the generated report (best for Results page)
+                job_dict["results"] = data["pairs"]
+    except Exception:
+        pass
+    return job_dict
 
 
 def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+    """Run AI detection on all submissions and aggregate results.
+
+    Returns a rich summary including per-file signals, flagged lines,
+    annotated code snippets, and batch-level statistics.
+    """
     if not submissions:
         return {}
 
-    from src.backend.engines.similarity.ai_detection import AIDetectionEngine
+    from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
-    detector = AIDetectionEngine()
+    detector = AIDetectionOrchestrator()
     entries: List[Dict[str, Any]] = []
     signal_totals: Dict[str, float] = {}
     signal_peaks: Dict[str, float] = {}
     signal_counts: Dict[str, int] = {}
 
     for name, code in submissions.items():
-        result = detector.analyze(code, language=_infer_language_from_filename(name))
+        language = _infer_language_from_filename(name)
+        result = detector.analyze(code, language=language)
         ai_probability = round(_coerce_float(result.get("ai_probability")), 3)
         confidence = round(_coerce_float(result.get("confidence")), 3)
         signals = {
             signal_name: round(_coerce_float(signal_value), 3)
             for signal_name, signal_value in (result.get("signals") or {}).items()
         }
+        signal_labels = result.get("signal_labels") or {}
 
         for signal_name, signal_value in signals.items():
             signal_totals[signal_name] = (
@@ -2880,18 +4064,29 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
             )
             signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
 
+        # Build annotated code snippet (first 60 lines, flagged lines marked)
+        flagged_lines = result.get("flagged_lines") or []
+        flagged_set = set(flagged_lines)
+        code_lines = code.splitlines()[:60]
+        annotated_snippet = [
+            {"line": i + 1, "text": ln, "flagged": (i + 1) in flagged_set}
+            for i, ln in enumerate(code_lines)
+        ]
+
         entries.append(
             {
                 "name": name,
-                "language": result.get("language")
-                or _infer_language_from_filename(name),
+                "language": language,
                 "ai_probability": ai_probability,
                 "confidence": confidence,
                 "status": _ai_status_label(ai_probability),
                 "signals": signals,
+                "signal_labels": signal_labels,
                 "indicators": [
                     str(indicator) for indicator in (result.get("indicators") or [])
-                ][:5],
+                ][:6],
+                "flagged_lines": flagged_lines[:30],
+                "annotated_snippet": annotated_snippet,
                 "error": str(result.get("error") or ""),
             }
         )
@@ -3103,13 +4298,19 @@ def _build_ai_text_trust_report(ai_detection: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+def _build_web_analysis_summary(
+    submissions: Dict[str, str], settings_payload: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Build public-source match evidence from administrator-configured sources."""
     if not submissions:
         return {}
 
-    web_enabled = (
-        os.getenv("INTEGRITYDESK_ENABLE_WEB_ANALYSIS", "").strip().lower()
-        in TRUTHY_VALUES
+    settings_payload = settings_payload or {}
+    source_sites = _normalize_source_scan_sites(
+        settings_payload.get("source_scan_sites")
+    )
+    web_enabled = bool(settings_payload.get("source_scan_enabled")) and bool(
+        source_sites
     )
     github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
     stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
@@ -3117,12 +4318,13 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     if not web_enabled:
         return {
             "enabled": False,
-            "configured": bool(github_token or stackoverflow_api_key),
-            "status_message": "Web analysis is available but disabled by default. Set INTEGRITYDESK_ENABLE_WEB_ANALYSIS=1 to query external sources during assignment checks.",
+            "configured": bool(source_sites),
+            "status_message": "External source scanning is disabled in admin settings.",
             "matched_submissions": 0,
             "highest_similarity": 0.0,
             "average_similarity": 0.0,
             "source_totals": {},
+            "configured_sources": source_sites,
             "submissions": [],
         }
 
@@ -3136,8 +4338,8 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     source_totals: Dict[str, int] = {}
 
     for name, code in submissions.items():
-        result = service.perform_full_web_scan(
-            code, _infer_language_from_filename(name)
+        result = service.scan_configured_sources(
+            code, _infer_language_from_filename(name), source_sites
         )
         sources = []
         for source in result.get("web_results", [])[:5]:
@@ -3184,13 +4386,14 @@ def _build_web_analysis_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     return {
         "enabled": True,
         "configured": True,
-        "status_message": "External source checks are enabled for this assignment.",
+        "status_message": "External source checks scanned administrator-configured sources.",
         "matched_submissions": sum(1 for entry in entries if entry["match_count"] > 0),
         "highest_similarity": round(
             max((entry["max_similarity"] for entry in entries), default=0.0), 3
         ),
         "average_similarity": round(average_similarity, 3),
         "source_totals": source_totals,
+        "configured_sources": source_sites,
         "submissions": entries,
     }
 
@@ -3211,6 +4414,22 @@ def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
         if _job_is_accessible(normalized, current_user):
             jobs_by_id[job_id] = normalized
 
+    # DB-backed listing (D) – pick up jobs persisted via ORM even without local report dir
+    try:
+        with SessionLocal() as db:
+            tenant_id = current_user.get("tenant_id") if current_user else None
+            q = db.query(Job)
+            if tenant_id:
+                q = q.filter(Job.tenant_id == tenant_id)
+            db_jobs = q.order_by(Job.created_at.desc()).limit(200).all()
+            for db_job in db_jobs:
+                if db_job.id not in jobs_by_id:
+                    loaded = _get_job(db_job.id)  # will hit _load_job_from_db
+                    if loaded and _job_is_accessible(loaded, current_user):
+                        jobs_by_id[db_job.id] = loaded
+    except Exception:
+        logger.warning("DB job listing fallback failed")
+
     return sorted(
         jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True
     )
@@ -3218,12 +4437,16 @@ def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 @app.get("/api/auth/status")
 async def auth_status():
-    with SessionLocal() as db:
-        user_count = int(db.scalar(select(func.count()).select_from(User)) or 0)
+    user_count = await run_in_threadpool(_get_user_count)
     _ensure_auth_secret()
     return JSONResponse(
         content={"bootstrapped": user_count > 0, "user_count": user_count}
     )
+
+
+def _get_user_count():
+    with SessionLocal() as db:
+        return int(db.scalar(select(func.count()).select_from(User)) or 0)
 
 
 @app.post("/api/auth/bootstrap-admin")
@@ -3238,7 +4461,19 @@ async def bootstrap_admin(request: Request):
         raise HTTPException(status_code=400, detail="Email and full name are required")
     _validate_password_input(password)
 
-    with SessionLocal() as db:
+    user_data = await run_in_threadpool(
+        _bootstrap_admin_sync, email, full_name, password, tenant_name
+    )
+    _ensure_auth_secret()
+    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
+    _ensure_auth_secret()
+    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
+
+
+def _bootstrap_admin_sync(email, full_name, password, tenant_name):
+    db = SessionLocal()
+
+    try:
         existing_users = int(db.scalar(select(func.count()).select_from(User)) or 0)
         if existing_users > 0:
             raise HTTPException(
@@ -3258,11 +4493,52 @@ async def bootstrap_admin(request: Request):
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
 
-        response = JSONResponse(content={"user": _serialize_user(user)})
-        _issue_auth_cookie(response, user)
-        return response
+        user_data = _serialize_user(user)
+        return user_data
+
+    finally:
+        db.close()
+
+
+def _login_sync(email, password):
+    db = SessionLocal()
+
+    try:
+        user = (
+            db.query(User)
+            .options(joinedload(User.tenant))
+            .filter(User.email == email)
+            .first()
+        )
+
+        if not user or not _verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Your account is disabled")
+
+        user.last_login_at = datetime.utcnow()
+        db.add(user)
+        db.commit()
+
+        user_data = _serialize_user(user)
+        return user_data
+
+    finally:
+        db.close()
+
+
+def _get_user_for_cookie(email):
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == email))
+        return user
+
+
+def _get_user_by_id(user_id: str):
+    """Get a user by their ID for cookie operations."""
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.id == user_id))
+        return user
 
 
 @app.post("/api/auth/login")
@@ -3275,21 +4551,12 @@ async def login(request: Request):
         raise HTTPException(status_code=400, detail="Email and password are required")
     _validate_password_input(password)
 
-    with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.email == email))
-        if not user or not _verify_password(password, user.password_hash):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        if not user.is_active:
-            raise HTTPException(status_code=403, detail="Your account is disabled")
-
-        user.last_login_at = datetime.utcnow()
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        response = JSONResponse(content={"user": _serialize_user(user)})
-        _issue_auth_cookie(response, user)
-        return response
+    user_data = await run_in_threadpool(_login_sync, email, password)
+    # Need to fetch user again for cookie issuance since we now return serialized data
+    user = await run_in_threadpool(_get_user_for_cookie, email)
+    response = JSONResponse(content={"user": user_data})
+    _issue_auth_cookie(response, user)
+    return response
 
 
 @app.post("/api/auth/logout")
@@ -3304,11 +4571,27 @@ async def auth_me(request: Request):
     return JSONResponse(content={"user": _require_current_user(request)})
 
 
+@app.post("/api/auth/refresh")
+async def refresh_session(request: Request):
+    """Refresh the session by extending the cookie expiration."""
+    user = _authenticate_request(request)
+    user_obj = await run_in_threadpool(_get_user_by_id, user["id"])
+    if not user_obj:
+        raise HTTPException(status_code=401, detail="User not found")
+    response = JSONResponse(content={"user": user})
+    _issue_auth_cookie(response, user_obj)
+    return response
+
+
 @app.get("/api/admin/users")
 async def list_users(request: Request):
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
-        users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+        users = db.scalars(
+            select(User)
+            .options(joinedload(User.tenant))
+            .order_by(User.created_at.desc())
+        ).all()
         return JSONResponse(
             content={"users": [_serialize_user(user) for user in users]}
         )
@@ -3350,14 +4633,152 @@ async def create_user(request: Request):
         )
         db.add(user)
         db.commit()
-        db.refresh(user)
+        # Refresh with tenant loaded
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
 
         return JSONResponse(
             status_code=201,
             content={
-                "user": _serialize_user(user),
+                "user": _serialize_user(user),  # Still works since we're in session
                 "created_by": current_user["email"],
             },
+        )
+
+
+# ============================================================
+# Admin - Course Instructor Management (new many-to-many)
+# ============================================================
+
+
+@app.get("/api/admin/courses-with-instructors")
+async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any]:
+    """Admin view: all courses with their assigned instructors."""
+    current_user = _require_current_user(request, admin_only=True)
+
+    try:
+        with SessionLocal() as db:
+            courses = (
+                db.query(Course)
+                .options(joinedload(Course.organization))
+                .order_by(Course.name)
+                .all()
+            )
+
+            result = []
+            for course in courses:
+                instructors = (
+                    db.query(User)
+                    .join(CourseInstructor)
+                    .filter(CourseInstructor.course_id == course.id)
+                    .all()
+                )
+
+                result.append(
+                    {
+                        "id": course.id,
+                        "name": course.name,
+                        "code": course.code,
+                        "organization_id": course.organization_id,
+                        "organization_name": (
+                            course.organization.name if course.organization else None
+                        ),
+                        "instructors": [
+                            {
+                                "id": u.id,
+                                "email": u.email,
+                                "full_name": u.full_name,
+                                "role": u.role,
+                            }
+                            for u in instructors
+                        ],
+                    }
+                )
+
+            return {"courses": result}
+    except Exception:
+        logger.exception("Failed to load courses with instructors for admin")
+        return {"courses": []}
+
+
+@app.post("/api/admin/course-instructors")
+async def admin_assign_instructor_to_course(request: Request):
+    """Assign a user as instructor to a course."""
+    current_user = _require_current_user(request, admin_only=True)
+    data = await request.json()
+
+    course_id = data.get("course_id")
+    user_id = data.get("user_id")
+    role = data.get("role", "instructor")
+
+    if not course_id or not user_id:
+        return JSONResponse(
+            status_code=400, content={"error": "course_id and user_id are required"}
+        )
+
+    try:
+        with SessionLocal() as db:
+            # Check if already exists
+            existing = (
+                db.query(CourseInstructor)
+                .filter(
+                    CourseInstructor.course_id == course_id,
+                    CourseInstructor.user_id == user_id,
+                )
+                .first()
+            )
+
+            if existing:
+                existing.role = role
+                db.commit()
+                return {"success": True, "message": "Role updated"}
+
+            assignment = CourseInstructor(
+                course_id=course_id, user_id=user_id, role=role
+            )
+            db.add(assignment)
+            db.commit()
+
+            return {"success": True, "message": "Instructor assigned"}
+    except Exception:
+        logger.exception("Failed to assign instructor")
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to assign instructor"}
+        )
+
+
+@app.delete("/api/admin/course-instructors")
+async def admin_remove_instructor_from_course(request: Request):
+    """Remove an instructor assignment from a course."""
+    current_user = _require_current_user(request, admin_only=True)
+    data = await request.json()
+
+    course_id = data.get("course_id")
+    user_id = data.get("user_id")
+
+    if not course_id or not user_id:
+        return JSONResponse(
+            status_code=400, content={"error": "course_id and user_id are required"}
+        )
+
+    try:
+        with SessionLocal() as db:
+            deleted = (
+                db.query(CourseInstructor)
+                .filter(
+                    CourseInstructor.course_id == course_id,
+                    CourseInstructor.user_id == user_id,
+                )
+                .delete()
+            )
+            db.commit()
+
+            return {"success": True, "removed": deleted > 0}
+    except Exception:
+        logger.exception("Failed to remove instructor")
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to remove instructor"}
         )
 
 
@@ -4349,37 +5770,45 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 async def upload_files(
     request: Request,
     files: List[UploadFile] = File(...),
-    starter_file: UploadFile = File(None),
+    starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_id: Optional[str] = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
+    source_scan_enabled: bool = Form(default=True),
 ):
-    current_user = _require_current_user(request)
+    # Allow unauthenticated uploads for plagiarism checker
+    current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
-    starter_file_path = None
-
-    # Handle starter file if provided
-    if starter_file and starter_file.filename:
-        if _is_code_file(starter_file.filename):
-            starter_target = job_dir / f"starter_{starter_file.filename}"
-            starter_content = await starter_file.read()
-            starter_target.write_bytes(starter_content)
-            starter_file_path = str(starter_target)
-            logger.info(f"Saved starter file: {starter_file_path}")
-
     for f in files:
         if f.filename and _is_code_file(f.filename):
-            target = job_dir / f.filename
+            safe_name = PathLib(f.filename).name
+            target = _unique_child_path(job_dir, PathLib(safe_name))
+            target.parent.mkdir(parents=True, exist_ok=True)
             content = await f.read()
             target.write_bytes(content)
-            saved_files.append(f.filename)
+            saved_files.append(str(target.relative_to(job_dir)))
+
+    starter_dir = job_dir / "starter"
+    starter_sources = []
+    if starter_files:
+        starter_dir.mkdir(exist_ok=True)
+        for f in starter_files:
+            if f.filename and _is_code_file(f.filename):
+                safe_name = PathLib(f.filename).name
+                target = _unique_child_path(starter_dir, PathLib(safe_name))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                content = await f.read()
+                target.write_bytes(content)
+                starter_sources.append(content.decode("utf-8", errors="ignore"))
 
     if len(saved_files) < 2:
         return JSONResponse(
@@ -4391,11 +5820,13 @@ async def upload_files(
         job_dir,
         course_name,
         assignment_name,
+        assignment_id,
         assignment_mode,
         threshold,
         current_user,
         engine_keys,
         tool_ids,
+        starter_sources,
     )
 
 
@@ -4403,20 +5834,25 @@ async def upload_files(
 async def upload_zip(
     request: Request,
     file: UploadFile = File(...),
+    starter_files: Optional[List[UploadFile]] = File(default=None),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_id: Optional[str] = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
+    source_scan_enabled: bool = Form(default=True),
 ):
-    current_user = _require_current_user(request)
+    # Allow unauthenticated uploads for plagiarism checker
+    current_user = getattr(request.state, "user", None)
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(
             status_code=400, content={"error": "Please upload a .zip file"}
         )
 
     job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -4431,16 +5867,105 @@ async def upload_zip(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
 
+    starter_dir = job_dir / "starter"
+    starter_sources = []
+    if starter_files:
+        starter_dir.mkdir(exist_ok=True)
+        for f in starter_files:
+            if f.filename and _is_code_file(f.filename):
+                safe_name = PathLib(f.filename).name
+                target = _unique_child_path(starter_dir, PathLib(safe_name))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                content = await f.read()
+                target.write_bytes(content)
+                starter_sources.append(content.decode("utf-8", errors="ignore"))
+
     return await _run_analysis(
         job_id,
         job_dir,
         course_name,
         assignment_name,
+        assignment_id,
         assignment_mode,
         threshold,
         current_user,
         engine_keys,
         tool_ids,
+        starter_sources,
+    )
+
+
+@app.post("/api/ai-detect")
+async def detect_ai_generated_code(
+    request: Request,
+    files: Optional[List[UploadFile]] = File(default=None),
+    file: Optional[UploadFile] = File(default=None),
+    course_name: str = Form(default=""),
+    assignment_name: str = Form(default=""),
+):
+    """Run AI-generated code detection for one or more uploaded submissions.
+
+    Accessible to both authenticated users and guests.
+    """
+    current_user = getattr(request.state, "user", None)
+    job_id = str(uuid.uuid4())[:8]
+    job_dir = UPLOADS_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    uploads = list(files or [])
+    if file is not None:
+        uploads.append(file)
+
+    for upload in uploads:
+        if not upload.filename:
+            continue
+        filename = PathLib(upload.filename).name
+        content = await upload.read()
+        target = job_dir / filename
+        target.write_bytes(content)
+        if filename.lower().endswith(".zip"):
+            _extract_zip(target, job_dir)
+
+    submissions = _read_files_from_dir(job_dir)
+    if not submissions:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Upload at least one valid code file or ZIP archive."},
+        )
+
+    ai_detection = _build_ai_detection_summary(submissions)
+    _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
+    _jobs[job_id] = {
+        "id": job_id,
+        "job_type": "ai_detector",
+        "course_name": course_name or "AI Detector",
+        "assignment_name": assignment_name or "AI Generated Code Review",
+        "status": "completed",
+        "created_at": datetime.now().isoformat(),
+        "file_count": len(submissions),
+        "results": [],
+        "summary": {
+            "total_files": len(submissions),
+            "flagged_files": ai_detection.get("flagged_count", 0),
+            "highest_ai_probability": ai_detection.get("highest_score", 0.0),
+            "average_ai_probability": ai_detection.get("average_score", 0.0),
+        },
+        "review_status": "unreviewed",
+        "review_notes": "",
+        "review_updated_at": None,
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "owner_user_email": current_user.get("email") if current_user else None,
+        "selected_tool_ids": ["ai_detector"],
+        "selected_tools": ["AI Detector"],
+        "ai_detection": ai_detection,
+        # Store first 4 KB of each file for the report code preview
+        "submissions": {k: v[:4096] for k, v in submissions.items()},
+    }
+    _persist_job(job_id)
+    return JSONResponse(
+        content={"job_id": job_id, "status": "completed", "ai_detection": ai_detection}
     )
 
 
@@ -4449,16 +5974,42 @@ async def _run_analysis(
     job_dir,
     course_name,
     assignment_name,
-    assignment_mode,
-    threshold,
-    current_user: Dict[str, Any],
+    assignment_id: Optional[str] = None,
+    assignment_mode: str = "",
+    threshold: float = 0.5,
+    current_user: Dict[str, Any] = None,
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
-    starter_file_path: str = None,
+    starter_sources: List[str] = None,
 ):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
 
     mode = get_assignment_mode(assignment_mode)
+
+    # Resolve authoritative course/assignment names from DB when assignment_id is provided.
+    # This wires the new Organization → Course → Assignment hierarchy into the upload flow
+    # (DB link takes precedence even if free-text fields were left blank).
+    if assignment_id:
+        try:
+            with SessionLocal() as db:
+                assignment = (
+                    db.query(Assignment)
+                    .options(joinedload(Assignment.course))
+                    .filter(Assignment.id == assignment_id)
+                    .first()
+                )
+                if assignment:
+                    if getattr(assignment, "name", None):
+                        assignment_name = assignment.name
+                    if getattr(assignment, "course", None) and getattr(
+                        assignment.course, "name", None
+                    ):
+                        course_name = assignment.course.name
+        except Exception:
+            logger.warning(
+                f"Failed to resolve assignment_id={assignment_id} for name lookup"
+            )
+
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
         requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
@@ -4472,36 +6023,20 @@ async def _run_analysis(
         engine_weights = dict(mode.weights)
     else:
         engine_weights = _get_upload_engine_weights(
-            current_user.get("tenant_id"), [str(key) for key in requested_engine_keys]
+            current_user.get("tenant_id") if current_user else None,
+            [str(key) for key in requested_engine_keys],
         )
     selected_engine_keys = [
         key for key, value in engine_weights.items() if _coerce_float(value) > 0
     ]
     fusion_weights = _build_fusion_weights(engine_weights)
 
-    # === Wiring: resolve/create Assignment from names (new normalized schema) ===
-    assignment_id = None
-    tenant_id = current_user.get("tenant_id")
-    if tenant_id and (course_name or assignment_name):
-        try:
-            with SessionLocal() as db:
-                assignment = AcademicService.get_or_create_assignment(
-                    db,
-                    str(tenant_id),
-                    course_name or "",
-                    assignment_name or "",
-                    assignment_mode,
-                )
-                assignment_id = str(assignment.id) if assignment else None
-        except Exception as e:
-            logger.warning(f"Failed to resolve/create Assignment for upload: {e}")
-
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id,
         "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
-        "assignment_id": assignment_id,  # NEW - linked to normalized Assignment
+        "assignment_id": assignment_id,
         "assignment_mode": mode.mode_id,
         "assignment_mode_name": mode.name,
         "assignment_mode_version": mode.version,
@@ -4512,6 +6047,7 @@ async def _run_analysis(
             "calibration": mode.calibration,
         },
         "threshold": threshold,
+        "starter_sources": starter_sources or [],
         "status": "processing",
         "created_at": datetime.now().isoformat(),
         "file_count": 0,
@@ -4520,9 +6056,9 @@ async def _run_analysis(
         "review_status": "unreviewed",
         "review_notes": "",
         "review_updated_at": None,
-        "tenant_id": current_user.get("tenant_id"),
-        "owner_user_id": current_user.get("id"),
-        "owner_user_email": current_user.get("email"),
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": selected_tool_ids,
         "selected_tools": [
             BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
@@ -4554,6 +6090,55 @@ async def _run_analysis(
         _jobs[job_id]["file_count"] = len(submissions)
         _jobs[job_id]["status"] = "analyzing"
         _persist_job(job_id)
+        _update_job_status_in_db(job_id, "analyzing")
+
+        # Minimal DB wiring for upload flow — persist Job + Submission rows
+        # (non-fatal; file-based storage remains primary for now)
+        try:
+            with SessionLocal() as db:
+                if not db.query(Job).filter(Job.id == job_id).first():
+                    tenant_id = _jobs[job_id].get("tenant_id")
+                    if not tenant_id:
+                        # Fallback for public/demo uploads (no logged-in user):
+                        # attribute the job to the first existing tenant so the new
+                        # hierarchy (assignment_id) and results pages can see the data.
+                        fallback = db.query(Tenant).first()
+                        if fallback:
+                            tenant_id = fallback.id
+                            _jobs[job_id]["tenant_id"] = tenant_id
+
+                    if tenant_id:
+                        db_job = Job(
+                            id=job_id,
+                            tenant_id=tenant_id,
+                            assignment_id=_jobs[job_id].get("assignment_id"),
+                            name=_jobs[job_id].get("assignment_name")
+                            or f"Upload {job_id}",
+                            status=_jobs[job_id].get("status", "analyzing"),
+                            threshold=_jobs[job_id].get("threshold", 0.5),
+                            created_at=datetime.now(),
+                            file_count=len(submissions),
+                        )
+                        db.add(db_job)
+                        for sub_name in list(submissions.keys())[:100]:
+                            db.add(
+                                Submission(
+                                    id=str(uuid.uuid4()),
+                                    job_id=job_id,
+                                    name=sub_name,
+                                    file_count=1,
+                                    created_at=datetime.now(),
+                                )
+                            )
+                        db.commit()
+                    else:
+                        logger.warning(
+                            f"DB persist skipped for job {job_id} - no tenant available"
+                        )
+        except Exception:
+            logger.warning(
+                f"DB persist skipped for job {job_id} (file storage still used)"
+            )
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -4562,7 +6147,9 @@ async def _run_analysis(
 
         if "integritydesk" in selected_tool_ids:
             service = BatchDetectionService(
-                threshold=threshold, weights=fusion_weights or None
+                threshold=threshold,
+                weights=fusion_weights or None,
+                starter_sources=starter_sources,
             )
             results = service.compare_all_pairs(submissions)
             _merge_external_features_into_results(results, external_tool_results)
@@ -4577,7 +6164,28 @@ async def _run_analysis(
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
         ai_detection = _build_ai_detection_summary(submissions)
-        web_analysis = _build_web_analysis_summary(submissions)
+        settings_payload = _build_settings_payload(
+            current_user.get("tenant_id") if current_user else None
+        )
+
+        # Per-assignment override for external source scanning (uses existing Assignment.settings JSONB)
+        assignment_id = _jobs[job_id].get("assignment_id")
+        if assignment_id:
+            try:
+                with SessionLocal() as db:
+                    ass = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+                    if ass and ass.settings:
+                        for key in ("source_scan_enabled", "source_scan_sites"):
+                            if key in ass.settings:
+                                settings_payload[key] = ass.settings[key]
+            except Exception:
+                logger.warning("Failed to load per-assignment external scan settings override")
+
+        # Per-submission override from upload form (highest priority)
+        if job_id in _jobs and "source_scan_enabled_override" in _jobs[job_id]:
+            settings_payload["source_scan_enabled"] = _jobs[job_id]["source_scan_enabled_override"]
+
+        web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
         reproducibility_report = _build_reproducibility_report(
@@ -4628,6 +6236,11 @@ async def _run_analysis(
                 "risk_level": r.risk_level,
                 "engine_scores": r.features,
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
+                "code_a": submissions.get(r.file_a, ""),
+                "code_b": submissions.get(r.file_b, ""),
+                "external_evidence": _external_evidence_for_pair(
+                    r.file_a, r.file_b, external_tool_results
+                ),
             }
             for r in results
         ]
@@ -4706,6 +6319,48 @@ async def _run_analysis(
             }
         )
         _persist_job(job_id)
+        _update_job_status_in_db(job_id, "completed")
+
+        # Persist SimilarityResult rows to DB (minimal wiring for results/[id] page)
+        try:
+            with SessionLocal() as db:
+                for r in results:
+                    external_ev = _external_evidence_for_pair(
+                        r.file_a, r.file_b, external_tool_results
+                    )
+                    mb = getattr(r, "matching_blocks", None) or getattr(
+                        r, "features", {}
+                    ).get("matching_blocks", [])
+                    conf = getattr(r, "confidence", None) or getattr(
+                        r, "confidence_level", None
+                    )
+
+                    db.add(
+                        SimilarityResult(
+                            id=str(uuid.uuid4()),
+                            job_id=job_id,
+                            submission_a_id=r.file_a,
+                            submission_b_id=r.file_b,
+                            similarity_score=r.score,
+                            confidence_level=conf,
+                            confidence_lower=getattr(r, "confidence_lower", None),
+                            confidence_upper=getattr(r, "confidence_upper", None),
+                            matching_blocks=mb if isinstance(mb, (list, dict)) else [],
+                            excluded_matches=getattr(r, "excluded_matches", None) or {},
+                            algorithm_scores={
+                                **dict(getattr(r, "features", {})),
+                                "external_evidence": external_ev or {},
+                                "contributions": dict(getattr(r, "contributions", {})),
+                            },
+                            created_at=datetime.now(),
+                        )
+                    )
+                db.commit()
+        except Exception:
+            logger.exception(
+                f"DB results persist skipped for job {job_id}"
+            )  # shows full traceback in logs
+
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
@@ -4713,6 +6368,7 @@ async def _run_analysis(
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(e)
             _persist_job(job_id)
+            _update_job_status_in_db(job_id, "failed", str(e))
         return JSONResponse(
             status_code=500, content={"error": f"Analysis failed: {str(e)}"}
         )
@@ -4739,7 +6395,11 @@ async def update_job_review(job_id: str, request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid review payload")
 
-    if "review_status" not in payload and "review_notes" not in payload:
+    if (
+        "review_status" not in payload
+        and "review_notes" not in payload
+        and "pair_reviews" not in payload
+    ):
         raise HTTPException(status_code=400, detail="No review updates provided")
 
     if "review_status" in payload:
@@ -4753,6 +6413,62 @@ async def update_job_review(job_id: str, request: Request):
         if not isinstance(review_notes, str):
             raise HTTPException(status_code=400, detail="Review notes must be a string")
         job["review_notes"] = review_notes.strip()
+
+    # Per-pair review persistence to database (SimilarityResult rows)
+    if "pair_reviews" in payload and isinstance(payload.get("pair_reviews"), dict):
+        try:
+            with SessionLocal() as db:
+                for pair_key, review_data in payload["pair_reviews"].items():
+                    if not isinstance(review_data, dict):
+                        continue
+                    parts = (
+                        str(pair_key).split("::")
+                        if "::" in str(pair_key)
+                        else str(pair_key).split(":")
+                    )
+                    if len(parts) >= 2:
+                        a_id, b_id = parts[0], parts[1]
+                        sim = (
+                            db.query(SimilarityResult)
+                            .filter(
+                                SimilarityResult.job_id == job_id,
+                                SimilarityResult.submission_a_id == a_id,
+                                SimilarityResult.submission_b_id == b_id,
+                            )
+                            .first()
+                        )
+                        if sim:
+                            if (
+                                "status" in review_data
+                                or "review_status" in review_data
+                            ):
+                                sim.review_status = review_data.get(
+                                    "status"
+                                ) or review_data.get("review_status")
+                            if "notes" in review_data or "review_notes" in review_data:
+                                sim.review_notes = (
+                                    review_data.get("notes")
+                                    or review_data.get("review_notes")
+                                    or ""
+                                ).strip() or None
+                db.commit()
+        except Exception:
+            logger.warning(f"Failed to persist per-pair reviews for job {job_id}")
+
+    # Also reflect in in-memory results if present
+    if (
+        "results" in job
+        and isinstance(job["results"], list)
+        and "pair_reviews" in payload
+    ):
+        for r in job["results"]:
+            k = f"{r.get('file_a')}::{r.get('file_b')}"
+            if k in payload["pair_reviews"]:
+                rd = payload["pair_reviews"][k]
+                if "status" in rd or "review_status" in rd:
+                    r["review_status"] = rd.get("status") or rd.get("review_status")
+                if "notes" in rd or "review_notes" in rd:
+                    r["review_notes"] = rd.get("notes") or rd.get("review_notes")
 
     job["review_updated_at"] = datetime.now().isoformat()
     _jobs[job_id] = job
@@ -4790,6 +6506,402 @@ async def get_benchmark_tools():
     for tool in tools:
         tool["available"] = tool.get("runnable", False)
     return JSONResponse(content={"tools": tools})
+
+
+@app.post("/api/benchmark/real-fpr")
+async def compute_real_fpr_on_clean_corpus(
+    files: List[UploadFile] = File(...),
+):
+    """
+    Compute real False Positive Rate on a set of known-clean submissions.
+    Used for professor-release validation of the plagiarism checker.
+    """
+    if len(files) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="At least 2 submissions are required to compute FPR.",
+        )
+
+    submissions: Dict[str, str] = {}
+    for upload in files:
+        try:
+            content = (await upload.read()).decode("utf-8", errors="ignore")
+            if len(content.strip()) > 30:
+                submissions[upload.filename] = content
+        except Exception:
+            continue
+
+    if len(submissions) < 2:
+        raise HTTPException(
+            status_code=400, detail="Could not load enough valid submissions."
+        )
+
+    try:
+        # Use very low threshold to capture full distribution
+        service = BatchDetectionService(threshold=0.0)
+        pair_results = service.compare_all_pairs(submissions)
+
+        scores = [float(r.score) for r in pair_results]
+        num_pairs = len(scores)
+        num_submissions = len(submissions)
+    except Exception as e:
+        logger.exception("Real FPR computation failed")
+        raise HTTPException(
+            status_code=500, detail=f"Internal error during FPR computation: {str(e)}"
+        ) from e
+
+    # Very fine-grained thresholds focused on the critical professor decision zone
+    # Extra density between 0.65 – 0.78 (most common range where professors tune)
+    thresholds_to_evaluate = [
+        0.40,
+        0.45,
+        0.50,
+        0.52,
+        0.55,
+        0.58,
+        0.60,
+        0.62,
+        0.64,
+        0.65,
+        0.66,
+        0.67,
+        0.68,
+        0.69,
+        0.70,
+        0.71,
+        0.72,
+        0.73,
+        0.74,
+        0.75,
+        0.76,
+        0.77,
+        0.78,
+        0.80,
+        0.82,
+        0.85,
+        0.88,
+        0.90,
+        0.95,
+    ]
+
+    fpr_table = []
+    for t in thresholds_to_evaluate:
+        above = sum(1 for s in scores if s >= t)
+        fpr = above / num_pairs if num_pairs > 0 else 0.0
+
+        if fpr <= 0.015:
+            label = "Excellent – very safe"
+        elif fpr <= 0.03:
+            label = "Good – comfortable for most courses"
+        elif fpr <= 0.05:
+            label = "Acceptable – use with evidence review"
+        elif fpr <= 0.08:
+            label = "Borderline – caution recommended"
+        else:
+            label = "High risk – too many false positives"
+
+        fpr_table.append(
+            {
+                "threshold": round(t, 2),
+                "fpr": round(fpr, 4),
+                "fpr_percent": round(fpr * 100, 2),
+                "label": label,
+                "flagged_pairs": above,
+            }
+        )
+
+    # === Sophisticated Multi-Factor Recommendation Logic ===
+    # Find the most conservative "very safe" threshold (FPR ≤ 1.5%)
+    very_safe = next((row for row in fpr_table if row["fpr"] <= 0.015), None)
+    # Find the best balanced threshold (FPR ≤ 3%)
+    balanced = next((row for row in fpr_table if row["fpr"] <= 0.03), None)
+    # Find the highest recall threshold that is still acceptable (FPR ≤ 5%)
+    high_recall = next((row for row in fpr_table if row["fpr"] <= 0.05), None)
+
+    # Context from the clean corpus
+    mean_clean = sum(scores) / len(scores) if scores else 0
+    max_clean = max(scores) if scores else 0
+
+    recommendations = []
+
+    if very_safe:
+        recommendations.append(
+            {
+                "threshold": very_safe["threshold"],
+                "fpr": very_safe["fpr_percent"],
+                "type": "very_safe",
+                "title": "Maximum Safety",
+                "advice": f"At {very_safe['threshold']*100:.0f}% the FPR on your clean data is only {very_safe['fpr_percent']:.1f}%. This is the most conservative setting and minimizes risk of false accusations.",
+            }
+        )
+
+    if balanced:
+        recommendations.append(
+            {
+                "threshold": balanced["threshold"],
+                "fpr": balanced["fpr_percent"],
+                "type": "balanced",
+                "title": "Recommended Default",
+                "advice": f"At {balanced['threshold']*100:.0f}% you get a good balance (FPR ≈ {balanced['fpr_percent']:.1f}%). Strong choice for most undergraduate courses.",
+            }
+        )
+
+    if high_recall:
+        recommendations.append(
+            {
+                "threshold": high_recall["threshold"],
+                "fpr": high_recall["fpr_percent"],
+                "type": "high_recall",
+                "title": "Higher Detection (with review)",
+                "advice": f"At {high_recall['threshold']*100:.0f}% you catch more cases (FPR ≈ {high_recall['fpr_percent']:.1f}%). Best used when every flagged pair is manually reviewed.",
+            }
+        )
+
+    # Overall assessment
+    if mean_clean > 0.25:
+        overall_risk = "Your clean corpus shows unusually high baseline similarity. Consider stronger starter-code / template filtering."
+    elif max_clean > 0.65:
+        overall_risk = "Some very similar clean pairs exist. Review the highest-scoring clean pairs to understand why."
+    else:
+        overall_risk = "Your clean data looks healthy. The system behaves as expected on non-plagiarized work."
+
+    # Actionable suggestions
+    suggested_actions = []
+    if not very_safe or very_safe["fpr"] > 0.02:
+        suggested_actions.append(
+            "Raise the default decision threshold by 5–8 percentage points."
+        )
+    if mean_clean > 0.20:
+        suggested_actions.append(
+            "Enable or improve starter-code / boilerplate suppression."
+        )
+    if max_clean > 0.70:
+        suggested_actions.append(
+            "Manually review the top 5–10 clean pairs with the highest scores."
+        )
+    if not suggested_actions:
+        suggested_actions.append(
+            "Current settings appear well calibrated for your student population."
+        )
+
+    # Legacy single recommendation string (for backward compatibility)
+    best = balanced or very_safe or fpr_table[-1]
+    recommendation = (
+        f"Recommended starting threshold: {best['threshold']*100:.0f}% "
+        f"(FPR on your clean data ≈ {best['fpr_percent']:.1f}%). "
+        f"{overall_risk}"
+    )
+
+    # Basic histogram (10 bins)
+    bins = [0] * 10
+    for s in scores:
+        idx = min(int(s * 10), 9)
+        bins[idx] += 1
+
+    histogram = [
+        {"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)
+    ]
+
+    return JSONResponse(
+        content={
+            "num_submissions": num_submissions,
+            "num_pairs": num_pairs,
+            "fpr_table": fpr_table,
+            "score_histogram": histogram,
+            "recommendation": recommendation,  # legacy string
+            "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
+            "max_score": round(max(scores), 4) if scores else 0,
+            # New structured data for better frontend experience
+            "recommendations": recommendations,
+            "overall_assessment": overall_risk,
+            "suggested_actions": suggested_actions,
+        }
+    )
+
+
+class FprValidationRunCreate(BaseModel):
+    """Request body for saving an FPR validation run (internal tool endpoint)."""
+
+    name: Optional[str] = None
+    result: Dict[str, Any]
+    notes: Optional[str] = None
+
+
+# ============================================================
+# FPR Validation Runs History (Database-backed)
+# ============================================================
+
+
+@app.post("/api/fpr-validation-runs")
+async def save_fpr_validation_run(
+    request: Request,
+    payload: FprValidationRunCreate,
+):
+    """Save a completed FPR validation run to the database."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+        user_id = current_user.get("id")
+
+        if not tenant_id:
+            raise HTTPException(
+                status_code=400, detail="No tenant associated with user"
+            )
+
+        name = (
+            payload.name
+            or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        )
+        result_data = payload.result
+
+        run = FprValidationRun(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            payload=result_data,
+            num_submissions=result_data.get("num_submissions"),
+            num_pairs=result_data.get("num_pairs"),
+            mean_score=result_data.get("mean_score"),
+            max_score=result_data.get("max_score"),
+            recommended_threshold=result_data.get("recommended_threshold"),
+            fpr_at_recommended_threshold=result_data.get(
+                "fpr_at_recommended_threshold"
+            ),
+            notes=payload.notes,
+            status="completed",
+        )
+
+        with SessionLocal() as db:
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+        return {"id": run.id, "name": run.name, "created_at": run.created_at}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to save FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/fpr-validation-runs")
+async def list_fpr_validation_runs(
+    request: Request,
+    limit: int = 50,
+):
+    """List historical FPR validation runs for the current tenant."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            runs = (
+                db.query(FprValidationRun)
+                .filter(FprValidationRun.tenant_id == tenant_id)
+                .order_by(FprValidationRun.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+            return {
+                "runs": [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "created_at": r.created_at,
+                        "num_submissions": r.num_submissions,
+                        "num_pairs": r.num_pairs,
+                        "recommended_threshold": r.recommended_threshold,
+                        "fpr_at_recommended_threshold": r.fpr_at_recommended_threshold,
+                        "is_certified": r.is_certified,
+                        "status": r.status,
+                    }
+                    for r in runs
+                ]
+            }
+
+    except Exception as e:
+        logger.exception("Failed to list FPR validation runs")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/fpr-validation-runs/{run_id}")
+async def get_fpr_validation_run(run_id: str, request: Request):
+    """Retrieve a single saved FPR validation run."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            run = (
+                db.query(FprValidationRun)
+                .filter(
+                    FprValidationRun.id == run_id,
+                    FprValidationRun.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not run:
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
+
+            return {
+                "id": run.id,
+                "name": run.name,
+                "created_at": run.created_at,
+                "notes": run.notes,
+                "is_certified": run.is_certified,
+                "certified_at": run.certified_at,
+                "result": run.payload,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/fpr-validation-runs/{run_id}")
+async def delete_fpr_validation_run(run_id: str, request: Request):
+    """Delete a saved FPR validation run."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            run = (
+                db.query(FprValidationRun)
+                .filter(
+                    FprValidationRun.id == run_id,
+                    FprValidationRun.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not run:
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
+
+            db.delete(run)
+            db.commit()
+
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# End of FPR Validation Runs History
+# ============================================================
 
 
 BENCHMARK_DATASETS = []
@@ -4990,6 +7102,43 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
     history = [item for item in history if item.get("job_id") != summary["job_id"]]
     history.insert(0, summary)
     _write_benchmark_history(history)
+
+    # Wire benchmark run metadata to DB (so benchmark/page.tsx + Admin can list/reload from DB)
+    try:
+        with SessionLocal() as db:
+            job_id = summary.get("job_id")
+            if job_id:
+                db_job = db.query(Job).filter(Job.id == job_id).first()
+                benchmark_settings = {
+                    "type": "benchmark",
+                    "dataset": summary.get("dataset"),
+                    "tools": summary.get("tools"),
+                    "summary": summary,
+                }
+                if not db_job:
+                    run_at = summary.get("run_at")
+                    try:
+                        created_at = (
+                            datetime.fromisoformat(run_at) if run_at else datetime.now()
+                        )
+                    except Exception:
+                        created_at = datetime.now()
+
+                    db_job = Job(
+                        id=job_id,
+                        name=f"Benchmark: {summary.get('dataset', 'unknown')}",
+                        status="completed",
+                        settings=benchmark_settings,
+                        created_at=created_at,
+                    )
+                    db.add(db_job)
+                else:
+                    db_job.settings = {**(db_job.settings or {}), **benchmark_settings}
+                    db_job.status = "completed"
+                db.commit()
+    except Exception:
+        logger.warning(f"Failed to persist benchmark run {summary.get('job_id')} to DB")
+
     return response
 
 
@@ -5001,11 +7150,7 @@ async def get_benchmark_presets() -> Dict[str, Any]:
         for tool in _list_benchmark_tools()
         if tool["id"] in REAL_BENCHMARK_TOOL_IDS
     }
-    datasets = (
-        {item.name for item in BENCHMARK_DATA_DIR.iterdir()}
-        if BENCHMARK_DATA_DIR.exists()
-        else set()
-    )
+    datasets = {item.name for item in _iter_benchmark_dataset_roots()}
     datasets.update(
         dataset_id
         for dataset_id in BUILTIN_PAIR_DATASET_IDS
@@ -5041,9 +7186,743 @@ async def get_benchmark_presets() -> Dict[str, Any]:
 
 @app.get("/api/benchmark-history")
 async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
-    """Return recent benchmark run summaries."""
+    """Return recent benchmark run summaries (file + DB for native persistence)."""
     safe_limit = max(1, min(100, int(limit)))
-    return {"runs": _read_benchmark_history()[:safe_limit]}
+    runs = _read_benchmark_history()[:safe_limit]
+
+    # DB-backed benchmark runs (so benchmark/page.tsx can list/reload from DB)
+    try:
+        with SessionLocal() as db:
+            db_benchmarks = (
+                db.query(Job)
+                .filter(Job.settings.op("->>")("type") == "benchmark")
+                .order_by(Job.created_at.desc())
+                .limit(safe_limit)
+                .all()
+            )
+            for j in db_benchmarks:
+                s = (j.settings or {}).get("summary") or {}
+                if s and not any(r.get("job_id") == j.id for r in runs):
+                    runs.append(s)
+    except Exception:
+        logger.warning("Failed to load benchmark runs from DB")
+
+    return {"runs": runs[:safe_limit]}
+
+
+@app.get("/api/courses")
+async def get_courses(request: Request) -> Dict[str, Any]:
+    """Return courses visible to the current user.
+
+    A user can see a course if:
+    - They are explicitly assigned as an instructor (via course_instructors), or
+    - They belong to the same organization as the course.
+    """
+    try:
+        try:
+            current_user = _require_current_user(request, admin_only=False)
+            user_id = current_user.get("id")
+            user_org_id = current_user.get("organization_id")
+        except Exception:
+            return {"courses": []}
+
+        with SessionLocal() as db:
+            q = db.query(Course)
+
+            # Build OR condition: direct instructor OR same organization
+            filters = []
+            if user_id:
+                filters.append(
+                    Course.id.in_(
+                        db.query(CourseInstructor.course_id).filter(
+                            CourseInstructor.user_id == user_id
+                        )
+                    )
+                )
+            if user_org_id:
+                filters.append(Course.organization_id == user_org_id)
+
+            if filters:
+                q = q.filter(or_(*filters))
+            else:
+                # No org and no assignments → return nothing
+                return {"courses": []}
+
+            courses = q.order_by(Course.name).all()
+            return {
+                "courses": [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "code": c.code,
+                        "organization_id": c.organization_id,
+                    }
+                    for c in courses
+                ]
+            }
+    except Exception:
+        logger.warning("Failed to fetch courses (instructor + org scoped)")
+        return {"courses": []}
+
+
+@app.get("/api/assignments")
+async def get_assignments(
+    course_id: Optional[str] = None, request: Request = None
+) -> Dict[str, Any]:
+    """Return assignments visible to the current user (instructor + org scoped)."""
+    try:
+        try:
+            current_user = _require_current_user(request, admin_only=False)
+            user_id = current_user.get("id")
+            user_org_id = current_user.get("organization_id")
+        except Exception:
+            return {"assignments": []}
+
+        with SessionLocal() as db:
+            q = db.query(Assignment)
+
+            # Join to Course to apply visibility rules
+            q = q.join(Course)
+
+            filters = []
+            if user_id:
+                filters.append(
+                    Course.id.in_(
+                        db.query(CourseInstructor.course_id).filter(
+                            CourseInstructor.user_id == user_id
+                        )
+                    )
+                )
+            if user_org_id:
+                filters.append(Course.organization_id == user_org_id)
+
+            if filters:
+                q = q.filter(or_(*filters))
+            else:
+                return {"assignments": []}
+
+            if course_id:
+                q = q.filter(Assignment.course_id == course_id)
+
+            assignments = q.order_by(Assignment.name).all()
+            return {
+                "assignments": [
+                    {
+                        "id": a.id,
+                        "name": a.name,
+                        "course_id": a.course_id,
+                        "due_at": a.due_at.isoformat() if a.due_at else None,
+                    }
+                    for a in assignments
+                ]
+            }
+    except Exception:
+        logger.warning("Failed to fetch assignments (instructor + org scoped)")
+        return {"assignments": []}
+
+
+@app.get("/api/error-analysis")
+async def get_error_analysis() -> Dict[str, Any]:
+    """Compute real error analysis from stored benchmark runs and job results.
+
+    Priority:
+    1. Most recent benchmark run with ground-truth labels → full TP/FP/FN/TN + real cases
+    2. All job results → score-distribution analysis with real file names and engine data
+    """
+    # ── 1. Try benchmark runs with ground truth ──────────────────────────
+    benchmark_runs = sorted(
+        BENCHMARK_RUNS_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    labeled_run: Optional[Dict[str, Any]] = None
+    for run_path in benchmark_runs[:10]:  # check last 10 runs
+        try:
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            if run.get("has_ground_truth") and run.get("pair_results"):
+                labeled_run = run
+                break
+        except Exception:
+            continue
+
+    if labeled_run:
+        return _build_error_analysis_from_benchmark(labeled_run)
+
+    # ── 2. Fall back to job results ──────────────────────────────────────
+    return _build_error_analysis_from_jobs()
+
+
+def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Build full error analysis from a benchmark run that has ground-truth labels."""
+    pair_results = run.get("pair_results", [])
+    tool_scores = run.get("tool_scores", {})
+    evaluation = run.get("evaluation", {})
+    dataset_name = run.get("summary", {}).get("dataset_name") or run.get(
+        "dataset", "benchmark"
+    )
+
+    # Determine primary tool (integritydesk preferred)
+    primary_tool = (
+        "integritydesk"
+        if "integritydesk" in tool_scores
+        else (next(iter(tool_scores), None))
+    )
+
+    # Get threshold from evaluation or default
+    threshold = 0.5
+    if primary_tool and evaluation.get(primary_tool):
+        t = evaluation[primary_tool].get("best_threshold") or evaluation[
+            primary_tool
+        ].get("fixed_threshold")
+        if t is not None:
+            threshold = float(t)
+
+    tp = fp = fn = tn = 0
+    false_positive_cases: List[Dict[str, Any]] = []
+    false_negative_cases: List[Dict[str, Any]] = []
+    engine_fp_counts: Dict[str, int] = {}
+    engine_fn_counts: Dict[str, int] = {}
+
+    for pair in pair_results:
+        gt = pair.get("ground_truth_label")
+        if gt is None:
+            continue
+        is_plagiarism = int(gt) >= 2  # PAN convention: label >= 2 means plagiarism
+
+        # Get score for primary tool
+        score = None
+        features: Dict[str, Any] = {}
+        contributions: Dict[str, Any] = {}
+        for tr in pair.get("tool_results", []):
+            if tr.get("tool") == primary_tool:
+                score = float(tr.get("score", 0))
+                features = tr.get("features", {})
+                contributions = tr.get("contributions", {})
+                break
+        if score is None:
+            continue
+
+        predicted = score >= threshold
+
+        if is_plagiarism and predicted:
+            tp += 1
+        elif not is_plagiarism and predicted:
+            fp += 1
+            # Track which engines drove this FP
+            dominant = (
+                max(contributions, key=lambda k: contributions[k], default=None)
+                if contributions
+                else None
+            )
+            if dominant:
+                engine_fp_counts[dominant] = engine_fp_counts.get(dominant, 0) + 1
+            if len(false_positive_cases) < 10:
+                false_positive_cases.append(
+                    _make_error_case(
+                        pair, score, "false_positive", features, contributions
+                    )
+                )
+        elif is_plagiarism and not predicted:
+            fn += 1
+            dominant = (
+                max(contributions, key=lambda k: contributions[k], default=None)
+                if contributions
+                else None
+            )
+            if dominant:
+                engine_fn_counts[dominant] = engine_fn_counts.get(dominant, 0) + 1
+            if len(false_negative_cases) < 10:
+                false_negative_cases.append(
+                    _make_error_case(
+                        pair, score, "false_negative", features, contributions
+                    )
+                )
+        else:
+            tn += 1
+
+    total = tp + fp + fn + tn
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    accuracy = (tp + tn) / max(total, 1)
+
+    # Engine contribution percentages
+    fp_total = sum(engine_fp_counts.values()) or 1
+    fn_total = sum(engine_fn_counts.values()) or 1
+
+    # Pull engine contributions from evaluation if available
+    eval_data = evaluation.get(primary_tool, {})
+    engine_contrib = eval_data.get("engine_contribution", {})
+
+    def _engine_pct_from_counts(
+        counts: Dict[str, int], total_count: int
+    ) -> Dict[str, int]:
+        return {
+            k: round(v / total_count * 100)
+            for k, v in sorted(counts.items(), key=lambda x: -x[1])[:6]
+        }
+
+    fp_engine_pct = (
+        _engine_pct_from_counts(engine_fp_counts, fp_total)
+        if engine_fp_counts
+        else _invert_engine_contrib(engine_contrib)
+    )
+    fn_engine_pct = (
+        _engine_pct_from_counts(engine_fn_counts, fn_total)
+        if engine_fn_counts
+        else engine_contrib
+    )
+
+    return {
+        "source": "benchmark",
+        "dataset": dataset_name,
+        "job_id": run.get("job_id"),
+        "has_ground_truth": True,
+        "threshold": threshold,
+        "summary": {
+            "totalPairs": total,
+            "truePositives": tp,
+            "trueNegatives": tn,
+            "falsePositives": fp,
+            "falseNegatives": fn,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "accuracy": round(accuracy, 4),
+        },
+        "falsePositives": false_positive_cases,
+        "falseNegatives": false_negative_cases,
+        "engineContributions": {
+            "falsePositives": fp_engine_pct,
+            "falseNegatives": fn_engine_pct,
+        },
+        "recommendations": _generate_recommendations(
+            fp, fn, precision, recall, engine_contrib
+        ),
+    }
+
+
+def _build_error_analysis_from_jobs() -> Dict[str, Any]:
+    """Build error analysis from stored plagiarism job results (no ground truth)."""
+    all_results: List[Dict[str, Any]] = []
+    job_count = 0
+
+    for job_path in sorted(
+        REPORTS_DIR.glob("*/job.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )[:50]:
+        try:
+            job = json.loads(job_path.read_text(encoding="utf-8"))
+            if job.get("status") != "done":
+                continue
+            threshold = float(job.get("threshold", 0.5))
+            for r in job.get("results", []):
+                score = float(r.get("score", 0))
+                features = r.get("features", {})
+                all_results.append(
+                    {
+                        "file_a": r.get("file_a", ""),
+                        "file_b": r.get("file_b", ""),
+                        "score": score,
+                        "features": features,
+                        "threshold": threshold,
+                        "flagged": score >= threshold,
+                        "risk_level": r.get("risk_level", ""),
+                    }
+                )
+            job_count += 1
+        except Exception:
+            continue
+
+    if not all_results:
+        return _empty_error_analysis()
+
+    total = len(all_results)
+    flagged = [r for r in all_results if r["flagged"]]
+    not_flagged = [r for r in all_results if not r["flagged"]]
+
+    # Without ground truth we can't compute real TP/FP/FN/TN.
+    # Use heuristics: very high scores (>0.85) are likely true positives,
+    # borderline flagged (0.5-0.65) are likely false positives,
+    # high-feature-but-low-score are likely false negatives.
+    likely_tp = [r for r in flagged if r["score"] >= 0.75]
+    likely_fp = [r for r in flagged if r["score"] < 0.65]
+    likely_fn = _find_likely_false_negatives(not_flagged)
+    likely_tn = [r for r in not_flagged if r not in likely_fn]
+
+    tp = len(likely_tp)
+    fp = len(likely_fp)
+    fn = len(likely_fn)
+    tn = len(likely_tn)
+
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    accuracy = (tp + tn) / max(total, 1)
+
+    # Build real error cases from actual data
+    fp_cases = [
+        _make_job_error_case(r, "false_positive")
+        for r in sorted(likely_fp, key=lambda x: -x["score"])[:10]
+    ]
+    fn_cases = [
+        _make_job_error_case(r, "false_negative")
+        for r in sorted(likely_fn, key=lambda x: x["score"])[:10]
+    ]
+
+    # Engine contribution from features
+    fp_engine = _aggregate_engine_contributions([r["features"] for r in likely_fp])
+    fn_engine = _aggregate_engine_contributions([r["features"] for r in likely_fn])
+
+    return {
+        "source": "jobs",
+        "dataset": f"{job_count} plagiarism check job(s)",
+        "job_id": None,
+        "has_ground_truth": False,
+        "threshold": 0.5,
+        "summary": {
+            "totalPairs": total,
+            "truePositives": tp,
+            "trueNegatives": tn,
+            "falsePositives": fp,
+            "falseNegatives": fn,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "accuracy": round(accuracy, 4),
+        },
+        "falsePositives": fp_cases,
+        "falseNegatives": fn_cases,
+        "engineContributions": {
+            "falsePositives": fp_engine,
+            "falseNegatives": fn_engine,
+        },
+        "recommendations": _generate_recommendations(fp, fn, precision, recall, {}),
+    }
+
+
+def _find_likely_false_negatives(
+    not_flagged: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Identify pairs that were not flagged but show suspicious feature patterns."""
+    candidates = []
+    for r in not_flagged:
+        features = r.get("features", {})
+        if not features:
+            continue
+        # High token/winnowing but low overall score suggests obfuscation
+        token_score = float(
+            features.get("token", features.get("token_similarity", 0)) or 0
+        )
+        winnow_score = float(features.get("winnowing", features.get("winnow", 0)) or 0)
+        ast_score = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+        max_sub = max(token_score, winnow_score, ast_score)
+        if max_sub >= 0.6 and r["score"] < r["threshold"]:
+            candidates.append(r)
+    return candidates
+
+
+def _make_error_case(
+    pair: Dict[str, Any],
+    score: float,
+    error_type: str,
+    features: Dict[str, Any],
+    contributions: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build an error case dict from a benchmark pair."""
+    dominant_engine = (
+        max(contributions, key=lambda k: contributions[k], default="token")
+        if contributions
+        else "token"
+    )
+    dominant_pct = (
+        round(float(contributions.get(dominant_engine, 0)) * 100, 1)
+        if contributions
+        else 0
+    )
+
+    if error_type == "false_positive":
+        reason = _classify_fp_reason(features, contributions)
+        explanation = (
+            f"Similarity score {score:.1%} exceeded the threshold but ground truth indicates "
+            f"these are independent submissions. The {dominant_engine} engine contributed "
+            f"{dominant_pct}% of the fused score. This may indicate shared boilerplate, "
+            f"common algorithmic patterns, or assignment template code."
+        )
+        recommendation = _fp_recommendation(reason)
+    else:
+        reason = _classify_fn_reason(features, score)
+        explanation = (
+            f"Similarity score {score:.1%} fell below the threshold despite being labeled as "
+            f"plagiarism. The {dominant_engine} engine was the strongest signal at {dominant_pct}%. "
+            f"This suggests the plagiarism was obfuscated through renaming, restructuring, or "
+            f"semantic transformation."
+        )
+        recommendation = _fn_recommendation(reason)
+
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
+    snippet = (
+        "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
+        if top_features
+        else "# No feature breakdown available"
+    )
+
+    return {
+        "id": hash(f"{pair.get('file_a')}{pair.get('file_b')}") & 0xFFFFFF,
+        "fileA": str(pair.get("file_a", "file_a")),
+        "fileB": str(pair.get("file_b", "file_b")),
+        "score": round(score, 4),
+        "reason": reason,
+        "explanation": explanation,
+        "codeSnippet": snippet,
+        "recommendation": recommendation,
+        "features": {k: round(float(v or 0), 3) for k, v in features.items()},
+        "contributions": {k: round(float(v or 0), 3) for k, v in contributions.items()},
+    }
+
+
+def _make_job_error_case(r: Dict[str, Any], error_type: str) -> Dict[str, Any]:
+    """Build an error case dict from a job result."""
+    features = r.get("features", {})
+    score = r["score"]
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
+    snippet = (
+        "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
+        if top_features
+        else "# No feature breakdown available"
+    )
+
+    if error_type == "false_positive":
+        reason = _classify_fp_reason(features, {})
+        explanation = (
+            f"Score {score:.1%} triggered a flag (threshold {r['threshold']:.0%}) but the "
+            f"similarity may be driven by shared boilerplate or common patterns rather than "
+            f"actual copying. No ground-truth label is available for this pair."
+        )
+        recommendation = _fp_recommendation(reason)
+    else:
+        reason = _classify_fn_reason(features, score)
+        explanation = (
+            f"Score {score:.1%} fell below the threshold ({r['threshold']:.0%}) but individual "
+            f"engine signals suggest possible obfuscated similarity. "
+            f"Manual review is recommended."
+        )
+        recommendation = _fn_recommendation(reason)
+
+    return {
+        "id": hash(f"{r['file_a']}{r['file_b']}") & 0xFFFFFF,
+        "fileA": str(r.get("file_a", "file_a")),
+        "fileB": str(r.get("file_b", "file_b")),
+        "score": round(score, 4),
+        "reason": reason,
+        "explanation": explanation,
+        "codeSnippet": snippet,
+        "recommendation": recommendation,
+        "features": {k: round(float(v or 0), 3) for k, v in features.items()},
+    }
+
+
+def _classify_fp_reason(features: Dict[str, Any], contributions: Dict[str, Any]) -> str:
+    token = float(features.get("token", features.get("token_similarity", 0)) or 0)
+    ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+    embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
+    if token > 0.7:
+        return "Shared boilerplate or template code"
+    if ast > 0.6 and token < 0.5:
+        return "Algorithmic coincidence (same structure, different tokens)"
+    if embed > 0.6:
+        return "Semantically similar independent solutions"
+    return "Borderline similarity near threshold"
+
+
+def _classify_fn_reason(features: Dict[str, Any], score: float) -> str:
+    token = float(features.get("token", features.get("token_similarity", 0)) or 0)
+    ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
+    embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
+    if token < 0.3 and ast > 0.5:
+        return "Variable renaming and structural obfuscation"
+    if embed > 0.5 and token < 0.4:
+        return "Semantic similarity hidden by surface changes"
+    if score < 0.3:
+        return "Heavy restructuring and logic reordering"
+    return "Partial copying below detection threshold"
+
+
+def _fp_recommendation(reason: str) -> str:
+    if "boilerplate" in reason.lower() or "template" in reason.lower():
+        return "Configure starter-code removal to exclude assignment templates from scoring."
+    if "algorithmic" in reason.lower():
+        return "Add algorithmic pattern recognition to distinguish independent correct solutions."
+    if "semantic" in reason.lower():
+        return "Increase the similarity threshold or require corroboration from multiple engines."
+    return "Review manually and consider raising the detection threshold for this assignment type."
+
+
+def _fn_recommendation(reason: str) -> str:
+    if "renaming" in reason.lower() or "obfuscation" in reason.lower():
+        return "Enable AST-based matching and identifier-normalisation to catch renamed variables."
+    if "semantic" in reason.lower():
+        return "Lower the embedding engine weight threshold to catch semantically equivalent code."
+    if "restructuring" in reason.lower():
+        return "Enable control-flow graph (CFG) comparison to detect reordered logic."
+    return "Lower the detection threshold and enable all available detection engines."
+
+
+def _aggregate_engine_contributions(
+    feature_list: List[Dict[str, Any]]
+) -> Dict[str, int]:
+    """Compute average engine contribution percentages across a list of feature dicts."""
+    totals: Dict[str, float] = {}
+    count = 0
+    for features in feature_list:
+        if not features:
+            continue
+        count += 1
+        for k, v in features.items():
+            totals[k] = totals.get(k, 0.0) + float(v or 0)
+    if not count:
+        return {}
+    avgs = {k: v / count for k, v in totals.items()}
+    total_avg = sum(avgs.values()) or 1
+    return {
+        k: round(v / total_avg * 100)
+        for k, v in sorted(avgs.items(), key=lambda x: -x[1])[:6]
+        if v > 0
+    }
+
+
+def _invert_engine_contrib(engine_contrib: Dict[str, Any]) -> Dict[str, int]:
+    """Convert engine contribution floats to integer percentages."""
+    total = sum(float(v or 0) for v in engine_contrib.values()) or 1
+    return {
+        k: round(float(v or 0) / total * 100)
+        for k, v in sorted(engine_contrib.items(), key=lambda x: -float(x[1] or 0))[:6]
+    }
+
+
+def _generate_recommendations(
+    fp: int, fn: int, precision: float, recall: float, engine_contrib: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Generate actionable recommendations based on error patterns."""
+    recs = []
+
+    if fp > fn and precision < 0.85:
+        recs.append(
+            {
+                "category": "Reduce False Positives",
+                "priority": "high",
+                "items": [
+                    {
+                        "title": "Configure starter-code removal",
+                        "detail": f"You have {fp} false positives. Upload assignment templates as starter code so the system excludes them from scoring.",
+                    },
+                    {
+                        "title": "Raise detection threshold",
+                        "detail": f"Current precision is {precision:.0%}. Increasing the threshold from 0.5 to 0.65 will reduce borderline false flags.",
+                    },
+                    {
+                        "title": "Enable boilerplate filtering",
+                        "detail": "Common imports, class headers, and standard library calls inflate token similarity scores.",
+                    },
+                ],
+            }
+        )
+
+    if fn > fp and recall < 0.80:
+        recs.append(
+            {
+                "category": "Catch More Plagiarism",
+                "priority": "high",
+                "items": [
+                    {
+                        "title": "Enable AST-based matching",
+                        "detail": f"You have {fn} missed cases. AST comparison catches variable renaming and structural obfuscation.",
+                    },
+                    {
+                        "title": "Lower detection threshold",
+                        "detail": f"Current recall is {recall:.0%}. Lowering the threshold to 0.40 will surface more borderline cases for review.",
+                    },
+                    {
+                        "title": "Enable semantic (embedding) engine",
+                        "detail": "CodeBERT-style embeddings detect semantically equivalent code even after heavy rewriting.",
+                    },
+                ],
+            }
+        )
+
+    recs.append(
+        {
+            "category": "Manual Review Guidelines",
+            "priority": "medium",
+            "items": [
+                {
+                    "title": "Score ≥ 75%: Investigate immediately",
+                    "detail": "High-confidence flags are very likely real cases. Prioritise these in your review queue.",
+                },
+                {
+                    "title": "Score 50–75%: Review code structure",
+                    "detail": "Check for shared logic, renamed variables, and reordered functions before dismissing.",
+                },
+                {
+                    "title": "Score < 50% with engine disagreement",
+                    "detail": "If token and AST engines disagree significantly, manual inspection is warranted.",
+                },
+            ],
+        }
+    )
+
+    recs.append(
+        {
+            "category": "Preventive Measures",
+            "priority": "low",
+            "items": [
+                {
+                    "title": "Design unique assignments",
+                    "detail": "Problems with personalised inputs (student ID, unique constraints) reduce template sharing.",
+                },
+                {
+                    "title": "Require intermediate submissions",
+                    "detail": "Staged commits let you track code evolution and spot sudden large additions.",
+                },
+                {
+                    "title": "Educate on academic integrity",
+                    "detail": "Proactive communication about consequences reduces plagiarism attempts.",
+                },
+            ],
+        }
+    )
+
+    return recs
+
+
+def _empty_error_analysis() -> Dict[str, Any]:
+    """Return an empty analysis when no data is available."""
+    return {
+        "source": "none",
+        "dataset": "No data available",
+        "job_id": None,
+        "has_ground_truth": False,
+        "threshold": 0.5,
+        "summary": {
+            "totalPairs": 0,
+            "truePositives": 0,
+            "trueNegatives": 0,
+            "falsePositives": 0,
+            "falseNegatives": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "accuracy": 0.0,
+        },
+        "falsePositives": [],
+        "falseNegatives": [],
+        "engineContributions": {"falsePositives": {}, "falseNegatives": {}},
+        "recommendations": [],
+    }
 
 
 @app.get("/api/benchmark-datasets")
@@ -5077,86 +7956,82 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
         "xiangtan": "sky",
     }
 
-    if BENCHMARK_DATA_DIR.exists():
-        for item in sorted(BENCHMARK_DATA_DIR.iterdir()):
-            if not item.is_dir():
-                continue
+    for item in _iter_benchmark_dataset_roots():
+        dataset_id = item.name
+        metadata = _load_dataset_metadata(item)
+        dataset_info: Dict[str, Any] = {}
 
-            dataset_id = item.name
-            metadata = _load_dataset_metadata(item)
-            dataset_info: Dict[str, Any] = {}
+        if metadata.get("exclude_from_benchmark"):
+            continue
 
-            if metadata.get("exclude_from_benchmark"):
-                continue
+        readiness = _build_benchmark_dataset_readiness(dataset_id, item)
+        if not readiness.get("runnable"):
+            logger.debug(
+                "Hiding benchmark dataset %s: %s",
+                dataset_id,
+                readiness.get("reason", "not runnable"),
+            )
+            continue
 
-            readiness = _build_benchmark_dataset_readiness(dataset_id, item)
-            if not readiness.get("runnable"):
-                logger.debug(
-                    "Hiding benchmark dataset %s: %s",
-                    dataset_id,
-                    readiness.get("reason", "not runnable"),
-                )
-                continue
+        # Determine if this is a demo dataset
+        is_demo = dataset_id.startswith("demo_")
+        dataset_dir = _resolve_benchmark_dataset_dir(dataset_id) or item
 
-            # Determine if this is a demo dataset
-            is_demo = dataset_id.startswith("demo_")
-            dataset_dir = _resolve_benchmark_dataset_dir(dataset_id) or item
+        if not is_demo and dataset_dir.name in {"train", "test", "validation"}:
+            dataset_info = _read_json_file(dataset_dir / "dataset_info.json")
 
-            if not is_demo and dataset_dir.name in {"train", "test", "validation"}:
-                dataset_info = _read_json_file(dataset_dir / "dataset_info.json")
+        # Infer icon and color based on dataset name
+        icon = dataset_icons.get("demo" if is_demo else "synthetic", "📦")
+        color = dataset_colors.get("demo" if is_demo else "gray", "slate")
 
-            # Infer icon and color based on dataset name
-            icon = dataset_icons.get("demo" if is_demo else "synthetic", "📦")
-            color = dataset_colors.get("demo" if is_demo else "gray", "slate")
+        # Try to find icon/color for known dataset types
+        for key in dataset_icons.keys():
+            if key in dataset_id.lower():
+                icon = dataset_icons[key]
+                color = dataset_colors.get(key, "slate")
+                break
 
-            # Try to find icon/color for known dataset types
-            for key in dataset_icons.keys():
-                if key in dataset_id.lower():
-                    icon = dataset_icons[key]
-                    color = dataset_colors.get(key, "slate")
-                    break
+        # Build dataset record
+        dataset_record: Dict[str, Any] = {
+            "id": dataset_id,
+            "name": metadata.get("name", dataset_id.replace("_", " ").title()),
+            "desc": metadata.get("description", f"Dataset: {dataset_id}"),
+            "icon": icon,
+            "color": color,
+            "language": _infer_dataset_language(
+                dataset_id,
+                metadata,
+                dataset_info,
+                dataset_dir=dataset_dir,
+            ),
+            "size": _infer_dataset_size_label(
+                dataset_dir, metadata, dataset_info, is_demo
+            ),
+            "created_by": metadata.get("created_by", "System"),
+            "created_at": metadata.get("created", metadata.get("created_at", "")),
+            "is_demo": is_demo,
+            "has_ground_truth": bool(readiness.get("runnable")),
+            "benchmark_availability": readiness,
+        }
+        benchmark_quality = _build_benchmark_quality_certificate(item)
+        if benchmark_quality:
+            dataset_record["benchmark_quality"] = benchmark_quality
 
-            # Build dataset record
-            dataset_record: Dict[str, Any] = {
-                "id": dataset_id,
-                "name": metadata.get("name", dataset_id.replace("_", " ").title()),
-                "desc": metadata.get("description", f"Dataset: {dataset_id}"),
-                "icon": icon,
-                "color": color,
-                "language": _infer_dataset_language(
-                    dataset_id,
-                    metadata,
-                    dataset_info,
-                    dataset_dir=dataset_dir,
-                ),
-                "size": _infer_dataset_size_label(
-                    dataset_dir, metadata, dataset_info, is_demo
-                ),
-                "created_by": metadata.get("created_by", "System"),
-                "created_at": metadata.get("created", metadata.get("created_at", "")),
-                "is_demo": is_demo,
-                "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, item),
-                "benchmark_availability": readiness,
-            }
-            benchmark_quality = _build_benchmark_quality_certificate(item)
-            if benchmark_quality:
-                dataset_record["benchmark_quality"] = benchmark_quality
+        # Add demo-specific fields if applicable
+        if is_demo:
+            dataset_record["files_created"] = metadata.get("files_created", 0)
+            dataset_record["similarity_type"] = metadata.get(
+                "similarity_type", "unknown"
+            )
 
-            # Add demo-specific fields if applicable
-            if is_demo:
-                dataset_record["files_created"] = metadata.get("files_created", 0)
-                dataset_record["similarity_type"] = metadata.get(
-                    "similarity_type", "unknown"
-                )
-
-            datasets.append(dataset_record)
+        datasets.append(dataset_record)
 
     present_dataset_ids = {dataset["id"] for dataset in datasets}
     for dataset_id in sorted(BUILTIN_PAIR_DATASET_IDS - present_dataset_ids):
         metadata = _load_builtin_pair_dataset_metadata(dataset_id)
         if not metadata:
             continue
-        dataset_root = BENCHMARK_DATA_DIR / dataset_id
+        dataset_root = _resolve_benchmark_dataset_root(dataset_id)
         readiness = _build_benchmark_dataset_readiness(dataset_id, dataset_root)
         benchmark_quality = _build_benchmark_quality_certificate(dataset_root)
         dataset_record = {
@@ -5191,19 +8066,50 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
 
 def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bool:
     """Return true when a dataset can support pair-level benchmark metrics."""
-    return bool(
-        _build_benchmark_dataset_readiness(dataset_id, dataset_root).get("runnable")
-    )
+    if dataset_id in BUILTIN_PAIR_DATASET_IDS:
+        return _builtin_pair_dataset_path(dataset_id).exists()
+    if (dataset_root / "generated_pairs.jsonl").exists():
+        return True
+    if dataset_id == "kaggle_student_code":
+        return (dataset_root / "cheating_dataset.csv").exists()
+    if dataset_id in {"CodeSimilarityDataset", "bigclonebench", "conplag"}:
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
+    if dataset_id in {"xiangtan", "google_codejam"}:
+        return (dataset_root / "pairs.csv").exists() or (
+            dataset_root / "ground_truth.json"
+        ).exists()
+    if dataset_id in {"poj104", "codexglue_clone"}:
+        return (dataset_root / "huggingface" / "dataset_dict.json").exists()
+    if dataset_id == "poolc_600k_python":
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
+    if dataset_id in {"IR-Plag-Dataset", "conplag_classroom_java"}:
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
+    return False
 
 
 @app.post("/api/benchmark")
 async def run_benchmark(
+    request: Request,
     files: List[UploadFile] = File(default=[]),
     tools: List[str] = Form(default=[]),
     dataset: str = Form(default=""),
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
 ):
+    # User authentication is handled by middleware, user info is in request.state
+    selected_tools: List[str] = []
+    for tool in tools:
+        tool_id = str(tool).strip().lower()
+        if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
+            selected_tools.append(tool_id)
+    tools = selected_tools or ["integritydesk"]
+
     job_id = str(uuid.uuid4())[:8]
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -5243,6 +8149,7 @@ async def run_benchmark(
 
     submissions = {}
     explicit_pairs: List[Dict[str, Any]] = []
+    pair_sampling_audit: Dict[str, Any] = {}
 
     logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
@@ -5250,6 +8157,18 @@ async def run_benchmark(
         submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
             dataset, job_dir
         )
+        if explicit_pairs:
+            explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
+                dataset, explicit_pairs
+            )
+            selected_files = {
+                str(pair.get("file_a", "")) for pair in explicit_pairs
+            } | {str(pair.get("file_b", "")) for pair in explicit_pairs}
+            submissions = {
+                filename: content
+                for filename, content in submissions.items()
+                if filename in selected_files
+            }
         if not submissions:
             submissions = _load_benchmark_dataset(dataset, job_dir)
     else:
@@ -5259,6 +8178,14 @@ async def run_benchmark(
     logger.info(
         f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully"
     )
+    if pair_sampling_audit:
+        logger.info(
+            "[BENCHMARK %s] Pair sampling: %s selected from %s (%s)",
+            job_id,
+            pair_sampling_audit.get("selected", {}).get("total_pairs", 0),
+            pair_sampling_audit.get("original", {}).get("total_pairs", 0),
+            pair_sampling_audit.get("sampling_policy"),
+        )
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -5361,6 +8288,11 @@ async def run_benchmark(
 
     total_tools = len([t for t in tools if t != "integritydesk"])
     current_tool_idx = 1
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
+
+    external_tool_runner = ExternalToolRunner(
+        moss_user_id=_get_setting_secret("moss_user_id")
+    )
     for tool in tools:
         if tool == "integritydesk":
             continue
@@ -5370,7 +8302,7 @@ async def run_benchmark(
         current_tool_idx += 1
         tool_started = time.perf_counter()
         try:
-            score_data = _run_competitor_tool(tool, submissions, all_pairs)
+            score_data = external_tool_runner.run_tool(tool, submissions, all_pairs)
             if score_data:
                 tool_results[tool] = score_data
             else:
@@ -5498,6 +8430,11 @@ async def run_benchmark(
             k: {
                 "pairs": len(v.get("pairs", [])),
                 "error": v.get("error"),
+                "score_source": (
+                    "built_in_integritydesk"
+                    if k == "integritydesk"
+                    else ("real_cli" if "error" not in v else "unavailable")
+                ),
                 "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
                 "avg_runtime_seconds": round(
                     tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
@@ -5514,6 +8451,11 @@ async def run_benchmark(
             "accuracy": {
                 "integritydesk": round(id_avg, 4),
                 "best_competitor": round(comp_avg, 4),
+            },
+            "accuracy_basis": "mean_similarity_score_not_classification_accuracy",
+            "score_summary": {
+                "integritydesk_mean_similarity": round(id_avg, 4),
+                "competitor_mean_similarity": round(comp_avg, 4),
             },
             "dataset_name": dataset or "custom",
             "dataset_size": len(submissions),
@@ -5541,6 +8483,8 @@ async def run_benchmark(
         ),
         "has_ground_truth": bool(ground_truth_labels),
     }
+    if pair_sampling_audit:
+        response["pair_sampling_audit"] = pair_sampling_audit
     if benchmark_quality:
         response["benchmark_quality"] = benchmark_quality
 
@@ -5548,6 +8492,10 @@ async def run_benchmark(
     if evaluation_results:
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
+        response["benchmark_trust"] = (
+            evaluation_results.get("integritydesk")
+            or next(iter(evaluation_results.values()), {})
+        ).get("benchmark_trust", {})
         if benchmark_type == "regression_test":
             response["quality_gates"] = _build_regression_quality_gates(
                 evaluation_results.get("integritydesk") or {}
@@ -5555,6 +8503,510 @@ async def run_benchmark(
 
     response = _persist_benchmark_response(response)
     return JSONResponse(content=response)
+
+
+@app.post("/api/benchmark/stream")
+async def stream_benchmark(
+    request: Request,
+    files: List[UploadFile] = File(default=[]),
+    tools: List[str] = Form(default=[]),
+    dataset: str = Form(default=""),
+    benchmark_type: str = Form(default="tool_comparison"),
+    preset_id: str = Form(default=""),
+):
+    """Delegate to the real benchmark endpoint (streaming was replaced with direct JSON)."""
+    return await run_benchmark(
+        request=request,
+        files=files,
+        tools=tools,
+        dataset=dataset,
+        benchmark_type=benchmark_type,
+        preset_id=preset_id,
+    )
+
+
+# ── Background benchmark job store ────────────────────────────────────────
+BENCHMARK_JOBS: Dict[str, Dict[str, Any]] = {}
+BENCHMARK_JOBS_LOCK = threading.Lock()
+
+
+def _benchmark_job_set(job_id: str, updates: Dict[str, Any]) -> None:
+    """Thread-safe update of a benchmark job record."""
+    with BENCHMARK_JOBS_LOCK:
+        BENCHMARK_JOBS.setdefault(job_id, {}).update(updates)
+
+
+def _run_benchmark_background(
+    job_id: str,
+    tool_ids: List[str],
+    dataset: str,
+    benchmark_type: str,
+    preset_id: str,
+    file_bytes: List[tuple],  # list of (filename, bytes)
+) -> None:
+    """Run the full benchmark in a background thread and store the result."""
+    import asyncio
+    import io
+
+    def _progress(msg: str) -> None:
+        _benchmark_job_set(job_id, {})
+        with BENCHMARK_JOBS_LOCK:
+            BENCHMARK_JOBS[job_id].setdefault("progress", []).append(msg)
+
+    try:
+        _benchmark_job_set(job_id, {"status": "running", "progress": []})
+        _progress(f"Starting benchmark with tools: {', '.join(tool_ids)}")
+
+        selected_tools: List[str] = []
+        for tool in tool_ids:
+            tool_id = str(tool).strip().lower()
+            if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
+                selected_tools.append(tool_id)
+        tools = selected_tools or ["integritydesk"]
+
+        job_dir = UPLOADS_DIR / f"bench_{job_id}"
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
+        btype = normalized_protocol["benchmark_type"]
+        protocol = normalized_protocol["protocol"]
+        threshold_policy = normalized_protocol["threshold_policy"]
+        optimization_objective = normalized_protocol["optimization_objective"]
+        report_type = normalized_protocol["report_type"]
+
+        if btype in {"pan_optimization", "regression_test"}:
+            dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
+            has_labeled = bool(
+                dataset
+                and dataset != "custom"
+                and dataset_root
+                and _dataset_has_pair_ground_truth(dataset, dataset_root)
+            )
+            if not has_labeled:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                _benchmark_job_set(
+                    job_id,
+                    {
+                        "status": "error",
+                        "error": (
+                            "PAN metrics require labeled ground truth. Select a labeled "
+                            "demo/synthetic original-vs-plagiarized dataset."
+                        ),
+                    },
+                )
+                return
+
+        submissions: Dict[str, str] = {}
+        explicit_pairs: List[Dict[str, Any]] = []
+        pair_sampling_audit: Dict[str, Any] = {}
+
+        if dataset and dataset != "custom":
+            _progress(f"Loading dataset: {dataset}")
+            submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
+                dataset, job_dir
+            )
+            if explicit_pairs:
+                explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
+                    dataset, explicit_pairs
+                )
+                selected_files = {str(p.get("file_a", "")) for p in explicit_pairs} | {
+                    str(p.get("file_b", "")) for p in explicit_pairs
+                }
+                submissions = {
+                    fn: content
+                    for fn, content in submissions.items()
+                    if fn in selected_files
+                }
+            if not submissions:
+                submissions = _load_benchmark_dataset(dataset, job_dir)
+        else:
+            _progress(f"Processing {len(file_bytes)} uploaded files")
+            for fname, fbytes in file_bytes:
+                safe = PathLib(fname).name
+                target = job_dir / safe
+                target.write_bytes(fbytes)
+                try:
+                    submissions[safe] = fbytes.decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
+        _progress(f"Loaded {len(submissions)} submissions")
+
+        if len(submissions) < 2:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            _benchmark_job_set(
+                job_id,
+                {"status": "error", "error": "At least 2 code files required"},
+            )
+            return
+
+        if explicit_pairs:
+            all_pairs = [
+                (str(p["file_a"]), str(p["file_b"]))
+                for p in explicit_pairs
+                if p.get("file_a") in submissions and p.get("file_b") in submissions
+            ]
+        else:
+            file_list = list(submissions.keys())
+            all_pairs = [
+                (file_list[i], file_list[j])
+                for i in range(len(file_list))
+                for j in range(i + 1, len(file_list))
+            ]
+        _progress(f"Generated {len(all_pairs)} comparison pairs")
+
+        tool_results: Dict[str, Any] = {}
+        tool_timings: Dict[str, float] = {}
+
+        if "integritydesk" in tools:
+            _progress("Running IntegrityDesk engine…")
+            t0 = time.perf_counter()
+            try:
+                import os as _os
+
+                orig_emb = _os.environ.get("EMBEDDING_RUNTIME")
+                disable_emb = False
+                try:
+                    import torch
+
+                    if not torch.cuda.is_available() and settings.EMBEDDING_RUNTIME in (
+                        "local_unixcoder",
+                        "local",
+                        "unixcoder",
+                    ):
+                        disable_emb = True
+                        _os.environ["EMBEDDING_RUNTIME"] = "none"
+                except ImportError:
+                    if settings.EMBEDDING_RUNTIME in (
+                        "local_unixcoder",
+                        "local",
+                        "unixcoder",
+                    ):
+                        disable_emb = True
+                        _os.environ["EMBEDDING_RUNTIME"] = "none"
+
+                service = BatchDetectionService(threshold=0.3)
+                if explicit_pairs:
+                    results = service.compare_pairs(submissions, explicit_pairs)
+                else:
+                    results = service.compare_all_pairs(submissions)
+                tool_results["integritydesk"] = {
+                    "pairs": [
+                        {
+                            "file_a": r.file_a,
+                            "file_b": r.file_b,
+                            "score": round(r.score, 3),
+                            "features": {k: round(v, 3) for k, v in r.features.items()},
+                            "contributions": {
+                                k: round(v, 3) for k, v in r.contributions.items()
+                            },
+                        }
+                        for r in results
+                    ]
+                }
+                _progress(f"IntegrityDesk: {len(results)} pairs analysed")
+                if disable_emb:
+                    if orig_emb:
+                        _os.environ["EMBEDDING_RUNTIME"] = orig_emb
+                    elif "EMBEDDING_RUNTIME" in _os.environ:
+                        del _os.environ["EMBEDDING_RUNTIME"]
+            except Exception as exc:
+                logger.exception("IntegrityDesk benchmark failed in background job")
+                tool_results["integritydesk"] = {"error": str(exc)}
+                _progress(f"IntegrityDesk error: {exc}")
+            finally:
+                tool_timings["integritydesk"] = time.perf_counter() - t0
+
+        from src.backend.benchmark.runners.external_tool_runner import (
+            ExternalToolRunner,
+        )
+
+        ext_runner = ExternalToolRunner(
+            moss_user_id=_get_setting_secret("moss_user_id")
+        )
+        for tool in tools:
+            if tool == "integritydesk":
+                continue
+            _progress(f"Running {tool}…")
+            t0 = time.perf_counter()
+            try:
+                score_data = ext_runner.run_tool(tool, submissions, all_pairs)
+                tool_results[tool] = (
+                    score_data if score_data else {"error": f"{tool} not available"}
+                )
+            except Exception as exc:
+                logger.exception("%s benchmark failed in background job", tool)
+                tool_results[tool] = {"error": str(exc)}
+                _progress(f"{tool} error: {exc}")
+            finally:
+                tool_timings[tool] = time.perf_counter() - t0
+
+        explicit_pair_labels = {
+            frozenset((str(p.get("file_a", "")), str(p.get("file_b", "")))): int(
+                p.get("label", 0)
+            )
+            for p in explicit_pairs
+        }
+        pair_results = []
+        for fa, fb in all_pairs:
+            entry: Dict[str, Any] = {
+                "file_a": fa,
+                "file_b": fb,
+                "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
+                "tool_results": [],
+            }
+            lk = frozenset((fa, fb))
+            if lk in explicit_pair_labels:
+                entry["ground_truth_label"] = explicit_pair_labels[lk]
+            for tn, td in tool_results.items():
+                if "pairs" in td:
+                    for p in td["pairs"]:
+                        if (p["file_a"] == fa and p["file_b"] == fb) or (
+                            p["file_a"] == fb and p["file_b"] == fa
+                        ):
+                            entry["tool_results"].append(
+                                {
+                                    "tool": tn,
+                                    "score": p["score"],
+                                    "features": p.get("features", {}),
+                                    "contributions": p.get("contributions", {}),
+                                }
+                            )
+            pair_results.append(entry)
+
+        ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
+        evaluation_results: Dict[str, Any] = {}
+        if ground_truth_labels:
+            for tn, td in tool_results.items():
+                if "pairs" not in td:
+                    continue
+                scores, labels = [], []
+                for entry in pair_results:
+                    fa, fb = entry["file_a"], entry["file_b"]
+                    for tr in entry["tool_results"]:
+                        if tr["tool"] == tn:
+                            scores.append(tr["score"])
+                            idx = next(
+                                (
+                                    i
+                                    for i, p in enumerate(pair_results)
+                                    if p["file_a"] == fa and p["file_b"] == fb
+                                ),
+                                -1,
+                            )
+                            if 0 <= idx < len(ground_truth_labels):
+                                labels.append(ground_truth_labels[idx])
+                            break
+                if scores and labels:
+                    metrics = _compute_evaluation_metrics(
+                        scores,
+                        labels,
+                        tn,
+                        dataset or "custom",
+                        tool_timings.get(tn, 0.0),
+                        _compute_engine_contribution(td.get("pairs", [])),
+                        threshold_strategy=(
+                            "fixed_threshold"
+                            if btype == "regression_test"
+                            else "calibration_holdout"
+                        ),
+                    )
+                    evaluation_results[tn] = metrics
+
+        id_avg = sum(
+            p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])
+        ) / max(1, len(tool_results.get("integritydesk", {}).get("pairs", [])))
+        comp_scores = [
+            p["score"]
+            for t, d in tool_results.items()
+            if t != "integritydesk" and "pairs" in d
+            for p in d["pairs"]
+        ]
+        comp_avg = sum(comp_scores) / len(comp_scores) if comp_scores else 0
+        benchmark_quality = (
+            _build_benchmark_quality_certificate(BENCHMARK_DATA_DIR / dataset)
+            if dataset and dataset != "custom"
+            else None
+        )
+
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+        response: Dict[str, Any] = {
+            "job_id": job_id,
+            "preset_id": preset_id,
+            "preset_name": next(
+                (
+                    preset["name"]
+                    for preset in BENCHMARK_WORKFLOW_PRESETS
+                    if preset["id"] == preset_id
+                ),
+                "",
+            ),
+            "requested_tools": tools,
+            "tool_scores": {
+                k: {
+                    "pairs": len(v.get("pairs", [])),
+                    "error": v.get("error"),
+                    "score_source": (
+                        "built_in_integritydesk"
+                        if k == "integritydesk"
+                        else ("real_cli" if "error" not in v else "unavailable")
+                    ),
+                    "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
+                    "avg_runtime_seconds": round(
+                        tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
+                    ),
+                }
+                for k, v in tool_results.items()
+            },
+            "pair_results": pair_results,
+            "summary": {
+                "pairs_tested": len(pair_results),
+                "tools_compared": len(
+                    [t for t in tool_results if "error" not in tool_results[t]]
+                ),
+                "accuracy": {
+                    "integritydesk": round(id_avg, 4),
+                    "best_competitor": round(comp_avg, 4),
+                },
+                "accuracy_basis": "mean_similarity_score_not_classification_accuracy",
+                "score_summary": {
+                    "integritydesk_mean_similarity": round(id_avg, 4),
+                    "competitor_mean_similarity": round(comp_avg, 4),
+                },
+                "dataset_name": dataset or "custom",
+                "dataset_size": len(submissions),
+                "positive_pairs": int(
+                    sum(1 for label in ground_truth_labels if label >= 2)
+                ),
+                "negative_pairs": int(
+                    sum(1 for label in ground_truth_labels if label < 2)
+                ),
+                "optimization_trials": 17,
+                "cross_validation_folds": 1,
+                "optimization_method": "Threshold sweep over 17 cutoffs, maximising F1",
+            },
+            "benchmark_type": btype,
+            "protocol": protocol,
+            "threshold_policy": threshold_policy,
+            "optimization_objective": optimization_objective,
+            "report_type": report_type,
+            "benchmark_goal": (
+                "admin_pan_optimization"
+                if btype == "pan_optimization"
+                else (
+                    "locked_regression_test"
+                    if btype == "regression_test"
+                    else "professor_tool_comparison"
+                )
+            ),
+            "has_ground_truth": bool(ground_truth_labels),
+        }
+        if pair_sampling_audit:
+            response["pair_sampling_audit"] = pair_sampling_audit
+        if benchmark_quality:
+            response["benchmark_quality"] = benchmark_quality
+        if evaluation_results:
+            response["evaluation"] = evaluation_results
+            response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
+            response["benchmark_trust"] = (
+                evaluation_results.get("integritydesk")
+                or next(iter(evaluation_results.values()), {})
+            ).get("benchmark_trust", {})
+            if btype == "regression_test":
+                response["quality_gates"] = _build_regression_quality_gates(
+                    evaluation_results.get("integritydesk") or {}
+                )
+
+        response = _persist_benchmark_response(response)
+        _progress("✓ Benchmark complete")
+        _benchmark_job_set(job_id, {"status": "done", "result": response})
+
+    except Exception as exc:
+        logger.exception("Background benchmark job %s failed", job_id)
+        _benchmark_job_set(job_id, {"status": "error", "error": str(exc)})
+
+
+@app.post("/api/benchmark/start")
+async def start_benchmark_job(
+    request: Request,
+    files: List[UploadFile] = File(default=[]),
+    tools: List[str] = Form(default=[]),
+    dataset: str = Form(default=""),
+    benchmark_type: str = Form(default="tool_comparison"),
+    preset_id: str = Form(default=""),
+):
+    """Start a benchmark in the background and return a job_id immediately."""
+    job_id = str(uuid.uuid4())[:8]
+
+    # Read file bytes now, before the request context closes
+    file_bytes: List[tuple] = []
+    for f in files:
+        if f.filename:
+            content = await f.read()
+            file_bytes.append((f.filename, content))
+
+    tool_list = list(tools)  # copy from form data
+
+    _benchmark_job_set(job_id, {"status": "queued", "progress": []})
+
+    t = threading.Thread(
+        target=_run_benchmark_background,
+        args=(job_id, tool_list, dataset, benchmark_type, preset_id, file_bytes),
+        daemon=True,
+    )
+    t.start()
+
+    return JSONResponse(content={"job_id": job_id, "status": "queued"})
+
+
+@app.get("/api/benchmark/status/{job_id}")
+async def get_benchmark_job_status(job_id: str):
+    """Poll the status and progress of a background benchmark job."""
+    with BENCHMARK_JOBS_LOCK:
+        job = BENCHMARK_JOBS.get(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Benchmark job not found")
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "progress": job.get("progress", []),
+            "result": job.get("result") if job.get("status") == "done" else None,
+            "error": job.get("error") if job.get("status") == "error" else None,
+        }
+    )
+
+
+@app.post("/api/benchmark/apply-optimization")
+async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
+    """Apply proposed benchmark optimization changes to engine_weights.yaml."""
+    _require_current_user(request, admin_only=False)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid optimization payload")
+
+    changes = payload.get("config_changes")
+    if not isinstance(changes, list) or not changes:
+        raise HTTPException(status_code=400, detail="No optimization changes provided")
+
+    from src.backend.engines.scoring.fusion_engine import (
+        load_engine_config,
+        save_engine_config,
+    )
+
+    current_config = load_engine_config()
+    applied = _apply_engine_optimization_changes(current_config, changes)
+    save_engine_config(applied["config"])
+
+    return {
+        "success": True,
+        "message": "Proposed optimization applied to engine_weights.yaml",
+        "config_file": "src/backend/engines/engine_weights.yaml",
+        "applied_changes": applied["applied_changes"],
+    }
 
 
 def _get_ground_truth_labels(
@@ -5625,6 +9077,17 @@ REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
         "direction": "max",
         "reason": "False accusations must stay rare.",
     },
+}
+
+BENCHMARK_TRUST_THRESHOLDS: Dict[str, int] = {
+    "strong_holdout_pairs": 40,
+    "strong_holdout_pairs_per_class": 10,
+    "moderate_holdout_pairs": 12,
+    "moderate_holdout_pairs_per_class": 3,
+    "strong_locked_pairs": 100,
+    "strong_locked_pairs_per_class": 20,
+    "moderate_locked_pairs": 30,
+    "moderate_locked_pairs_per_class": 5,
 }
 
 
@@ -5703,12 +9166,76 @@ def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     passed_count = sum(1 for gate in gates if gate["passed"])
+    diagnosis = _diagnose_regression_gate_failure(metrics, gates)
+    summary = f"{passed_count}/{len(gates)} quality gates passed."
     return {
         "passed": passed_count == len(gates),
         "passed_count": passed_count,
         "total_count": len(gates),
         "gates": gates,
-        "summary": f"{passed_count}/{len(gates)} quality gates passed.",
+        "summary": summary,
+        "diagnosis": diagnosis,
+    }
+
+
+def _diagnose_regression_gate_failure(
+    metrics: Dict[str, Any], gates: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Explain the highest-impact reason a fixed-threshold release gate failed."""
+    failed_metrics = {gate["metric"] for gate in gates if not gate.get("passed")}
+    if not failed_metrics:
+        return {}
+
+    confusion = metrics.get("confusion_matrix") or {}
+    diagnostics = metrics.get("score_diagnostics") or {}
+    recall = _coerce_float(metrics.get("recall"))
+    precision = _coerce_float(metrics.get("precision"))
+    false_positive_rate = _coerce_float(metrics.get("false_positive_rate"))
+    threshold = _coerce_float(metrics.get("fixed_threshold"))
+    threshold_source = str(metrics.get("fixed_threshold_source") or "locked threshold")
+
+    if (
+        "recall" in failed_metrics
+        and precision >= REGRESSION_QUALITY_GATE_THRESHOLDS["precision"]["min"]
+        and false_positive_rate
+        <= REGRESSION_QUALITY_GATE_THRESHOLDS["false_positive_rate"]["max"]
+    ):
+        return {
+            "mode": "detector_recall_failure",
+            "summary": (
+                "IntegrityDesk is too conservative at the locked threshold; "
+                "known plagiarism is not being surfaced."
+            ),
+            "detail": (
+                f"At threshold {threshold:.2f} from {threshold_source}, the detector found "
+                f"{int(confusion.get('tp', 0))} positive pairs and missed "
+                f"{int(confusion.get('fn', 0))}. Precision is protected, but recall is "
+                f"{recall:.1%}."
+            ),
+            "next_step": (
+                "Fix score separation or candidate scoring before changing the release gate."
+            ),
+            "score_overlap_warning": bool(diagnostics.get("score_overlap_warning")),
+        }
+
+    if "precision" in failed_metrics or "false_positive_rate" in failed_metrics:
+        return {
+            "mode": "false_positive_failure",
+            "summary": "IntegrityDesk is flagging too many clean pairs.",
+            "detail": (
+                f"False positive rate is {false_positive_rate:.1%}; inspect high-scoring "
+                "negative pairs before lowering thresholds or increasing recall."
+            ),
+            "next_step": "Tighten guardrails or reduce over-dominant engine signals.",
+            "score_overlap_warning": bool(diagnostics.get("score_overlap_warning")),
+        }
+
+    return {
+        "mode": "balanced_quality_failure",
+        "summary": "IntegrityDesk missed the fixed-threshold release target.",
+        "detail": "Review failed gates and score diagnostics before changing thresholds.",
+        "next_step": "Rerun after detector scoring changes, not after weakening gates.",
+        "score_overlap_warning": bool(diagnostics.get("score_overlap_warning")),
     }
 
 
@@ -5776,6 +9303,23 @@ def _ground_truth_filename_parts(filename: str) -> tuple[str, str]:
     return stem, "original"
 
 
+def _benchmark_fixed_threshold() -> tuple[float, str]:
+    """Return the locked IntegrityDesk threshold used by regression benchmarks."""
+    try:
+        from src.backend.engines.scoring.fusion_engine import load_engine_config
+
+        config = load_engine_config()
+        decision = config.get("decision", {}) if isinstance(config, dict) else {}
+        if "default_threshold" in decision:
+            return _coerce_float(decision.get("default_threshold"), 0.82), (
+                "engine_weights.decision.default_threshold"
+            )
+    except Exception:
+        logger.exception("Failed to read benchmark fixed threshold from engine config")
+
+    return _coerce_float(settings.DEFAULT_THRESHOLD, 0.82), "settings.DEFAULT_THRESHOLD"
+
+
 def _compute_evaluation_metrics(
     scores: List[float],
     labels: List[int],
@@ -5801,35 +9345,43 @@ def _compute_evaluation_metrics(
     scores_arr = np.array(scores)
     labels_arr = np.array(binary_labels)
 
-    split_protocol = _build_stratified_calibration_holdout_split(binary_labels)
-    threshold_indices = split_protocol["calibration_indices"]
-    evaluation_indices = split_protocol["holdout_indices"]
-    threshold_scores_arr = scores_arr[threshold_indices]
-    threshold_labels_arr = labels_arr[threshold_indices]
-    evaluation_scores_arr = scores_arr[evaluation_indices]
-    evaluation_labels_arr = labels_arr[evaluation_indices]
-
-    fixed_threshold = 0.5
+    fixed_threshold, fixed_threshold_source = _benchmark_fixed_threshold()
     normalized_threshold_strategy = (
         "fixed_threshold"
         if threshold_strategy == "fixed_threshold"
         else "calibration_holdout"
     )
     best_threshold = fixed_threshold
+    all_indices = list(range(len(binary_labels)))
+
+    if normalized_threshold_strategy == "fixed_threshold":
+        split_protocol = _build_locked_full_sample_protocol(binary_labels)
+        threshold_indices = all_indices
+        evaluation_indices = all_indices
+    else:
+        split_protocol = _build_stratified_calibration_holdout_split(binary_labels)
+        threshold_indices = split_protocol["calibration_indices"]
+        evaluation_indices = split_protocol["holdout_indices"]
+
+    threshold_scores_arr = scores_arr[threshold_indices]
+    threshold_labels_arr = labels_arr[threshold_indices]
+    evaluation_scores_arr = scores_arr[evaluation_indices]
+    evaluation_labels_arr = labels_arr[evaluation_indices]
 
     if normalized_threshold_strategy == "calibration_holdout":
         # Find the PAN/PlagDet operating point on the calibration slice only.
         # Held-out metrics below are the trustworthy headline when a holdout exists.
         best_candidate_key = None
+        # Use unique observed scores as threshold candidates for more precise optimization
+        unique_calibration_scores = sorted(np.unique(threshold_scores_arr))
         sweep_thresholds = sorted(
             {
                 round(float(threshold), 6)
                 for threshold in np.concatenate(
                     [
-                        np.linspace(0.05, 0.95, 91),
-                        threshold_scores_arr,
-                        np.maximum(0.0, threshold_scores_arr - 1e-6),
-                        np.minimum(1.0, threshold_scores_arr + 1e-6),
+                        [0.0],  # boundary: predict all positive
+                        unique_calibration_scores,  # unique observed scores
+                        [1.0],  # boundary: predict all negative
                     ]
                 )
             }
@@ -5839,20 +9391,36 @@ def _compute_evaluation_metrics(
             candidate = _binary_metrics_at_threshold(
                 threshold_scores_arr, threshold_labels_arr, threshold
             )
-            candidate_key = (
-                float(candidate["f1_score"]),
-                float(candidate["recall"]),
-                float(candidate["precision"]),
-                -float(candidate["false_positive_rate"]),
-                -float(threshold),
-            )
-            if best_candidate_key is None or candidate_key > best_candidate_key:
-                best_threshold = threshold
-                best_candidate_key = candidate_key
+            precision = float(candidate["precision"])
+            fpr = float(candidate["false_positive_rate"])
+            f1_score = float(candidate["f1_score"])
+
+            # Apply constraints to prevent degenerate solutions:
+            # - Minimum precision of 0.1 (not all-positive)
+            # - Maximum FPR of 0.5 (not too noisy)
+            # - F1 score must be reasonable (> 0)
+            if precision >= 0.1 and fpr <= 0.5 and f1_score > 0.0:
+                candidate_key = (
+                    f1_score,
+                    precision,
+                    -fpr,
+                    float(candidate["recall"]),
+                    -float(threshold),
+                )
+                if best_candidate_key is None or candidate_key > best_candidate_key:
+                    best_threshold = threshold
+                    best_candidate_key = candidate_key
 
     # Compute ROC-AUC and PR-AUC
     try:
-        from sklearn.metrics import roc_auc_score, average_precision_score
+        from sklearn.metrics import (
+            roc_auc_score,
+            average_precision_score,
+            precision_score,
+            recall_score,
+            f1_score,
+            confusion_matrix,
+        )
 
         if len(np.unique(labels_arr)) > 1:
             roc_auc = roc_auc_score(labels_arr, scores_arr)
@@ -5868,17 +9436,25 @@ def _compute_evaluation_metrics(
     optimized_metrics = _binary_metrics_at_threshold(
         threshold_scores_arr, threshold_labels_arr, best_threshold
     )
-    evaluation_metrics = _binary_metrics_at_threshold(
+    holdout_metrics = _binary_metrics_at_threshold(
         evaluation_scores_arr, evaluation_labels_arr, best_threshold
     )
-    precision = float(evaluation_metrics["precision"])
-    recall = float(evaluation_metrics["recall"])
-    f1_score = float(evaluation_metrics["f1_score"])
-    best_cm = evaluation_metrics["confusion_matrix"]
+    headline_scores_arr = evaluation_scores_arr
+    headline_labels_arr = evaluation_labels_arr
+    headline_basis = (
+        "locked_full_sample_evaluation"
+        if normalized_threshold_strategy == "fixed_threshold"
+        else "held_out_evaluation"
+    )
+    headline_metrics = holdout_metrics
+    precision = float(headline_metrics["precision"])
+    recall = float(headline_metrics["recall"])
+    f1_score = float(headline_metrics["f1_score"])
+    best_cm = headline_metrics["confusion_matrix"]
     granularity = 1.0
     plagdet = f1_score / math.log2(1 + granularity)
-    evaluation_scores = [float(score) for score in evaluation_scores_arr.tolist()]
-    evaluation_binary_labels = [int(label) for label in evaluation_labels_arr.tolist()]
+    evaluation_scores = [float(score) for score in headline_scores_arr.tolist()]
+    evaluation_binary_labels = [int(label) for label in headline_labels_arr.tolist()]
     top_10_retrieval = _compute_top_k_precision(
         evaluation_scores, evaluation_binary_labels, k=10
     )
@@ -5892,7 +9468,7 @@ def _compute_evaluation_metrics(
         evaluation_scores, evaluation_binary_labels, k=20
     )
     avg_runtime_seconds = runtime_seconds / max(1, len(scores))
-    false_positive_rate = float(evaluation_metrics["false_positive_rate"])
+    false_positive_rate = float(headline_metrics["false_positive_rate"])
     fixed_threshold_metrics = _binary_metrics_at_threshold(
         evaluation_scores_arr, evaluation_labels_arr, fixed_threshold
     )
@@ -5901,7 +9477,7 @@ def _compute_evaluation_metrics(
     )
     score_diagnostics = _build_score_diagnostics(scores_arr, labels_arr)
     calibration_curve = _build_threshold_calibration_points(
-        scores_arr, labels_arr, [0.5, float(best_threshold), 0.75, 0.9]
+        scores_arr, labels_arr, [fixed_threshold, float(best_threshold), 0.5, 0.75, 0.9]
     )
     metric_assumptions = {
         "span_level_scoring": False,
@@ -5912,11 +9488,23 @@ def _compute_evaluation_metrics(
             "Regression uses a fixed threshold. Calibration selects a threshold on "
             "the calibration slice and reports headline metrics on the held-out slice."
         ),
+        "ranking_objective": (
+            "Use PR-AUC, PlagDet, precision@20, and top-k recall to tune ranking; "
+            "do not optimize average similarity."
+        ),
         "external_score_calibration": (
             "External tools are evaluated independently; normalize or calibrate "
             "scores before combining them into fusion weights."
         ),
     }
+    benchmark_trust = _build_benchmark_trust_assessment(
+        split_protocol=split_protocol,
+        confidence_intervals=confidence_intervals,
+        score_diagnostics=score_diagnostics,
+        threshold_strategy=normalized_threshold_strategy,
+        headline_basis=headline_basis,
+        binary_labels=binary_labels,
+    )
     metric_integrity = _build_metric_integrity_summary(
         scores=scores,
         labels=labels,
@@ -5924,12 +9512,27 @@ def _compute_evaluation_metrics(
         best_threshold=float(best_threshold),
         fixed_threshold=fixed_threshold,
         optimized_metrics=optimized_metrics,
-        heldout_metrics=evaluation_metrics,
+        heldout_metrics=holdout_metrics,
         fixed_threshold_metrics=fixed_threshold_metrics,
         split_protocol=split_protocol,
         confidence_intervals=confidence_intervals,
+        score_diagnostics=score_diagnostics,
+        benchmark_trust=benchmark_trust,
     )
     calibration_report = _build_calibration_report(float(best_threshold), "benchmark")
+    tuning_recommendations = _build_engine_tuning_recommendations(
+        tool_name=tool_name,
+        precision=precision,
+        recall=recall,
+        f1_score=f1_score,
+        false_positive_rate=false_positive_rate,
+        auc_pr=float(pr_auc),
+        best_threshold=float(best_threshold),
+        fixed_threshold=fixed_threshold,
+        engine_contribution=engine_contribution or {},
+        confusion_matrix=best_cm,
+        score_diagnostics=score_diagnostics,
+    )
 
     return {
         "tool": tool_name,
@@ -5941,9 +9544,12 @@ def _compute_evaluation_metrics(
         "best_threshold_exact": round(float(best_threshold), 6),
         "threshold_strategy": normalized_threshold_strategy,
         "fixed_threshold": fixed_threshold,
+        "fixed_threshold_source": fixed_threshold_source,
         "fixed_threshold_metrics": fixed_threshold_metrics,
         "calibration_metrics": optimized_metrics,
-        "holdout_metrics": evaluation_metrics,
+        "holdout_metrics": holdout_metrics,
+        "headline_metric_basis": headline_basis,
+        "benchmark_trust": benchmark_trust,
         "split_protocol": split_protocol,
         "confidence_intervals": confidence_intervals,
         "best_f1": round(f1_score, 4),
@@ -5969,6 +9575,7 @@ def _compute_evaluation_metrics(
         "score_diagnostics": score_diagnostics,
         "calibration_curve": calibration_curve,
         "calibration_report": calibration_report,
+        "tuning_recommendations": tuning_recommendations,
         "metric_integrity": metric_integrity,
         "metric_assumptions": metric_assumptions,
         "pan_metrics": {
@@ -5987,8 +9594,6 @@ def _compute_evaluation_metrics(
             "ai_generated_recall": None,
             "avg_runtime_seconds": round(avg_runtime_seconds, 6),
             "score_diagnostics": score_diagnostics,
-            "metric_integrity": metric_integrity,
-            "confidence_intervals": confidence_intervals,
         },
         "granularity_basis": "pair_level_single_detection",
     }
@@ -5999,25 +9604,49 @@ def _binary_metrics_at_threshold(
 ) -> Dict[str, Any]:
     """Compute binary confusion metrics at a concrete decision threshold."""
     preds = (scores_arr >= threshold).astype(int)
-    tp = int(np.sum((preds == 1) & (labels_arr == 1)))
-    fp = int(np.sum((preds == 1) & (labels_arr == 0)))
-    tn = int(np.sum((preds == 0) & (labels_arr == 0)))
-    fn = int(np.sum((preds == 0) & (labels_arr == 1)))
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1_score = (
-        2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    )
-    false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    # Use sklearn for metrics computation
+    try:
+        from sklearn.metrics import (
+            confusion_matrix,
+            precision_score,
+            recall_score,
+            f1_score,
+        )
+
+        cm = confusion_matrix(labels_arr, preds)
+        tn, fp, fn, tp = cm.ravel()
+        precision = precision_score(labels_arr, preds, zero_division=0)
+        recall = recall_score(labels_arr, preds, zero_division=0)
+        f1_score_val = f1_score(labels_arr, preds, zero_division=0)
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    except ImportError:
+        # Fallback to manual computation
+        tp = int(np.sum((preds == 1) & (labels_arr == 1)))
+        fp = int(np.sum((preds == 1) & (labels_arr == 0)))
+        tn = int(np.sum((preds == 0) & (labels_arr == 0)))
+        fn = int(np.sum((preds == 0) & (labels_arr == 1)))
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1_score_val = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall)
+            else 0.0
+        )
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
     return {
         "threshold": round(float(threshold), 6),
         "precision": round(float(precision), 4),
         "recall": round(float(recall), 4),
-        "f1_score": round(float(f1_score), 4),
+        "f1_score": round(float(f1_score_val), 4),
         "false_positive_rate": round(float(false_positive_rate), 4),
-        "confusion_matrix": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
+        "confusion_matrix": {
+            "tp": int(tp),
+            "fp": int(fp),
+            "tn": int(tn),
+            "fn": int(fn),
+        },
     }
 
 
@@ -6078,6 +9707,28 @@ def _build_stratified_calibration_holdout_split(
     }
 
 
+def _build_locked_full_sample_protocol(binary_labels: List[int]) -> Dict[str, Any]:
+    """Describe a fixed-threshold evaluation over all labeled pairs."""
+    positive_count = int(sum(binary_labels))
+    negative_count = int(len(binary_labels) - positive_count)
+    all_indices = list(range(len(binary_labels)))
+    return {
+        "protocol": "locked_full_sample_evaluation",
+        "calibration_indices": all_indices,
+        "holdout_indices": all_indices,
+        "calibration_size": 0,
+        "holdout_size": len(all_indices),
+        "calibration_positive_pairs": 0,
+        "calibration_negative_pairs": 0,
+        "holdout_positive_pairs": positive_count,
+        "holdout_negative_pairs": negative_count,
+        "warning": (
+            "Fixed-threshold regression used every labeled pair. No threshold "
+            "was selected from this run."
+        ),
+    }
+
+
 def _classification_confidence_intervals(
     scores: List[float], binary_labels: List[int], threshold: float
 ) -> Dict[str, Any]:
@@ -6105,6 +9756,128 @@ def _classification_confidence_intervals(
     return {"available": True, "method": "bootstrap_percentile", **intervals}
 
 
+def _build_benchmark_trust_assessment(
+    split_protocol: Dict[str, Any],
+    confidence_intervals: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+    threshold_strategy: str,
+    headline_basis: str,
+    binary_labels: List[int],
+) -> Dict[str, Any]:
+    """Grade whether benchmark metrics are suitable for internal decisions."""
+    protocol = str(split_protocol.get("protocol", "unknown"))
+    holdout_size = int(split_protocol.get("holdout_size") or 0)
+    holdout_positive = int(split_protocol.get("holdout_positive_pairs") or 0)
+    holdout_negative = int(split_protocol.get("holdout_negative_pairs") or 0)
+    positive_count = int(sum(binary_labels))
+    negative_count = int(len(binary_labels) - positive_count)
+    reasons: List[str] = []
+    blockers: List[str] = []
+
+    if positive_count == 0 or negative_count == 0:
+        blockers.append("Benchmark needs both positive and negative labeled pairs.")
+    if score_diagnostics.get("label_conflict"):
+        blockers.append(
+            "Labeled negatives score at or above positives; inspect labels or fixtures."
+        )
+
+    confidence_available = bool(confidence_intervals.get("available"))
+    if not confidence_available:
+        reasons.append(
+            "Confidence intervals are unavailable or too unstable for certification."
+        )
+
+    if protocol == "deterministic_stratified_calibration_holdout":
+        if (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and confidence_available
+            and not blockers
+        ):
+            grade = "strong"
+            score = 90
+        elif (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and not blockers
+        ):
+            grade = "moderate"
+            score = 70
+        else:
+            grade = "limited"
+            score = 45
+            reasons.append(
+                "Held-out slice is small; use this run for direction, not final gates."
+            )
+    elif protocol == "locked_full_sample_evaluation":
+        if (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and confidence_available
+            and not blockers
+        ):
+            grade = "strong"
+            score = 85
+        elif (
+            holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and not blockers
+        ):
+            grade = "moderate"
+            score = 65
+        else:
+            grade = "limited"
+            score = 40
+            reasons.append(
+                "Locked regression sample is small; add more labeled pairs before "
+                "treating it as a release gate."
+            )
+    else:
+        grade = "limited"
+        score = 25
+        reasons.append("No independent evaluation protocol was available.")
+
+    if blockers:
+        grade = "invalid"
+        score = 0
+
+    can_gate = (
+        grade in {"strong", "moderate"} and threshold_strategy == "fixed_threshold"
+    )
+    if threshold_strategy != "fixed_threshold":
+        reasons.append(
+            "Threshold was calibrated in this run; use fixed-threshold regression "
+            "for pass/fail gates."
+        )
+
+    return {
+        "grade": grade,
+        "score": score,
+        "can_gate_internal_regression": can_gate,
+        "headline_basis": headline_basis,
+        "protocol": protocol,
+        "sample_size": holdout_size,
+        "positive_pairs": holdout_positive,
+        "negative_pairs": holdout_negative,
+        "confidence_intervals_available": confidence_available,
+        "blockers": blockers,
+        "warnings": reasons,
+        "minimums": BENCHMARK_TRUST_THRESHOLDS,
+    }
+
+
 def _build_metric_integrity_summary(
     scores: List[float],
     labels: List[int],
@@ -6116,6 +9889,8 @@ def _build_metric_integrity_summary(
     fixed_threshold_metrics: Dict[str, Any],
     split_protocol: Dict[str, Any],
     confidence_intervals: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+    benchmark_trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Describe benchmark metric trust boundaries and validation checks."""
     positive_count = int(sum(binary_labels))
@@ -6127,11 +9902,14 @@ def _build_metric_integrity_summary(
         warnings.append(
             str(split_protocol.get("warning") or "No held-out split available.")
         )
-    if abs(best_threshold - fixed_threshold) > 1e-6:
+    if split_protocol.get("protocol") == "locked_full_sample_evaluation":
+        warnings.append(str(split_protocol.get("warning", "")))
+    if score_diagnostics.get("label_conflict"):
         warnings.append(
-            "Threshold was calibrated from labeled benchmark pairs; compare fixed-threshold "
-            "metrics and held-out confidence intervals before making release claims."
+            str(score_diagnostics.get("message", "Label conflict detected."))
         )
+    warnings.extend(benchmark_trust.get("warnings", []))
+    warnings.extend(benchmark_trust.get("blockers", []))
 
     return {
         "label_count_matches_score_count": len(scores) == len(labels),
@@ -6153,8 +9931,717 @@ def _build_metric_integrity_summary(
         ),
         "split_protocol": split_protocol,
         "confidence_intervals": confidence_intervals,
+        "benchmark_trust": benchmark_trust,
         "warnings": warnings,
     }
+
+
+def _clamp_config_value(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    """Clamp a numeric config recommendation into a safe range."""
+    return max(lower, min(upper, float(value)))
+
+
+def _round_config_value(value: float) -> float:
+    """Round config recommendations consistently for YAML patches."""
+    return round(float(value), 4)
+
+
+def _canonical_weight_key(engine_name: str) -> str:
+    """Map runtime feature names back to engine_weights.yaml weight keys."""
+    return {
+        "fingerprint": "token",
+        "semantic": "embedding",
+        "codebert": "embedding",
+        "gst": "ngram",
+        "execution_cfg": "execution",
+        "cfg": "graph",
+    }.get(str(engine_name).strip().lower(), str(engine_name).strip().lower())
+
+
+def _normalized_weight_patch(
+    current_weights: Dict[str, Any],
+    adjustments: Dict[str, float],
+) -> Dict[str, float]:
+    """Apply relative weight deltas and return a normalized weight map."""
+    patched = {
+        str(key): max(0.0, float(value))
+        for key, value in current_weights.items()
+        if isinstance(value, (int, float))
+    }
+    for key, delta in adjustments.items():
+        if key not in patched:
+            continue
+        patched[key] = max(0.0, patched[key] + float(delta))
+
+    total = sum(patched.values())
+    if total <= 0:
+        return patched
+    return {key: _round_config_value(value / total) for key, value in patched.items()}
+
+
+def _add_config_change(
+    changes: List[Dict[str, Any]],
+    path: str,
+    current: Any,
+    proposed: Any,
+    reason: str,
+    risk: str = "medium",
+) -> None:
+    """Append a config change when the proposed value differs from current."""
+    if current == proposed:
+        return
+    changes.append(
+        {
+            "path": path,
+            "current": current,
+            "proposed": proposed,
+            "reason": reason,
+            "risk": risk,
+        }
+    )
+
+
+def _manual_engine_tuning_options(
+    weights: Dict[str, Any],
+    decision: Dict[str, Any],
+    precision_guard: Dict[str, Any],
+    ast_boost: Dict[str, Any],
+    deep_verify: Dict[str, Any],
+    tuning_mode: str,
+    dominant_engine: str,
+) -> List[Dict[str, Any]]:
+    """Expose editable config controls even when no automatic edit is available."""
+    options: List[Dict[str, Any]] = []
+
+    def add_option(
+        path: str,
+        current: Any,
+        proposed: Any,
+        reason: str,
+        risk: str = "manual",
+    ) -> None:
+        if current is None:
+            return
+        rounded_current = (
+            _round_config_value(current) if isinstance(current, float) else current
+        )
+        rounded_proposed = (
+            _round_config_value(proposed) if isinstance(proposed, float) else proposed
+        )
+        if rounded_current == rounded_proposed:
+            return
+        options.append(
+            {
+                "path": path,
+                "current": rounded_current,
+                "proposed": rounded_proposed,
+                "reason": reason,
+                "risk": risk,
+                "manual": True,
+            }
+        )
+
+    threshold = _coerce_float(decision.get("default_threshold"), 0.82)
+    min_agreement = int(decision.get("minimum_engine_agreement", 3) or 3)
+    min_concrete = int(precision_guard.get("minimum_concrete_engines", 3) or 3)
+    semantic_cap = _coerce_float(precision_guard.get("semantic_only_cap"), 0.38)
+    penalty_multiplier = _coerce_float(precision_guard.get("penalty_multiplier"), 0.8)
+    ast_threshold = _coerce_float(ast_boost.get("threshold"), 0.86)
+    ast_floor = _coerce_float(ast_boost.get("minimum_guaranteed_score"), 0.68)
+    deep_agreement = int(deep_verify.get("minimum_agreeing_engines", 3) or 3)
+
+    if tuning_mode == "recall_first":
+        threshold_proposed = _clamp_config_value(threshold - 0.02, 0.05, 0.95)
+        agreement_proposed = max(1, min_agreement - 1)
+        concrete_proposed = max(1, min_concrete - 1)
+        semantic_cap_proposed = _clamp_config_value(semantic_cap + 0.03, 0.0, 1.0)
+        penalty_proposed = _clamp_config_value(penalty_multiplier + 0.03, 0.0, 1.0)
+        ast_threshold_proposed = _clamp_config_value(ast_threshold - 0.02, 0.0, 1.0)
+        ast_floor_proposed = _clamp_config_value(ast_floor + 0.02, 0.0, 1.0)
+        deep_agreement_proposed = max(1, deep_agreement - 1)
+        weight_adjustments = {"embedding": 0.03, "execution": 0.02, "graph": 0.02}
+    else:
+        threshold_proposed = _clamp_config_value(threshold + 0.02, 0.05, 0.95)
+        agreement_proposed = min(10, min_agreement + 1)
+        concrete_proposed = min(10, min_concrete + 1)
+        semantic_cap_proposed = _clamp_config_value(semantic_cap - 0.03, 0.0, 1.0)
+        penalty_proposed = _clamp_config_value(penalty_multiplier - 0.03, 0.0, 1.0)
+        ast_threshold_proposed = _clamp_config_value(ast_threshold + 0.02, 0.0, 1.0)
+        ast_floor_proposed = _clamp_config_value(ast_floor - 0.02, 0.0, 1.0)
+        deep_agreement_proposed = min(10, deep_agreement + 1)
+        weight_adjustments = {"token": 0.015, "winnowing": 0.015, "execution": 0.015}
+        if dominant_engine in weights:
+            weight_adjustments[dominant_engine] = (
+                weight_adjustments.get(dominant_engine, 0.0) - 0.025
+            )
+        if "embedding" in weights:
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.02
+            )
+
+    add_option(
+        "decision.default_threshold",
+        threshold,
+        threshold_proposed,
+        "Manual control for the final positive cutoff. Raise for precision; lower for recall.",
+    )
+    add_option(
+        "decision.minimum_engine_agreement",
+        min_agreement,
+        agreement_proposed,
+        "Manual control for how many independent engines must agree.",
+    )
+    add_option(
+        "precision_guard.minimum_concrete_engines",
+        min_concrete,
+        concrete_proposed,
+        "Manual control for concrete evidence required before trusting broad matches.",
+    )
+    add_option(
+        "precision_guard.semantic_only_cap",
+        semantic_cap,
+        semantic_cap_proposed,
+        "Manual cap for semantic-only matches.",
+    )
+    add_option(
+        "precision_guard.penalty_multiplier",
+        penalty_multiplier,
+        penalty_proposed,
+        "Manual penalty for weak-evidence pairs.",
+    )
+    add_option(
+        "ast_boost.threshold",
+        ast_threshold,
+        ast_threshold_proposed,
+        "Manual AST boost activation threshold.",
+    )
+    add_option(
+        "ast_boost.minimum_guaranteed_score",
+        ast_floor,
+        ast_floor_proposed,
+        "Manual AST-only guaranteed score floor.",
+    )
+    add_option(
+        "deep_verify.minimum_agreeing_engines",
+        deep_agreement,
+        deep_agreement_proposed,
+        "Manual agreement requirement for deep verification.",
+    )
+
+    proposed_weights = _normalized_weight_patch(weights, weight_adjustments)
+    for key in sorted(weights):
+        value = weights.get(key)
+        if isinstance(value, (int, float)):
+            add_option(
+                f"weights.{key}",
+                float(value),
+                float(proposed_weights.get(key, value)),
+                f"Manual control for the {key} contribution in the fusion score.",
+            )
+
+    return options
+
+
+def _engine_weight_change_reason(
+    key: str,
+    current: float,
+    proposed: float,
+    dominant_engine: str,
+    dominant_value: float,
+    mode: str,
+) -> str:
+    """Explain why a specific engine weight is being moved."""
+    direction = "increase" if proposed > current else "decrease"
+    percent = f"{dominant_value:.0%}"
+
+    if mode == "precision_first":
+        if key == dominant_engine:
+            return (
+                f"Decrease {key} because it is the dominant contributor "
+                f"({percent}) while false positives are high."
+            )
+        if key == "embedding":
+            return (
+                "Decrease embedding because semantic-only similarity can match broad "
+                "intent without enough concrete code evidence."
+            )
+        if key in {"token", "winnowing", "ngram"}:
+            return (
+                f"{direction.title()} {key} so high-risk decisions rely more on "
+                "lexical overlap that is easier to audit against false positives."
+            )
+        if key == "execution":
+            return (
+                "Increase execution because behavior agreement is independent "
+                "evidence and helps confirm suspicious pairs."
+            )
+        if key == "ast":
+            return (
+                "Reduce AST influence when structure is dominating negatives; "
+                "keep AST as evidence but require corroboration."
+            )
+    elif mode == "recall_first":
+        if key in {"embedding", "execution", "graph"}:
+            return (
+                f"{direction.title()} {key} to recover renamed, reordered, or "
+                "semantic clones that lexical engines may miss."
+            )
+        if key in {"token", "ngram", "winnowing"}:
+            return (
+                f"{direction.title()} {key} so lexical mismatch does not block "
+                "obfuscated true positives from ranking high enough."
+            )
+    elif mode == "ranking":
+        return (
+            f"{direction.title()} {key} to improve pair ranking before the final "
+            "decision threshold is applied."
+        )
+
+    return (
+        f"{direction.title()} {key} based on this run's contributor balance; "
+        "validate the moved scores on the next labeled rerun."
+    )
+
+
+def _build_engine_tuning_recommendations(
+    tool_name: str,
+    precision: float,
+    recall: float,
+    f1_score: float,
+    false_positive_rate: float,
+    auc_pr: float,
+    best_threshold: float,
+    fixed_threshold: float,
+    engine_contribution: Dict[str, float],
+    confusion_matrix: Dict[str, Any],
+    score_diagnostics: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build concrete candidate edits for engine_weights.yaml after a benchmark.
+
+    These are deliberately conservative recommendations. They are meant to make
+    the next tuning run easy to execute, not to silently overwrite production
+    calibration from a single benchmark.
+    """
+    if tool_name != "integritydesk":
+        return {
+            "available": False,
+            "reason": "Engine tuning recommendations only apply to IntegrityDesk.",
+        }
+
+    try:
+        from src.backend.engines.scoring.fusion_engine import load_engine_config
+
+        config = load_engine_config()
+    except Exception as exc:
+        return {"available": False, "reason": f"Could not load engine config: {exc}"}
+
+    weights = config.get("weights") or {}
+    decision = config.get("decision") or {}
+    precision_guard = config.get("precision_guard") or {}
+    ast_boost = config.get("ast_boost") or {}
+    deep_verify = config.get("deep_verify") or {}
+    advanced = config.get("advanced") or {}
+
+    precision_problem = precision < 0.85
+    recall_problem = recall < 0.85
+    fpr_problem = false_positive_rate > 0.05
+    ranking_problem = auc_pr < 0.85
+    separation_problem = bool(
+        score_diagnostics.get("score_overlap_warning")
+        or score_diagnostics.get("label_conflict")
+    )
+    previous_candidate_pending = bool(advanced.get("weights_need_validation"))
+    changes: List[Dict[str, Any]] = []
+    actions: List[Dict[str, Any]] = []
+
+    current_threshold = _coerce_float(
+        decision.get("default_threshold"), _coerce_float(fixed_threshold, 0.82)
+    )
+    if precision_problem or fpr_problem:
+        proposed_threshold = _clamp_config_value(
+            max(current_threshold + 0.03, best_threshold, 0.82), 0.05, 0.95
+        )
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(proposed_threshold),
+            "False positives are high; raise the final production decision threshold.",
+        )
+    elif recall_problem and not separation_problem:
+        proposed_threshold = _clamp_config_value(
+            min(current_threshold - 0.03, best_threshold), 0.05, 0.95
+        )
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(proposed_threshold),
+            "Recall is low without a precision/FPR problem; lower the final threshold modestly.",
+        )
+    elif (
+        abs(best_threshold - current_threshold) > 0.02
+        and f1_score < 0.90
+        and not separation_problem
+    ):
+        _add_config_change(
+            changes,
+            "decision.default_threshold",
+            _round_config_value(current_threshold),
+            _round_config_value(best_threshold),
+            "Use the benchmark-calibrated threshold as the next validation candidate.",
+            risk="low",
+        )
+
+    if precision_problem or fpr_problem:
+        current_min_agreement = int(decision.get("minimum_engine_agreement", 3) or 3)
+        _add_config_change(
+            changes,
+            "decision.minimum_engine_agreement",
+            current_min_agreement,
+            min(5, max(3, current_min_agreement + 1)),
+            "Require more independent evidence before a pair becomes a positive decision.",
+        )
+        current_concrete = int(precision_guard.get("minimum_concrete_engines", 3) or 3)
+        _add_config_change(
+            changes,
+            "precision_guard.minimum_concrete_engines",
+            current_concrete,
+            min(5, max(3, current_concrete + 1)),
+            "False positives need stronger token/AST/execution corroboration.",
+        )
+        current_semantic_cap = _coerce_float(
+            precision_guard.get("semantic_only_cap"), 0.38
+        )
+        _add_config_change(
+            changes,
+            "precision_guard.semantic_only_cap",
+            _round_config_value(current_semantic_cap),
+            _round_config_value(max(0.25, current_semantic_cap - 0.05)),
+            "Reduce broad semantic-only matches until negatives are cleaner.",
+        )
+        current_penalty = _coerce_float(precision_guard.get("penalty_multiplier"), 0.8)
+        _add_config_change(
+            changes,
+            "precision_guard.penalty_multiplier",
+            _round_config_value(current_penalty),
+            _round_config_value(max(0.55, current_penalty - 0.05)),
+            "Make weak-evidence pairs lose more score when guardrails fail.",
+        )
+
+    contributions = {
+        _canonical_weight_key(key): float(value)
+        for key, value in (engine_contribution or {}).items()
+        if isinstance(value, (int, float))
+    }
+    dominant_engine = ""
+    dominant_value = 0.0
+    if contributions:
+        dominant_engine, dominant_value = max(
+            contributions.items(), key=lambda item: item[1]
+        )
+
+    weight_adjustments: Dict[str, float] = {}
+    if precision_problem or fpr_problem:
+        if dominant_engine in weights and dominant_value >= 0.45:
+            weight_adjustments[dominant_engine] = (
+                weight_adjustments.get(dominant_engine, 0.0) - 0.04
+            )
+        if "embedding" in weights:
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.03
+            )
+        for key, delta in (("token", 0.025), ("winnowing", 0.025), ("execution", 0.02)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+    elif recall_problem and not separation_problem:
+        for key, delta in (("embedding", 0.035), ("execution", 0.025), ("graph", 0.02)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+        for key, delta in (("token", -0.02), ("ngram", -0.015)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+    elif ranking_problem:
+        for key, delta in (("token", 0.015), ("ast", 0.015), ("embedding", -0.015)):
+            if key in weights:
+                weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
+
+    tuning_mode = (
+        "separation_first"
+        if recall_problem
+        and separation_problem
+        and not (precision_problem or fpr_problem)
+        else (
+            "precision_first"
+            if precision_problem or fpr_problem
+            else (
+                "recall_first"
+                if recall_problem
+                else ("ranking" if ranking_problem else "balanced")
+            )
+        )
+    )
+
+    if weight_adjustments and not previous_candidate_pending:
+        proposed_weights = _normalized_weight_patch(weights, weight_adjustments)
+        for key in sorted(proposed_weights):
+            if key not in weights:
+                continue
+            current_weight = _round_config_value(float(weights[key]))
+            proposed_weight = proposed_weights[key]
+            _add_config_change(
+                changes,
+                f"weights.{key}",
+                current_weight,
+                proposed_weight,
+                _engine_weight_change_reason(
+                    key,
+                    current_weight,
+                    proposed_weight,
+                    dominant_engine,
+                    dominant_value,
+                    tuning_mode,
+                ),
+                risk="medium",
+            )
+    elif weight_adjustments and previous_candidate_pending:
+        actions.append(
+            {
+                "title": "Do not stack another weight candidate yet",
+                "detail": (
+                    "The current engine_weights.yaml already contains an applied "
+                    "candidate marked for validation. If the rerun did not improve, "
+                    "avoid another weight-only Apply and inspect the false positives "
+                    "or missed positives directly."
+                ),
+            }
+        )
+
+    if (precision_problem or fpr_problem) and dominant_engine == "ast":
+        current_ast_boost = _coerce_float(
+            ast_boost.get("minimum_guaranteed_score"), 0.68
+        )
+        _add_config_change(
+            changes,
+            "ast_boost.minimum_guaranteed_score",
+            _round_config_value(current_ast_boost),
+            _round_config_value(max(0.55, current_ast_boost - 0.04)),
+            "AST dominates current evidence; lower the AST-only guaranteed floor.",
+        )
+        current_ast_threshold = _coerce_float(ast_boost.get("threshold"), 0.86)
+        _add_config_change(
+            changes,
+            "ast_boost.threshold",
+            _round_config_value(current_ast_threshold),
+            _round_config_value(min(0.95, current_ast_threshold + 0.03)),
+            "Only apply AST boost on stronger AST matches.",
+        )
+
+    if precision_problem or fpr_problem:
+        current_deep_agreement = int(
+            deep_verify.get("minimum_agreeing_engines", 3) or 3
+        )
+        _add_config_change(
+            changes,
+            "deep_verify.minimum_agreeing_engines",
+            current_deep_agreement,
+            min(5, max(3, current_deep_agreement + 1)),
+            "Deep verification should require more agreement before lifting scores.",
+        )
+
+    if precision_problem or fpr_problem:
+        actions.append(
+            {
+                "title": "Apply a precision-first candidate config",
+                "detail": (
+                    "False positives are the blocking issue. Start with the proposed threshold, "
+                    "agreement, semantic cap, and weight changes, then rerun the same benchmark."
+                ),
+            }
+        )
+    if recall_problem and separation_problem:
+        actions.append(
+            {
+                "title": "Fix score separation before threshold changes",
+                "detail": (
+                    "Known positives and labeled negatives overlap in the same score band. "
+                    "Do not lower the final threshold from this run alone; inspect the "
+                    "highest-scoring negatives and missed positives, then adjust the engines "
+                    "that collapse template, starter-code, or same-assignment pairs together."
+                ),
+            }
+        )
+    if recall_problem:
+        actions.append(
+            {
+                "title": "Audit missed positives before lowering final threshold",
+                "detail": (
+                    "Recall is also low. If the missed positives are Type-3/Type-4 clones, "
+                    "improve candidate retrieval or semantic/execution reranking before making "
+                    "the final decision threshold too permissive."
+                ),
+            }
+        )
+    if dominant_engine:
+        actions.append(
+            {
+                "title": f"Check {dominant_engine} false-positive dominance",
+                "detail": (
+                    f"{dominant_engine} contributes {dominant_value:.0%} of current evidence. "
+                    "Inspect high-scoring negatives; if they are caused by this engine, keep its "
+                    "proposed weight reduction."
+                ),
+            }
+        )
+
+    if not actions:
+        actions.append(
+            {
+                "title": "Keep current config as baseline",
+                "detail": (
+                    "The scorecard is balanced enough that the next step is a harder benchmark, "
+                    "not a config change."
+                ),
+            }
+        )
+
+    return {
+        "available": True,
+        "config_file": "src/backend/engines/engine_weights.yaml",
+        "mode": tuning_mode,
+        "summary": (
+            f"Precision {precision:.1%}, recall {recall:.1%}, F1 {f1_score:.1%}, "
+            f"FPR {false_positive_rate:.1%}. Proposed changes are candidates for the next rerun."
+        ),
+        "dominant_engine": dominant_engine,
+        "dominant_engine_contribution": round(dominant_value, 4),
+        "confusion_matrix": confusion_matrix,
+        "score_diagnostics": score_diagnostics,
+        "actions": actions,
+        "config_changes": changes,
+        "manual_config_options": _manual_engine_tuning_options(
+            weights,
+            decision,
+            precision_guard,
+            ast_boost,
+            deep_verify,
+            tuning_mode,
+            dominant_engine,
+        ),
+        "apply_instructions": [
+            "Copy the proposed values into src/backend/engines/engine_weights.yaml.",
+            "Rerun the same benchmark dataset and compare F1, precision, recall, and FPR.",
+            "Only keep the changes if held-out F1 improves and FPR does not regress.",
+        ],
+    }
+
+
+ENGINE_OPTIMIZATION_ALLOWED_PREFIXES = {
+    "weights",
+    "decision",
+    "precision_guard",
+    "ast_boost",
+    "deep_verify",
+    "thresholds",
+}
+
+
+def _validate_engine_optimization_value(path: str, proposed: Any) -> None:
+    """Validate an optimization value according to its engine config path."""
+    if not isinstance(proposed, (int, float, bool)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported proposed value for {path}",
+        )
+    if isinstance(proposed, bool):
+        return
+
+    numeric = float(proposed)
+    unit_interval_paths = (
+        path.startswith("weights.")
+        or path.startswith("thresholds.")
+        or path.endswith("_threshold")
+        or path.endswith("_floor")
+        or path.endswith("_cap")
+        or path.endswith("_multiplier")
+        or path.endswith(".default_threshold")
+        or path.endswith(".minimum_confidence")
+    )
+    count_paths = (
+        path.endswith("_engines")
+        or path.endswith("_engines_high_score")
+        or path.endswith("_agreement")
+        or path.endswith(".minimum_engine_agreement")
+    )
+
+    if unit_interval_paths and not 0.0 <= numeric <= 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 0.0 and 1.0",
+        )
+    if count_paths and not 1 <= numeric <= 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 1 and 10",
+        )
+    if not unit_interval_paths and not count_paths and not 0.0 <= numeric <= 10.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{path} must be between 0.0 and 10.0",
+        )
+
+
+def _apply_engine_optimization_changes(
+    config: Dict[str, Any], changes: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Apply vetted benchmark optimization changes to an engine config copy."""
+    updated_config = json.loads(json.dumps(config))
+    applied_changes: List[Dict[str, Any]] = []
+
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        path = str(change.get("path") or "").strip()
+        parts = [part for part in path.split(".") if part]
+        if len(parts) < 2 or parts[0] not in ENGINE_OPTIMIZATION_ALLOWED_PREFIXES:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported config path: {path}"
+            )
+
+        proposed = change.get("proposed")
+        _validate_engine_optimization_value(path, proposed)
+
+        target = updated_config
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+            if not isinstance(target, dict):
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid config path: {path}"
+                )
+        target[parts[-1]] = proposed
+        applied_changes.append(
+            {
+                "path": path,
+                "proposed": proposed,
+                "reason": change.get("reason", ""),
+            }
+        )
+
+    if "weights" in updated_config and isinstance(updated_config["weights"], dict):
+        total = sum(
+            float(value)
+            for value in updated_config["weights"].values()
+            if isinstance(value, (int, float))
+        )
+        if total > 0:
+            updated_config["weights"] = {
+                key: _round_config_value(float(value) / total)
+                for key, value in updated_config["weights"].items()
+                if isinstance(value, (int, float))
+            }
+        updated_config.setdefault("advanced", {})["weights_need_validation"] = True
+
+    return {"config": updated_config, "applied_changes": applied_changes}
 
 
 def _build_threshold_calibration_points(
@@ -6211,12 +10698,20 @@ def _build_score_diagnostics(
     max_positive = float(np.max(positives))
     min_positive = float(np.min(positives))
     mean_positive = float(np.mean(positives))
+    median_positive = float(np.median(positives))
     max_negative = float(np.max(negatives))
     mean_negative = float(np.mean(negatives))
+    median_negative = float(np.median(negatives))
     negatives_above_best_positive = int(np.sum(negatives > max_positive))
     negatives_above_worst_positive = int(np.sum(negatives >= min_positive))
+    negatives_above_median_positive = int(np.sum(negatives >= median_positive))
     label_conflict = bool(
         max_negative >= max_positive or mean_negative >= mean_positive
+    )
+    score_overlap_warning = bool(
+        label_conflict
+        or max_negative >= median_positive
+        or median_negative >= median_positive
     )
 
     diagnostics.update(
@@ -6224,11 +10719,15 @@ def _build_score_diagnostics(
             "max_positive_score": round(max_positive, 4),
             "min_positive_score": round(min_positive, 4),
             "mean_positive_score": round(mean_positive, 4),
+            "median_positive_score": round(median_positive, 4),
             "max_negative_score": round(max_negative, 4),
             "mean_negative_score": round(mean_negative, 4),
+            "median_negative_score": round(median_negative, 4),
             "negatives_above_best_positive": negatives_above_best_positive,
             "negatives_above_worst_positive": negatives_above_worst_positive,
+            "negatives_above_median_positive": negatives_above_median_positive,
             "label_conflict": label_conflict,
+            "score_overlap_warning": score_overlap_warning,
         }
     )
 
@@ -6237,6 +10736,11 @@ def _build_score_diagnostics(
             "Some labeled negatives score as high as or higher than labeled positives. "
             "Inspect dataset labels and common starter-code/template pairs before "
             "treating every high-scoring negative as an engine false positive."
+        )
+    elif score_overlap_warning:
+        diagnostics["message"] = (
+            "Labeled negatives overlap the positive score band. Treat this as a score "
+            "separation problem before lowering the final decision threshold."
         )
     else:
         diagnostics["message"] = (
@@ -6325,892 +10829,6 @@ def _compute_auc_fallback(
         return np.trapz(prec, rec)
 
 
-def _run_competitor_tool(tool, submissions, pairs):
-    if tool == "moss":
-        return _run_moss_cli(submissions, pairs)
-    elif tool == "dolos":
-        return _run_dolos_cli(submissions, pairs)
-    elif tool == "jplag":
-        return _run_jplag_cli(submissions, pairs)
-    elif tool == "nicad":
-        return _run_nicad_cli(submissions, pairs)
-    elif tool == "pmd":
-        return _run_pmd_cli(submissions, pairs)
-
-    elif tool == "sherlock":
-        return _run_sherlock_cli(submissions, pairs)
-    return None
-
-
-def _coerce_similarity_score(result):
-    if isinstance(result, (int, float)):
-        return float(result)
-
-    score = getattr(result, "score", None)
-    if isinstance(score, (int, float)):
-        return float(score)
-
-    return 0.0
-
-
-def _run_pairwise_tool(submissions, pairs, scorer, tolerate_pair_errors: bool = False):
-    results = []
-    for fa, fb in pairs:
-        try:
-            score = _coerce_similarity_score(scorer(submissions[fa], submissions[fb]))
-        except Exception:
-            if not tolerate_pair_errors:
-                raise
-            score = 0.0
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _tokenize_code(code: str) -> List[str]:
-    return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|\S", code.lower())
-
-
-def _token_jaccard_score(code_a: str, code_b: str) -> float:
-    tokens_a = set(_tokenize_code(code_a))
-    tokens_b = set(_tokenize_code(code_b))
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
-
-
-def _line_overlap_score(code_a: str, code_b: str) -> float:
-    lines_a = {line.strip() for line in code_a.splitlines() if line.strip()}
-    lines_b = {line.strip() for line in code_b.splitlines() if line.strip()}
-    if not lines_a and not lines_b:
-        return 1.0
-    if not lines_a or not lines_b:
-        return 0.0
-    return len(lines_a & lines_b) / len(lines_a | lines_b)
-
-
-def _sequence_similarity_score(code_a: str, code_b: str) -> float:
-    from difflib import SequenceMatcher
-
-    tokens_a = _tokenize_code(code_a)
-    tokens_b = _tokenize_code(code_b)
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return SequenceMatcher(a=tokens_a, b=tokens_b).ratio()
-
-
-_NICAD_KEYWORDS = frozenset(
-    [
-        "def",
-        "class",
-        "return",
-        "if",
-        "else",
-        "elif",
-        "for",
-        "while",
-        "import",
-        "from",
-        "try",
-        "except",
-        "finally",
-        "with",
-        "as",
-        "in",
-        "not",
-        "and",
-        "or",
-        "is",
-        "none",
-        "true",
-        "false",
-        "pass",
-        "break",
-        "continue",
-        "raise",
-        "yield",
-        "lambda",
-        "public",
-        "private",
-        "protected",
-        "static",
-        "void",
-        "int",
-        "float",
-        "double",
-        "char",
-        "boolean",
-        "string",
-        "new",
-        "this",
-        "super",
-        "extends",
-        "implements",
-        "const",
-        "let",
-        "var",
-        "function",
-        "async",
-        "await",
-    ]
-)
-
-
-def _nicad_normalize(code: str) -> List[str]:
-    code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-    code = re.sub(r"//.*$", "", code, flags=re.MULTILINE)
-    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-    code = re.sub(r'"[^"]*"', '"STRING"', code)
-    code = re.sub(r"'[^']*'", "'STRING'", code)
-    code = re.sub(r"\b[0-9]+\.?[0-9]*\b", "NUM", code)
-
-    normalized = []
-    identifier_map: Dict[str, str] = {}
-    next_identifier = 0
-
-    for token in re.findall(r"[A-Za-z_]\w*|==|!=|<=|>=|\S", code):
-        lowered = token.lower()
-        if re.match(r"[A-Za-z_]\w*$", token) and lowered not in _NICAD_KEYWORDS:
-            if token not in identifier_map:
-                identifier_map[token] = f"__id{next_identifier}__"
-                next_identifier += 1
-            normalized.append(identifier_map[token])
-        else:
-            normalized.append(lowered)
-
-    return normalized
-
-
-def _nicad_score(code_a: str, code_b: str) -> float:
-    tokens_a = set(_nicad_normalize(code_a))
-    tokens_b = set(_nicad_normalize(code_b))
-    if not tokens_a and not tokens_b:
-        return 1.0
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
-
-
-def _run_moss_cli(submissions, pairs):
-    moss_user_id = _get_setting_secret("moss_user_id")
-    script_path = _find_moss_script()
-    if not moss_user_id or not script_path:
-        return None
-
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
-    language_map = {
-        "python": "python",
-        "java": "java",
-        "c": "cc",
-        "cpp": "cc",
-        "javascript": "javascript",
-        "csharp": "csharp",
-    }
-
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        moss_language = language_map.get(language)
-        if not moss_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"moss-{language}-") as temp_dir:
-            run_dir = PathLib(temp_dir)
-            source_root = run_dir / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            written_paths = _write_submissions_to_directory(
-                source_root, language_submissions
-            )
-            run_script_path = _prepare_moss_script(script_path, run_dir, moss_user_id)
-
-            env = os.environ.copy()
-            env["MOSS_USER_ID"] = moss_user_id
-            env["MOSS_LOGFILE"] = str(run_dir / "moss.log")
-            result = subprocess.run(
-                [
-                    "perl",
-                    str(run_script_path),
-                    "-l",
-                    moss_language,
-                    *written_paths.values(),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=300,
-                cwd=str(script_path.parent),
-                env=env,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "MOSS execution failed"
-                )
-
-            report_url = None
-            for line in result.stdout.splitlines():
-                stripped = line.strip()
-                if stripped.startswith(
-                    "http://moss.stanford.edu/results/"
-                ) or stripped.startswith("https://moss.stanford.edu/results/"):
-                    report_url = stripped.rstrip("/")
-            if not report_url:
-                continue
-
-            with urllib.request.urlopen(f"{report_url}/") as response:
-                html = response.read().decode("utf-8", "ignore")
-
-            # Debug: log HTML content for troubleshooting
-            logger.info(f"MOSS HTML preview: {html[:500]}...")
-
-            row_pattern = re.compile(
-                r'<TR><TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>\s*<TD><A HREF="[^"]+">([^<]+) \((\d+)%\)</A>',
-                re.IGNORECASE,
-            )
-            path_to_filename = {
-                path: filename for filename, path in written_paths.items()
-            }
-
-            matches_found = row_pattern.findall(html)
-            logger.info(f"MOSS regex matches found: {len(matches_found)}")
-
-            for left_path, left_pct, right_path, right_pct in matches_found:
-                left_name = path_to_filename.get(left_path)
-                right_name = path_to_filename.get(right_path)
-                if not left_name or not right_name:
-                    continue
-
-                left_pct_val = float(left_pct)
-                right_pct_val = float(right_pct)
-
-                # Use minimum as similarity score - represents guaranteed overlap
-                similarity = min(left_pct_val, right_pct_val) / 100.0
-
-                logger.info(
-                    f"MOSS pair: {left_name} ({left_pct_val}%) vs {right_name} ({right_pct_val}%) -> similarity: {similarity:.3f}"
-                )
-
-                pair_key = _pair_key(left_name, right_name)
-                score_by_pair[pair_key] = max(
-                    score_by_pair.get(pair_key, 0.0),
-                    max(0.0, min(1.0, similarity)),
-                )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_jplag_cli(submissions, pairs):
-    jar_path = _find_jplag_jar()
-    if not jar_path:
-        return None
-
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
-
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    language_map = {
-        "python": "python3",
-        "javascript": "javascript",
-        "typescript": "typescript",
-        "java": "java",
-        "c": "c",
-        "cpp": "cpp",
-        "csharp": "csharp",
-        "go": "go",
-        "rust": "rust",
-        "kotlin": "kotlin",
-        "swift": "swift",
-    }
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        jplag_language = language_map.get(language)
-        if not jplag_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"jplag-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            result_root = PathLib(temp_dir) / "results"
-            source_root.mkdir(parents=True, exist_ok=True)
-            submission_map = _write_submissions_as_submission_dirs(
-                source_root, language_submissions
-            )
-
-            result = subprocess.run(
-                [
-                    "java",
-                    "-jar",
-                    str(jar_path),
-                    "-l",
-                    jplag_language,
-                    "-t",
-                    "3",
-                    "--csv-export",
-                    "-M",
-                    "RUN",
-                    "-r",
-                    str(result_root),
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=240,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "JPlag execution failed"
-                )
-
-            csv_path = result_root / "results.csv"
-            if not csv_path.exists():
-                continue
-
-            logger.info(f"JPlag CSV output found at: {csv_path}")
-            with csv_path.open(newline="", encoding="utf-8") as handle:
-                reader = csv.DictReader(handle)
-                for row in reader:
-                    left_submission = row.get("submissionName1")
-                    right_submission = row.get("submissionName2")
-                    if (
-                        left_submission not in submission_map
-                        or right_submission not in submission_map
-                    ):
-                        continue
-                    try:
-                        similarity = float(row.get("averageSimilarity", 0.0))
-                    except (TypeError, ValueError):
-                        continue
-                    left_name = submission_map[left_submission]["filename"]
-                    right_name = submission_map[right_submission]["filename"]
-                    score_by_pair[_pair_key(left_name, right_name)] = max(
-                        0.0, min(1.0, similarity)
-                    )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_dolos_cli(submissions, pairs):
-    cli_path = _find_dolos_cli()
-    dolos_dir = _find_tool_dir("dolos")
-    node_bin_dir = (dolos_dir / "node20" / "bin") if dolos_dir else None
-    if not cli_path:
-        return None
-
-    similarity_by_pair: Dict[str, float] = {}
-
-    with tempfile.TemporaryDirectory(prefix="dolos-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        report_dir = PathLib(temp_dir) / "report"
-        source_root.mkdir(parents=True, exist_ok=True)
-        written_paths = _write_submissions_to_directory(source_root, submissions)
-
-        env = os.environ.copy()
-        if node_bin_dir and node_bin_dir.exists():
-            env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
-
-        command_prefix = (
-            ["node", str(cli_path)] if cli_path.suffix == ".js" else [str(cli_path)]
-        )
-        result = subprocess.run(
-            [
-                *command_prefix,
-                "run",
-                "--output-format",
-                "csv",
-                "--output-destination",
-                str(report_dir),
-                *written_paths.values(),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=180,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                result.stderr.strip()
-                or result.stdout.strip()
-                or "Dolos execution failed"
-            )
-
-        pairs_path = report_dir / "pairs.csv"
-        if not pairs_path.exists():
-            return {"pairs": []}
-
-        logger.info(f"Dolos CSV output found at: {pairs_path}")
-        with pairs_path.open(newline="", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                left_name = PathLib(row.get("leftFilePath", "")).name
-                right_name = PathLib(row.get("rightFilePath", "")).name
-                if not left_name or not right_name:
-                    continue
-                try:
-                    similarity = float(row.get("similarity", 0.0))
-                except (TypeError, ValueError):
-                    continue
-                similarity_by_pair[_pair_key(left_name, right_name)] = max(
-                    0.0, min(1.0, similarity)
-                )
-
-    results = []
-    for fa, fb in pairs:
-        score = similarity_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_nicad_cli(submissions, pairs):
-    nicad_path = _find_nicad_executable()
-    txl_path = _find_txl_executable()
-    if not nicad_path or not txl_path:
-        return None
-
-    groups: Dict[str, Dict[str, str]] = {}
-    score_by_pair: Dict[str, float] = {}
-    language_map = {
-        "python": "py",
-        "java": "java",
-        "csharp": "cs",
-        "php": "php",
-        "ruby": "rb",
-        "swift": "swift",
-        "rust": "rs",
-    }
-
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        nicad_language = language_map.get(language)
-        if not nicad_language:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"nicad-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            submission_map = _write_submissions_as_submission_dirs(
-                source_root, language_submissions
-            )
-
-            env = os.environ.copy()
-            env["PATH"] = f"{txl_path.parent}:{env.get('PATH', '')}"
-
-            result = subprocess.run(
-                [
-                    str(nicad_path),
-                    "files",
-                    nicad_language,
-                    str(source_root),
-                    "default-report",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=240,
-                cwd=str(
-                    nicad_path.parent.parent
-                    if nicad_path.parent.name == "bin"
-                    else nicad_path.parent
-                ),
-                env=env,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "NiCad execution failed"
-                )
-
-            report_dir = None
-            for line in result.stdout.splitlines():
-                if line.startswith("Results in "):
-                    report_dir = line.replace("Results in ", "", 1).strip()
-            if not report_dir:
-                continue
-
-            report_path = PathLib(report_dir)
-            xml_candidates = sorted(report_path.glob("*-classes-withsource.xml"))
-            if not xml_candidates:
-                xml_candidates = sorted(report_path.glob("*.xml"))
-            if not xml_candidates:
-                continue
-
-            logger.info(f"NiCad XML output found at: {xml_candidates[0]}")
-            tree = ET.parse(xml_candidates[0])
-            root = tree.getroot()
-            for class_node in root.findall("class"):
-                try:
-                    similarity = float(class_node.get("similarity", "0")) / 100.0
-                except (TypeError, ValueError):
-                    continue
-                class_files = []
-                for source_node in class_node.findall("source"):
-                    source_path = source_node.get("file", "")
-                    if not source_path:
-                        continue
-                    filename = PathLib(source_path).name
-                    if filename in language_submissions:
-                        class_files.append(filename)
-                        continue
-                    for submission_data in submission_map.values():
-                        if PathLib(submission_data["path"]).name == filename:
-                            class_files.append(submission_data["filename"])
-                            break
-                for i in range(len(class_files)):
-                    for j in range(i + 1, len(class_files)):
-                        pair_key = _pair_key(class_files[i], class_files[j])
-                        score_by_pair[pair_key] = max(
-                            score_by_pair.get(pair_key, 0.0), similarity
-                        )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_pmd_cli(submissions, pairs):
-    pmd_path = _find_pmd_executable()
-    if not pmd_path:
-        return None
-
-    token_counts = {
-        filename: max(1, len(_tokenize_code(content)))
-        for filename, content in submissions.items()
-    }
-    score_by_pair: Dict[str, float] = {}
-    groups: Dict[str, Dict[str, str]] = {}
-
-    for filename, content in submissions.items():
-        groups.setdefault(_infer_pmd_language_from_filename(filename), {})[
-            filename
-        ] = content
-
-    for language, language_submissions in groups.items():
-        if len(language_submissions) < 2:
-            continue
-
-        with tempfile.TemporaryDirectory(prefix=f"pmd-{language}-") as temp_dir:
-            source_root = PathLib(temp_dir) / "subs"
-            source_root.mkdir(parents=True, exist_ok=True)
-            written_paths = _write_submissions_to_directory(
-                source_root, language_submissions
-            )
-
-            result = subprocess.run(
-                [
-                    str(pmd_path),
-                    "cpd",
-                    "--language",
-                    language,
-                    "--minimum-tokens",
-                    "5",
-                    "--format",
-                    "csv",
-                    "--no-fail-on-error",
-                    "--no-fail-on-violation",
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=180,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "PMD CPD execution failed"
-                )
-
-            output_lines = [line for line in result.stdout.splitlines() if line.strip()]
-            if len(output_lines) <= 1:
-                continue
-
-            logger.info(f"PMD CPD found {len(output_lines)} output lines")
-            path_to_filename = {
-                path: filename for filename, path in written_paths.items()
-            }
-            reader = csv.reader(output_lines)
-            next(reader, None)
-
-            for row in reader:
-                if len(row) < 5:
-                    continue
-                try:
-                    duplicated_tokens = int(row[1])
-                    occurrence_count = int(row[2])
-                except (TypeError, ValueError):
-                    continue
-
-                file_names: List[str] = []
-                for index in range(3, min(len(row), 3 + occurrence_count * 2), 2):
-                    file_path = row[index + 1]
-                    filename = path_to_filename.get(file_path)
-                    if filename:
-                        file_names.append(filename)
-
-                for i in range(len(file_names)):
-                    for j in range(i + 1, len(file_names)):
-                        fa = file_names[i]
-                        fb = file_names[j]
-                        denominator = max(1, min(token_counts[fa], token_counts[fb]))
-                        score = max(0.0, min(1.0, duplicated_tokens / denominator))
-                        pair_key = _pair_key(fa, fb)
-                        score_by_pair[pair_key] = max(
-                            score_by_pair.get(pair_key, 0.0), score
-                        )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _run_ac_cli(submissions, pairs):
-    ac_dir = _find_tool_dir("ac")
-    jar_path = (
-        ac_dir / "ac-2.2.1-SNAPSHOT-92c42.jar"
-        if ac_dir
-        else TOOLS_DIR / "ac" / "ac-2.2.1-SNAPSHOT-92c42.jar"
-    )
-    if not jar_path.exists():
-        return None
-
-    distance_by_pair = {}
-
-    with tempfile.TemporaryDirectory(prefix="ac-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        source_root.mkdir(parents=True, exist_ok=True)
-
-        for filename, content in submissions.items():
-            submission_dir = source_root / PathLib(filename).stem
-            submission_dir.mkdir(parents=True, exist_ok=True)
-            (submission_dir / PathLib(filename).name).write_text(
-                content, encoding="utf-8"
-            )
-
-        result = subprocess.run(
-            [
-                "java",
-                "-cp",
-                str(jar_path),
-                "es.ucm.fdi.ac.CommandLineMain",
-                str(source_root),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                result.stderr.strip() or result.stdout.strip() or "AC execution failed"
-            )
-
-        csv_lines = []
-        capture = False
-        for raw_line in result.stdout.splitlines():
-            line = raw_line.strip()
-            if line.startswith("Distance (0=same, 1=very different),StudentA,StudentB"):
-                capture = True
-                csv_lines.append("distance,student_a,student_b")
-                continue
-            if capture:
-                if not line or line.startswith("Test finished!"):
-                    break
-                if re.match(r"^[0-9.]+,[^,]+,[^,]+$", line):
-                    csv_lines.append(line)
-
-        if len(csv_lines) <= 1:
-            return {"pairs": []}
-
-        reader = csv.DictReader(csv_lines)
-        for row in reader:
-            try:
-                distance = float(row["distance"])
-            except (TypeError, ValueError):
-                continue
-            pair_key = _pair_key(f"{row['student_a']}.py", f"{row['student_b']}.py")
-            distance_by_pair[pair_key] = max(0.0, min(1.0, distance))
-
-    results = []
-    for fa, fb in pairs:
-        distance = distance_by_pair.get(
-            _pair_key(PathLib(fa).stem + ".py", PathLib(fb).stem + ".py")
-        )
-        if distance is None:
-            score = 0.0
-        else:
-            score = 1.0 - distance
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-
-    return {"pairs": results}
-
-
-def _run_sherlock_cli(
-    submissions: Dict[str, str], pairs: List[tuple]
-) -> Optional[Dict[str, Any]]:
-    """Run the local Sherlock binary and convert percentage output to pair scores."""
-    sherlock_path = _find_sherlock_executable()
-    if not sherlock_path:
-        return None
-
-    score_by_pair: Dict[str, float] = {}
-    groups: Dict[str, Dict[str, str]] = {}
-
-    for filename, content in submissions.items():
-        suffix = PathLib(filename).suffix.lower()
-        if not suffix:
-            continue
-        groups.setdefault(suffix, {})[filename] = content
-
-    with tempfile.TemporaryDirectory(prefix="sherlock-benchmark-") as temp_dir:
-        source_root = PathLib(temp_dir) / "subs"
-        source_root.mkdir(parents=True, exist_ok=True)
-        written_paths = _write_submissions_to_directory(source_root, submissions)
-        path_to_filename = {
-            str(PathLib(path).resolve()): filename
-            for filename, path in written_paths.items()
-        }
-        name_to_filename = {
-            PathLib(path).name: filename for filename, path in written_paths.items()
-        }
-
-        for suffix, suffix_submissions in groups.items():
-            if len(suffix_submissions) < 2:
-                continue
-
-            result = subprocess.run(
-                [
-                    str(sherlock_path),
-                    "-t",
-                    "0",
-                    "-e",
-                    suffix,
-                    str(source_root),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=180,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "Sherlock execution failed"
-                )
-
-            for raw_line in result.stdout.splitlines():
-                parts = [part.strip() for part in raw_line.split(";")]
-                if len(parts) != 3 or not parts[2].endswith("%"):
-                    continue
-
-                left_name = _resolve_sherlock_output_file(
-                    parts[0], path_to_filename, name_to_filename
-                )
-                right_name = _resolve_sherlock_output_file(
-                    parts[1], path_to_filename, name_to_filename
-                )
-                if not left_name or not right_name:
-                    continue
-
-                try:
-                    similarity = float(parts[2].rstrip("%")) / 100.0
-                except ValueError:
-                    continue
-
-                pair_key = _pair_key(left_name, right_name)
-                score_by_pair[pair_key] = max(
-                    score_by_pair.get(pair_key, 0.0), max(0.0, min(1.0, similarity))
-                )
-
-    results = []
-    for fa, fb in pairs:
-        score = score_by_pair.get(_pair_key(fa, fb), 0.0)
-        results.append({"file_a": fa, "file_b": fb, "score": score})
-    return {"pairs": results}
-
-
-def _resolve_sherlock_output_file(
-    raw_path: str, path_to_filename: Dict[str, str], name_to_filename: Dict[str, str]
-) -> Optional[str]:
-    """Map a Sherlock output path or basename back to the original submission name."""
-    resolved = str(PathLib(raw_path).resolve())
-    if resolved in path_to_filename:
-        return path_to_filename[resolved]
-    return name_to_filename.get(PathLib(raw_path).name)
-
-
-def _run_sherlock_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _line_overlap_score)
-
-
-def _run_sim_approx(submissions, pairs):
-    return _run_pairwise_tool(submissions, pairs, _sequence_similarity_score)
-
-
-def _run_codequiry_approx(submissions, pairs):
-    try:
-        from src.backend.engines.similarity.embedding_similarity import (
-            EmbeddingSimilarity,
-        )
-
-        engine = EmbeddingSimilarity()
-        return _run_pairwise_tool(
-            submissions,
-            pairs,
-            lambda code_a, code_b: engine.compare({"raw": code_a}, {"raw": code_b}),
-        )
-    except Exception:
-        return None
-
-
 def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> PathLib:
     """Resolve a report path from live job state or on-disk report output.
 
@@ -7223,6 +10841,40 @@ def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> P
         return PathLib(job[job_key])
 
     return REPORTS_DIR / job_id / fallback_filename
+
+
+def _refresh_html_report_from_json(job_id: str) -> None:
+    """Regenerate the browsable HTML report from the stored JSON payload."""
+    report_json_path = _resolve_report_path(job_id, "report_json_path", "report.json")
+    report_html_path = _resolve_report_path(job_id, "report_path", "report.html")
+    if not report_json_path.exists():
+        return
+
+    try:
+        report_payload = json.loads(report_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("Failed to read stored report JSON for %s", job_id)
+        return
+
+    # Hoist report_id from metadata to top-level so generate_html_report can find it
+    if not report_payload.get("report_id"):
+        report_payload["report_id"] = (
+            report_payload.get("metadata", {}).get("report_id") or job_id
+        )
+
+    institution_name = str(
+        report_payload.get("metadata", {}).get("institution")
+        or report_payload.get("course_name")
+        or "Course"
+    )
+    report_html_path.parent.mkdir(parents=True, exist_ok=True)
+    report_html_path.write_text(
+        ReportGenerator(
+            institution_name=institution_name,
+            branding_color="#2563eb",
+        ).generate_html_report(report_payload),
+        encoding="utf-8",
+    )
 
 
 def _format_env_value(value: Any) -> Optional[str]:
@@ -7283,17 +10935,25 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
 def _should_require_auth(path: str) -> bool:
     if path in AUTH_EXEMPT_PATHS:
         return False
+    # Allow unauthenticated access to job status endpoints
+    if path.startswith("/api/jobs/") or path.startswith("/api/job/"):
+        return False
+    # Allow unauthenticated access to benchmark status polling
+    if path.startswith("/api/benchmark/status/"):
+        return False
+    # Allow unauthenticated access to report endpoints
+    if path.startswith("/report/"):
+        return False
     return path.startswith(AUTH_PROTECTED_PREFIXES)
 
 
 def _ensure_auth_secret() -> str:
-    if settings.AUTH_JWT_SECRET:
-        return settings.AUTH_JWT_SECRET
-
-    generated_secret = secrets.token_urlsafe(48)
-    settings.AUTH_JWT_SECRET = generated_secret
-    _persist_env_settings({"AUTH_JWT_SECRET": generated_secret})
-    return generated_secret
+    if not settings.AUTH_JWT_SECRET:
+        raise RuntimeError(
+            "AUTH_JWT_SECRET is required. Set it in src/backend/.env.local with a secure random string. "
+            'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+    return settings.AUTH_JWT_SECRET
 
 
 def _normalize_email(value: str) -> str:
@@ -7301,9 +10961,34 @@ def _normalize_email(value: str) -> str:
 
 
 def _validate_password_input(password: str) -> None:
-    if len(password) < 8:
+    # Skip strict validation in debug mode for easier testing
+    if settings.DEBUG_MODE:
+        return
+
+    if len(password) < 12:
         raise HTTPException(
-            status_code=400, detail="Password must be at least 8 characters long"
+            status_code=400, detail="Password must be at least 12 characters long"
+        )
+    if not any(c.isupper() for c in password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one uppercase letter",
+        )
+    if not any(c.islower() for c in password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one lowercase letter",
+        )
+    if not any(c.isdigit() for c in password):
+        raise HTTPException(
+            status_code=400, detail="Password must contain at least one number"
+        )
+    # Common weak passwords
+    weak_passwords = ["password", "12345678", "qwerty", "admin", "letmein"]
+    if password.lower() in weak_passwords:
+        raise HTTPException(
+            status_code=400,
+            detail="Password is too common. Please choose a stronger password",
         )
 
 
@@ -7329,13 +11014,15 @@ def _create_access_token(user: User) -> str:
 
 
 def _serialize_user(user: User) -> Dict[str, Any]:
+    tenant = getattr(user, "tenant", None)
+
     return {
         "id": str(user.id),
         "email": user.email,
         "full_name": user.full_name,
         "role": user.role,
         "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
-        "tenant_name": user.tenant.name if getattr(user, "tenant", None) else None,
+        "tenant_name": tenant.name if tenant else None,
         "is_active": bool(user.is_active),
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -7361,6 +11048,20 @@ USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "batch_size": settings.BATCH_SIZE,
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
     "max_files_per_job": settings.MAX_FILES_PER_JOB,
+    "webhook_url": "",
+    "audit_log_level": "INFO",
+    "audit_retention_days": 365,
+    "debug_mode": False,
+    "source_scan_enabled": False,
+    "source_scan_sites": ["https://github.com"],
+    "professor_profile": {
+        "assignment_type": "auto_detect",
+        "sensitivity": "balanced",
+        "starter_code_handling": "student_written_only",
+        "previous_term_matching": "same_course_only",
+        "ai_rewrite_detection": "balanced",
+        "result_volume": "top_25",
+    },
 }
 
 SETTINGS_ATTR_MAP = {
@@ -7382,6 +11083,12 @@ SETTINGS_ATTR_MAP = {
     "batch_size": "BATCH_SIZE",
     "max_file_size_mb": "MAX_FILE_SIZE_MB",
     "max_files_per_job": "MAX_FILES_PER_JOB",
+    "webhook_url": "WEBHOOK_URL",
+    "audit_log_level": "AUDIT_LOG_LEVEL",
+    "audit_retention_days": "AUDIT_RETENTION_DAYS",
+    "debug_mode": "DEBUG_MODE",
+    "source_scan_enabled": "SOURCE_SCAN_ENABLED",
+    "source_scan_sites": "SOURCE_SCAN_SITES",
 }
 
 SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key", "moss_user_id"}
@@ -7389,13 +11096,25 @@ ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
     "winnowing": "Winnowing",
-    "gst": "GST",
+    "gst": "String Tiling",
+    "ngram": "N-gram",
     "semantic": "Semantic",
+    "embedding": "Embedding",
+    "graph": "Graph",
+    "static_rules": "Static Rules",
     "web": "Web",
     "ai_detection": "AI Detection",
-    "execution_cfg": "Execution/CFG",
 }
-UPLOAD_ENGINE_KEYS = ("token", "ast", "winnowing", "gst", "semantic")
+UPLOAD_ENGINE_KEYS = (
+    "token",
+    "winnowing",
+    "gst",
+    "ast",
+    "ngram",
+    "graph",
+    "embedding",
+    "static_rules",
+)
 
 
 def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
@@ -7413,6 +11132,9 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
     payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
+    payload["source_scan_sites"] = _normalize_source_scan_sites(
+        payload.get("source_scan_sites")
+    )
 
     openai_key = str(payload.get("openai_api_key") or "")
     anthropic_key = str(payload.get("anthropic_api_key") or "")
@@ -7424,6 +11146,17 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     payload["anthropic_api_key_configured"] = bool(anthropic_key)
     payload["moss_user_id"] = ""
     payload["moss_user_id_configured"] = bool(moss_user_id)
+    from src.backend.engines.scoring.professor_profiles import (
+        apply_professor_profile,
+        professor_profile_catalog,
+    )
+
+    applied_professor_profile = apply_professor_profile(
+        payload.get("professor_profile")
+    )
+    payload["professor_profile_catalog"] = professor_profile_catalog()
+    payload["professor_profile"] = dict(applied_professor_profile.profile.__dict__)
+    payload["applied_professor_profile"] = applied_professor_profile.to_dict()
     return payload
 
 
@@ -7432,9 +11165,28 @@ def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
         if key in merged:
+            if not hasattr(settings, attr):
+                continue
             setattr(settings, attr, merged[key])
             if key in SECRET_SETTING_KEYS and merged[key]:
                 os.environ[attr] = str(merged[key])
+
+
+def _normalize_source_scan_sites(value: Any) -> List[str]:
+    """Normalize admin-configured external source scan locations."""
+    if isinstance(value, str):
+        raw_sites = re.split(r"[\n,]+", value)
+    elif isinstance(value, list):
+        raw_sites = [str(item) for item in value]
+    else:
+        raw_sites = []
+
+    sites: List[str] = []
+    for site in raw_sites:
+        normalized = site.strip()
+        if normalized and normalized not in sites:
+            sites.append(normalized)
+    return sites[:20]
 
 
 def _get_upload_engine_weights(
@@ -7456,10 +11208,15 @@ def _get_upload_engine_weights(
 def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
     fusion_weights = {
         "fingerprint": _coerce_float(engine_weights.get("token")),
-        "ast": _coerce_float(engine_weights.get("ast")),
         "winnowing": _coerce_float(engine_weights.get("winnowing")),
-        "ngram": _coerce_float(engine_weights.get("gst")),
-        "embedding": _coerce_float(engine_weights.get("semantic")),
+        "string_tiling": _coerce_float(engine_weights.get("gst")),
+        "ast": _coerce_float(engine_weights.get("ast")),
+        "ngram": _coerce_float(engine_weights.get("ngram")),
+        "graph": _coerce_float(engine_weights.get("graph")),
+        "embedding": _coerce_float(
+            engine_weights.get("embedding", engine_weights.get("semantic"))
+        ),
+        "static_rules": _coerce_float(engine_weights.get("static_rules")),
     }
     if not any(value > 0 for value in fusion_weights.values()):
         return {}
@@ -7521,7 +11278,9 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     with SessionLocal() as db:
-        user = db.get(User, user_id)
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user_id)
+        )
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
         serialized = _serialize_user(user)
@@ -7538,7 +11297,11 @@ def _require_current_user(request: Request, admin_only: bool = False) -> Dict[st
     return user
 
 
-def _job_is_accessible(job: Dict[str, Any], user: Dict[str, Any]) -> bool:
+def _job_is_accessible(job: Dict[str, Any], user: Optional[Dict[str, Any]]) -> bool:
+    # Allow access to jobs without authentication (guest users)
+    if user is None:
+        return True
+
     if user.get("role") == "admin":
         return True
 
@@ -7550,6 +11313,10 @@ def _job_is_accessible(job: Dict[str, Any], user: Dict[str, Any]) -> bool:
     if tenant_id and tenant_id == user.get("tenant_id"):
         return True
 
+    # Allow access if job has no owner (guest job)
+    if not owner_user_id and not tenant_id:
+        return True
+
     return False
 
 
@@ -7558,7 +11325,8 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    user = _require_current_user(request)
+    # Allow unauthenticated access for guest users
+    user = getattr(request.state, "user", None)
     if not _job_is_accessible(job, user):
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -7567,6 +11335,11 @@ def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
 
 @app.middleware("http")
 async def dashboard_auth_middleware(request: Request, call_next):
+    """Authentication middleware for protected endpoints."""
+    # Always allow OPTIONS requests for CORS preflight - let CORS middleware handle headers
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
     if not _should_require_auth(path):
         return await call_next(request)
@@ -7589,11 +11362,16 @@ async def dashboard_auth_middleware(request: Request, call_next):
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
 async def download_report_html(request: Request, job_id: str):
     _require_job_access(job_id, request)
+    _refresh_html_report_from_json(job_id)
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(
-        str(rp), media_type="text/html", filename=f"integritydesk_report_{job_id}.html"
+        str(rp),
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f'inline; filename="integritydesk_report_{job_id}.html"'
+        },
     )
 
 
@@ -7613,44 +11391,91 @@ async def download_report_json(job_id: str, request: Request):
 @app.get("/report/{job_id}/committee", response_class=HTMLResponse)
 async def download_committee_report(request: Request, job_id: str):
     _require_job_access(job_id, request)
-    rp = _resolve_report_path(job_id, "committee_report_path", "committee_report.html")
+    _refresh_html_report_from_json(job_id)
+    rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
-        raise HTTPException(status_code=404, detail="Committee report file not found")
+        raise HTTPException(status_code=404, detail="Report file not found")
     return FileResponse(
         str(rp),
         media_type="text/html",
-        filename=f"integritydesk_committee_report_{job_id}.html",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="integritydesk_originality_report_{job_id}.html"'
+            )
+        },
     )
 
 
 @app.get("/report/{job_id}/download-pdf")
 async def download_report_pdf(job_id: str, request: Request):
+    """Generate and return a PDF version of the originality report."""
     _require_job_access(job_id, request)
+
+    # Always regenerate HTML from JSON so report_id and all fields are current
+    _refresh_html_report_from_json(job_id)
+
     rp = _resolve_report_path(job_id, "report_path", "report.html")
     if not rp.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
 
     html_content = rp.read_text(encoding="utf-8")
 
+    # Strip the in-page Download PDF / Print buttons — they make no sense in a PDF
+    html_content = html_content.replace(
+        'class="action-buttons no-print"',
+        'class="action-buttons no-print" style="display:none"',
+    )
+
     try:
         import weasyprint
 
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-
-        response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = (
-            f"attachment; filename=integritydesk_report_{job_id}.pdf"
+        # base_url lets WeasyPrint resolve any relative asset references
+        base_url = str(rp.parent.as_uri())
+        pdf_bytes = weasyprint.HTML(string=html_content, base_url=base_url).write_pdf(
+            stylesheets=[
+                weasyprint.CSS(
+                    string="""
+                    @page {
+                        size: A4;
+                        margin: 15mm 12mm 18mm 12mm;
+                        @bottom-center {
+                            content: "IntegrityDesk Originality Report  ·  Page " counter(page) " of " counter(pages);
+                            font-size: 9pt;
+                            color: #64748b;
+                        }
+                    }
+                    body { background: #fff !important; }
+                    .shell { box-shadow: none !important; max-width: 100% !important; }
+                    .no-print, .action-buttons { display: none !important; }
+                    details.finding { page-break-inside: avoid; }
+                    .code-card { page-break-inside: avoid; }
+                    summary::after { display: none !important; }
+                    details > .finding-body { display: block !important; }
+                    """
+                )
+            ]
         )
+
+        response = Response(content=pdf_bytes, media_type="application/pdf")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="integritydesk_report_{job_id}.pdf"'
+        )
+        response.headers["Cache-Control"] = "no-store"
         return response
+
     except ImportError:
-        # Fallback: send HTML with print friendly styling
+        logger.warning(
+            "weasyprint not available, returning print-ready HTML for %s", job_id
+        )
         styled_html = html_content.replace(
             "</head>",
             """<style>
             @media print {
-                body { background: white !important; }
-                .report-container { box-shadow: none !important; max-width: 100% !important; }
-                .no-print { display: none !important; }
+                body { background: #fff !important; }
+                .shell { box-shadow: none !important; max-width: 100% !important; }
+                .no-print, .action-buttons { display: none !important; }
+                details > .finding-body { display: block !important; }
+                details.finding { page-break-inside: avoid; }
             }
             </style></head>""",
         )
@@ -7658,21 +11483,49 @@ async def download_report_pdf(job_id: str, request: Request):
             content=styled_html,
             media_type="text/html",
             headers={
-                "Content-Disposition": f"attachment; filename=integritydesk_report_{job_id}.html"
+                "Content-Disposition": f'attachment; filename="integritydesk_report_{job_id}.html"'
             },
         )
     except Exception as exc:
-        logger.warning(
-            "Report PDF export fell back to minimal PDF for %s: %s", job_id, exc
+        logger.exception("PDF generation failed for %s: %s", job_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"PDF generation failed: {exc}. Try using the Print button in your browser instead.",
         )
+
+
+def _build_ai_originality_report_html(job: Dict[str, Any]) -> str:
+    """Build a Turnitin-grade printable AI Detector originality report."""
+    from src.backend.infrastructure.ai_report_generator import (
+        build_ai_originality_report_html,
+    )
+
+    return build_ai_originality_report_html(job)
+
+
+@app.get("/report/{job_id}/ai-originality-pdf")
+async def download_ai_originality_pdf(job_id: str, request: Request):
+    job = _require_job_access(job_id, request)
+    if job.get("job_type") != "ai_detector":
+        raise HTTPException(status_code=404, detail="AI Detector report not found")
+
+    html_content = _build_ai_originality_report_html(job)
+    try:
+        import weasyprint
+
+        pdf = weasyprint.HTML(string=html_content).write_pdf()
+        response = Response(content=pdf, media_type="application/pdf")
+    except Exception as exc:
+        logger.warning("AI originality PDF fallback for %s: %s", job_id, exc)
         response = Response(
-            content=_minimal_pdf_bytes(f"IntegrityDesk Report {job_id}"),
+            content=_minimal_pdf_bytes(f"IntegrityDesk Originality Report {job_id}"),
             media_type="application/pdf",
         )
-        response.headers["Content-Disposition"] = (
-            f"attachment; filename=integritydesk_report_{job_id}.pdf"
-        )
-        return response
+
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=integritydesk_originality_report_{job_id}.pdf"
+    )
+    return response
 
 
 @app.get("/benchmark/{job_id}/download-csv")
@@ -7795,9 +11648,1654 @@ async def download_benchmark_pdf(job_id: str):
         return response
 
 
+def _pdf_escape(value: Any) -> str:
+    """Escape text for a simple PDF content stream."""
+    return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _format_report_percent(value: Any, scale: bool = True) -> str:
+    """Format benchmark values as report-ready percentages."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if scale:
+        numeric *= 100
+    return f"{numeric:.1f}%"
+
+
+def _format_report_number(value: Any, digits: int = 3) -> str:
+    """Format numeric values for the benchmark report."""
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _benchmark_tool_display_name(tool_id: str) -> str:
+    """Return a stable human-readable benchmark tool name."""
+    metadata = BENCHMARK_TOOL_METADATA.get(str(tool_id).lower(), {})
+    return str(metadata.get("name") or tool_id)
+
+
+def _metric_action(metric: str, value: float) -> str:
+    """Return actionable guidance for a benchmark metric value."""
+    if metric == "precision":
+        if value < 0.85:
+            return (
+                "False positives are the priority. Raise the decision threshold, "
+                "suppress boilerplate/templates, and require agreement from at least "
+                "two independent engines before high-risk flags."
+            )
+        return "Precision is usable. Preserve current negative filters while tuning recall."
+    if metric == "recall":
+        if value < 0.85:
+            return (
+                "Known plagiarism is being missed. Lower candidate retrieval cutoffs, "
+                "strengthen renamed and structural clone handling, and rerank a wider "
+                "shortlist with heavier engines."
+            )
+        return "Recall is usable. Keep the broad candidate path while reducing noisy matches."
+    if metric == "f1_score":
+        if value < 0.85:
+            return (
+                "The precision/recall tradeoff is not calibrated. Run threshold sweeps "
+                "on the labeled holdout and optimize F1 and PlagDet together."
+            )
+        return "F1 is strong enough for a baseline. Validate again on harder negatives."
+    if metric == "false_positive_rate":
+        if value > 0.05:
+            return (
+                "False positive rate is above the preferred review threshold. Add starter-code "
+                "filters, common-library suppression, and stricter high-confidence gates."
+            )
+        return "False positive rate is controlled. Keep this guardrail in regression checks."
+    if metric == "auc_pr":
+        if value < 0.85:
+            return (
+                "Ranking quality is weak. Tune fusion weights with PR-AUC and add hard "
+                "negative pairs that look structurally similar but are independently written."
+            )
+        return "Ranking quality is good. Use PR-AUC as a regression metric."
+    if metric == "top_10_retrieval":
+        if value < 0.90:
+            return (
+                "True positives are not consistently near the top. Improve cheap lexical/AST "
+                "retrieval before expensive reranking."
+            )
+        return "Top-10 retrieval is healthy. Keep it as a candidate-stage acceptance check."
+    if metric == "granularity":
+        if value > 1.10:
+            return (
+                "Detections may be split into too many fragments. Merge adjacent or overlapping "
+                "evidence spans for the same file pair."
+            )
+        return (
+            "Granularity is close to ideal. Keep one coherent detection per true pair."
+        )
+    if metric == "avg_runtime_seconds":
+        if value > 0.5:
+            return (
+                "Runtime is expensive for iterative benchmarking. Cache parsing/tokenization and "
+                "run embeddings or execution checks only on shortlisted pairs."
+            )
+        return "Runtime is suitable for tight benchmark iteration."
+    return "Track this value across benchmark runs and investigate regressions."
+
+
+def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a comprehensive evaluation scorecard with visual elements and detailed analysis."""
+    pair_results = payload.get("pair_results") or []
+    evaluation = payload.get("evaluation") or {}
+    tool_timings = payload.get("tool_timings") or {}
+    dataset_name = (
+        payload.get("datasetName") or payload.get("dataset_name") or "Benchmark Dataset"
+    )
+    generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
+    benchmark_type = payload.get("benchmark_type") or "tool_comparison"
+    total_submissions = payload.get("total_submissions", 0)
+    total_pairs = payload.get("total_pairs", 0)
+
+    # Extract valid evaluations
+    valid_evaluations = {
+        tool: metrics
+        for tool, metrics in evaluation.items()
+        if isinstance(metrics, dict) and not metrics.get("error")
+    }
+
+    # Create scorecard structure
+    scorecard = {
+        "metadata": {
+            "title": "IntegrityDesk Detailed Evaluation Scorecard",
+            "dataset": dataset_name,
+            "generated_at": generated_at,
+            "benchmark_type": benchmark_type,
+            "total_submissions": total_submissions,
+            "total_pairs": total_pairs,
+            "tools_evaluated": len(valid_evaluations),
+        },
+        "executive_summary": _build_executive_summary(valid_evaluations),
+        "performance_metrics": _build_performance_metrics(valid_evaluations),
+        "tool_comparison": _build_tool_comparison(valid_evaluations, tool_timings),
+        "risk_assessment": _build_risk_assessment(valid_evaluations),
+        "recommendations": _build_recommendations(valid_evaluations),
+        "detailed_breakdown": _build_detailed_breakdown(
+            pair_results, valid_evaluations
+        ),
+    }
+
+    return scorecard
+
+
+def _build_executive_summary(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+    """Build executive summary section."""
+    if not evaluations:
+        return {"status": "No valid evaluations available"}
+
+    # Find best performing tool
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
+
+    best_metrics = evaluations[best_tool]
+    plagdet = best_metrics.get("plagdet", 0)
+    f1_score = best_metrics.get("f1_score", 0)
+    precision = best_metrics.get("precision", 0)
+    recall = best_metrics.get("recall", 0)
+
+    # Determine overall status
+    if f1_score >= 0.9 and plagdet >= 0.9:
+        status = "Excellent"
+        status_color = "green"
+        status_description = "Ready for production use with high confidence"
+    elif f1_score >= 0.8 and plagdet >= 0.8:
+        status = "Good"
+        status_color = "blue"
+        status_description = "Suitable for most academic integrity workflows"
+    elif f1_score >= 0.7:
+        status = "Needs Improvement"
+        status_color = "yellow"
+        status_description = "Functional but requires threshold tuning"
+    else:
+        status = "Critical Issues"
+        status_color = "red"
+        status_description = "Significant optimization required before use"
+
+    return {
+        "status": status,
+        "status_color": status_color,
+        "status_description": status_description,
+        "best_tool": _benchmark_tool_display_name(best_tool),
+        "key_metrics": {
+            "plagdet": round(plagdet, 3),
+            "f1_score": round(f1_score, 3),
+            "precision": round(precision, 3),
+            "recall": round(recall, 3),
+        },
+        "tools_compared": len(evaluations),
+        "confidence_level": _calculate_confidence_level(best_metrics),
+    }
+
+
+def _build_performance_metrics(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+    """Build detailed performance metrics section."""
+    metrics_data = {}
+
+    for tool_name, metrics in evaluations.items():
+        display_name = _benchmark_tool_display_name(tool_name)
+        metrics_data[display_name] = {
+            "primary_metrics": {
+                "plagdet": {
+                    "value": round(metrics.get("plagdet", 0), 3),
+                    "description": "Primary PAN evaluation score",
+                    "target": ">= 0.90",
+                    "weight": "high",
+                },
+                "f1_score": {
+                    "value": round(metrics.get("f1_score", 0), 3),
+                    "description": "Balanced precision and recall",
+                    "target": ">= 0.85",
+                    "weight": "high",
+                },
+                "precision": {
+                    "value": round(metrics.get("precision", 0), 3),
+                    "description": "Accuracy of plagiarism flags",
+                    "target": ">= 0.90",
+                    "weight": "high",
+                },
+                "recall": {
+                    "value": round(metrics.get("recall", 0), 3),
+                    "description": "Detection of true plagiarism",
+                    "target": ">= 0.90",
+                    "weight": "high",
+                },
+            },
+            "secondary_metrics": {
+                "granularity": {
+                    "value": round(metrics.get("granularity", 1.0), 3),
+                    "description": "Detection fragmentation (closer to 1.0 is better)",
+                    "target": "<= 1.05",
+                    "weight": "medium",
+                },
+                "auc_pr": {
+                    "value": round(metrics.get("auc_pr", 0), 3),
+                    "description": "Ranking quality across all thresholds",
+                    "target": ">= 0.85",
+                    "weight": "medium",
+                },
+                "false_positive_rate": {
+                    "value": round(metrics.get("false_positive_rate", 0), 3),
+                    "description": "Rate of false plagiarism flags",
+                    "target": "<= 0.05",
+                    "weight": "medium",
+                },
+                "top_10_retrieval": {
+                    "value": round(metrics.get("top_10_retrieval", 0), 3),
+                    "description": "True positives in top 10 results",
+                    "target": ">= 0.90",
+                    "weight": "medium",
+                },
+                "avg_runtime_seconds": {
+                    "value": round(metrics.get("avg_runtime_seconds", 0), 3),
+                    "description": "Average processing time per pair",
+                    "target": "<= 0.50",
+                    "weight": "low",
+                },
+            },
+        }
+
+    return metrics_data
+
+
+def _build_tool_comparison(
+    evaluations: Dict[str, Any], tool_timings: Dict[str, float]
+) -> Dict[str, Any]:
+    """Build tool comparison section."""
+    comparison_data = []
+
+    # Tool logo mapping
+    tool_logos = {
+        "moss": "https://theory.stanford.edu/~aiken/moss/mosslogo.gif",
+        "jplag": "https://github.com/jplag/JPlag/raw/main/core/src/main/resources/de/jplag/logo-dark.png",
+        "dolos": "https://avatars.githubusercontent.com/u/40892657?s=48&v=4",
+        "pmd": "https://raw.githubusercontent.com/pmd/pmd/main/docs/images/logo/pmd-logo-300px.png",
+        "nicad": None,
+        "sherlock": None,
+        "integritydesk": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzcwM0FFRCIvPgo8dGV4dCB4PSIxNiIgeT0iMjAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkQ8L3RleHQ+Cjwvc3ZnPg==",
+    }
+
+    for tool_name, metrics in evaluations.items():
+        display_name = _benchmark_tool_display_name(tool_name)
+        runtime = tool_timings.get(tool_name, 0)
+        logo_url = tool_logos.get(tool_name.lower())
+
+        tool_data = {
+            "tool_name": display_name,
+            "logo_url": logo_url,
+            "metrics": {
+                "f1_score": round(metrics.get("f1_score", 0), 3),
+                "precision": round(metrics.get("precision", 0), 3),
+                "recall": round(metrics.get("recall", 0), 3),
+                "plagdet": round(metrics.get("plagdet", 0), 3),
+                "runtime_seconds": round(runtime, 2),
+            },
+            "performance_tier": _calculate_performance_tier(metrics),
+            "strengths": _identify_tool_strengths(metrics),
+            "weaknesses": _identify_tool_weaknesses(metrics),
+        }
+        comparison_data.append(tool_data)
+
+    # Sort by F1 score
+    comparison_data.sort(key=lambda x: x["metrics"]["f1_score"], reverse=True)
+
+    return {
+        "tools": comparison_data,
+        "summary": {
+            "best_overall": (
+                comparison_data[0]["tool_name"] if comparison_data else "N/A"
+            ),
+            "fastest": (
+                min(comparison_data, key=lambda x: x["metrics"]["runtime_seconds"])[
+                    "tool_name"
+                ]
+                if comparison_data
+                else "N/A"
+            ),
+            "most_accurate": (
+                max(comparison_data, key=lambda x: x["metrics"]["f1_score"])[
+                    "tool_name"
+                ]
+                if comparison_data
+                else "N/A"
+            ),
+        },
+    }
+
+
+def _build_risk_assessment(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+    """Build risk assessment section."""
+    if not evaluations:
+        return {"overall_risk": "high", "issues": ["No evaluation data available"]}
+
+    # Use the best performing tool for risk assessment
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
+    metrics = evaluations[best_tool]
+
+    risks = []
+    risk_level = "low"
+
+    # Precision risk
+    precision = metrics.get("precision", 0)
+    if precision < 0.8:
+        risks.append(
+            {
+                "severity": "high",
+                "category": "False Positives",
+                "description": f"High false positive rate ({(1-precision)*100:.1f}%) may overwhelm reviewers",
+                "impact": "Reduced reviewer efficiency and trust",
+                "recommendation": "Increase decision threshold and require multi-engine agreement",
+            }
+        )
+        risk_level = "high"
+    elif precision < 0.9:
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "False Positives",
+                "description": f"Moderate false positive rate may require additional review",
+                "impact": "Increased manual review workload",
+                "recommendation": "Fine-tune threshold for better precision/recall balance",
+            }
+        )
+        if risk_level == "low":
+            risk_level = "medium"
+
+    # Recall risk
+    recall = metrics.get("recall", 0)
+    if recall < 0.8:
+        risks.append(
+            {
+                "severity": "high",
+                "category": "Missed Plagiarism",
+                "description": f"High miss rate ({(1-recall)*100:.1f}%) means plagiarism may go undetected",
+                "impact": "Academic integrity compromised",
+                "recommendation": "Lower candidate thresholds and enhance clone detection",
+            }
+        )
+        risk_level = "high"
+    elif recall < 0.9:
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "Missed Plagiarism",
+                "description": "Some plagiarism cases may be missed",
+                "impact": "Partial coverage of academic integrity threats",
+                "recommendation": "Expand detection scope for edge cases",
+            }
+        )
+        if risk_level == "low":
+            risk_level = "medium"
+
+    # Runtime risk
+    runtime = metrics.get("avg_runtime_seconds", 0)
+    if runtime > 2.0:
+        risks.append(
+            {
+                "severity": "medium",
+                "category": "Performance",
+                "description": f"Slow processing ({runtime:.2f}s per pair) may impact scalability",
+                "impact": "Limited to smaller assignments or slower workflows",
+                "recommendation": "Optimize processing pipeline and enable caching",
+            }
+        )
+        if risk_level == "low":
+            risk_level = "medium"
+
+    # Granularity risk
+    granularity = metrics.get("granularity", 1.0)
+    if granularity > 1.2:
+        risks.append(
+            {
+                "severity": "low",
+                "category": "User Experience",
+                "description": f"Over-fragmented detections (granularity: {granularity:.2f})",
+                "impact": "Reviewers see multiple alerts for same plagiarism case",
+                "recommendation": "Merge adjacent/overlapping evidence spans",
+            }
+        )
+
+    return {
+        "overall_risk": risk_level,
+        "risk_count": len(risks),
+        "risks": risks,
+        "mitigation_strategy": _generate_mitigation_strategy(risks, metrics),
+    }
+
+
+def _build_recommendations(evaluations: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build recommendations section."""
+    if not evaluations:
+        return [
+            {
+                "priority": "high",
+                "category": "System",
+                "recommendation": "Run benchmark evaluation to generate recommendations",
+            }
+        ]
+
+    recommendations = []
+
+    # Use best performing tool for analysis
+    best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
+    metrics = evaluations[best_tool]
+
+    # Precision recommendations
+    precision = metrics.get("precision", 0)
+    if precision < 0.85:
+        recommendations.append(
+            {
+                "priority": "high",
+                "category": "Threshold Tuning",
+                "recommendation": "Increase the decision threshold to reduce false positives",
+                "expected_impact": f"Could improve precision by {(0.9-precision)*100:.1f}%",
+                "implementation_effort": "medium",
+            }
+        )
+
+    # Recall recommendations
+    recall = metrics.get("recall", 0)
+    if recall < 0.85:
+        recommendations.append(
+            {
+                "priority": "high",
+                "category": "Detection Coverage",
+                "recommendation": "Lower candidate retrieval thresholds and enhance similarity detection",
+                "expected_impact": f"Could improve recall by {(0.9-recall)*100:.1f}%",
+                "implementation_effort": "high",
+            }
+        )
+
+    # Runtime recommendations
+    runtime = metrics.get("avg_runtime_seconds", 0)
+    if runtime > 1.0:
+        recommendations.append(
+            {
+                "priority": "medium",
+                "category": "Performance Optimization",
+                "recommendation": "Implement result caching and optimize processing pipeline",
+                "expected_impact": f"Could reduce runtime by {runtime*0.5:.1f}s per pair",
+                "implementation_effort": "medium",
+            }
+        )
+
+    # AUC-PR recommendations
+    auc_pr = metrics.get("auc_pr", 0)
+    if auc_pr < 0.85:
+        recommendations.append(
+            {
+                "priority": "medium",
+                "category": "Ranking Quality",
+                "recommendation": "Tune fusion weights with PR-AUC as optimization objective",
+                "expected_impact": f"Could improve ranking quality by {(0.9-auc_pr)*100:.1f}%",
+                "implementation_effort": "high",
+            }
+        )
+
+    # Default recommendations if none above apply
+    if not recommendations:
+        recommendations.append(
+            {
+                "priority": "low",
+                "category": "Monitoring",
+                "recommendation": "Continue regular benchmark evaluations to track performance trends",
+                "expected_impact": "Maintain current performance levels",
+                "implementation_effort": "low",
+            }
+        )
+
+    return recommendations
+
+
+def _build_detailed_breakdown(
+    pair_results: List[Dict[str, Any]], evaluations: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Build detailed breakdown section."""
+    if not pair_results:
+        return {
+            "available": False,
+            "message": "No pair results available for detailed analysis",
+        }
+
+    # Analyze top false positives and false negatives
+    false_positives = []
+    false_negatives = []
+    true_positives = []
+    true_negatives = []
+
+    for pair in pair_results:
+        ground_truth = pair.get("ground_truth_label", 0)
+        tool_results = pair.get("tool_results", [])
+
+        # Use the best tool for analysis
+        best_tool_result = None
+        if evaluations:
+            best_tool = max(
+                evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0)
+            )
+            best_tool_result = next(
+                (tr for tr in tool_results if tr.get("tool") == best_tool), None
+            )
+
+        if best_tool_result:
+            predicted_score = best_tool_result.get("score", 0)
+            predicted_positive = predicted_score >= 0.5  # Assuming 0.5 threshold
+
+            if ground_truth == 1 and predicted_positive:
+                true_positives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
+            elif ground_truth == 1 and not predicted_positive:
+                false_negatives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
+            elif ground_truth == 0 and predicted_positive:
+                false_positives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
+            elif ground_truth == 0 and not predicted_positive:
+                true_negatives.append(
+                    {
+                        "file_a": pair.get("file_a", ""),
+                        "file_b": pair.get("file_b", ""),
+                        "score": round(predicted_score, 3),
+                        "label": pair.get("label", ""),
+                    }
+                )
+
+    # Sort by score for most interesting cases
+    false_positives.sort(key=lambda x: x["score"], reverse=True)
+    false_negatives.sort(key=lambda x: x["score"])
+
+    return {
+        "available": True,
+        "summary": {
+            "total_pairs": len(pair_results),
+            "true_positives": len(true_positives),
+            "true_negatives": len(true_negatives),
+            "false_positives": len(false_positives),
+            "false_negatives": len(false_negatives),
+        },
+        "top_false_positives": false_positives[
+            :10
+        ],  # Top 10 most confident false positives
+        "top_false_negatives": false_negatives[:10],  # Top 10 most missed true cases
+        "confusion_matrix": {
+            "predicted_positive_actual_positive": len(true_positives),
+            "predicted_positive_actual_negative": len(false_positives),
+            "predicted_negative_actual_positive": len(false_negatives),
+            "predicted_negative_actual_negative": len(true_negatives),
+        },
+    }
+
+
+def _calculate_confidence_level(metrics: Dict[str, Any]) -> str:
+    """Calculate confidence level based on metric stability and sample size."""
+    plagdet = metrics.get("plagdet", 0)
+    sample_size = metrics.get("sample_size", 0)
+
+    if plagdet >= 0.9 and sample_size >= 100:
+        return "High"
+    elif plagdet >= 0.8 and sample_size >= 50:
+        return "Medium"
+    elif plagdet >= 0.7:
+        return "Low"
+    else:
+        return "Very Low"
+
+
+def _calculate_performance_tier(metrics: Dict[str, Any]) -> str:
+    """Calculate performance tier for a tool."""
+    f1_score = metrics.get("f1_score", 0)
+
+    if f1_score >= 0.9:
+        return "Excellent"
+    elif f1_score >= 0.8:
+        return "Good"
+    elif f1_score >= 0.7:
+        return "Fair"
+    else:
+        return "Poor"
+
+
+def _identify_tool_strengths(metrics: Dict[str, Any]) -> List[str]:
+    """Identify strengths of a tool based on its metrics."""
+    strengths = []
+
+    if metrics.get("precision", 0) >= 0.9:
+        strengths.append("Excellent precision - very few false positives")
+    if metrics.get("recall", 0) >= 0.9:
+        strengths.append("Excellent recall - catches most plagiarism")
+    if metrics.get("auc_pr", 0) >= 0.9:
+        strengths.append("Strong ranking quality across all thresholds")
+    if metrics.get("top_10_retrieval", 0) >= 0.9:
+        strengths.append("Effective at surfacing true positives early")
+    if metrics.get("avg_runtime_seconds", 1) <= 0.5:
+        strengths.append("Fast processing for real-time use")
+    if metrics.get("granularity", 1.1) <= 1.05:
+        strengths.append("Clean, consolidated detections")
+
+    return strengths if strengths else ["Consistent baseline performance"]
+
+
+def _identify_tool_weaknesses(metrics: Dict[str, Any]) -> List[str]:
+    """Identify weaknesses of a tool based on its metrics."""
+    weaknesses = []
+
+    if metrics.get("precision", 1) < 0.8:
+        weaknesses.append("High false positive rate may overwhelm reviewers")
+    if metrics.get("recall", 1) < 0.8:
+        weaknesses.append("Misses significant amount of actual plagiarism")
+    if metrics.get("auc_pr", 1) < 0.8:
+        weaknesses.append("Poor ranking - true cases don't appear early in results")
+    if metrics.get("false_positive_rate", 0) > 0.1:
+        weaknesses.append("Too many clean pairs flagged as suspicious")
+    if metrics.get("avg_runtime_seconds", 0) > 2.0:
+        weaknesses.append("Slow processing may limit scalability")
+    if metrics.get("granularity", 1) > 1.2:
+        weaknesses.append("Over-fragmented detections create review noise")
+
+    return weaknesses if weaknesses else ["No major weaknesses identified"]
+
+
+def _generate_mitigation_strategy(
+    risks: List[Dict[str, Any]], metrics: Dict[str, Any]
+) -> str:
+    """Generate an overall mitigation strategy."""
+    if not risks:
+        return "Current configuration appears stable. Continue monitoring performance."
+
+    high_risks = [r for r in risks if r["severity"] == "high"]
+    if high_risks:
+        return "Address high-priority risks immediately. Focus on threshold calibration and multi-engine agreement requirements."
+
+    medium_risks = [r for r in risks if r["severity"] == "medium"]
+    if medium_risks:
+        return "Address medium-priority issues through iterative tuning. Consider performance optimizations for better scalability."
+
+    return "Minor adjustments may improve user experience. Focus on monitoring and trend analysis."
+
+
+def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
+    """Build a detailed, professional benchmark report from a benchmark payload."""
+    pair_results = payload.get("pair_results") or []
+    summary = payload.get("summary") or {}
+    evaluation = payload.get("evaluation") or {}
+    tool_scores = payload.get("tool_scores") or {}
+    dataset_name = (
+        payload.get("datasetName") or summary.get("dataset_name") or "Benchmark"
+    )
+    generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
+    benchmark_type = payload.get("benchmark_type") or payload.get("benchmarkMode") or ""
+    requested_tools = payload.get("requested_tools") or list(tool_scores.keys())
+
+    valid_eval = {
+        tool: metrics
+        for tool, metrics in evaluation.items()
+        if isinstance(metrics, dict) and not metrics.get("error")
+    }
+    primary_tool = "integritydesk" if "integritydesk" in valid_eval else None
+    if not primary_tool and valid_eval:
+        primary_tool = next(iter(valid_eval.keys()))
+    primary_metrics = valid_eval.get(primary_tool or "", {})
+
+    lines: List[str] = [
+        f"IntegrityDesk Benchmark Report - {dataset_name}",
+        "",
+        "Executive Summary",
+        f"Generated: {generated_at}",
+        f"Benchmark type: {benchmark_type or 'tool comparison'}",
+        f"Dataset: {dataset_name}",
+        f"Pairs tested: {summary.get('pairs_tested', len(pair_results))}",
+        f"Tools completed: {summary.get('tools_compared', len(tool_scores))}",
+        f"Ground truth available: {'yes' if payload.get('has_ground_truth') else 'no'}",
+        "",
+    ]
+
+    if primary_metrics:
+        f1 = float(
+            primary_metrics.get("f1_score") or primary_metrics.get("best_f1") or 0
+        )
+        precision = float(primary_metrics.get("precision") or 0)
+        recall = float(primary_metrics.get("recall") or 0)
+        fpr = float(primary_metrics.get("false_positive_rate") or 0)
+        lines.extend(
+            [
+                "Primary Finding",
+                (
+                    f"{_benchmark_tool_display_name(primary_tool)} scored "
+                    f"{_format_report_percent(primary_metrics.get('plagdet', f1))} PlagDet, "
+                    f"{_format_report_percent(f1)} F1, "
+                    f"{_format_report_percent(precision)} precision, "
+                    f"{_format_report_percent(recall)} recall, and "
+                    f"{_format_report_percent(fpr)} false positive rate."
+                ),
+                "",
+            ]
+        )
+        if precision < 0.85:
+            lines.append(
+                "Main risk: false positives are too high for trusted review workflows."
+            )
+        elif recall < 0.85:
+            lines.append("Main risk: known plagiarism pairs are being missed.")
+        elif f1 < 0.85:
+            lines.append("Main risk: threshold calibration needs more work.")
+        else:
+            lines.append(
+                "Main result: the detector is suitable as a baseline for regression tracking."
+            )
+        lines.append("")
+
+        metric_integrity = primary_metrics.get("metric_integrity") or {}
+        split_protocol = primary_metrics.get("split_protocol") or {}
+        confidence_intervals = primary_metrics.get("confidence_intervals") or {}
+        benchmark_trust = primary_metrics.get(
+            "benchmark_trust"
+        ) or metric_integrity.get("benchmark_trust", {})
+        heldout_confusion = metric_integrity.get("heldout_confusion_matrix") or {}
+        fixed_threshold_metrics = primary_metrics.get("fixed_threshold_metrics") or {}
+        trust_level = benchmark_trust.get("grade", "limited")
+        lines.extend(
+            [
+                "Score Trust and Error Audit",
+                f"Trust level: {trust_level}",
+                f"Trust score: {benchmark_trust.get('score', 'N/A')}/100",
+                (
+                    "Protocol: "
+                    + (
+                        "stratified calibration/holdout"
+                        if split_protocol.get("protocol")
+                        == "deterministic_stratified_calibration_holdout"
+                        else (
+                            "locked fixed-threshold evaluation"
+                            if split_protocol.get("protocol")
+                            == "locked_full_sample_evaluation"
+                            else "fallback evaluation without separate holdout"
+                        )
+                    )
+                ),
+                (
+                    f"Held-out labels: {split_protocol.get('holdout_positive_pairs', 0)} "
+                    f"positive and {split_protocol.get('holdout_negative_pairs', 0)} negative pairs"
+                ),
+                f"Optimized threshold: {_format_report_number(primary_metrics.get('best_threshold'), 2)}",
+                (
+                    f"Held-out F1: {_format_report_number(metric_integrity.get('heldout_f1', f1), 3)}; "
+                    f"fixed {_format_report_number(primary_metrics.get('fixed_threshold'), 2)} F1: "
+                    f"{_format_report_number(metric_integrity.get('fixed_threshold_f1', fixed_threshold_metrics.get('f1_score')), 3)}"
+                ),
+                (
+                    "Held-out confusion matrix: "
+                    f"TP {heldout_confusion.get('tp', 0)}, FP {heldout_confusion.get('fp', 0)}, "
+                    f"TN {heldout_confusion.get('tn', 0)}, FN {heldout_confusion.get('fn', 0)}"
+                ),
+            ]
+        )
+        if confidence_intervals.get("available") and confidence_intervals.get("f1"):
+            f1_interval = confidence_intervals["f1"]
+            lines.append(
+                "95% bootstrap F1 confidence interval: "
+                f"{_format_report_number(f1_interval.get('ci_lower'), 3)}-"
+                f"{_format_report_number(f1_interval.get('ci_upper'), 3)}"
+            )
+        else:
+            lines.append(
+                "Confidence interval: unavailable; use a larger labeled holdout to "
+                "narrow uncertainty before making certification claims."
+            )
+        lines.append(
+            "Interpretation: precision drops when clean pairs are above threshold; "
+            "recall drops when labeled plagiarism pairs are below threshold."
+        )
+        lines.append("")
+
+        tuning = primary_metrics.get("tuning_recommendations") or {}
+        tuning_changes = tuning.get("config_changes") or []
+        if tuning.get("available"):
+            lines.extend(
+                [
+                    "Engine Tuning Plan",
+                    str(tuning.get("summary") or ""),
+                    f"Config file: {tuning.get('config_file', 'src/backend/engines/engine_weights.yaml')}",
+                ]
+            )
+            for action in tuning.get("actions") or []:
+                lines.append(
+                    f"- {action.get('title', 'Action')}: {action.get('detail', '')}"
+                )
+            if tuning_changes:
+                lines.append("Proposed YAML edits:")
+                for change in tuning_changes:
+                    lines.append(
+                        f"- {change.get('path')}: {change.get('current')} -> "
+                        f"{change.get('proposed')} ({change.get('reason', '')})"
+                    )
+            lines.append("")
+
+    if requested_tools:
+        lines.extend(["Tool Coverage"])
+        for tool in requested_tools:
+            meta = tool_scores.get(tool, {})
+            status = "failed" if meta.get("error") else "completed"
+            runtime = _format_report_number(meta.get("runtime_seconds"), 3)
+            pairs = meta.get("pairs", 0)
+            lines.append(
+                f"- {_benchmark_tool_display_name(tool)}: {status}; {pairs} pairs; "
+                f"{runtime}s total runtime"
+            )
+            if meta.get("error"):
+                lines.append(f"  Error: {meta.get('error')}")
+        lines.append("")
+
+    if valid_eval:
+        lines.extend(["Metric Scorecard"])
+        for tool, metrics in valid_eval.items():
+            lines.append(f"{_benchmark_tool_display_name(tool)}")
+            score_rows = [
+                ("PlagDet", "plagdet", True),
+                ("Precision", "precision", True),
+                ("Recall", "recall", True),
+                ("F1 Score", "f1_score", True),
+                ("False Positive Rate", "false_positive_rate", True),
+                ("AUC-PR", "auc_pr", True),
+                ("Top-10 Retrieval", "top_10_retrieval", True),
+                ("Granularity", "granularity", False),
+                ("Avg Runtime Seconds", "avg_runtime_seconds", False),
+            ]
+            for label, key, as_percent in score_rows:
+                value = metrics.get(key)
+                if value is None and key == "f1_score":
+                    value = metrics.get("best_f1")
+                if value is None:
+                    continue
+                display = (
+                    _format_report_percent(value)
+                    if as_percent
+                    else _format_report_number(value, 3)
+                )
+                lines.append(f"- {label}: {display}")
+            lines.append("")
+
+    if primary_metrics:
+        lines.extend(["Detailed Improvement Guide"])
+        guide_metrics = [
+            ("precision", "Precision"),
+            ("recall", "Recall"),
+            ("f1_score", "F1 Score"),
+            ("false_positive_rate", "False Positive Rate"),
+            ("auc_pr", "AUC-PR"),
+            ("top_10_retrieval", "Top-10 Retrieval"),
+            ("granularity", "Granularity"),
+            ("avg_runtime_seconds", "Runtime"),
+        ]
+        for key, label in guide_metrics:
+            value = primary_metrics.get(key)
+            if value is None and key == "f1_score":
+                value = primary_metrics.get("best_f1")
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            lines.append(f"{label}: {_metric_action(key, numeric)}")
+        contribution = primary_metrics.get("engine_contribution") or {}
+        if contribution:
+            top_contributors = sorted(
+                contribution.items(), key=lambda item: float(item[1] or 0), reverse=True
+            )[:4]
+            rendered = ", ".join(
+                f"{name} {_format_report_percent(value)}"
+                for name, value in top_contributors
+            )
+            lines.append(f"Engine contribution focus: {rendered}.")
+        warnings = (primary_metrics.get("metric_integrity") or {}).get("warnings") or []
+        if warnings:
+            lines.append("Metric integrity warnings:")
+            lines.extend(f"- {warning}" for warning in warnings)
+        lines.append("")
+
+    if payload.get("benchmark_quality"):
+        quality = payload["benchmark_quality"]
+        lines.extend(
+            [
+                "Dataset Quality Notes",
+                f"Certification level: {quality.get('certification_level', 'unknown')}",
+                f"Quality score: {_format_report_percent(quality.get('score_percent'), scale=False)}",
+                f"Pair count: {quality.get('pair_count', 'N/A')}",
+                f"Positive pairs: {quality.get('positive_pairs', 'N/A')}",
+                f"Negative pairs: {quality.get('negative_pairs', 'N/A')}",
+                "",
+            ]
+        )
+
+    if primary_metrics and pair_results:
+        threshold = _coerce_float(primary_metrics.get("best_threshold"), 0.5)
+        labeled_rows = []
+        for pair in pair_results:
+            if pair.get("ground_truth_label") is None:
+                continue
+            tool_result = next(
+                (
+                    result
+                    for result in pair.get("tool_results") or []
+                    if result.get("tool") == primary_tool
+                ),
+                None,
+            )
+            if not tool_result:
+                continue
+            score = _coerce_float(tool_result.get("score"))
+            actual = int(pair.get("ground_truth_label") or 0) >= 2
+            predicted = score >= threshold
+            labeled_rows.append(
+                {
+                    "pair": pair,
+                    "score": score,
+                    "actual": actual,
+                    "predicted": predicted,
+                }
+            )
+
+        if labeled_rows:
+            false_positives = sorted(
+                [row for row in labeled_rows if not row["actual"] and row["predicted"]],
+                key=lambda row: row["score"],
+                reverse=True,
+            )[:5]
+            false_negatives = sorted(
+                [row for row in labeled_rows if row["actual"] and not row["predicted"]],
+                key=lambda row: row["score"],
+            )[:5]
+            lines.extend(["Error Examples"])
+            if false_positives:
+                lines.append("False positives: clean pairs above threshold.")
+                for row in false_positives:
+                    pair = row["pair"]
+                    lines.append(
+                        f"- {pair.get('label', 'Pair')}: {pair.get('file_a', '')} vs "
+                        f"{pair.get('file_b', '')}; score {_format_report_percent(row['score'])}"
+                    )
+            else:
+                lines.append("False positives: none in labeled pair rows.")
+            if false_negatives:
+                lines.append("False negatives: plagiarism pairs below threshold.")
+                for row in false_negatives:
+                    pair = row["pair"]
+                    lines.append(
+                        f"- {pair.get('label', 'Pair')}: {pair.get('file_a', '')} vs "
+                        f"{pair.get('file_b', '')}; score {_format_report_percent(row['score'])}"
+                    )
+            else:
+                lines.append("False negatives: none in labeled pair rows.")
+            lines.append("")
+
+    if pair_results:
+        lines.extend(["Pair-Level Appendix"])
+        for pair in pair_results[:80]:
+            label = pair.get("label") or "Pair"
+            ground_truth = pair.get("ground_truth_label")
+            lines.append(
+                f"{label}: {pair.get('file_a', '')} vs {pair.get('file_b', '')}"
+                + (
+                    f" | ground truth {ground_truth}"
+                    if ground_truth is not None
+                    else ""
+                )
+            )
+            for tool_result in pair.get("tool_results") or []:
+                tool = _benchmark_tool_display_name(tool_result.get("tool", "tool"))
+                score = _format_report_percent(tool_result.get("score"))
+                lines.append(f"- {tool}: {score}")
+            features = next(
+                (
+                    tr.get("features")
+                    for tr in pair.get("tool_results") or []
+                    if tr.get("tool") == "integritydesk" and tr.get("features")
+                ),
+                None,
+            )
+            if features:
+                top_features = sorted(
+                    features.items(), key=lambda item: float(item[1] or 0), reverse=True
+                )[:4]
+                rendered_features = ", ".join(
+                    f"{name} {_format_report_percent(value)}"
+                    for name, value in top_features
+                )
+                lines.append(f"  IntegrityDesk signal breakdown: {rendered_features}")
+        if len(pair_results) > 80:
+            lines.append(f"... {len(pair_results) - 80} additional pairs omitted.")
+    else:
+        lines.extend(
+            ["Pair-Level Appendix", "No pair-level rows were included in the result."]
+        )
+
+    return lines
+
+
+def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
+    """Generate a detailed, visually appealing scorecard PDF using HTML/CSS and WeasyPrint."""
+    from weasyprint import HTML, CSS
+    from io import BytesIO
+
+    # Build HTML content
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{scorecard["metadata"]["title"]}</title>
+        <style>
+            @page {{
+                size: letter;
+                margin: 0.75in;
+            }}
+            body {{
+                font-family: 'Helvetica', 'Arial', sans-serif;
+                color: #1f2937;
+                line-height: 1.6;
+                font-size: 11pt;
+            }}
+            .header {{
+                text-align: center;
+                border-bottom: 2px solid #e5e7eb;
+                padding-bottom: 20pt;
+                margin-bottom: 30pt;
+            }}
+            .title {{
+                font-size: 24pt;
+                font-weight: bold;
+                color: #1f2937;
+                margin-bottom: 10pt;
+            }}
+            .subtitle {{
+                font-size: 12pt;
+                color: #6b7280;
+            }}
+            .section {{
+                margin-bottom: 40pt;
+                page-break-inside: avoid;
+            }}
+            .section-header {{
+                font-size: 16pt;
+                font-weight: bold;
+                color: #374151;
+                border-bottom: 1px solid #e5e7eb;
+                padding-bottom: 8pt;
+                margin-bottom: 15pt;
+            }}
+            .status-badge {{
+                display: inline-block;
+                padding: 6pt 12pt;
+                border-radius: 6pt;
+                font-weight: bold;
+                font-size: 11pt;
+                margin: 10pt 0;
+            }}
+            .status-excellent {{ background-color: #dcfce7; color: #166534; }}
+            .status-good {{ background-color: #dbeafe; color: #1e40af; }}
+            .status-needs-improvement {{ background-color: #fef3c7; color: #92400e; }}
+            .status-critical {{ background-color: #fee2e2; color: #991b1b; }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin: 15pt 0;
+                font-size: 10pt;
+            }}
+            th, td {{
+                border: 1px solid #e5e7eb;
+                padding: 8pt;
+                text-align: left;
+                vertical-align: top;
+            }}
+            th {{
+                background-color: #f9fafb;
+                font-weight: bold;
+                color: #374151;
+            }}
+            .metric-table {{
+                font-size: 9pt;
+            }}
+            .metric-table th {{
+                text-align: center;
+                font-size: 10pt;
+            }}
+            .metric-table td {{
+                text-align: center;
+            }}
+            .metric-good {{ color: #166534; font-weight: bold; }}
+            .metric-warning {{ color: #92400e; font-weight: bold; }}
+            .metric-bad {{ color: #991b1b; font-weight: bold; }}
+            .priority-high {{ color: #991b1b; }}
+            .priority-medium {{ color: #92400e; }}
+            .priority-low {{ color: #166534; }}
+            .footer {{
+                font-size: 8pt;
+                color: #9ca3af;
+                text-align: center;
+                border-top: 1px solid #e5e7eb;
+                padding-top: 20pt;
+                margin-top: 40pt;
+            }}
+            .page-break {{
+                page-break-before: always;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">{scorecard["metadata"]["title"]}</div>
+            <div class="subtitle">Dataset: {scorecard["metadata"]["dataset"]} | Generated: {scorecard["metadata"]["generated_at"][:19].replace('T', ' ')}</div>
+        </div>
+    """
+
+    # Executive Summary
+    exec_summary = scorecard["executive_summary"]
+    status_class = (
+        f"status-{exec_summary.get('status_color', 'blue').lower().replace(' ', '-')}"
+    )
+    status_description = exec_summary.get("status_description", "")
+
+    html_content += f"""
+        <div class="section">
+            <div class="section-header">Executive Summary</div>
+            <div class="status-badge {status_class}">{exec_summary["status"]}</div>
+            <p>{status_description}</p>
+            <table class="metric-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+
+    key_metrics = exec_summary.get("key_metrics", {})
+    metrics_info = [
+        ("PlagDet Score", key_metrics.get("plagdet", 0), "≥ 0.90"),
+        ("F1 Score", key_metrics.get("f1_score", 0), "≥ 0.85"),
+        ("Precision", key_metrics.get("precision", 0), "≥ 0.90"),
+        ("Recall", key_metrics.get("recall", 0), "≥ 0.90"),
+    ]
+
+    for name, value, target in metrics_info:
+        status = "✓" if _meets_target(value, target) else "⚠"
+        status_class = (
+            "metric-good" if _meets_target(value, target) else "metric-warning"
+        )
+        html_content += f"""
+                    <tr>
+                        <td>{name}</td>
+                        <td>{value:.3f}</td>
+                        <td>{target}</td>
+                        <td class="{status_class}">{status}</td>
+                    </tr>
+        """
+
+    html_content += """
+                </tbody>
+            </table>
+        </div>
+    """
+
+    # Tool Comparison with Logos
+    comparison_data = scorecard["tool_comparison"]
+    if comparison_data and comparison_data.get("tools"):
+        html_content += """
+            <div class="section page-break">
+                <div class="section-header">Tool Comparison</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20pt; margin: 20pt 0;">
+        """
+
+        for tool_data in comparison_data["tools"]:
+            logo_html = ""
+            if tool_data.get("logo_url"):
+                logo_html = f'<img src="{tool_data["logo_url"]}" alt="{tool_data["tool_name"]} logo" style="height: 32px; width: auto; margin-right: 10pt; vertical-align: middle;">'
+
+            tier_color = {
+                "Excellent": "#166534",
+                "Good": "#1e40af",
+                "Fair": "#92400e",
+                "Poor": "#991b1b",
+            }.get(tool_data["performance_tier"], "#6b7280")
+
+            html_content += f"""
+                <div style="border: 1px solid #e5e7eb; border-radius: 8pt; padding: 15pt; background-color: #f9fafb;">
+                    <div style="display: flex; align-items: center; margin-bottom: 10pt;">
+                        {logo_html}
+                        <div>
+                            <h4 style="margin: 0; color: #1f2937; font-size: 16pt;">{tool_data["tool_name"]}</h4>
+                            <span style="background-color: {tier_color}20; color: {tier_color}; padding: 2pt 8pt; border-radius: 4pt; font-size: 10pt; font-weight: bold;">{tool_data["performance_tier"]}</span>
+                        </div>
+                    </div>
+                    <table style="width: 100%; font-size: 9pt; margin-bottom: 10pt;">
+                        <tr>
+                            <td style="padding: 4pt; font-weight: bold;">F1 Score:</td>
+                            <td style="padding: 4pt;">{tool_data["metrics"]["f1_score"]:.3f}</td>
+                            <td style="padding: 4pt; font-weight: bold;">Runtime:</td>
+                            <td style="padding: 4pt;">{tool_data["metrics"]["runtime_seconds"]:.2f}s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 4pt; font-weight: bold;">Precision:</td>
+                            <td style="padding: 4pt;">{tool_data["metrics"]["precision"]:.3f}</td>
+                            <td style="padding: 4pt; font-weight: bold;">Recall:</td>
+                            <td style="padding: 4pt;">{tool_data["metrics"]["recall"]:.3f}</td>
+                        </tr>
+                    </table>
+                    <div style="font-size: 9pt; color: #374151;">
+                        <strong>Strengths:</strong> {" • ".join(tool_data["strengths"][:2])}
+                    </div>
+                </div>
+            """
+
+        html_content += """
+                </div>
+            </div>
+        """
+
+    # Performance Metrics
+    html_content += """
+        <div class="section page-break">
+            <div class="section-header">Detailed Performance Metrics</div>
+    """
+
+    performance_data = scorecard["performance_metrics"]
+    for tool_name, tool_metrics in performance_data.items():
+        html_content += f"""
+            <h3 style="color: #374151; margin: 20pt 0 10pt 0;">{tool_name}</h3>
+            <table class="metric-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                        <th>Target</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        for metric_name, metric_info in tool_metrics["primary_metrics"].items():
+            value = metric_info["value"]
+            target = metric_info["target"]
+            description = metric_info["description"]
+            meets = _meets_target(value, target)
+            status_class = "metric-good" if meets else "metric-warning"
+
+            html_content += f"""
+                    <tr>
+                        <td>{metric_name.replace('_', ' ').title()}</td>
+                        <td class="{status_class}">{value:.3f}</td>
+                        <td>{target}</td>
+                        <td>{description}</td>
+                    </tr>
+            """
+
+        html_content += """
+                </tbody>
+            </table>
+        """
+
+    html_content += "</div>"
+
+    # Risk Assessment
+    risk_data = scorecard["risk_assessment"]
+    overall_risk = risk_data["overall_risk"]
+    risk_color = {"low": "#166534", "medium": "#92400e", "high": "#991b1b"}.get(
+        overall_risk, "#6b7280"
+    )
+
+    html_content += f"""
+        <div class="section page-break">
+            <div class="section-header">Risk Assessment</div>
+            <div style="background-color: #fef3c7; padding: 15pt; border-radius: 6pt; margin: 15pt 0;">
+                <strong style="color: {risk_color};">Overall Risk Level: {overall_risk.upper()}</strong>
+                <p style="margin: 10pt 0 0 0;">{risk_data["mitigation_strategy"]}</p>
+            </div>
+    """
+
+    if risk_data["risks"]:
+        html_content += """
+            <table>
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Recommendation</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        for risk in risk_data["risks"][:5]:
+            severity_color = {
+                "high": "#991b1b",
+                "medium": "#92400e",
+                "low": "#ca8a04",
+            }.get(risk["severity"], "#6b7280")
+            html_content += f"""
+                    <tr>
+                        <td><span style="color: {severity_color}; font-weight: bold;">{risk["severity"].upper()}</span></td>
+                        <td>{risk["category"]}</td>
+                        <td>{risk["description"][:100]}{"..." if len(risk["description"]) > 100 else ""}</td>
+                        <td>{risk["recommendation"][:80]}{"..." if len(risk["recommendation"]) > 80 else ""}</td>
+                    </tr>
+            """
+
+        html_content += """
+                </tbody>
+            </table>
+        """
+
+    html_content += "</div>"
+
+    # Recommendations
+    recommendations = scorecard["recommendations"]
+    if recommendations:
+        html_content += """
+            <div class="section page-break">
+                <div class="section-header">Recommendations</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Priority</th>
+                            <th>Category</th>
+                            <th>Recommendation</th>
+                            <th>Expected Impact</th>
+                            <th>Effort</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+
+        for rec in recommendations:
+            priority_color = {
+                "high": "#991b1b",
+                "medium": "#92400e",
+                "low": "#166534",
+            }.get(rec["priority"], "#6b7280")
+            html_content += f"""
+                        <tr>
+                            <td><span style="color: {priority_color}; font-weight: bold;">{rec["priority"].upper()}</span></td>
+                            <td>{rec["category"]}</td>
+                            <td>{rec["recommendation"][:80]}{"..." if len(rec["recommendation"]) > 80 else ""}</td>
+                            <td>{rec["expected_impact"][:60]}{"..." if len(rec["expected_impact"]) > 60 else ""}</td>
+                            <td>{rec["implementation_effort"].title()}</td>
+                        </tr>
+            """
+
+        html_content += """
+                </tbody>
+            </table>
+        </div>
+        """
+
+    # Footer
+    html_content += f"""
+        <div class="footer">
+            Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')} |
+            Dataset: {scorecard['metadata']['dataset']} |
+            {scorecard['metadata']['tools_evaluated']} tools evaluated
+        </div>
+    </body>
+    </html>
+    """
+
+    # Generate PDF using the existing simple text method
+    # Convert the HTML structure to plain text format for PDF
+    lines = []
+
+    # Title
+    lines.append(scorecard["metadata"]["title"])
+    lines.append("")
+    lines.append(f"Dataset: {scorecard['metadata']['dataset']}")
+    lines.append(
+        f"Generated: {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
+    lines.append("")
+
+    # Executive Summary
+    exec_summary = scorecard["executive_summary"]
+    lines.append("EXECUTIVE SUMMARY")
+    lines.append("-" * 20)
+    lines.append(f"Status: {exec_summary['status']}")
+    lines.append(f"Description: {exec_summary['status_description']}")
+    lines.append("")
+    lines.append("Key Metrics:")
+    key_metrics = exec_summary.get("key_metrics", {})
+    lines.append(".3f")
+    lines.append(".3f")
+    lines.append(".3f")
+    lines.append(".3f")
+    lines.append("")
+
+    # Tool Comparison with Logos
+    comparison_data = scorecard["tool_comparison"]
+    if comparison_data and comparison_data.get("tools"):
+        lines.append("TOOL COMPARISON")
+        lines.append("-" * 20)
+        for tool_data in comparison_data["tools"]:
+            logo_indicator = "[LOGO]" if tool_data.get("logo_url") else ""
+            lines.append(f"{tool_data['tool_name']} {logo_indicator}")
+            lines.append(f"  Performance Tier: {tool_data['performance_tier']}")
+            lines.append(f"  F1 Score: {tool_data['metrics']['f1_score']:.3f}")
+            lines.append(f"  Precision: {tool_data['metrics']['precision']:.3f}")
+            lines.append(f"  Recall: {tool_data['metrics']['recall']:.3f}")
+            lines.append(f"  Runtime: {tool_data['metrics']['runtime_seconds']:.2f}s")
+            if tool_data["strengths"]:
+                lines.append(f"  Strengths: {', '.join(tool_data['strengths'][:2])}")
+            lines.append("")
+
+    # Performance Metrics
+    lines.append("PERFORMANCE METRICS")
+    lines.append("-" * 20)
+    performance_data = scorecard["performance_metrics"]
+    for tool_name, tool_metrics in performance_data.items():
+        lines.append(f"{tool_name}:")
+        for metric_name, metric_info in tool_metrics["primary_metrics"].items():
+            value = metric_info["value"]
+            target = metric_info["target"]
+            status = "✓" if _meets_target(value, target) else "⚠"
+            lines.append(
+                f"  {metric_name.replace('_', ' ').title()}: {value:.3f} (Target: {target}) {status}"
+            )
+        lines.append("")
+
+    # Risk Assessment
+    risk_data = scorecard["risk_assessment"]
+    lines.append("RISK ASSESSMENT")
+    lines.append("-" * 20)
+    lines.append(f"Overall Risk Level: {risk_data['overall_risk'].upper()}")
+    lines.append(f"Strategy: {risk_data['mitigation_strategy']}")
+    lines.append("")
+
+    if risk_data["risks"]:
+        lines.append("Top Risks:")
+        for risk in risk_data["risks"][:3]:
+            lines.append(
+                f"  {risk['severity'].upper()}: {risk['category']} - {risk['description'][:60]}..."
+            )
+        lines.append("")
+
+    # Recommendations
+    recommendations = scorecard["recommendations"]
+    if recommendations:
+        lines.append("RECOMMENDATIONS")
+        lines.append("-" * 20)
+        for rec in recommendations:
+            lines.append(
+                f"{rec['priority'].upper()}: {rec['category']} - {rec['recommendation'][:80]}..."
+            )
+            lines.append(
+                f"  Impact: {rec['expected_impact'][:60]}... | Effort: {rec['implementation_effort'].title()}"
+            )
+        lines.append("")
+
+    # Footer
+    lines.append("-" * 60)
+    lines.append(
+        f"Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
+    lines.append(
+        f"Dataset: {scorecard['metadata']['dataset']} | {scorecard['metadata']['tools_evaluated']} tools evaluated"
+    )
+
+    return _simple_text_pdf_bytes(scorecard["metadata"]["title"], lines)
+
+
+def _meets_target(value: float, target_str: str) -> bool:
+    """Check if a value meets its target."""
+    if "≥" in target_str:
+        target = float(target_str.replace("≥", "").strip())
+        return value >= target
+    elif "≤" in target_str:
+        target = float(target_str.replace("≤", "").strip())
+        return value <= target
+    return True
+
+
+def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
+    """Generate a reliable multi-page text PDF without external PDF dependencies."""
+    import textwrap
+
+    page_width = 612
+    page_height = 792
+    margin_x = 42
+    start_y = 742
+    max_lines = 52
+    wrap_width = 92
+
+    rendered_lines: List[str] = []
+    for raw_line in lines:
+        line = str(raw_line).strip("\n")
+        if not line:
+            rendered_lines.append("")
+            continue
+        wrapped = textwrap.wrap(
+            line,
+            width=wrap_width,
+            break_long_words=False,
+            replace_whitespace=False,
+        )
+        rendered_lines.extend(wrapped or [""])
+
+    pages = [
+        rendered_lines[index : index + max_lines]
+        for index in range(0, len(rendered_lines), max_lines)
+    ] or [[title]]
+
+    objects: List[bytes] = []
+    page_object_ids: List[int] = []
+
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(b"")
+
+    font_id = 3 + (len(pages) * 2)
+    for page_index, page_lines in enumerate(pages):
+        page_id = 3 + (page_index * 2)
+        content_id = page_id + 1
+        page_object_ids.append(page_id)
+
+        page = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+            f"/Contents {content_id} 0 R /Resources << /Font << /F1 {font_id} 0 R >> >> >>"
+        )
+        objects.append(page.encode("utf-8"))
+
+        stream_lines = ["BT", "/F1 10 Tf", f"{margin_x} {start_y} Td", "14 TL"]
+        for idx, line in enumerate(page_lines):
+            if idx > 0:
+                stream_lines.append("T*")
+            stream_lines.append(f"({_pdf_escape(line)}) Tj")
+        stream_lines.append("ET")
+        stream = "\n".join(stream_lines).encode("utf-8")
+        objects.append(
+            b"<< /Length "
+            + str(len(stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
+        )
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_object_ids)
+    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode(
+        "utf-8"
+    )
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_id, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+
+    xref_start = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        (
+            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_start}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(output)
+
+
 @app.post("/api/benchmark/export-pdf")
 async def export_benchmark_pdf(request: Request):
     payload = await request.json()
+    dataset_name = (
+        payload.get("datasetName")
+        or (payload.get("summary") or {}).get("dataset_name")
+        or "Benchmark"
+    )
+
+    # Check if detailed scorecard is requested
+    if payload.get("format") == "detailed_scorecard":
+        scorecard = _build_detailed_evaluation_scorecard(payload)
+        pdf = _generate_detailed_scorecard_pdf(scorecard)
+    else:
+        # Use legacy format
+        report_lines = _build_benchmark_report_lines(payload)
+        pdf = _simple_text_pdf_bytes(f"{dataset_name} Benchmark Report", report_lines)
+
+    response = Response(content=pdf, media_type="application/pdf")
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=benchmark_evaluation_scorecard.pdf"
+    )
+    return response
 
     pair_results = payload.get("pair_results") or []
     summary = payload.get("summary") or {}
@@ -8162,7 +13660,7 @@ def _render_code_table(code, max_lines=80):
         rows.append(
             f'<tr><td class="line-num">{i}</td><td class="line-code">{escaped}</td></tr>'
         )
-    if len(code or "") > sum(len(l) for l in lines):
+    if len(code or "") > sum(len(line) for line in lines):
         rows.append(
             f'<tr><td class="line-num"></td><td class="line-code" style="color:#6b7280;">// ... truncated ({len(code.split(chr(10)))-max_lines} more lines)</td></tr>'
         )
@@ -8201,78 +13699,84 @@ def _generate_committee_report(
     student_info = {fn: _extract_student_info(fn) for fn in students_involved}
 
     css = """
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #f5f5f5; color: #333; line-height: 1.5; }
-    .report-container { max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .report-header { background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%); color: #fff; padding: 24px 32px; display: flex; align-items: center; justify-content: space-between; }
-    .report-header-left { display: flex; align-items: center; gap: 16px; }
-    .report-logo { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-    .report-title { font-size: 18px; font-weight: 600; }
-    .report-subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
-    .report-header-right { text-align: right; font-size: 11px; opacity: 0.8; }
-    .report-meta { padding: 20px 32px; border-bottom: 1px solid #e0e0e0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 13px; }
-    .meta-item { }
-    .meta-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; }
-    .meta-value { font-size: 14px; font-weight: 500; color: #333; }
-    .similarity-overview { padding: 32px; text-align: center; border-bottom: 1px solid #e0e0e0; }
-    .similarity-circle { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; color: #fff; position: relative; }
-    .similarity-circle::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: #fff; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; }
+    .report-container { max-width: 1000px; margin: 0 auto; background: #ffffff; box-shadow: 0 10px 25px rgba(0,0,0,0.1), 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+    .conf-banner { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #ffffff; text-align: center; padding: 12px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; border-bottom: 1px solid #475569; }
+    .report-header { background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); color: #ffffff; padding: 32px 40px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .report-header-left { display: flex; align-items: center; gap: 20px; }
+    .report-logo { width: 50px; height: 50px; background: rgba(255,255,255,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .report-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .report-subtitle { font-size: 14px; opacity: 0.9; margin-top: 4px; font-weight: 500; }
+    .report-header-right { text-align: right; font-size: 12px; opacity: 0.9; font-weight: 500; }
+    .report-meta { padding: 28px 40px; border-bottom: 2px solid #e2e8f0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; font-size: 14px; background: #f8fafc; }
+    .meta-item { background: #ffffff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .meta-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 6px; }
+    .meta-value { font-size: 15px; font-weight: 600; color: #1e293b; }
+    .similarity-overview { padding: 40px; text-align: center; border-bottom: 2px solid #e2e8f0; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); }
+    .similarity-circle { width: 140px; height: 140px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 800; color: #ffffff; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .similarity-circle::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: #ffffff; }
     .similarity-circle span { position: relative; z-index: 1; }
-    .similarity-label { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 4px; }
-    .similarity-desc { font-size: 12px; color: #666; }
-    .color-legend { display: flex; justify-content: center; gap: 20px; margin-top: 16px; }
-    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666; }
-    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .sources-section { padding: 24px 32px; }
-    .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a73e8; }
-    .sources-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .sources-table th { background: #f8f9fa; padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 2px solid #e0e0e0; }
-    .sources-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
-    .sources-table tr:hover td { background: #fafbfc; }
-    .similarity-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
-    .sim-high { background: #dc3545; }
-    .sim-medium { background: #fd7e14; }
-    .sim-low { background: #ffc107; color: #333; }
-    .sim-none { background: #28a745; }
-    .findings-section { padding: 24px 32px; }
-    .finding-card { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
-    .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; }
-    .finding-title { font-size: 14px; font-weight: 600; color: #333; }
-    .finding-body { padding: 18px; }
-    .finding-summary { font-size: 13px; color: #555; margin-bottom: 12px; }
-    .engine-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
-    .engine-item { text-align: center; padding: 8px; background: #f8f9fa; border-radius: 6px; }
-    .engine-name { font-size: 9px; font-weight: 600; text-transform: uppercase; color: #666; margin-bottom: 4px; }
-    .engine-score { font-size: 16px; font-weight: 700; }
-    .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; margin-top: 12px; }
-    .code-panel { }
-    .code-panel-header { padding: 8px 12px; background: #f8f9fa; font-size: 11px; font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
-    .code-table { width: 100%; border-collapse: collapse; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; line-height: 1.6; }
+    .similarity-label { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+    .similarity-desc { font-size: 14px; color: #64748b; font-weight: 500; }
+    .color-legend { display: flex; justify-content: center; gap: 24px; margin-top: 20px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569; font-weight: 600; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .sources-section { padding: 32px 40px; border-bottom: 1px solid #e2e8f0; }
+    .section-title { font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #1e40af; letter-spacing: -0.01em; }
+    .sources-table { width: 100%; border-collapse: collapse; font-size: 14px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .sources-table th { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 14px 16px; text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; border-bottom: 2px solid #cbd5e1; }
+    .sources-table td { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
+    .sources-table tr:hover td { background: #f8fafc; transition: background-color 0.2s; }
+    .similarity-badge { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .sim-high { background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); }
+    .sim-medium { background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%); }
+    .sim-low { background: linear-gradient(135deg, #ca8a04 0%, #a16207 100%); color: #ffffff; }
+    .sim-none { background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); }
+    .findings-section { padding: 32px 40px; }
+    .finding-card { border: 2px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); background: #ffffff; }
+    .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-bottom: 2px solid #cbd5e1; }
+    .finding-title { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .finding-body { padding: 24px; }
+    .finding-summary { font-size: 14px; color: #475569; margin-bottom: 16px; line-height: 1.7; }
+    .engine-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+    .engine-item { text-align: center; padding: 12px; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-radius: 8px; border: 1px solid #cbd5e1; }
+    .engine-name { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 6px; letter-spacing: 0.05em; }
+    .engine-score { font-size: 18px; font-weight: 800; }
+    .code-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 2px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .code-panel { background: #0f172a; }
+    .code-panel-header { padding: 12px 16px; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #e2e8f0; font-size: 13px; font-weight: 700; border-bottom: 1px solid #475569; }
+    .code-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
     .code-table td { padding: 0; vertical-align: top; }
-    .code-table .line-num { width: 40px; text-align: right; padding: 0 8px 0 4px; color: #6b7280; background: #f3f4f6; border-right: 1px solid #e5e7eb; user-select: none; font-size: 10px; white-space: nowrap; }
-    .code-table .line-code { padding: 0 12px; white-space: pre; color: #d1d5db; }
+    .code-table .line-num { width: 50px; text-align: right; padding: 0 10px 0 6px; color: #94a3b8; background: #1e293b; border-right: 1px solid #475569; user-select: none; font-size: 11px; white-space: nowrap; }
+    .code-table .line-code { padding: 0 16px; white-space: pre; color: #cbd5e1; }
     .code-table tr.matched { background: rgba(250, 204, 21, 0.15); }
     .code-table tr.matched .line-num { background: #fef3c7; color: #92400e; }
     .code-table tr.matched .line-code { color: #fef08a; }
     .code-table tr.highlight { background: rgba(239, 68, 68, 0.2); }
     .code-table tr.highlight .line-num { background: #fecaca; color: #991b1b; }
     .code-table tr.highlight .line-code { color: #fca5a5; }
-    .code-scroll { max-height: 400px; overflow-y: auto; }
-    .code-scroll::-webkit-scrollbar { width: 6px; }
-    .code-scroll::-webkit-scrollbar-track { background: #1e1e1e; }
-    .code-scroll::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
-    .match-legend { display: flex; gap: 16px; margin-top: 8px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px; font-size: 10px; color: #666; }
-    .match-legend-item { display: flex; align-items: center; gap: 4px; }
-    .match-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
-    .tool-chip { display: inline-flex; margin: 3px 4px 3px 0; padding: 4px 8px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 600; }
-    .policy-list { margin-top: 8px; padding-left: 18px; font-size: 12px; color: #555; line-height: 1.6; }
-    .methodology { padding: 24px 32px; border-top: 1px solid #e0e0e0; }
-    .methodology p { font-size: 12px; color: #555; line-height: 1.6; }
-    .footer { padding: 20px 32px; border-top: 1px solid #e0e0e0; text-align: center; font-size: 11px; color: #888; }
-    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 20px; }
-    .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color: #333; }
-    .conf-banner { background: #333; color: #fff; text-align: center; padding: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
-    @media print { body { background: #fff; } .report-container { box-shadow: none; } .no-print { display: none; } }
+    .code-scroll { max-height: 500px; overflow-y: auto; }
+    .code-scroll::-webkit-scrollbar { width: 8px; }
+    .code-scroll::-webkit-scrollbar-track { background: #1e293b; }
+    .code-scroll::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
+    .code-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .match-legend { display: flex; gap: 20px; margin-top: 12px; padding: 12px 16px; background: #f8fafc; border-radius: 6px; font-size: 11px; color: #64748b; border: 1px solid #e2e8f0; }
+    .match-legend-item { display: flex; align-items: center; gap: 6px; }
+    .match-legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+    .tool-chip { display: inline-flex; margin: 4px 6px 4px 0; padding: 6px 12px; border-radius: 20px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; font-size: 12px; font-weight: 700; border: 1px solid #93c5fd; }
+    .policy-list { margin-top: 12px; padding-left: 24px; font-size: 13px; color: #475569; line-height: 1.7; }
+    .policy-list li { margin-bottom: 6px; }
+    .methodology { padding: 32px 40px; border-top: 2px solid #e2e8f0; background: #f8fafc; }
+    .methodology p { font-size: 14px; color: #475569; line-height: 1.7; margin-bottom: 12px; }
+    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
+    .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+    .footer { padding: 28px 40px; border-top: 2px solid #e2e8f0; text-align: center; font-size: 12px; color: #64748b; background: #f1f5f9; }
+    .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
+    .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+    @media print { body { background: #ffffff; } .report-container { box-shadow: none; border: none; } .no-print { display: none; } page-break-before: always; }
+    @page { margin: 1in; size: letter; }
     """
 
     now = datetime.now()
@@ -8560,14 +14064,24 @@ async def update_settings(request: Request):
         env_updates: Dict[str, Any] = {}
 
         for key, value in data.items():
-            if key not in SETTINGS_ATTR_MAP:
+            if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
                 continue
             if key in SECRET_SETTING_KEYS and value == "":
                 continue
             if key == "engine_weights":
                 value = _normalize_engine_weights(value)
+            if key == "source_scan_sites":
+                value = _normalize_source_scan_sites(value)
+            if key == "professor_profile":
+                from src.backend.engines.scoring.professor_profiles import (
+                    apply_professor_profile,
+                )
+
+                value = dict(apply_professor_profile(value).profile.__dict__)
             stored_settings[key] = value
             applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
+            if key == "professor_profile":
+                continue
             if key in SECRET_SETTING_KEYS and value:
                 env_updates[SETTINGS_ATTR_MAP[key]] = value
 
@@ -8599,6 +14113,17 @@ async def update_settings(request: Request):
         engine_config["weights"] = proposed_weights
         if governance_result.requires_validation and not governance_result.allowed:
             engine_config.setdefault("advanced", {})["weights_need_validation"] = True
+    elif "professor_profile" in data:
+        from src.backend.engines.scoring.professor_profiles import (
+            apply_professor_profile,
+            professor_profile_to_engine_weights,
+        )
+
+        applied_profile = apply_professor_profile(data.get("professor_profile"))
+        engine_config["weights"] = professor_profile_to_engine_weights(applied_profile)
+        engine_config.setdefault("professor_profile", {})[
+            "applied"
+        ] = applied_profile.to_dict()
     if "baseline_correction" in data:
         engine_config["baseline_correction"] = data["baseline_correction"]
 

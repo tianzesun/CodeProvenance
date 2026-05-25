@@ -85,6 +85,17 @@ main {
   position: relative;
 }
 
+.dashboard-main {
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-main {
+    width: calc(100% - var(--sidebar-width));
+    margin-left: var(--sidebar-width);
+  }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -130,27 +141,11 @@ main {
 }
 
 .theme-shell::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at top left, var(--shell-spotlight-a), transparent 34%),
-    radial-gradient(circle at top right, var(--shell-spotlight-b), transparent 30%),
-    linear-gradient(180deg, var(--shell-top) 0%, var(--shell-bottom) 100%);
+  content: none;
 }
 
 .theme-shell::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
-  background-size: 88px 88px;
-  mask-image: radial-gradient(circle at center, black 38%, transparent 86%);
-  opacity: 0.45;
+  content: none;
 }
 
 .glass-panel {

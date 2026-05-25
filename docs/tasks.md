@@ -13,7 +13,7 @@ Improve backend structure without breaking runtime behavior.
 3. Architect
    - Maintain the target module boundaries in `docs/architecture.md`.
 4. Developer
-   - Apply low-risk structural changes and compatibility shims first.
+   - Apply low-risk structural changes first.
 5. Tester
    - Validate imports and targeted backend tests.
 6. Reviewer
@@ -21,11 +21,11 @@ Improve backend structure without breaking runtime behavior.
 
 ## Immediate Tasks
 
-- [x] Add a compatibility namespace for `src.backend.backend.*`.
+- [x] Remove the legacy `src.backend.backend.*` compatibility namespace.
 - [x] Add a backend structure audit script.
 - [x] Document the staged cleanup plan.
 - [x] Rewrite tests away from `src.backend.backend.*`.
-- [ ] Rewrite any remaining runtime imports away from `src.backend.backend.*`.
+- [x] Confirm no runtime imports depend on `src.backend.backend.*`.
 - [ ] Inventory duplicate basenames and prioritize the highest-risk collisions.
 - [x] Reduce `report_generator.py` collisions by renaming modules to role-specific names.
 - [x] Reduce most runtime `registry.py` collisions by renaming module files to role-specific names.

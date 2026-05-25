@@ -68,33 +68,34 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         runtime_seconds=2.0,
     )
 
-    assert metrics["precision"] == 0.6667
-    assert metrics["recall"] == 1.0
-    assert metrics["f1_score"] == 0.8
+    assert metrics["headline_metric_basis"] == "held_out_evaluation"
+    assert metrics["precision"] == 0.0
+    assert metrics["recall"] == 0.0
+    assert metrics["f1_score"] == 0.0
     assert metrics["granularity"] == 1.0
-    assert metrics["plagdet"] == 0.8
-    assert metrics["plagdet_percent"] == 80.0
+    assert metrics["plagdet"] == 0.0
+    assert metrics["plagdet_percent"] == 0.0
     assert metrics["top_10_retrieval"] == 0.5
     assert metrics["top_20_retrieval"] == 0.5
     assert metrics["top_10_recall"] == 1.0
     assert metrics["top_20_recall"] == 1.0
-    assert metrics["false_positive_rate"] == 0.5
+    assert metrics["false_positive_rate"] == 0.0
     assert "auc_pr" in metrics
     assert metrics["engine_contribution"] == {}
     assert metrics["ai_generated_recall"] is None
     assert metrics["runtime_seconds"] == 2.0
     assert metrics["avg_runtime_seconds"] == 0.5
     assert metrics["pan_metrics"] == {
-        "precision": 0.6667,
-        "recall": 1.0,
-        "f1_score": 0.8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_score": 0.0,
         "granularity": 1.0,
-        "plagdet": 0.8,
+        "plagdet": 0.0,
         "top_10_retrieval": 0.5,
         "top_20_retrieval": 0.5,
         "top_10_recall": 1.0,
         "top_20_recall": 1.0,
-        "false_positive_rate": 0.5,
+        "false_positive_rate": 0.0,
         "auc_pr": metrics["auc_pr"],
         "engine_contribution": {},
         "ai_generated_recall": None,
@@ -102,6 +103,7 @@ def test_compute_evaluation_metrics_includes_pan_scores():
         "score_diagnostics": metrics["score_diagnostics"],
     }
     assert metrics["score_diagnostics"]["label_conflict"] is False
+    assert metrics["benchmark_trust"]["grade"] == "limited"
     assert metrics["granularity_basis"] == "pair_level_single_detection"
     assert metrics["metric_assumptions"]["span_level_scoring"] is False
     assert metrics["metric_assumptions"]["character_offsets"] is False
@@ -141,6 +143,44 @@ def test_compute_top_k_retrieval_uses_ranked_scores():
     retrieval = server._compute_top_k_retrieval(scores, labels, k=2)
 
     assert retrieval == 0.5
+
+
+def test_select_reliable_explicit_pairs_balances_and_shuffles() -> None:
+    pairs = [
+        {"file_a": f"pos_{idx}_a.py", "file_b": f"pos_{idx}_b.py", "label": 3}
+        for idx in range(6)
+    ] + [
+        {
+            "file_a": f"neg_{idx}_a.py",
+            "file_b": f"neg_{idx}_b.py",
+            "label": 0,
+            "case_category": "true_negative",
+        }
+        for idx in range(2)
+    ]
+
+    selected, audit = server._select_reliable_explicit_pairs("demo_dataset", pairs)
+
+    labels = [server._pair_label_value(pair) for pair in selected]
+    assert len(selected) == 4
+    assert sum(1 for label in labels if label >= 2) == 2
+    assert sum(1 for label in labels if label < 2) == 2
+    assert audit["sampling_policy"] == "deterministic_balanced_shuffle"
+    assert audit["original"]["positive_pairs"] == 6
+    assert audit["original"]["negative_pairs"] == 2
+    assert audit["selected"]["class_balance_ratio"] == 1.0
+    assert audit["dropped_pairs"] == 4
+
+
+def test_pair_sampling_audit_warns_for_generated_negatives() -> None:
+    pairs = [
+        {"file_a": "p_a.java", "file_b": "p_b.java", "label": 3},
+        {"file_a": "n_a.java", "file_b": "n_b.java", "label": 0},
+    ]
+
+    _selected, audit = server._select_reliable_explicit_pairs("xiangtan", pairs)
+
+    assert any("Negative pairs are generated" in item for item in audit["warnings"])
 
 
 def test_ground_truth_labels_infer_demo_original_plagiarized_pairs():

@@ -1,0 +1,11 @@
+{
+  "name": "IR-Plag Dataset",
+  "description": "Research benchmark dataset for Java plagiarism detection with controlled plagiarism levels (L1-L6) and non-plagiarized examples. Contains 7 cases with varying obfuscation techniques.",
+  "language": "java",
+  "size": "7 cases, ~483 labeled pairs",
+  "created_by": "Research Community",
+  "created": "2020-01-01",
+  "source": "IR-Plag research dataset",
+  "license": "Academic/Research",
+  "citation": "IR-Plag: A Dataset for Plagiarism Detection in Java Source Code"
+}

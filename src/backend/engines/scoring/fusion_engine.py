@@ -17,6 +17,7 @@ from src.backend.engines.scoring.fusion_policy import (
     default_weight_governance_policy,
     fusion_presets_payload,
 )
+from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -32,6 +33,10 @@ class FusedScore:
     agreement_index: float = 1.0
     components: Dict[str, float] = field(default_factory=dict)
     contributions: Dict[str, float] = field(default_factory=dict)
+    review_priority: float = 0.0
+    professor_summary: str = ""
+    evidence_reasons: list[str] = field(default_factory=list)
+    evidence_guardrails: list[str] = field(default_factory=list)
 
 
 # Baseline scores expected for two unrelated files in the same language.
@@ -41,16 +46,23 @@ class FusedScore:
 LANGUAGE_BASELINE: Dict[str, float] = {
     "embedding": 0.70,  # UniXcoder sees "this is Python code" for both
     "winnowing": 0.25,  # Common keywords/structures produce some overlap
+    "string_tiling": 0.20,  # Normalized local token runs from common idioms
     "ngram": 0.15,  # Character n-grams share syntax tokens
     "ast": 0.25,  # Similar AST node types (functions, returns, etc.)
+    "graph": 0.20,  # Common control/data-flow skeletons in same assignment
+    "static_rules": 0.20,  # Static rule patterns are coarse by design
     "fingerprint": 0.15,  # Token-level overlap from language keywords
+    "sklearn_cosine": 0.25,  # TF-IDF baseline has vocabulary overlap noise
 }
 
 WEIGHT_ALIASES: Dict[str, str] = {
     "token": "fingerprint",
     "semantic": "embedding",
     "codebert": "embedding",
-    "gst": "ngram",
+    "gst": "string_tiling",
+    "cfg": "graph",
+    "execution_cfg": "graph",
+    "llm": "embedding",
 }
 
 
@@ -98,23 +110,29 @@ def _get_default_config() -> Dict:
     return _with_policy_defaults(
         {
             "weights": {
-                "ast": 0.65,
-                "token": 0.25,
-                "winnowing": 0.10,
-                "graph": 0.00,
-                "execution": 0.00,
-                "embedding": 0.00,
-                "ngram": 0.00,
+                "token": 0.12,
+                "winnowing": 0.16,
+                "gst": 0.13,
+                "ast": 0.17,
+                "ngram": 0.10,
+                "graph": 0.15,
+                "embedding": 0.12,
+                "static_rules": 0.05,
                 "codebert": 0.00,
+                "sklearn_cosine": 0.00,
             },
             "baseline_correction": {
                 "enabled": True,
                 "baselines": {
                     "embedding": 0.70,
                     "winnowing": 0.25,
+                    "string_tiling": 0.20,
                     "ngram": 0.15,
                     "ast": 0.25,
+                    "graph": 0.20,
+                    "static_rules": 0.20,
                     "fingerprint": 0.15,
+                    "sklearn_cosine": 0.25,
                 },
             },
             "arbitration": {
@@ -176,6 +194,7 @@ class FusionEngine:
         self._fuser = PrecisionWeightedFuser(
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
+        self._ranker = EvidenceFusionRanker()
 
     @staticmethod
     def _normalize_weight_names(weights: Dict[str, float]) -> Dict[str, float]:
@@ -518,6 +537,8 @@ class FusionEngine:
         final_score = min(1.0, max(0.0, final_score))
         final_score = self._apply_precision_guards(corrected_scores, final_score)
 
+        evidence_rank = self._ranker.rank_pair(raw_scores, base_score=final_score)
+
         return FusedScore(
             final_score=final_score,
             confidence=arbitration.agreement_index,
@@ -525,6 +546,10 @@ class FusionEngine:
             agreement_index=arbitration.agreement_index,
             components=raw_scores,
             contributions=arbitration.engine_contributions,
+            review_priority=evidence_rank.review_priority,
+            professor_summary=evidence_rank.professor_summary,
+            evidence_reasons=evidence_rank.reasons,
+            evidence_guardrails=evidence_rank.guardrails,
         )
 
     def _apply_precision_guards(
@@ -546,14 +571,24 @@ class FusionEngine:
         cap = float(guard.get("insufficient_evidence_cap", 0.58))
         semantic_only_cap = float(guard.get("semantic_only_cap", 0.45))
 
-        concrete_engines = ("ast", "fingerprint", "winnowing", "ngram")
-        lexical_engines = ("fingerprint", "winnowing", "ngram")
+        concrete_engines = (
+            "ast",
+            "fingerprint",
+            "winnowing",
+            "string_tiling",
+            "ngram",
+            "graph",
+            "static_rules",
+        )
+        lexical_engines = ("fingerprint", "winnowing", "string_tiling", "ngram")
 
         # AI detection cannot alone trigger high-severity outcomes
         ai_score = corrected_scores.get("ai_detection", 0.0)
         if ai_score >= evidence_threshold and final_score >= high_score_floor:
             # If only AI detection is contributing to high score, cap it
-            non_ai_scores = {k: v for k, v in corrected_scores.items() if k != "ai_detection"}
+            non_ai_scores = {
+                k: v for k, v in corrected_scores.items() if k != "ai_detection"
+            }
             max_non_ai = max(non_ai_scores.values()) if non_ai_scores else 0.0
             if max_non_ai < evidence_threshold:
                 return min(final_score, cap)
@@ -598,6 +633,7 @@ class FusionEngine:
         total = sum(self.weights.values())
         if total > 0:
             self.weights = {k: v / total for k, v in self.weights.items()}
-        self._arbitrator = BayesianArbitrator(
-            engine_prior_precisions={k: v * 20 for k, v in self.weights.items()}
+        multiplier = self._config["arbitration"]["prior_precision_multiplier"]
+        self._fuser = PrecisionWeightedFuser(
+            engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )

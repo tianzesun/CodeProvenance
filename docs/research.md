@@ -18,14 +18,14 @@ existing import surface.
    benchmark logic, but they are implemented as separate package trees.
 4. `src/backend/bootstrap_disabled/` is a legacy area that should be treated as
    quarantined code, not a production subsystem.
-5. Tests still use the legacy `src.backend.backend.*` import path, so a strict
-   move or rename would break the test suite and probably some local tooling.
+5. The legacy `src.backend.backend.*` import path was only covered by a
+   compatibility test and is no longer used by runtime code.
 
 ## Best-Practice Direction
 
 1. Keep production request-serving code under a stable backend package.
 2. Move benchmark and offline evaluation workflows toward top-level,
-   non-production directories only after compatibility shims exist.
+   non-production directories after import paths are normalized.
 3. Quarantine dead or deprecated code behind explicit legacy boundaries instead
    of leaving it mixed into active production areas.
 4. Prefer package-level names that encode responsibility, not implementation
@@ -35,8 +35,7 @@ existing import surface.
 
 ## Safe Immediate Actions
 
-1. Preserve the current import contract with a compatibility namespace for
-   `src.backend.backend.*`.
+1. Keep imports on the normalized `src.backend.*` package path.
 2. Add an audit script to make duplicate basenames and legacy directories
    visible.
 3. Document a staged migration rather than doing a wide directory move in one

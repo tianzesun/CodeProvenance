@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
 import {
   Upload as UploadIcon,
@@ -19,9 +20,12 @@ import {
   ArrowRight,
   Zap,
   Shield,
+  Clock3,
+  SearchCheck,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-const API = 'http://localhost:8080';
+const API = '';
 const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
 const UPLOAD_ENGINE_OPTIONS = [
   { key: 'token', label: 'Token' },
@@ -30,57 +34,45 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'gst', label: 'GST' },
   { key: 'semantic', label: 'Semantic' },
 ];
-const DETECTION_MODES = [
+
+const ASSIGNMENT_TYPE_OPTIONS = [
   {
     id: 'auto_detect',
-    name: 'Auto Detect',
-    subtitle: '(Recommended)',
-    desc: 'AI automatically chooses the best detection strategy based on your files',
-    icon: Sparkles,
-    recommended: true,
+    label: 'Auto Detect',
+    eyebrow: 'Recommended',
+    description: 'AI automatically chooses the best detection strategy based on your files',
   },
   {
     id: 'intro_programming',
-    name: 'Intro Programming',
-    subtitle: 'Python/Java/C Basics',
-    desc: 'Loops, functions, arrays. Students share similar answers with template code. Strong rename/copy detection needed.',
-    icon: Zap,
-    recommended: false,
+    label: 'Intro Programming',
+    eyebrow: 'Python/Java/C Basics',
+    description: 'Loops, functions, arrays. Students share similar answers with template code. Strong rename/copy detection needed.',
   },
   {
-    id: 'data_structures',
-    name: 'Data Structures / OOP',
-    subtitle: 'Linked List, Tree, Classes',
-    desc: 'Structure matters most. Students rename and reorder code. Focus on AST and control flow analysis.',
-    icon: Layers3,
-    recommended: false,
+    id: 'data_structures_oop',
+    label: 'Data Structures / OOP',
+    eyebrow: 'Linked List, Tree, Classes',
+    description: 'Structure matters most. Students rename and reorder code. Focus on AST and control flow analysis.',
   },
   {
-    id: 'algorithms',
-    name: 'Algorithms / Advanced Logic',
-    subtitle: 'Recursion, DP, Graph',
-    desc: 'Logic similarity hidden behind different implementations. Deep semantic and behavioral analysis required.',
-    icon: Settings2,
-    recommended: false,
+    id: 'algorithms_advanced_logic',
+    label: 'Algorithms / Advanced Logic',
+    eyebrow: 'Recursion, DP, Graph',
+    description: 'Logic similarity hidden behind different implementations. Deep semantic and behavioral analysis required.',
   },
   {
-    id: 'project',
-    name: 'Project / Software Engineering',
-    subtitle: 'Web Apps, Team Projects',
-    desc: 'Multi-file projects with shared frameworks. Focus on history and module-level comparisons.',
-    icon: FolderArchive,
-    recommended: false,
+    id: 'project_software_engineering',
+    label: 'Project / Software Engineering',
+    eyebrow: 'Web Apps, Team Projects',
+    description: 'Multi-file projects with shared frameworks. Focus on history and module-level comparisons.',
   },
   {
-    id: 'notebook_analysis',
-    name: 'Notebook / Data Analysis / AI',
-    subtitle: 'Jupyter, Pandas, ML',
-    desc: 'Notebook cells with common imports and boilerplate. Compare custom logic only, ignore standard libraries.',
-    icon: FileUp,
-    recommended: false,
+    id: 'notebook_data_analysis_ai',
+    label: 'Notebook / Data Analysis / AI',
+    eyebrow: 'Jupyter, Pandas, ML',
+    description: 'Notebook cells with common imports and boilerplate. Compare custom logic only, ignore standard libraries.',
   },
 ];
-
 const FALLBACK_TOOL_OPTIONS = [
   {
     id: 'integritydesk',
@@ -191,6 +183,12 @@ const btnShadow = { boxShadow: '0 1px 2px rgba(37,99,235,0.2), 0 4px 14px rgba(3
 const dotGrid = { backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' };
 const blueBg = { background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' };
 const blueCardBg = { background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', border: '1px solid #bfdbfe' };
+const progressTasks = [
+  'Removing starter code',
+  'Building similarity candidates',
+  'Comparing prior semesters',
+  'Ranking cases worth review',
+];
 
 export default function UploadPage() {
   const router = useRouter();
@@ -198,33 +196,75 @@ export default function UploadPage() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const starterFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [starterFiles, setStarterFiles] = useState<File[]>([]);
+  const [isStarterDragOver, setIsStarterDragOver] = useState(false);
   const [courseName, setCourseName] = useState('');
   const [assignmentName, setAssignmentName] = useState('');
-  const [threshold, setThreshold] = useState(0.5);
+  const [assignmentId, setAssignmentId] = useState('');
+  const [courses, setCourses] = useState<any[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
-  const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('auto_detect');
+  const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
   const [modeSuggestion, setModeSuggestion] = useState<ModeSuggestion | null>(null);
   const [modeSuggesting, setModeSuggesting] = useState(false);
   const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
-  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [thresholdLoading, setThresholdLoading] = useState(true);
   const [modesLoading, setModesLoading] = useState(true);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
-  const [isDragOver, setIsDragOver] = useState(false);
   const [progress, setProgress] = useState(0);
   const [scanIndex, setScanIndex] = useState(0);
   const [animateFiles, setAnimateFiles] = useState(false);
   const [dragCount, setDragCount] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [starterFile, setStarterFile] = useState<File | null>(null);
-  const starterFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
+  const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  useEffect(() => {
+    if (!uploading) {
+      setProgress(0);
+      return;
+    }
+    setProgress(0.12);
+    const timer = window.setInterval(() => {
+      setProgress((current) => Math.min(0.92, current + 0.035));
+    }, 600);
+    return () => window.clearInterval(timer);
+  }, [uploading]);
+
+  // Fetch tenant-level external source scan setting + source count for visibility
+  const [configuredSourceCount, setConfiguredSourceCount] = useState(0);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await apiClient.get('/api/settings');
+        const enabled = Boolean(res.data?.source_scan_enabled);
+        const sites = res.data?.source_scan_sites || [];
+        setTenantExternalScanEnabled(enabled);
+        setConfiguredSourceCount(Array.isArray(sites) ? sites.length : 0);
+      } catch (e) {
+        setTenantExternalScanEnabled(false);
+        setConfiguredSourceCount(0);
+      }
+    };
+    if (user) {
+      fetchSettings();
+    }
+  }, [user]);
 
   const startPolling = useCallback((jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -243,6 +283,24 @@ export default function UploadPage() {
   }, [files]);
 
   const selectedFiles = useMemo(() => (zipFile ? [] : files), [files, zipFile]);
+  const inferredComparisonScope = useMemo(() => {
+    if (zipFile || files.length > 2) {
+      return {
+        label: 'Class-wide comparison',
+        detail: 'IntegrityDesk will rank suspicious pairs across the uploaded submissions.',
+      };
+    }
+    if (files.length === 2) {
+      return {
+        label: 'Pairwise comparison',
+        detail: 'IntegrityDesk will compare the two selected submissions directly.',
+      };
+    }
+    return {
+      label: 'Awaiting submissions',
+      detail: 'Upload two files, multiple files, or one ZIP to start plagiarism review.',
+    };
+  }, [files.length, zipFile]);
   const selectedAssignmentMode = useMemo(() => assignmentModes.find((m) => m.id === selectedAssignmentModeId), [assignmentModes, selectedAssignmentModeId]);
   const hasMixedZipSelection = useMemo(() => files.length > 1 && files.some((f) => f.name.toLowerCase().endsWith('.zip')), [files]);
   const canRunCheck = useMemo(() => {
@@ -267,7 +325,6 @@ export default function UploadPage() {
       setActiveEngines(keys.length > 0 ? keys : UPLOAD_ENGINE_OPTIONS.map((e) => e.key));
       setAssignmentModes(Array.isArray(mp?.modes) ? mp.modes : []);
       if (typeof mp?.default_mode_id === 'string') setSelectedAssignmentModeId((c) => c || mp.default_mode_id);
-      else setSelectedAssignmentModeId((c) => c || 'auto_detect');
     }).catch(() => {
       if (active) { setThreshold(0.5); setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((e) => e.key)); setAssignmentModes([]); }
     }).finally(() => { if (active) { setThresholdLoading(false); setModesLoading(false); } });
@@ -276,7 +333,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     let active = true;
-    axios.get(`${API}/api/benchmark-tools`).then((res) => {
+    apiClient.get('/api/benchmark-tools').then((res) => {
       if (!active) return;
       const t = Array.isArray(res.data?.tools) ? res.data.tools : [];
       const tools = t.length > 0 ? t : FALLBACK_TOOL_OPTIONS;
@@ -295,6 +352,7 @@ export default function UploadPage() {
       const p = JSON.parse(raw);
       if (typeof p.course_name === 'string') setCourseName(p.course_name);
       if (typeof p.assignment_name === 'string') setAssignmentName(p.assignment_name);
+      if (typeof p.assignment_id === 'string') setAssignmentId(p.assignment_id);
       if (typeof p.assignment_mode === 'string') setSelectedAssignmentModeId(p.assignment_mode);
     } catch { }
   }, [authLoading, uploadFormStorageKey]);
@@ -302,139 +360,59 @@ export default function UploadPage() {
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') return;
     window.localStorage.setItem(uploadFormStorageKey, JSON.stringify({
-      course_name: courseName, assignment_name: assignmentName, assignment_mode: getBackendModeId(selectedAssignmentModeId),
+      course_name: courseName, assignment_name: assignmentName, assignment_id: assignmentId, assignment_mode: selectedAssignmentModeId,
     }));
-  }, [assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
+  }, [assignmentId, assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
 
-  const autoDetectMode = useCallback(() => {
-    if (files.length === 0) return 'intro_programming';
-
-    const fileNames = files.map(f => f.name.toLowerCase());
-    const fileSizes = files.map(f => f.size);
-
-    // Primary file type detection
-    const hasNotebooks = fileNames.some(name => name.endsWith('.ipynb'));
-    const hasPython = fileNames.some(name => name.endsWith('.py'));
-    const hasJava = fileNames.some(name => name.endsWith('.java'));
-    const hasCpp = fileNames.some(name => name.endsWith('.cpp') || name.endsWith('.cc') || name.endsWith('.h'));
-    const hasWeb = fileNames.some(name => name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.html') || name.endsWith('.css'));
-
-    // Basic metrics
-    const fileCount = files.length;
-    const avgSize = fileSizes.reduce((sum, size) => sum + size, 0) / fileCount;
-    const maxSize = Math.max(...fileSizes);
-
-    // 1. Notebook / Data Analysis / AI (highest priority - ML/data science indicators)
-    if (hasNotebooks || fileNames.some(name =>
-      name.includes('pandas') || name.includes('numpy') || name.includes('sklearn') ||
-      name.includes('matplotlib') || name.includes('tensorflow') || name.includes('pytorch') ||
-      name.includes('jupyter') || name.includes('analysis') || name.includes('ml') || name.includes('ai')
-    )) {
-      return 'notebook_analysis';
-    }
-
-    // 2. Project / Software Engineering (large multi-file, complex projects)
-    if (fileCount >= 8 || maxSize > 50000 || avgSize > 25000 || fileNames.some(name =>
-      name.includes('main') || name.includes('app') || name.includes('server') ||
-      name.includes('client') || name.includes('database') || name.includes('api')
-    )) {
-      return 'project';
-    }
-
-    // 3. Algorithms / Advanced Logic (complex algorithms, competitive programming style)
-    if (avgSize > 12000 || fileNames.some(name =>
-      name.includes('graph') || name.includes('dp') || name.includes('dynamic') ||
-      name.includes('sort') || name.includes('search') || name.includes('tree') ||
-      name.includes('recursion') || name.includes('backtrack') || name.includes('dfs') || name.includes('bfs')
-    )) {
-      return 'algorithms';
-    }
-
-    // 4. Data Structures / OOP (Java/C++ with class structures, moderate complexity)
-    if ((hasJava || hasCpp) && (avgSize > 4000 || fileNames.some(name =>
-      name.includes('list') || name.includes('stack') || name.includes('queue') ||
-      name.includes('hash') || name.includes('map') || name.includes('set') ||
-      name.includes('linked') || name.includes('binary') || name.includes('bst')
-    ))) {
-      return 'data_structures';
-    }
-
-    // 5. Intro Programming (default - simple assignments, basic syntax)
-    return 'intro_programming';
-  }, [files]);
-
-  const getBackendModeId = useCallback((frontendModeId: string) => {
-    if (frontendModeId === 'auto_detect') {
-      return autoDetectMode();
-    }
-
-    // Map simplified frontend modes to actual backend assignment modes
-    const modeMapping: Record<string, string> = {
-      'intro_programming': 'intro_programming',                    // Token-focused for starter code, templates
-      'data_structures': 'data_structures_algorithms',            // AST-focused for structure and classes
-      'algorithms': 'algorithmic_code',                           // Semantic-focused for logic similarity
-      'project': 'software_engineering_large_project',            // History-focused for multi-file projects
-      'notebook_analysis': 'notebook_ai',                         // Cell-focused for notebooks and data analysis
-    };
-
-    return modeMapping[frontendModeId] || 'intro_programming'; // fallback to intro programming
-  }, [autoDetectMode]);
-
+  // Fetch courses for the new hierarchy selector
   useEffect(() => {
-    if (files.length === 0 && !courseName.trim() && !assignmentName.trim()) {
-      setModeSuggestion(null);
+    if (authLoading) return;
+    setCoursesLoading(true);
+    apiClient.get('/api/courses')
+      .then((res) => setCourses(res.data?.courses || []))
+      .catch(() => setCourses([]))
+      .finally(() => setCoursesLoading(false));
+  }, [authLoading]);
+
+  // Fetch assignments when a course is selected
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setAssignments([]);
+      setAssignmentId('');
       return;
     }
+    setAssignmentsLoading(true);
+    apiClient.get(`/api/assignments?course_id=${selectedCourseId}`)
+      .then((res) => setAssignments(res.data?.assignments || []))
+      .catch(() => setAssignments([]))
+      .finally(() => setAssignmentsLoading(false));
+  }, [selectedCourseId]);
 
+  useEffect(() => {
+    if (modesLoading || assignmentModes.length === 0) return;
+    if (!courseName.trim() && !assignmentName.trim() && files.length === 0) { setModeSuggestion(null); return; }
     const timer = window.setTimeout(async () => {
       setModeSuggesting(true);
       try {
-        // For auto-detect, use local logic
-        if (files.length > 0) {
-          const recommendedMode = autoDetectMode();
-          const modeInfo = DETECTION_MODES.find(m => m.id === recommendedMode);
-          if (modeInfo) {
-            const fileCount = files.length;
-            const avgSize = files.reduce((sum, f) => sum + f.size, 0) / files.length;
-            const fileNames = files.map(f => f.name.toLowerCase());
-            const hasNotebooks = fileNames.some(name => name.endsWith('.ipynb'));
-            const hasLargeFiles = avgSize > 20000;
-            const hasManyFiles = fileCount > 5;
-
-            let reasoning = [];
-            if (hasNotebooks) {
-              reasoning.push("Detected Jupyter notebooks - using cell-aware analysis");
-            } else if (hasManyFiles) {
-              reasoning.push(`${fileCount} files suggest multi-file project structure`);
-            } else if (hasLargeFiles) {
-              reasoning.push(`Large files (${Math.round(avgSize/1000)}KB avg) indicate complex algorithms`);
-            } else {
-              reasoning.push(`${fileCount} moderate-sized files typical of ${modeInfo.subtitle.toLowerCase()}`);
-            }
-
-            setModeSuggestion({
-              recommended_mode_id: recommendedMode,
-              recommended_mode_name: modeInfo.name,
-              confidence: 0.85,
-              reasons: reasoning,
-            });
-          }
-        } else {
-          // Fallback to API for course/assignment name based suggestions
-          const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
-            course_name: courseName, assignment_name: assignmentName, filenames: [],
-          });
-          setModeSuggestion(res.data);
-        }
+        const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
+          course_name: courseName, assignment_name: assignmentName, filenames: files.map((f) => f.name),
+        });
+        setModeSuggestion(res.data);
       } catch { setModeSuggestion(null); } finally { setModeSuggesting(false); }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [files, courseName, assignmentName, autoDetectMode]);
+  }, [assignmentModes.length, assignmentName, courseName, files, modesLoading]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
     const f = Array.from(e.dataTransfer.files);
     if (f.length) setFiles(f);
+  }, []);
+
+  const handleStarterDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault(); setIsStarterDragOver(false);
+    const f = Array.from(e.dataTransfer.files);
+    if (f.length) setStarterFiles(f);
   }, []);
 
   const handleSubmit = async () => {
@@ -444,15 +422,18 @@ export default function UploadPage() {
     if (selectedToolIds.includes('integritydesk') && activeEngines.length === 0) { setError('Select at least one engine.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
+    setProgress(0.18);
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
-    if (starterFile) fd.append('starter_file', starterFile);
+    starterFiles.forEach((f) => fd.append('starter_files', f));
     fd.append('course_name', courseName || assignmentName || 'Assignment Check');
     fd.append('assignment_name', assignmentName || courseName || 'Assignment Check');
-    fd.append('assignment_mode', getBackendModeId(selectedAssignmentModeId));
+    if (assignmentId) fd.append('assignment_id', assignmentId);
+    fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_keys', JSON.stringify(activeEngines));
     fd.append('tool_ids', JSON.stringify(selectedToolIds));
+    fd.append('source_scan_enabled', String(sourceScanEnabled));
     try {
       const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
       const res = await axios.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -484,19 +465,32 @@ export default function UploadPage() {
                   </div>
                   <div>
                     <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                      New Assignment Check
+                      Plagiarism Checker
                     </h1>
                   </div>
-                  <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                    Upload submission files, configure detection settings, and run a full similarity analysis.
-                  </p>
+                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+                     Upload files and IntegrityDesk compares them using similarity engines + AI detection. 
+                     When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code.
+                   </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!canRunCheck}
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
-                  >
+                 <div className="flex flex-wrap items-center gap-3">
+                   {/* Small external scan status pill next to Analyze button */}
+                   {tenantExternalScanEnabled !== null && (
+                     <div className={`hidden md:flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
+                       tenantExternalScanEnabled 
+                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
+                         : 'border-amber-200 bg-amber-50 text-amber-700'
+                     }`}>
+                       <div className={`w-1.5 h-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                       External: {tenantExternalScanEnabled ? 'On' : 'Off'}
+                     </div>
+                   )}
+
+                   <button
+                     onClick={handleSubmit}
+                     disabled={!canRunCheck}
+                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+                   >
                     {uploading
                       ? <>
                         <svg width="18" height="18" viewBox="0 0 20 20">
@@ -505,148 +499,403 @@ export default function UploadPage() {
                         </svg>
                         Analyzing…
                       </>
-                      : <><Zap size={16} />Run Check<ArrowRight size={15} className="opacity-70" /></>}
+                      : <><Zap size={16} />Analyze<ArrowRight size={15} className="opacity-70" /></>}
                   </button>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Context Fields */}
-          <div className="grid gap-4 lg:grid-cols-2 mb-4">
-            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Course</label>
-              <input
-                type="text"
-                placeholder="e.g. CS 101 - Introduction to Programming"
-                value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
-                className="w-full h-11 px-4 rounded-xl border text-sm outline-none transition-all"
-                style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-              />
-            </div>
-            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assignment</label>
-              <input
-                type="text"
-                placeholder="e.g. Assignment 3 - Sorting Algorithms"
-                value={assignmentName}
-                onChange={(e) => setAssignmentName(e.target.value)}
-                className="w-full h-11 px-4 rounded-xl border text-sm outline-none transition-all"
-                style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-              />
-            </div>
-          </div>
+          {uploading && (
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-950">
+                    <Loader2 size={16} className="animate-spin" />
+                    Analyzing {zipFile ? 'submissions from archive' : `${files.length} submissions`}...
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+                  </div>
+                </div>
+                <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">
+                  {progressTasks.map((task, index) => (
+                    <div key={task} className="flex items-center gap-2">
+                      <Check size={14} className={progress > (index + 1) * 0.18 ? 'text-blue-700' : 'text-blue-300'} />
+                      {task}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
 
-          {/* Upload Sections */}
+           {inferredComparisonScope && (
+             <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+               <div className="flex items-start gap-3">
+                 <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                 <div>
+                   <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
+                   <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
+                 </div>
+               </div>
+             </section>
+           )}
+
+           {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
+           {tenantExternalScanEnabled === false && !sourceScanEnabled && (
+             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
+               <div className="flex items-center gap-3 text-sm">
+                 <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                 <div className="flex-1 text-amber-900">
+                   External source scanning (GitHub + web) is disabled at the tenant level.
+                   <a href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</a>
+                 </div>
+               </div>
+             </div>
+           )}
+
+            {/* Context Fields - DB-backed hierarchy only (legacy free-text inputs removed) */}
+           <div className="mb-4">
+             <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Course</label>
+                   <select
+                     value={selectedCourseId}
+                     onChange={(e) => {
+                       const cid = e.target.value;
+                       setSelectedCourseId(cid);
+                       const found = courses.find((c: any) => c.id === cid);
+                       if (found) setCourseName(found.name);
+                       setAssignmentId('');
+                       setAssignments([]);
+                     }}
+                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white"
+                     disabled={coursesLoading}
+                   >
+                     <option value="">
+                       {coursesLoading ? 'Loading courses...' : courses.length === 0 ? '-- No courses yet --' : '-- Select Course --'}
+                     </option>
+                     {courses.map((c: any) => (
+                       <option key={c.id} value={c.id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
+                     ))}
+                   </select>
+                    {courses.length === 0 && !coursesLoading && (
+                      <p className="text-[10px] text-amber-600 mt-1">
+                        No courses assigned. Ask an admin to add you as instructor.
+                      </p>
+                    )}
+                 </div>
+
+                 <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assignment</label>
+                   <select
+                     value={assignmentId}
+                     onChange={(e) => {
+                       const aid = e.target.value;
+                       setAssignmentId(aid);
+                       const found = assignments.find((a: any) => a.id === aid);
+                       if (found) setAssignmentName(found.name);
+                     }}
+                     disabled={!selectedCourseId || assignmentsLoading}
+                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white disabled:opacity-60"
+                   >
+                     <option value="">
+                       {assignmentsLoading ? 'Loading assignments...' : !selectedCourseId ? 'Select a course first' : assignments.length === 0 ? '-- No assignments for this course --' : '-- Select Assignment --'}
+                     </option>
+                     {assignments.map((a: any) => (
+                       <option key={a.id} value={a.id}>{a.name}</option>
+                     ))}
+                   </select>
+                 </div>
+               </div>
+                 <p className="text-[10px] text-slate-500 mt-2">Selecting an Assignment links this upload in the database for reporting and review.</p>
+
+                 {/* External Source Scan status + per-submission control */}
+                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                   <div className="flex items-center gap-2">
+                     <span className="text-slate-500">External Source Scan:</span>
+                     {tenantExternalScanEnabled === true ? (
+                       <span className="font-medium text-emerald-700">
+                         Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
+                       </span>
+                     ) : tenantExternalScanEnabled === false ? (
+                       <span className="font-medium text-amber-700">Disabled</span>
+                     ) : (
+                       <span className="text-slate-400">Loading…</span>
+                     )}
+                   </div>
+
+                   <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                     <input
+                       type="checkbox"
+                       checked={sourceScanEnabled}
+                       onChange={(e) => setSourceScanEnabled(e.target.checked)}
+                       className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                     />
+                     <span>Scan for this submission</span>
+                   </label>
+
+                   <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
+                 </div>
+              </div>
+            </div>
+
+          {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Upload Card */}
             <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-              onDragLeave={() => setIsDragOver(false)}
-              className="relative"
-            >
-              {/* Dot-grid bg — only visible in empty state */}
-              {files.length === 0 && (
-                <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
-              )}
+              <div
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                className="relative"
+              >
+                {/* Dot-grid bg — only visible in empty state */}
+                {files.length === 0 && (
+                  <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
+                )}
 
-              {/* Drag ring */}
-              {isDragOver && (
-                <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
-                  style={{ boxShadow: 'inset 0 0 0 2px #3b82f6', background: 'rgba(239,246,255,0.5)' }} />
-              )}
+                {/* Drag ring */}
+                {isDragOver && (
+                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
+                    style={{ boxShadow: 'inset 0 0 0 2px #3b82f6', background: 'rgba(239,246,255,0.5)' }} />
+                )}
 
-              {files.length === 0 ? (
-                /* ── Empty drop zone ── */
-                <div
-                  className="relative flex flex-col items-center justify-center text-center px-8 py-20 cursor-pointer"
-                  onClick={() => fileInputRef.current?.click()}
-                >
+                {files.length === 0 ? (
+                  /* ── Empty drop zone ── */
                   <div
-                    className="w-[72px] h-[72px] rounded-[20px] flex items-center justify-center mb-5 transition-all duration-300"
-                    style={{
-                      background: isDragOver ? '#dbeafe' : '#f8fafc',
-                      boxShadow: isDragOver
-                        ? '0 0 0 10px rgba(59,130,246,0.08), 0 1px 3px rgba(0,0,0,0.06)'
-                        : '0 0 0 10px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
-                      transform: isDragOver ? 'scale(1.08)' : 'scale(1)',
-                    }}
+                    className="relative flex flex-col items-center justify-center text-center px-8 py-20 cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
                   >
-                    <UploadIcon size={28} style={{ color: isDragOver ? '#3b82f6' : '#94a3b8', transition: 'color 0.2s' }} />
+                    <div
+                      className="w-[72px] h-[72px] rounded-[20px] flex items-center justify-center mb-5 transition-all duration-300"
+                      style={{
+                        background: isDragOver ? '#dbeafe' : '#f8fafc',
+                        boxShadow: isDragOver
+                          ? '0 0 0 10px rgba(59,130,246,0.08), 0 1px 3px rgba(0,0,0,0.06)'
+                          : '0 0 0 10px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
+                        transform: isDragOver ? 'scale(1.08)' : 'scale(1)',
+                      }}
+                    >
+                      <UploadIcon size={28} style={{ color: isDragOver ? '#3b82f6' : '#94a3b8', transition: 'color 0.2s' }} />
+                    </div>
+                    <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
+                      {isDragOver ? 'Release to upload' : 'Drag files here'}
+                    </h3>
+                    <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
+                      Upload a ZIP archive, LMS export, repository bundle, or source files for this review.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                        className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
+                        style={{ borderColor: '#e2e8f0', color: '#475569', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                      >
+                        <FileUp size={13} />Browse files
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium text-slate-400"
+                        style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
+                      >
+                        <FolderArchive size={13} />Import from LMS
+                      </button>
+                    </div>
+                    <p className="mt-5 text-xs text-slate-300 font-medium">
+                      .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift · .zip
+                    </p>
                   </div>
-                  <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
-                    {isDragOver ? 'Release to upload' : 'Drop submission files here'}
-                  </h3>
-                  <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
-                    Upload multiple code files for comparison, or a single ZIP archive containing all submissions
-                  </p>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
-                    style={{ borderColor: '#e2e8f0', color: '#475569', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                  >
-                    <FileUp size={13} />Browse files
-                  </button>
-                  <p className="mt-5 text-xs text-slate-300 font-medium">
-                    .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift · .zip
-                  </p>
-                </div>
-              ) : (
-                /* ── File list ── */
-                <div className="px-5 pt-5 pb-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2.5">
-                      {zipFile ? (
-                        <>
-                          <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: '#fef3c7' }}>
-                            <FolderArchive size={11} style={{ color: '#d97706' }} />
-                          </div>
-                          <span className="text-sm font-semibold text-slate-700">ZIP Archive</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#2563eb' }}>
-                            {selectedFiles.length}
-                          </span>
-                          <span className="text-sm font-semibold text-slate-700">
-                            {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'} selected
-                          </span>
-                          {files.length < 2 && (
-                            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ background: '#fef3c7', color: '#b45309' }}>
-                              Need 2+
+                ) : (
+                  /* ── File list ── */
+                  <div className="px-5 pt-5 pb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        {zipFile ? (
+                          <>
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: '#fef3c7' }}>
+                              <FolderArchive size={11} style={{ color: '#d97706' }} />
+                            </div>
+                            <span className="text-sm font-semibold text-slate-700">ZIP Archive</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#2563eb' }}>
+                              {selectedFiles.length}
                             </span>
-                          )}
-                        </>
+                            <span className="text-sm font-semibold text-slate-700">
+                              {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'} selected
+                            </span>
+                            {files.length < 2 && (
+                              <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ background: '#fef3c7', color: '#b45309' }}>
+                                Need 2+
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors">
+                          Add more
+                        </button>
+                        <button onClick={() => setFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-1.5 max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {zipFile ? (
+                        <div className="flex items-center gap-3 rounded-xl px-4 py-3.5"
+                          style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#fef3c7' }}>
+                            <FolderArchive size={15} style={{ color: '#d97706' }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-800 truncate">{zipFile.name}</p>
+                            <p className="text-xs font-medium" style={{ color: '#b45309' }}>{formatSize(zipFile.size)}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        selectedFiles.map((f, i) => {
+                          const c = getExtColor(f.name);
+                          return (
+                            <div
+                              key={i}
+                              className="flex items-center gap-3 rounded-xl border px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200"
+                              style={{ borderColor: '#f1f5f9', background: '#f8fafc' }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = '#ffffff'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                            >
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
+                                style={{ background: c.bg, color: c.text }}>
+                                {getExt(f.name)}
+                              </div>
+                              <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
+                              <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}
+                                className="opacity-0 group-hover/row:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50"
+                                style={{ color: '#cbd5e1' }}
+                                onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.color = '#cbd5e1'; }}
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors">
-                        Add more
-                      </button>
-                      <button onClick={() => setFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
-                        Clear all
-                      </button>
-                    </div>
                   </div>
+                )}
+              </div>
 
-                  <div className="grid gap-1.5 max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {zipFile ? (
-                      <div className="flex items-center gap-3 rounded-xl px-4 py-3.5"
-                        style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#fef3c7' }}>
-                          <FolderArchive size={15} style={{ color: '#d97706' }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-800 truncate">{zipFile.name}</p>
-                          <p className="text-xs font-medium" style={{ color: '#b45309' }}>{formatSize(zipFile.size)}</p>
-                        </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
+                className="hidden"
+                onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setFiles(f); }}
+              />
+
+              {error && (
+                <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
+                  <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-sm text-red-700 flex-1">{error}</p>
+                  <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+                </div>
+              )}
+              {hasMixedZipSelection && (
+                <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
+                  <AlertCircle size={13} className="text-amber-500 shrink-0" />
+                  <p className="text-sm text-amber-700">Remove the ZIP or the other files. Do not mix both.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Starter Code Upload */}
+            <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
+              <div
+                onDrop={handleStarterDrop}
+                onDragOver={(e) => { e.preventDefault(); setIsStarterDragOver(true); }}
+                onDragLeave={() => setIsStarterDragOver(false)}
+                className="relative"
+              >
+                {/* Dot-grid bg */}
+                {starterFiles.length === 0 && (
+                  <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
+                )}
+
+                {/* Drag ring */}
+                {isStarterDragOver && (
+                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
+                    style={{ boxShadow: 'inset 0 0 0 2px #10b981', background: 'rgba(239,246,255,0.5)' }} />
+                )}
+
+                {starterFiles.length === 0 ? (
+                  /* Empty drop zone */
+                  <div
+                    className="relative flex flex-col items-center justify-center text-center px-8 py-16 cursor-pointer"
+                    onClick={() => starterFileInputRef.current?.click()}
+                  >
+                    <div
+                      className="w-[60px] h-[60px] rounded-[16px] flex items-center justify-center mb-4 transition-all duration-300"
+                      style={{
+                        background: isStarterDragOver ? '#d1fae5' : '#f8fafc',
+                        boxShadow: isStarterDragOver
+                          ? '0 0 0 8px rgba(16,185,129,0.08), 0 1px 3px rgba(0,0,0,0.06)'
+                          : '0 0 0 8px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
+                        transform: isStarterDragOver ? 'scale(1.05)' : 'scale(1)',
+                      }}
+                    >
+                      <Layers3 size={24} style={{ color: isStarterDragOver ? '#10b981' : '#94a3b8', transition: 'color 0.2s' }} />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-800 mb-1">
+                      {isStarterDragOver ? 'Release to upload starter code' : 'Starter Code (Optional)'}
+                    </h3>
+                    <p className="text-xs text-slate-400 mb-4 max-w-xs leading-relaxed">
+                      Upload template files, boilerplate code, or reference implementations that should be ignored during comparison.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); starterFileInputRef.current?.click(); }}
+                      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-200 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-600"
+                      style={{ borderColor: '#e2e8f0', color: '#475569' }}
+                    >
+                      <FileUp size={11} />Browse files
+                    </button>
+                    <p className="mt-3 text-[10px] text-slate-300 font-medium">
+                      .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift
+                    </p>
+                  </div>
+                ) : (
+                  /* File list */
+                  <div className="px-5 pt-5 pb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#10b981' }}>
+                          {starterFiles.length}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-700">
+                          Starter file{starterFiles.length === 1 ? '' : 's'} uploaded
+                        </span>
                       </div>
-                    ) : (
-                      selectedFiles.map((f, i) => {
+                      <div className="flex items-center gap-3">
+                        <button type="button" onClick={() => starterFileInputRef.current?.click()} className="text-xs font-medium text-emerald-600 hover:text-emerald-700 transition-colors">
+                          Add more
+                        </button>
+                        <button onClick={() => setStarterFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-1.5 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {starterFiles.map((f, i) => {
                         const c = getExtColor(f.name);
                         return (
                           <div
@@ -663,7 +912,7 @@ export default function UploadPage() {
                             <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
                             <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
                             <button
-                              onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}
+                              onClick={(e) => { e.stopPropagation(); setStarterFiles(starterFiles.filter((_, j) => j !== i)); }}
                               className="opacity-0 group-hover/row:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50"
                               style={{ color: '#cbd5e1' }}
                               onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171'; }}
@@ -673,311 +922,204 @@ export default function UploadPage() {
                             </button>
                           </div>
                         );
-                      })
-                    )}
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
-              className="hidden"
-              onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setFiles(f); }}
-            />
-
-            {error && (
-              <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
-                <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
-                <p className="text-sm text-red-700 flex-1">{error}</p>
-                <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
-              </div>
-            )}
-            {hasMixedZipSelection && (
-              <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
-                <AlertCircle size={13} className="text-amber-500 shrink-0" />
-                <p className="text-sm text-amber-700">Remove the ZIP or the other files — can't mix both.</p>
-              </div>
-            )}
-            </div>
-
-            {/* Starter Code Upload */}
-            <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
-            <div className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
-                    <Sparkles size={13} style={{ color: '#64748b' }} />
-                  </div>
-                  <div>
-                    <span className="text-sm font-semibold text-slate-800">Starter Code (Optional)</span>
-                    <p className="text-xs text-slate-500 mt-0.5">Upload template/boilerplate code to exclude from similarity analysis</p>
-                  </div>
-                </div>
-                {starterFile && (
-                  <button
-                    type="button"
-                    onClick={() => setStarterFile(null)}
-                    className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors"
-                  >
-                    Remove
-                  </button>
                 )}
               </div>
 
-              {!starterFile ? (
-                <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center transition-all duration-200 hover:border-blue-300 hover:bg-blue-50/30">
-                  <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                    <Sparkles size={20} style={{ color: '#64748b' }} />
-                  </div>
-                  <p className="text-sm font-medium text-slate-700 mb-2">Upload Starter Code</p>
-                  <p className="text-xs text-slate-500 mb-4 max-w-xs mx-auto">
-                    Provide template files that students build upon. These will be automatically excluded from plagiarism detection.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => starterFileInputRef.current?.click()}
-                    className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300"
-                    style={{ borderColor: '#e2e8f0', color: '#475569' }}
-                  >
-                    <FileUp size={13} /> Choose File
-                  </button>
-                </div>
-              ) : (
-                <div className="rounded-xl border p-4" style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold"
-                      style={{ background: getExtColor(starterFile.name).bg, color: getExtColor(starterFile.name).text }}>
-                      {getExt(starterFile.name)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{starterFile.name}</p>
-                      <p className="text-xs text-slate-500">{formatSize(starterFile.size)}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => starterFileInputRef.current?.click()}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
-                    >
-                      Change
-                    </button>
-                  </div>
+              <input
+                ref={starterFileInputRef}
+                type="file"
+                multiple
+                accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
+                className="hidden"
+                onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setStarterFiles(f); }}
+              />
+
+              {error && starterFiles.length > 0 && (
+                <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
+                  <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-sm text-red-700 flex-1">{error}</p>
+                  <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
                 </div>
               )}
-            </div>
-
-            <input
-              ref={starterFileInputRef}
-              type="file"
-              className="hidden"
-              accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) setStarterFile(file);
-              }}
-            />
             </div>
           </div>
 
           {/* Config */}
-          <div className="grid gap-4 lg:grid-cols-2">
+          <details className="rounded-2xl bg-white p-5" style={cardShadow}>
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+              Advanced detection settings
+            </summary>
+            <p className="mt-2 text-sm text-slate-500">
+              Defaults are recommended for professors. These controls are mainly for administrators validating custom workflows.
+            </p>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
 
-            {/* Tools */}
-            <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
-              <div className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
-                      <Settings2 size={13} style={{ color: '#64748b' }} />
+              {/* Tools */}
+              <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+                <div className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
+                        <Settings2 size={13} style={{ color: '#64748b' }} />
+                      </div>
+                      <span className="text-sm font-semibold text-slate-800">Detection Tools</span>
                     </div>
-                    <span className="text-sm font-semibold text-slate-800">Tools</span>
+                    {!toolsLoading && toolOptions.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedToolIds(
+                          selectedToolIds.length === toolOptions.length ? [] : toolOptions.map((t) => t.id)
+                        )}
+                        className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors"
+                      >
+                        {selectedToolIds.length === toolOptions.length ? 'Unselect all' : 'Select all'}
+                      </button>
+                    )}
                   </div>
-                  {!toolsLoading && toolOptions.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedToolIds(
-                        selectedToolIds.length === toolOptions.length ? [] : toolOptions.map((t) => t.id)
-                      )}
-                      className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors"
-                    >
-                      {selectedToolIds.length === toolOptions.length ? 'Clear' : 'All'}
-                    </button>
+
+                  {toolsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-400 py-3">
+                      <Loader2 size={13} className="animate-spin" /> Loading tools…
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {toolOptions.map((tool) => {
+                        const on = selectedToolIds.includes(tool.id);
+                        return (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => toggleTool(tool.id)}
+                            className="w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200"
+                            style={on
+                              ? { borderColor: '#bfdbfe', background: '#eff6ff' }
+                              : { borderColor: '#f1f5f9', background: '#f8fafc' }}
+                          >
+                            <div
+                              className="w-4 h-4 rounded flex items-center justify-center border-2 transition-all duration-200 shrink-0"
+                              style={on ? { borderColor: '#2563eb', background: '#2563eb' } : { borderColor: '#cbd5e1', background: 'white' }}
+                            >
+                              {on && <Check size={9} className="text-white" strokeWidth={3} />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold" style={{ color: on ? '#1d4ed8' : '#374151' }}>{tool.name}</p>
+                              {tool.desc && <p className="text-xs text-slate-400 truncate">{tool.desc}</p>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-
-                {toolsLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-400 py-3">
-                    <Loader2 size={13} className="animate-spin" /> Loading tools…
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {toolOptions.map((tool) => {
-                      const on = selectedToolIds.includes(tool.id);
-                      return (
-                        <button
-                          key={tool.id}
-                          type="button"
-                          onClick={() => toggleTool(tool.id)}
-                          className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 hover:scale-105"
-                          style={on
-                            ? { borderColor: '#2563eb', background: '#dbeafe', color: '#1d4ed8' }
-                            : { borderColor: '#e2e8f0', background: '#f8fafc', color: '#64748b' }}
-                        >
-                          {on && <Check size={10} className="text-blue-600" strokeWidth={3} />}
-                          {tool.name}
-                        </button>
-                      );
-                    })}
+                {!toolsLoading && selectedToolIds.length === 0 && (
+                  <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
+                    <AlertCircle size={12} className="text-amber-500" />
+                    <p className="text-xs text-amber-700">Select at least one tool to proceed.</p>
                   </div>
                 )}
               </div>
-              {!toolsLoading && selectedToolIds.length === 0 && (
-                <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
-                  <AlertCircle size={12} className="text-amber-500" />
-                  <p className="text-xs text-amber-700">Select at least one tool to proceed.</p>
+
+              {/* Mode - Only show for IntegrityDesk (assignment modes are specific to IntegrityDesk fusion engine) */}
+              {selectedToolIds.includes('integritydesk') && (
+                <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
+                          <Layers3 size={13} style={{ color: '#64748b' }} />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
+                      </div>
+                      {selectedAssignmentMode?.version && (
+                        <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5" style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+                          v{selectedAssignmentMode.version}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid gap-3">
+                      {ASSIGNMENT_TYPE_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setSelectedAssignmentModeId(option.id)}
+                          className={`rounded-xl border p-4 text-left transition ${selectedAssignmentModeId === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                          <div className="text-sm font-semibold text-slate-950">{option.label}</div>
+                          <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] mb-1 ${selectedAssignmentModeId === option.id ? 'text-blue-600' : 'text-slate-400'}`}>{option.eyebrow}</div>
+                          <div className="text-sm leading-6 text-slate-500">{option.description}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {selectedAssignmentMode?.context && (
+                      <p className="mt-2.5 text-xs text-slate-500 leading-relaxed">{selectedAssignmentMode.context}</p>
+                    )}
+
+                    {selectedAssignmentMode?.warnings?.length ? (
+                      <div className="mt-3 flex items-start gap-2 rounded-xl px-3.5 py-3"
+                        style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+                        <AlertCircle size={13} style={{ color: '#f59e0b' }} className="mt-0.5 shrink-0" />
+                        <p className="text-xs leading-relaxed" style={{ color: '#92400e' }}>{selectedAssignmentMode.warnings[0]}</p>
+                      </div>
+                    ) : null}
+
+                    {/* AI Suggestion */}
+                    <div
+                      className="mt-3 rounded-xl px-3.5 py-3.5 transition-all duration-300"
+                      style={modeSuggestion
+                        ? { background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)', border: '1px solid #bfdbfe' }
+                        : { background: '#f8fafc', border: '1px solid #f1f5f9' }}
+                    >
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <Sparkles size={11} style={{ color: modeSuggestion ? '#60a5fa' : '#cbd5e1' }} />
+                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Recommended Mode</span>
+                      </div>
+                      {modeSuggesting ? (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <Loader2 size={11} className="animate-spin" /> Reading assignment context…
+                        </div>
+                      ) : modeSuggestion ? (
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold leading-snug" style={{ color: '#1e3a5f' }}>
+                              {modeSuggestion.recommended_mode_name}
+                              {typeof modeSuggestion.confidence === 'number' && (
+                                <span className="ml-1.5 text-[11px] font-normal" style={{ color: '#60a5fa' }}>
+                                  {Math.round(modeSuggestion.confidence * 100)}% match
+                                </span>
+                              )}
+                            </p>
+                            {modeSuggestion.reasons?.[0] && (
+                              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#3b82f6' }}>
+                                {modeSuggestion.reasons[0]}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAssignmentModeId(modeSuggestion.recommended_mode_id)}
+                            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:opacity-90"
+                            style={{ ...blueBg, boxShadow: '0 1px 3px rgba(37,99,235,0.3)' }}
+                          >
+                            <Check size={10} strokeWidth={3} />Apply
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Add files or assignment details for a recommendation.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-
-            {/* Mode - Only show for IntegrityDesk (assignment modes are specific to IntegrityDesk fusion engine) */}
-            {selectedToolIds.includes('integritydesk') && (
-              <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
-              <div className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
-                      <Layers3 size={13} style={{ color: '#64748b' }} />
-                    </div>
-                    <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
-                  </div>
-                  {selectedAssignmentMode?.version && (
-                    <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5" style={{ background: '#f1f5f9', color: '#94a3b8' }}>
-                      v{selectedAssignmentMode.version}
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {DETECTION_MODES.map((mode) => {
-                    const isSelected = selectedAssignmentModeId === mode.id;
-                    const IconComponent = mode.icon;
-                    return (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => setSelectedAssignmentModeId(mode.id)}
-                        className="group relative rounded-xl border p-4 text-left transition-all duration-200 hover:scale-[1.02]"
-                        style={isSelected
-                          ? { borderColor: '#2563eb', background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', boxShadow: '0 4px 16px rgba(37,99,235,0.15)' }
-                          : { borderColor: '#f1f5f9', background: '#f8fafc', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}
-                      >
-                        {isSelected && (
-                          <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center">
-                            <Check size={12} className="text-white" strokeWidth={3} />
-                          </div>
-                        )}
-                        <div className="flex items-start gap-3">
-                          <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                            style={isSelected ? { background: '#dbeafe' } : { background: '#f1f5f9' }}
-                          >
-                            <IconComponent
-                              size={16}
-                              style={isSelected ? { color: '#2563eb' } : { color: '#64748b' }}
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="text-sm font-semibold truncate" style={{ color: isSelected ? '#1d4ed8' : '#374151' }}>
-                                {mode.name}
-                              </p>
-                              {mode.recommended && (
-                                <span className="text-[10px] font-bold tracking-wider rounded-full px-2 py-0.5 bg-blue-100 text-blue-700">
-                                  Recommended
-                                </span>
-                              )}
-                            </div>
-                            {mode.subtitle && (
-                              <p className="text-[10px] font-medium uppercase tracking-wider mb-1" style={{ color: isSelected ? '#60a5fa' : '#9ca3af' }}>
-                                {mode.subtitle}
-                              </p>
-                            )}
-                            <p className="text-xs leading-relaxed" style={{ color: isSelected ? '#3b82f6' : '#6b7280' }}>
-                              {mode.desc}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {selectedAssignmentModeId && selectedAssignmentModeId !== 'auto_detect' && (
-                  <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
-                    <p className="text-xs leading-relaxed text-slate-600">
-                      {(() => {
-                        const mode = DETECTION_MODES.find(m => m.id === selectedAssignmentModeId);
-                        if (!mode) return 'Selected mode will optimize detection for this assignment type.';
-                        return mode.subtitle ? `${mode.name} (${mode.subtitle}): ${mode.desc}` : `${mode.name}: ${mode.desc}`;
-                      })()}
-                    </p>
-                  </div>
-                )}
-
-                {/* AI Suggestion */}
-                <div
-                  className="mt-3 rounded-xl px-3.5 py-3.5 transition-all duration-300"
-                  style={modeSuggestion
-                    ? { background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)', border: '1px solid #bfdbfe' }
-                    : { background: '#f8fafc', border: '1px solid #f1f5f9' }}
-                >
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Sparkles size={11} style={{ color: modeSuggestion ? '#60a5fa' : '#cbd5e1' }} />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">AI Suggestion</span>
-                  </div>
-                  {modeSuggesting ? (
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <Loader2 size={11} className="animate-spin" /> Analyzing context…
-                    </div>
-                  ) : modeSuggestion ? (
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold leading-snug" style={{ color: '#1e3a5f' }}>
-                          {modeSuggestion.recommended_mode_name}
-                          {typeof modeSuggestion.confidence === 'number' && (
-                            <span className="ml-1.5 text-[11px] font-normal" style={{ color: '#60a5fa' }}>
-                              {Math.round(modeSuggestion.confidence * 100)}% match
-                            </span>
-                          )}
-                        </p>
-                        {modeSuggestion.reasons?.[0] && (
-                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#3b82f6' }}>
-                            {modeSuggestion.reasons[0]}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAssignmentModeId(modeSuggestion.recommended_mode_id)}
-                        className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:opacity-90"
-                        style={{ ...blueBg, boxShadow: '0 1px 3px rgba(37,99,235,0.3)' }}
-                      >
-                        <Check size={10} strokeWidth={3} />Apply
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Add files or assignment details for a mode suggestion.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-            )}
-          </div>
+          </details>
 
           {/* Ready Banner */}
           {canRunCheck && (
@@ -991,7 +1133,7 @@ export default function UploadPage() {
                     {zipFile ? '1 archive' : `${selectedFiles.length} files`} ready to analyze
                   </p>
                   <p className="text-xs" style={{ color: '#60a5fa' }}>
-                    {selectedToolIds.length} tool{selectedToolIds.length !== 1 ? 's' : ''} · {activeEngines.length} engine{activeEngines.length !== 1 ? 's' : ''} active
+                    Auto profile · starter code removal · previous-term matching when available
                   </p>
                 </div>
               </div>
@@ -1003,7 +1145,7 @@ export default function UploadPage() {
               >
                 {uploading
                   ? <><Loader2 size={14} className="animate-spin" />Analyzing…</>
-                  : <><Zap size={14} />Run Check<ArrowRight size={13} className="opacity-70" /></>}
+                  : <><Zap size={14} />Analyze Assignment<ArrowRight size={13} className="opacity-70" /></>}
               </button>
             </div>
           )}
@@ -1011,5 +1153,21 @@ export default function UploadPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function AutoStep({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4" style={cardShadow}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+          <Icon size={16} />
+        </div>
+        <div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <div className="mt-1 text-sm leading-5 text-slate-500">{detail}</div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -64,10 +64,16 @@ echo "Ensuring Python dependencies..."
 # ----------------------------
 # Database init
 # ----------------------------
-echo "Initializing database..."
-cd "$PROJECT_DIR"
-"$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()"
-echo ""
+if lsof -i :$BACKEND_PORT >/dev/null 2>&1; then
+    echo "✔ Backend already running; skipping database init"
+elif [ "${SKIP_DB_INIT:-}" = "1" ]; then
+    echo "Skipping database init (SKIP_DB_INIT=1)"
+else
+    echo "Initializing database..."
+    cd "$PROJECT_DIR"
+    "$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()"
+    echo ""
+fi
 
 # ----------------------------
 # BACKEND START
@@ -123,6 +129,7 @@ echo "Starting dashboard..."
 cd "$DASHBOARD_DIR"
 
 export PORT="$DASHBOARD_PORT"
+export HOST="127.0.0.1"
 export API_URL="$BACKEND_URL"
 export NEXT_PUBLIC_API_URL="$BACKEND_URL"
 

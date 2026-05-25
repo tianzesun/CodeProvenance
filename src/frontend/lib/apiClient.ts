@@ -31,7 +31,9 @@ function flushQueue(error?: unknown) {
 }
 
 export const apiClient: AxiosInstance = axios.create({
+  baseURL: '',
   withCredentials: true,
+  timeout: 15000, // Increased timeout to 15 seconds for better reliability
 });
 
 async function refreshAuthSession() {

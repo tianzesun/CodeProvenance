@@ -4,6 +4,7 @@ Benchmark tool registry.
 Single source of truth for official benchmark participants,
 metadata, paths, versions, and enablement state.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ class ToolSpec:
     Immutable specification for a benchmark tool.
     All metadata required for reproducible execution.
     """
+
     name: str
     category: str  # external | library | internal
     entry_kind: str  # benchmark_tool | helper_lib | internal_engine
@@ -69,7 +71,8 @@ class ToolRegistry:
     def benchmark_tools(self) -> list[ToolSpec]:
         """Get all enabled benchmark participant tools."""
         return [
-            t for t in self._tools.values()
+            t
+            for t in self._tools.values()
             if t.entry_kind == "benchmark_tool" and t.enabled
         ]
 
@@ -100,7 +103,7 @@ def build_default_registry(base_dir: Path) -> ToolRegistry:
             category="external",
             entry_kind="benchmark_tool",
             root_path=external / "moss",
-            adapter_module="src.backend.benchmark.adapters.external.moss_adapter",
+            adapter_module="src.backend.benchmark.adapters.moss_adapter",
             adapter_class="MossAdapter",
             supported_languages=("python", "java", "javascript", "c", "cpp"),
             official=True,
@@ -113,7 +116,7 @@ def build_default_registry(base_dir: Path) -> ToolRegistry:
             category="external",
             entry_kind="benchmark_tool",
             root_path=external / "JPlag",
-            adapter_module="src.backend.benchmark.adapters.external.jplag_adapter",
+            adapter_module="src.backend.benchmark.adapters.jplag_adapter",
             adapter_class="JPlagAdapter",
             supported_languages=("python", "java", "cpp", "csharp"),
             official=True,
@@ -139,8 +142,8 @@ def build_default_registry(base_dir: Path) -> ToolRegistry:
             category="external",
             entry_kind="benchmark_tool",
             root_path=external / "dolos",
-            adapter_module="src.backend.benchmark.adapters.external.dolos_adapter",
-            adapter_class="DolosAdapter",
+            adapter_module="src.backend.benchmark.adapters.dolos_adapter",
+            adapter_class="DolosBenchmarkEngine",
             supported_languages=("python", "java", "javascript", "c", "cpp"),
             official=True,
         )
@@ -152,8 +155,8 @@ def build_default_registry(base_dir: Path) -> ToolRegistry:
             category="external",
             entry_kind="benchmark_tool",
             root_path=external / "pmd",
-            adapter_module="src.backend.benchmark.adapters.external.pmd_adapter",
-            adapter_class="PMDAdapter",
+            adapter_module="src.backend.benchmark.adapters.pmd_adapter",
+            adapter_class="PMDBenchmarkEngine",
             supported_languages=("java",),
             official=True,
         )

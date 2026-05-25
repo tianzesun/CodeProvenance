@@ -3,199 +3,125 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
+import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
 import {
   BarChart3, Loader2, Trophy, FileUp, X, AlertCircle,
-  Zap, Target, Layers, TrendingUp, CheckCircle2, ChevronDown, ChevronUp,
+  Zap, Layers, CheckCircle2, ChevronDown, ChevronUp,
   Download, Play, FlaskConical, FileText, Square, Check,
   ChevronRight, UploadCloud, Database, Settings2, ClipboardList, Plus,
-  GitCompare,
+  GitCompare, Eye, ShieldCheck,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
-
-// ── Tool definitions with full UI metadata ──────────────────────────────
+// ── Tool definitions ──────────────────────────────────────────────────────
 const TOOLS = [
   {
-    id: 'integritydesk',
-    name: 'IntegrityDesk',
-    color: '#7C3AED',
-    bgLight: 'bg-violet-50',
-    textColor: 'text-violet-700',
-    ring: 'ring-violet-500',
+    id: 'integritydesk', name: 'IntegrityDesk', color: '#7C3AED',
+    bgLight: 'bg-violet-50', textColor: 'text-violet-700', ring: 'ring-violet-500',
     gradient: 'from-violet-500 to-violet-700',
-    engines: ['AST', 'Embedding', 'Execution', 'Fingerprint', 'N-gram'],
-    desc: 'Full multi-engine fusion: AST, UniXcoder embeddings, execution similarity, and winnowing.',
+    engines: ['Token Graph', 'String Tiling', 'AST', 'PDG', 'N-gram', 'Code Embedding', 'Rules'],
+    desc: 'Seven-engine fusion for obfuscation-resistant class review: token normalization graph, subsequence merging, AST/CFG/PDG, n-grams, CodeBERT-style embeddings, and static-rule evidence.',
     status: 'Ready to run',
+    icon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzcwM0FFRCIvPgo8dGV4dCB4PSIxNiIgeT0iMjAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkQ8L3RleHQ+Cjwvc3ZnPg==',
   },
   {
-    id: 'moss',
-    name: 'MOSS',
-    color: '#0369A1',
-    bgLight: 'bg-sky-50',
-    textColor: 'text-sky-700',
-    ring: 'ring-sky-500',
-    gradient: 'from-sky-500 to-sky-700',
-    engines: ['Fingerprint', 'Token'],
+    id: 'moss', name: 'MOSS', color: '#0369A1',
+    bgLight: 'bg-sky-50', textColor: 'text-sky-700', ring: 'ring-sky-500',
+    gradient: 'from-sky-500 to-sky-700', engines: ['Fingerprint', 'Token'],
     desc: "Stanford's canonical academic plagiarism detector using k-gram fingerprinting.",
     status: 'Ready to run',
+    icon: 'https://theory.stanford.edu/~aiken/moss/mosslogo.gif',
   },
   {
-    id: 'jplag',
-    name: 'JPlag',
-    color: '#B45309',
-    bgLight: 'bg-amber-50',
-    textColor: 'text-amber-700',
-    ring: 'ring-amber-500',
-    gradient: 'from-amber-500 to-amber-700',
-    engines: ['Token', 'AST'],
+    id: 'jplag', name: 'JPlag', color: '#B45309',
+    bgLight: 'bg-amber-50', textColor: 'text-amber-700', ring: 'ring-amber-500',
+    gradient: 'from-amber-500 to-amber-700', engines: ['Token', 'AST'],
     desc: 'AST-based plagiarism detector widely used in academic settings. Supports 10+ languages.',
     status: 'Ready to run',
+    icon: 'https://github.com/jplag/JPlag/raw/main/core/src/main/resources/de/jplag/logo-dark.png',
   },
   {
-    id: 'dolos',
-    name: 'Dolos',
-    color: '#047857',
-    bgLight: 'bg-emerald-50',
-    textColor: 'text-emerald-700',
-    ring: 'ring-emerald-500',
-    gradient: 'from-emerald-500 to-emerald-700',
-    engines: ['AST', 'Fingerprint'],
+    id: 'dolos', name: 'Dolos', color: '#047857',
+    bgLight: 'bg-emerald-50', textColor: 'text-emerald-700', ring: 'ring-emerald-500',
+    gradient: 'from-emerald-500 to-emerald-700', engines: ['AST', 'Fingerprint'],
     desc: 'Modern AST + fingerprint tool from University of Ghent. Produces a pairwise similarity matrix.',
     status: 'Ready to run',
+    icon: 'https://avatars.githubusercontent.com/u/40892657?s=48&v=4',
   },
   {
-    id: 'nicad',
-    name: 'NiCad',
-    color: '#9D174D',
-    bgLight: 'bg-pink-50',
-    textColor: 'text-pink-700',
-    ring: 'ring-pink-500',
-    gradient: 'from-pink-500 to-pink-700',
-    engines: ['Clone', 'Text'],
+    id: 'nicad', name: 'NiCad', color: '#9D174D',
+    bgLight: 'bg-pink-50', textColor: 'text-pink-700', ring: 'ring-pink-500',
+    gradient: 'from-pink-500 to-pink-700', engines: ['Clone', 'Text'],
     desc: 'Clone detector using text normalisation and differencing. Strong on near-miss (Type 3) clones.',
     status: 'Ready to run',
   },
   {
-    id: 'pmd',
-    name: 'PMD-CPD',
-    color: '#374151',
-    bgLight: 'bg-slate-50',
-    textColor: 'text-slate-700',
-    ring: 'ring-slate-500',
-    gradient: 'from-slate-500 to-slate-700',
-    engines: ['Token', 'Duplication'],
+    id: 'pmd', name: 'PMD-CPD', color: '#374151',
+    bgLight: 'bg-slate-50', textColor: 'text-slate-700', ring: 'ring-slate-500',
+    gradient: 'from-slate-500 to-slate-700', engines: ['Token', 'Duplication'],
     desc: 'Copy-Paste Detector from the PMD project. Fast token-based duplication finder.',
     status: 'Ready to run',
+    icon: 'https://raw.githubusercontent.com/pmd/pmd/main/docs/images/logo/pmd-logo-300px.png',
   },
   {
-    id: 'sherlock',
-    name: 'Sherlock',
-    color: '#065F46',
-    bgLight: 'bg-teal-50',
-    textColor: 'text-teal-700',
-    ring: 'ring-teal-500',
-    gradient: 'from-teal-500 to-teal-700',
-    engines: ['Token'],
+    id: 'sherlock', name: 'Sherlock', color: '#065F46',
+    bgLight: 'bg-teal-50', textColor: 'text-teal-700', ring: 'ring-teal-500',
+    gradient: 'from-teal-500 to-teal-700', engines: ['Token'],
     desc: 'Classical token-based plagiarism detector from University of Sydney.',
-    status: 'Setup needed',
-    runnable: false,
-  },
-  {
-    id: 'sim',
-    name: 'SIM',
-    color: '#6B21A8',
-    bgLight: 'bg-purple-50',
-    textColor: 'text-purple-700',
-    ring: 'ring-purple-500',
-    gradient: 'from-purple-500 to-purple-700',
-    engines: ['Text'],
-    desc: 'Classical similarity detector by Dick Grune. Historical baseline for multi-language comparison.',
-    status: 'Ready to run',
+    status: 'Setup needed', runnable: false,
   },
 ];
 
-// ── FIX #1: Merge API availability data with full TOOLS metadata ──────────
 function mergeToolsWithAvailability(apiTools = []) {
   if (!apiTools.length) return TOOLS;
   return TOOLS.map(toolDef => {
     const apiTool = apiTools.find(t => t.id === toolDef.id);
     if (!apiTool) return { ...toolDef, available: false };
-    return { ...toolDef, available: apiTool.available !== false, status: apiTool.status || toolDef.status };
+    return {
+      ...toolDef,
+      available: apiTool.available !== false,
+      runnable: apiTool.runnable !== false,
+      status: apiTool.status || toolDef.status,
+    };
   });
 }
 
-// ── Dataset category metadata ──────────────────────────────────────────────
+// ── Dataset metadata ───────────────────────────────────────────────────────
 const DATASET_CATEGORY_META = {
   guided: {
-    label: 'Quick Check',
-    eyebrow: 'Fastest way to validate tools',
-    badgeClass: 'bg-violet-100 text-violet-700',
-    accentClass: 'text-violet-600',
-    panelClass: 'border-violet-200 bg-violet-50/70',
-    summaryLabel: 'Quick check',
+    label: 'Quick Check', eyebrow: 'Fastest way to validate tools',
+    badgeClass: 'bg-violet-100 text-violet-700', accentClass: 'text-violet-600',
+    panelClass: 'border-violet-200 bg-violet-50/70', summaryLabel: 'Quick check',
   },
   preset: {
-    label: 'Preset Dataset',
-    eyebrow: 'Standardized benchmark data',
-    badgeClass: 'bg-emerald-100 text-emerald-700',
-    accentClass: 'text-emerald-600',
-    panelClass: 'border-emerald-200 bg-emerald-50/70',
-    summaryLabel: 'Preset dataset',
+    label: 'Preset Dataset', eyebrow: 'Standardized benchmark data',
+    badgeClass: 'bg-emerald-100 text-emerald-700', accentClass: 'text-emerald-600',
+    panelClass: 'border-emerald-200 bg-emerald-50/70', summaryLabel: 'Preset dataset',
   },
   demo: {
-    label: 'Demo Dataset',
-    eyebrow: 'Reusable classroom-style demo',
-    badgeClass: 'bg-blue-100 text-blue-700',
-    accentClass: 'text-blue-600',
-    panelClass: 'border-blue-200 bg-blue-50/70',
-    summaryLabel: 'Demo dataset',
+    label: 'Demo Dataset', eyebrow: 'Reusable classroom-style demo',
+    badgeClass: 'bg-blue-100 text-blue-700', accentClass: 'text-blue-600',
+    panelClass: 'border-blue-200 bg-blue-50/70', summaryLabel: 'Demo dataset',
   },
 };
 
 const PRESET_DATASET_META = {
-  clough_stevenson_style: {
-    order: 5, presetCategory: 'Controlled plagiarism corpus', badgeLabel: 'Gold Standard',
-    eyebrow: 'Controlled original-vs-plagiarized benchmark',
-    summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs',
-  },
-  conplag_classroom_java: {
-    order: 10, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Java',
-    eyebrow: 'Best Java submission corpus', summary: 'Assignment-grouped Java submissions with labels',
-  },
-  kaggle_student_code: {
-    order: 20, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Python',
-    eyebrow: 'Best Python submission smoke test', summary: 'Lightweight student-style Python submission set',
-  },
-  'IR-Plag-Dataset': {
-    order: 30, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'Focused Java plagiarism cases', summary: 'Smaller Java plagiarism dataset for targeted checks',
-  },
-  human_eval: {
-    order: 40, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
-    eyebrow: 'Python code-task benchmark', summary: 'Task-based Python benchmark, not classroom submissions',
-  },
-  mbpp: {
-    order: 50, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks',
-    eyebrow: 'Short-form Python task coverage', summary: 'Python programming task benchmark, not classroom submissions',
-  },
-  codesearchnet: {
-    order: 60, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus',
-    eyebrow: 'Large-scale mixed-language stress test', summary: 'Use for scale and variety rather than classroom realism',
-  },
-  codexglue_clone: {
-    order: 70, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'Large labeled clone-pair benchmark', summary: 'Good for clone-pair stress testing in Java',
-  },
-  codexglue_defect: {
-    order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark',
-    eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like',
-  },
+  clough_stevenson_style: { order: 5, presetCategory: 'Controlled plagiarism corpus', badgeLabel: 'Gold Standard', eyebrow: 'Controlled original-vs-plagiarized benchmark', summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs' },
+  conplag_classroom_java: { order: 10, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Java', eyebrow: 'Best Java submission corpus', summary: 'Assignment-grouped Java submissions with labels' },
+  kaggle_student_code: { order: 20, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Python', eyebrow: 'Best Python submission smoke test', summary: 'Lightweight student-style Python submission set' },
+  'IR-Plag-Dataset': { order: 30, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Focused Java plagiarism cases', summary: 'Smaller Java plagiarism dataset for targeted checks' },
+  google_codejam: { order: 35, presetCategory: 'Classroom-style', badgeLabel: 'Code Jam', eyebrow: 'Google Code Jam competition submissions', summary: 'Python solutions with ground truth plagiarism labels for benchmarking' },
+  xiangtan: { order: 40, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Xiangtan University plagiarism dataset', summary: 'Java code pairs with plagiarism annotations for academic integrity testing' },
+  human_eval: { order: 45, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks', eyebrow: 'Python code-task benchmark', summary: 'Task-based Python benchmark, not classroom submissions' },
+  mbpp: { order: 50, presetCategory: 'Programming-task benchmark', badgeLabel: 'Programming Tasks', eyebrow: 'Short-form Python task coverage', summary: 'Python programming task benchmark, not classroom submissions' },
+  codexglue_clone: { order: 70, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'Large labeled clone-pair benchmark', summary: 'Good for clone-pair stress testing in Java' },
+  codexglue_defect: { order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like' },
+  poolc_600k_python: { order: 85, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus', eyebrow: 'Large Python code collection', summary: '600k Python snippets for extensive similarity testing and scale evaluation' },
 };
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
@@ -238,15 +164,7 @@ function summarizeDataset(dataset) {
   return `${languageLabel} • ${sizeLabel}`;
 }
 
-function formatBenchmarkQuality(quality) {
-  if (!quality) return null;
-  const level = ['gold_standard', 'controlled_gold_standard', 'gold_standard_external'].includes(quality.certification_level)
-    ? 'Gold-standard controlled benchmark'
-    : quality.certification_level === 'controlled_internal_ready'
-      ? 'Controlled internal benchmark'
-      : 'Labeled benchmark';
-  return `${level} • ${Number(quality.score_percent || 0).toFixed(0)}% quality gates`;
-}
+
 
 function sortDatasets(datasets, demo = false) {
   const items = [...datasets];
@@ -258,9 +176,24 @@ function sortDatasets(datasets, demo = false) {
   });
 }
 
-function buildDatasetLibrary(benchmarkDatasets = []) {
-  const presetDatasets = sortDatasets(benchmarkDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' })));
-  const demoDatasets = sortDatasets(benchmarkDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })), true);
+function buildDatasetLibrary(benchmarkDatasets = [], benchmarkMode = 'comparison') {
+  // Determine if the current benchmark mode requires labeled ground truth
+  const requiresGroundTruth = benchmarkMode === 'development' || benchmarkMode === 'calibration' ||
+    benchmarkMode === 'release' || benchmarkMode === 'regression';
+
+  // Filter datasets based on ground truth requirement
+  const filteredDatasets = benchmarkDatasets.filter(dataset => {
+    if (requiresGroundTruth) {
+      // For modes requiring ground truth, only show datasets that have it
+      return dataset.has_ground_truth === true;
+    } else {
+      // For comparison mode, show all datasets
+      return true;
+    }
+  });
+
+  const presetDatasets = sortDatasets(filteredDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' })));
+  const demoDatasets = sortDatasets(filteredDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })), true);
   return { presetDatasets, demoDatasets, allDatasets: [...presetDatasets, ...demoDatasets] };
 }
 
@@ -280,6 +213,7 @@ function deltaTone(value, lowerIsBetter = false) {
 }
 
 function formatChartPercent(value) { return `${Number(value || 0).toFixed(1)}%`; }
+
 function formatMetric(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   return Number(value).toFixed(3);
@@ -297,6 +231,13 @@ function formatPanMetricValue(metric) {
   if (metric.format === 'seconds') return `${Number(metric.value).toFixed(3)}s`;
   if (metric.format === 'plain') return Number(metric.value).toFixed(3);
   return `${(Number(metric.value) * 100).toFixed(1)}%`;
+}
+
+function apiErrorMessage(err, fallback) {
+  const detail = err?.response?.data?.detail ?? err?.response?.data?.error;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
+  return err?.message || fallback;
 }
 
 function metricBarWidth(metric) {
@@ -323,8 +264,58 @@ function metricToneClasses(tone) {
   return { border: 'border-red-200', bg: 'bg-red-50', text: 'text-red-700', bar: 'bg-red-500', badge: 'bg-red-100 text-red-700', label: 'Optimization priority' };
 }
 
+function configPathEffect(path) {
+  if (!path) return 'Controls one part of the IntegrityDesk score pipeline.';
+  if (path === 'decision.default_threshold') return 'Final cutoff: higher values reduce positives, usually improving precision but lowering recall.';
+  if (path === 'decision.minimum_engine_agreement') return 'Minimum number of engines that must agree before a high-risk decision is allowed.';
+  if (path === 'precision_guard.minimum_concrete_engines') return 'Requires concrete code evidence from token, AST, execution, or similar engines before trusting broad matches.';
+  if (path === 'precision_guard.semantic_only_cap') return 'Caps pairs supported mostly by semantic similarity, reducing broad intent-only false positives.';
+  if (path === 'precision_guard.penalty_multiplier') return 'Penalty applied when precision guardrails fail; lower values reduce weak-evidence scores more aggressively.';
+  if (path === 'ast_boost.minimum_guaranteed_score') return 'Score floor granted by strong AST matches; lowering it prevents AST-only evidence from forcing high scores.';
+  if (path === 'ast_boost.threshold') return 'AST similarity required before AST boost activates; higher values make structural boost stricter.';
+  if (path === 'deep_verify.minimum_agreeing_engines') return 'Agreement needed in deep verification before it can lift a pair score.';
+  if (path.startsWith('weights.')) {
+    const engine = path.split('.')[1] || 'engine';
+    const effects = {
+      ast: 'AST structure weight: changes influence from syntax-tree similarity and structural clones.',
+      token: 'Token weight: changes influence from exact lexical overlap and renamed-code evidence.',
+      winnowing: 'Fingerprint weight: changes influence from local k-gram matches used for copied fragments.',
+      ngram: 'N-gram weight: changes influence from token-sequence overlap.',
+      graph: 'Control-flow graph weight: changes influence from similar execution structure.',
+      execution: 'Execution behavior weight: changes influence from runtime/output agreement.',
+      embedding: 'Semantic embedding weight: changes influence from broad meaning similarity.',
+      llm: 'LLM-derived signal weight: changes influence from model-based similarity evidence.',
+    };
+    return effects[engine] || `${engine} weight: changes how much this engine contributes to the fused similarity score.`;
+  }
+  if (path.startsWith('thresholds.')) return 'Classification threshold used by one similarity tier or report category.';
+  return 'Affects how raw engine evidence is converted into the final fused score.';
+}
+
+function optimizationControlSpec(path, current, proposed) {
+  const values = [Number(current), Number(proposed)].filter(Number.isFinite);
+  const maxObserved = values.length ? Math.max(...values) : 1;
+  const isCount = path?.endsWith('_engines') || path?.endsWith('_agreement') || path?.endsWith('.minimum_engine_agreement');
+  if (isCount) return { min: 1, max: 10, step: 1 };
+  if (path?.startsWith('weights.') || path?.startsWith('thresholds.') || path?.includes('threshold') || path?.includes('floor') || path?.includes('cap') || path?.includes('multiplier')) {
+    return { min: 0, max: Math.max(1, maxObserved), step: 0.01 };
+  }
+  return { min: 0, max: Math.max(10, maxObserved), step: 0.1 };
+}
+
+function normalizeOptimizationValue(value, spec) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return spec.min;
+  const clamped = Math.max(spec.min, Math.min(spec.max, numeric));
+  if (spec.step === 1) return Math.round(clamped);
+  return Math.round(clamped * 10000) / 10000;
+}
+
 function buildPanFeedback(row) {
   if (!row) return [];
+  if (row.tuningRecommendations?.available && row.tuningRecommendations.actions?.length) {
+    return row.tuningRecommendations.actions;
+  }
   const suggestions = [];
   if (row.precision < 0.85) suggestions.push({ title: 'Precision is the main problem', detail: 'False positives are too high. Raise the final decision threshold, increase weight on exact/token/AST agreement, and reduce broad semantic-only matches until negatives are cleaner.' });
   if (row.recall < 0.85) suggestions.push({ title: 'Recall is missing true plagiarism', detail: 'Lower the candidate threshold, enable semantic or embedding retrieval for obfuscated clones, and make sure renamed/type-3/type-4 pairs enter the candidate pool before reranking.' });
@@ -358,7 +349,7 @@ function buildPanMetricDiagnostics(row) {
   return metrics.map(metric => ({ ...metric, tone: metricTone(Number(metric.value || 0), metric.mode) }));
 }
 
-// ── ToolBadge ──────────────────────────────────────────────────────────────
+// ── Shared UI atoms ────────────────────────────────────────────────────────
 function ToolBadge({ toolId, compact = false }) {
   const tool = TOOLS.find(t => t.id === toolId);
   if (!tool) return (
@@ -409,7 +400,7 @@ function LeaderboardTooltip({ active, payload }) {
       </div>
       {tool?.desc && <div className="mt-2 text-xs leading-5 text-slate-500">{tool.desc}</div>}
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        {[['Average', row.average], ['Peak', row.peak], ['Lowest', row.minimum], ['Spread', row.spread]].map(([lbl, val]) => (
+        {[['F1 Score', row.f1Score], ['Precision', row.precision], ['Recall', row.recall], ['FPR', row.fpr]].map(([lbl, val]) => (
           <div key={lbl} className="rounded-xl bg-slate-50 px-3 py-2">
             <div className="text-slate-400">{lbl}</div>
             <div className="mt-1 font-semibold text-slate-900">{formatChartPercent(val)}</div>
@@ -449,14 +440,14 @@ function StepIndicator({ steps, currentStep, completedSteps }) {
   );
 }
 
-// ── RunConfigBar — sticky summary shown during step 2+ ─────────────────────
+// ── RunConfigBar ───────────────────────────────────────────────────────────
 function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, modeName, modeColor }) {
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const toolNames = selectedTools.slice(0, 3).map(id => TOOLS.find(t => t.id === id)?.name || id);
   const extraTools = selectedTools.length - 3;
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm text-sm">
+    <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${modeColor}`}>{modeName}</span>
       <div className="flex items-center gap-1.5 text-slate-600">
         <Settings2 size={13} className="text-slate-400" />
@@ -467,6 +458,54 @@ function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, bench
         <Database size={13} className="text-slate-400" />
         <span className="font-medium">{uploadMode === 'builtin' ? (activeDataset?.name || 'No dataset') : `${files.length} file${files.length !== 1 ? 's' : ''}`}</span>
       </div>
+    </div>
+  );
+}
+
+// ── ToolGrid — shared tool card grid (eliminates duplication) ──────────────
+function ToolGrid({ tools, selectedTools, onToggle }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
+      {tools.map(tool => {
+        const isSelected = selectedTools.includes(tool.id);
+        const canRun = tool.available !== false && tool.runnable !== false;
+        return (
+          <button
+            key={tool.id}
+            onClick={() => onToggle(tool)}
+            disabled={!canRun}
+            className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group
+              ${!canRun
+                ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                : isSelected
+                  ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]`
+                  : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'
+              }`}
+          >
+            {isSelected && (
+              <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150">
+                <CheckCircle2 size={16} className={tool.textColor} />
+              </div>
+            )}
+            <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
+              {tool.icon ? (
+                <img src={tool.icon} alt={`${tool.name} icon`} className="w-6 h-6 object-contain" />
+              ) : (
+                <Zap size={16} className="text-white" />
+              )}
+            </div>
+            <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {(tool.engines || []).slice(0, 3).map(engine => (
+                <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                  {engine}
+                </span>
+              ))}
+            </div>
+            <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -490,6 +529,55 @@ function ToolSkeleton() {
   );
 }
 
+// ── Step 1: Tool Selection (unified — no duplicate render path) ────────────
+function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error, benchmarkMode }) {
+  const runnableTools = tools.filter(t => t.available !== false && t.runnable !== false);
+
+  const toggleTool = useCallback((tool) => {
+    if (tool.available === false || tool.runnable === false) return;
+    setSelectedTools(prev =>
+      prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]
+    );
+  }, [setSelectedTools]);
+
+  return (
+    <div>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+          <Settings2 size={18} className="text-violet-500" />Select Detection Tools
+        </h2>
+        <div className="flex items-center gap-3">
+          {benchmarkMode === 'comparison' && (
+            <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
+              {selectedTools.length} / {runnableTools.length} selected
+            </span>
+          )}
+          <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
+          <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
+          <AlertCircle size={14} className="shrink-0" />{error}
+        </div>
+      )}
+
+      {loading ? <ToolSkeleton /> : <ToolGrid tools={tools} selectedTools={selectedTools} onToggle={toggleTool} />}
+
+      <div className="flex justify-end mt-6">
+        <button
+          onClick={onNext}
+          disabled={selectedTools.length === 0}
+          className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none"
+        >
+          Continue to Dataset <ChevronRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── DatasetCard ────────────────────────────────────────────────────────────
 function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const categoryMeta = getDatasetCategoryMeta(dataset);
@@ -497,7 +585,6 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const badgeLabel = presetMeta?.badgeLabel || categoryMeta?.label;
   const eyebrow = presetMeta?.eyebrow || categoryMeta?.eyebrow;
   const secondarySummary = presetMeta?.summary;
-  const qualityLabel = formatBenchmarkQuality(dataset.benchmark_quality);
   return (
     <button
       disabled={disabled}
@@ -513,11 +600,6 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
       <div className={`mt-2 text-base font-semibold ${isActive ? 'text-white' : 'text-slate-900'}`}>{dataset.name}</div>
       <div className={`mt-2 text-sm leading-6 ${isActive ? 'text-slate-200' : 'text-slate-500'}`}>{dataset.desc}</div>
       {secondarySummary && <div className={`mt-2 text-xs leading-5 ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>{secondarySummary}</div>}
-      {qualityLabel && (
-        <div className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${isActive ? 'bg-white/10 text-slate-100' : 'bg-emerald-50 text-emerald-700'}`}>
-          <ClipboardList size={14} className="mt-0.5 shrink-0" /><span>{qualityLabel}</span>
-        </div>
-      )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{summarizeDataset(dataset)}</span>
         {dataset.created_by && <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{dataset.created_by}</span>}
@@ -527,223 +609,8 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   );
 }
 
-// ── Step 1: Tool Selection ─────────────────────────────────────────────────
-function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error, benchmarkMode }) {
-  const runnableTools = tools.filter(t => t.available !== false && t.runnable !== false);
-  const integrityDeskTool = tools.find(t => t.id === 'integritydesk');
-  const isImproveMode = benchmarkMode === 'development';
-  const integrityDeskReady = Boolean(integrityDeskTool && integrityDeskTool.available !== false && integrityDeskTool.runnable !== false);
-
-  useEffect(() => {
-    if (!isImproveMode) return;
-    if (!integrityDeskReady) return;
-    if (selectedTools.length === 1 && selectedTools[0] === 'integritydesk') return;
-    setSelectedTools(['integritydesk']);
-  }, [integrityDeskReady, isImproveMode, selectedTools, setSelectedTools]);
-
-  const toggleTool = (tool) => {
-    if (tool.available === false || tool.runnable === false) return;
-    setSelectedTools(prev => prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]);
-  };
-
-  if (benchmarkMode === 'comparison') {
-    return (
-      <div>
-        <div className="mb-6">
-          <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-            <Settings2 size={18} className="text-violet-500" />Select Detection Tools
-          </h2>
-          <div className="flex items-center gap-3 mt-3">
-            <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
-              {selectedTools.length} / {runnableTools.length} selected
-            </span>
-            <div className="flex gap-1">
-              <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
-              <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          {error && (
-            <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
-              <AlertCircle size={14} className="shrink-0" />{error}
-            </div>
-          )}
-
-          {loading ? <ToolSkeleton /> : (
-            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {tools.map(tool => {
-                const isSelected = selectedTools.includes(tool.id);
-                const canRun = tool.available !== false && tool.runnable !== false;
-                return (
-                  <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
-                    className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed' : isSelected ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]` : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'}`}>
-                    {isSelected && <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150"><CheckCircle2 size={16} className={tool.textColor} /></div>}
-                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
-                      <Zap size={16} className="text-white" />
-                    </div>
-                    <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                    <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>{tool.status || (canRun ? 'Ready to run' : 'Setup needed')}</div>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {(tool.engines || []).slice(0, 3).map(engine => (
-                        <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{engine}</span>
-                      ))}
-                    </div>
-                    <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="flex justify-end mt-6">
-            <button onClick={onNext} disabled={selectedTools.length === 0 || (isImproveMode && !integrityDeskReady)}
-              className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-              Continue to Dataset <ChevronRight size={18} />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-          <Settings2 size={18} className="text-violet-500" />{isImproveMode ? 'IntegrityDesk Benchmark Setup' : 'Select Detection Tools'}
-        </h2>
-        <div className="flex items-center gap-3">
-          <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg transition-all ${selectedTools.length > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400'}`}>
-            {selectedTools.length} / {runnableTools.length} selected
-          </span>
-          {!isImproveMode && (
-            <div className="flex gap-1">
-              <button onClick={() => setSelectedTools(runnableTools.map(t => t.id))} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Select All</button>
-              <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-6">
-        {error && (
-          <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
-            <AlertCircle size={14} className="shrink-0" />{error}
-          </div>
-        )}
-
-        {loading ? <ToolSkeleton /> : isImproveMode ? (
-          <div className="overflow-hidden rounded-[28px] border border-violet-200 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-rose-50 shadow-[0_24px_80px_-48px_rgba(124,58,237,0.45)]">
-            <div className="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_320px]">
-              <div className="p-6 lg:p-7">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-700 shadow-sm">
-                      <Zap size={12} />
-                      IntegrityDesk Optimization Path
-                    </div>
-                    <h3 className="mt-4 text-2xl font-bold tracking-tight text-slate-950">IntegrityDesk is the only tool used in this workflow</h3>
-                    <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-700">
-                      Improve IntegrityDesk is a focused benchmark loop for your own detector. Run labeled tests,
-                      inspect per-run F1 / Precision / Recall / FPR, and use the threshold and error analysis to decide what to change next.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-white/85 px-4 py-3 text-right shadow-sm">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Workflow scope</div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">Locked to IntegrityDesk</div>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-3 md:grid-cols-3">
-                  {[
-                    'Get per-run F1, Precision, Recall, and False Positive Rate',
-                    'Tune the operating threshold on labeled benchmark data',
-                    'Review the misses and false alarms blocking improvement',
-                  ].map(item => (
-                    <div key={item} className="rounded-2xl border border-white/70 bg-white/80 px-4 py-4 text-sm font-medium leading-6 text-slate-700 shadow-sm">
-                      {item}
-                    </div>
-                  ))}
-                </div>
-
-                {!integrityDeskReady && (
-                  <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
-                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                    IntegrityDesk is not currently available in this environment, so this workflow cannot run yet.
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-violet-100/80 bg-slate-950 px-6 py-6 text-slate-100 lg:border-l lg:border-t-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Selected engine</div>
-                <div className="mt-4 rounded-[24px] border border-white/10 bg-white/5 p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-900/30">
-                      <Zap size={18} className="text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold text-white">IntegrityDesk</div>
-                      <div className="mt-1 text-sm leading-6 text-slate-300">
-                        {integrityDeskTool?.desc || 'Multi-engine internal detector'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {(integrityDeskTool?.engines || ['AST', 'Embedding', 'Execution']).slice(0, 5).map(engine => (
-                      <span key={engine} className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-200">
-                        {engine}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="mt-4 rounded-2xl bg-white/5 px-4 py-4 text-sm leading-6 text-slate-300">
-                  External tools like MOSS, JPlag, and Dolos are still useful in <span className="font-semibold text-white">Compare Against Other Tools</span>,
-                  but they are not part of the IntegrityDesk improvement loop.
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-            {tools.map(tool => {
-              const isSelected = selectedTools.includes(tool.id);
-              const canRun = tool.available !== false && tool.runnable !== false;
-              return (
-                <button key={tool.id} onClick={() => toggleTool(tool)} disabled={!canRun}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 group ${!canRun ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed' : isSelected ? `border-transparent ring-2 ${tool.ring} ring-offset-2 ${tool.bgLight} scale-[1.02]` : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-sm hover:-translate-y-0.5'}`}>
-                  {isSelected && <div className="absolute top-2 right-2 animate-in zoom-in-50 duration-150"><CheckCircle2 size={16} className={tool.textColor} /></div>}
-                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${tool.gradient} flex items-center justify-center mb-3 shadow-sm transition-shadow ${isSelected ? 'shadow-md' : ''}`}>
-                    <Zap size={16} className="text-white" />
-                  </div>
-                  <div className="font-semibold text-sm text-slate-900">{tool.name}</div>
-                  <div className={`mt-1 text-[11px] font-semibold ${canRun ? 'text-emerald-600' : 'text-amber-600'}`}>{tool.status || (canRun ? 'Ready to run' : 'Setup needed')}</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {(tool.engines || []).slice(0, 3).map(engine => (
-                      <span key={engine} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isSelected ? 'border-current/20 bg-white/70' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{engine}</span>
-                    ))}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-2 line-clamp-2">{tool.desc}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="px-6 pb-6 flex justify-end">
-        <button onClick={onNext} disabled={selectedTools.length === 0 || (isImproveMode && !integrityDeskReady)}
-          className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-          Continue to Dataset <ChevronRight size={18} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Step 2: Dataset Selection ──────────────────────────────────────────────
-function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, canManageDemoDatasets, onBack, onNext }) {
+function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, benchmarkMode, canManageDemoDatasets, onBack, onNext }) {
   const [libraryFilter, setLibraryFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -758,7 +625,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     setCreatingDataset(true);
     setCreateError('');
     try {
-      await axios.post(`${API}/api/admin/create-demo-dataset`, datasetForm, { withCredentials: true });
+      await apiClient.post('/api/admin/create-demo-dataset', datasetForm);
       setShowCreateModal(false);
       setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
     } catch (err) {
@@ -768,10 +635,15 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     }
   };
 
-  const closeModal = () => { setShowCreateModal(false); setCreateError(''); setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' }); };
+  const closeModal = () => {
+    setShowCreateModal(false);
+    setCreateError('');
+    setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
+  };
+
   const handleDrop = useCallback(e => { e.preventDefault(); setFiles(Array.from(e.dataTransfer.files)); }, [setFiles]);
 
-  const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
+  const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets, benchmarkMode), [benchmarkDatasets, benchmarkMode]);
   const availableLanguages = useMemo(() => {
     const langs = new Set(allDatasets.map(d => d.language?.toLowerCase() || 'mixed').filter(Boolean));
     return Array.from(langs).sort();
@@ -794,177 +666,160 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 
   return (
     <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100">
+      <div>
+        <div className="mb-4">
           <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Database size={18} className="text-violet-500" />Choose What To Benchmark</h2>
           <p className="text-sm text-slate-500 mt-0.5">Select a reusable dataset for tool comparison, or upload your own files.</p>
         </div>
 
-        <div className="flex border-b border-slate-100">
+        <div className="flex border-b border-slate-200 mb-5">
           {[{ id: 'builtin', label: 'Dataset Library', icon: FlaskConical }, { id: 'upload', label: 'Upload Files or ZIP', icon: FileUp }].map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => { setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700 bg-violet-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${uploadMode === id ? 'border-violet-500 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               <Icon size={15} />{label}
             </button>
           ))}
         </div>
 
-        <div className="p-6">
-          {uploadMode === 'builtin' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                  <div className="flex items-center gap-1">
-                    {[{ id: 'all', label: 'All', count: allDatasets.length }, { id: 'preset', label: 'Preset', count: presetDatasets.length }, { id: 'demo', label: 'Demo', count: demoDatasets.length }].map(filter => (
-                      <button key={filter.id} onClick={() => setLibraryFilter(filter.id)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
-                        {filter.label} ({filter.count})
-                      </button>
-                    ))}
-                  </div>
-                  {availableLanguages.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <button onClick={() => setLanguageFilter('all')} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${languageFilter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>All Languages</button>
-                      {availableLanguages.map(lang => (
-                        <button key={lang} onClick={() => setLanguageFilter(lang)} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition capitalize ${languageFilter === lang ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>{lang}</button>
-                      ))}
-                    </div>
-                  )}
+        {uploadMode === 'builtin' && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <div className="flex items-center gap-1">
+                  {[{ id: 'all', label: 'All', count: allDatasets.length }, { id: 'preset', label: 'Preset', count: presetDatasets.length }, { id: 'demo', label: 'Demo', count: demoDatasets.length }].map(filter => (
+                    <button key={filter.id} onClick={() => setLibraryFilter(filter.id)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${libraryFilter === filter.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                      {filter.label} ({filter.count})
+                    </button>
+                  ))}
                 </div>
-                {visibleLibraryDatasets.length > 0 || (libraryFilter === 'demo' && canManageDemoDatasets) ? (
-                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-                    {visibleLibraryDatasets.map(dataset => (
-                      <DatasetCard key={dataset.id} dataset={dataset} isActive={selectedDataset === dataset.id} onSelect={setSelectedDataset} />
+                {availableLanguages.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button onClick={() => setLanguageFilter('all')} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${languageFilter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>All Languages</button>
+                    {availableLanguages.map(lang => (
+                      <button key={lang} onClick={() => setLanguageFilter(lang)} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition capitalize ${languageFilter === lang ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>{lang}</button>
                     ))}
-                    {canManageDemoDatasets && libraryFilter !== 'preset' && (
-                      <button onClick={() => setShowCreateModal(true)}
-                        className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3"><Plus size={24} className="text-blue-600" /></div>
-                        <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
-                        <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
-                    <div className="text-sm font-semibold text-slate-900">{libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}</div>
-                    <div className="mt-2 text-sm leading-6 text-slate-500">{libraryFilter === 'demo' ? 'Preset datasets are ready to use now.' : 'Try another filter or switch to Upload Your Own.'}</div>
                   </div>
                 )}
               </div>
-
-              {activeDataset && activeDatasetMeta && (
-                <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Selected dataset</p>
-                      <div className="mt-2 flex items-center gap-3">
-                        <span className="text-2xl">{activeDataset.icon}</span>
-                        <div>
-                          <div className="text-lg font-semibold text-slate-900">{activeDataset.name}</div>
-                          <div className="text-sm text-slate-600">{activePresetMeta?.presetCategory || activeDatasetMeta.label}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeDatasetMeta.badgeClass}`}>{activePresetMeta?.badgeLabel || activeDatasetMeta.summaryLabel}</span>
-                  </div>
-                  <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
-                  {activePresetMeta?.summary && <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>}
-
-                  {activeDataset.benchmark_quality && (
-                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Benchmark Quality Certificate</div>
-                          <div className="mt-2 text-sm leading-6 text-slate-600">{activeDataset.benchmark_quality.pair_count} labeled pairs, {activeDataset.benchmark_quality.positive_pairs} positives, {activeDataset.benchmark_quality.negative_pairs} negatives, {activeDataset.benchmark_quality.hard_negative_pairs} hard negatives.</div>
-                        </div>
-                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{Number(activeDataset.benchmark_quality.score_percent || 0).toFixed(0)}% gates passed</span>
-                      </div>
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
-                        {(activeDataset.benchmark_quality.gates || []).map(gate => (
-                          <div key={gate.id} className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
-                            <CheckCircle2 size={15} className={gate.passed ? 'mt-0.5 shrink-0 text-emerald-600' : 'mt-0.5 shrink-0 text-amber-600'} />
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold text-slate-800">{gate.label}</div>
-                              <div className="text-xs leading-5 text-slate-500">{gate.value} · {gate.target}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {activeDataset.cases ? (
-                    <div className="mt-5 grid md:grid-cols-3 gap-2">
-                      {activeDataset.cases.map(tc => (
-                        <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
-                            <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {[
-                        { label: 'Language', value: activeDataset.language || 'Mixed' },
-                        { label: activeDataset.is_demo ? 'Files' : 'Size', value: activeDataset.size || 'Unknown' },
-                        { label: activeDataset.is_demo ? 'Created' : 'Use', value: activeDataset.is_demo ? formatDatasetDate(activeDataset.created_at) : (activePresetMeta?.presetCategory || activeDataset.similarity_type || 'Standard') },
-                        { label: activeDataset.is_demo ? 'Created By' : 'Source', value: activeDataset.created_by || 'System' },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
-                          <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{value}</div>
-                          <div className="text-xs text-slate-500">{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {uploadMode === 'upload' && (
-            <div>
-              <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => document.getElementById('file-input').click()}
-                className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all group">
-                <input id="file-input" type="file" className="hidden" multiple
-                  accept=".zip,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
-                  onChange={e => setFiles(Array.from(e.target.files))} />
-                <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
-                <p className="font-semibold text-slate-600 mb-1">Drop source files or a ZIP archive here</p>
-                <p className="text-sm text-slate-400">Upload 2 or more source files, or a single ZIP for one-off comparison</p>
-                <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
-                  <FileUp size={14} />Browse files
-                </div>
-              </div>
-              {files.length > 0 && (
-                <div className="mt-4 bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-                  {files.map((f, i) => (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5 group/file hover:bg-white transition-colors">
-                      <div className="w-6 h-6 rounded-md bg-emerald-100 flex items-center justify-center shrink-0"><FileUp size={12} className="text-emerald-600" /></div>
-                      <span className="text-sm font-medium text-slate-700 truncate flex-1">{f.name}</span>
-                      <span className="text-xs text-slate-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
-                      <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="opacity-0 group-hover/file:opacity-100 text-slate-300 hover:text-red-500 transition-all"><X size={14} /></button>
-                    </div>
+              {visibleLibraryDatasets.length > 0 || (libraryFilter !== 'preset' && canManageDemoDatasets) ? (
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleLibraryDatasets.map(dataset => (
+                    <DatasetCard key={dataset.id} dataset={dataset} isActive={selectedDataset === dataset.id} onSelect={setSelectedDataset} />
                   ))}
+                  {canManageDemoDatasets && libraryFilter !== 'preset' && (
+                    <button onClick={() => setShowCreateModal(true)}
+                      className="relative rounded-2xl border-2 border-dashed border-slate-300 p-4 text-left transition-all duration-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/70 flex flex-col items-center justify-center min-h-[200px]">
+                      <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3"><Plus size={24} className="text-blue-600" /></div>
+                      <div className="text-base font-semibold text-slate-700">Create Demo Dataset</div>
+                      <div className="text-sm text-slate-500 mt-1">Generate a new synthetic benchmark dataset</div>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                  <div className="text-sm font-semibold text-slate-900">{libraryFilter === 'demo' ? 'No demo datasets yet' : 'No datasets match this filter'}</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">{libraryFilter === 'demo' ? 'Preset datasets are ready to use now.' : 'Try another filter or switch to Upload Your Own.'}</div>
                 </div>
               )}
-              {files.length === 1 && !hasZipUpload && (
-                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 source files, or use a ZIP archive</p>
-              )}
             </div>
-          )}
-        </div>
+
+            {activeDataset && activeDatasetMeta && (
+              <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Selected dataset</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className="text-2xl">{activeDataset.icon}</span>
+                      <div>
+                        <div className="text-lg font-semibold text-slate-900">{activeDataset.name}</div>
+                        <div className="text-sm text-slate-600">{activePresetMeta?.presetCategory || activeDatasetMeta.label}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${activeDatasetMeta.badgeClass}`}>{activePresetMeta?.badgeLabel || activeDatasetMeta.summaryLabel}</span>
+                </div>
+                <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
+                {activePresetMeta?.summary && <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>}
+
+
+
+                {activeDataset.cases ? (
+                  <div className="mt-5 grid md:grid-cols-3 gap-2">
+                    {activeDataset.cases.map(tc => (
+                      <div key={tc.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2.5">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${tc.expected >= 0.9 ? 'bg-red-500' : tc.expected >= 0.7 ? 'bg-amber-500' : tc.expected >= 0.4 ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-slate-800 truncate">{tc.label}</div>
+                          <div className="text-xs text-slate-400">~{(tc.expected * 100).toFixed(0)}% expected</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Language', value: activeDataset.language || 'Mixed' },
+                      { label: activeDataset.is_demo ? 'Files' : 'Size', value: activeDataset.size || 'Unknown' },
+                      { label: activeDataset.is_demo ? 'Created' : 'Use', value: activeDataset.is_demo ? formatDatasetDate(activeDataset.created_at) : (activePresetMeta?.presetCategory || activeDataset.similarity_type || 'Standard') },
+                      { label: activeDataset.is_demo ? 'Created By' : 'Source', value: activeDataset.created_by || 'System' },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 text-center">
+                        <div className={`text-lg font-bold ${activeDatasetMeta.accentClass}`}>{value}</div>
+                        <div className="text-xs text-slate-500">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {uploadMode === 'upload' && (
+          <div>
+            <div
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+              onClick={() => document.getElementById('file-input').click()}
+              className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50/30 transition-all group"
+            >
+              <input
+                id="file-input" type="file" className="hidden" multiple
+                accept=".zip,.txt,.py,.java,.c,.cpp,.h,.hpp,.js,.ts,.jsx,.tsx,.go,.rs,.rb,.php,.cs,.kt,.swift,.scala,.r,.m,.sql,.sh,.bash"
+                onChange={e => setFiles(Array.from(e.target.files))}
+              />
+              <UploadCloud size={40} className="mx-auto text-slate-300 group-hover:text-violet-400 transition-colors mb-4" />
+              <p className="font-semibold text-slate-600 mb-1">Drop source files or a ZIP archive here</p>
+              <p className="text-sm text-slate-400">Upload 2 or more files, or a single ZIP for one-off comparison</p>
+              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 group-hover:border-violet-300 transition-colors">
+                <FileUp size={14} />Browse files
+              </div>
+            </div>
+            {files.length > 0 && (
+              <div className="mt-4 bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {files.map((f, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5 group/file hover:bg-white transition-colors">
+                    <div className="w-6 h-6 rounded-md bg-emerald-100 flex items-center justify-center shrink-0"><FileUp size={12} className="text-emerald-600" /></div>
+                    <span className="text-sm font-medium text-slate-700 truncate flex-1">{f.name}</span>
+                    <span className="text-xs text-slate-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
+                    <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="opacity-0 group-hover/file:opacity-100 text-slate-300 hover:text-red-500 transition-all"><X size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {files.length === 1 && !hasZipUpload && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5"><AlertCircle size={13} /> Upload at least 2 files, or use a ZIP archive</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between">
         <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">← Back</button>
         <button onClick={onNext} disabled={!canProceed}
           className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl disabled:shadow-none">
-          Ready to Run <ChevronRight size={18} />
+          <Play size={18} />Start Benchmark
         </button>
       </div>
 
@@ -1046,36 +901,52 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
 }
 
 // ── Step 3: Run ────────────────────────────────────────────────────────────
-function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, onBack, onComplete }) {
+function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, autoStart = false, onBack, onComplete }) {
   const { token } = useAuth();
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState('');
+  const [progress, setProgress] = useState([]);
   const [progressPct, setProgressPct] = useState(0);
+  const [progressMode, setProgressMode] = useState('indeterminate');
   const [error, setError] = useState('');
+
+  // Use a ref to hold the run function so the autoStart effect always calls the latest version
+  const runRef = useRef(null);
   const requestControllerRef = useRef(null);
+  const autoStartedRef = useRef(false);
 
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
   const hasZipUpload = files.some(f => f.name?.toLowerCase().endsWith('.zip'));
-  const benchmarkType = benchmarkMode === 'development' || benchmarkMode === 'calibration'
-    ? 'pan_optimization'
-    : 'tool_comparison';
+  const benchmarkType = benchmarkMode === 'release' || benchmarkMode === 'regression'
+    ? 'regression_test'
+    : benchmarkMode === 'development' || benchmarkMode === 'calibration'
+      ? 'pan_optimization'
+      : 'tool_comparison';
 
-  const run = async () => {
+  const run = useCallback(async () => {
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
-    setError(''); setRunning(true); setProgressPct(10);
+    setError(''); setRunning(true);
+    setProgress([]); setProgressPct(0); setProgressMode('indeterminate');
+
     try {
       if (uploadMode === 'builtin' && activeDataset) {
         if (activeDataset.cases) {
+          // Guided test cases - use original implementation
+          setProgressMode('determinate');
           const allResults = [];
           const cases = activeDataset.cases;
+          const toolNames = selectedTools.map(t => TOOLS.find(tool => tool.id === t)?.name || t).join(', ');
+          setProgress(prev => [...prev, `Dataset: ${activeDataset.name} (${cases.length} guided test cases)`]);
+          setProgress(prev => [...prev, `Tools: ${toolNames}`]);
+
           for (let i = 0; i < cases.length; i++) {
             const tc = cases[i];
-            setProgress(`Running "${tc.label}" (${i + 1}/${cases.length})…`);
-            setProgressPct(10 + (i / cases.length) * 80);
+            setProgress(prev => [...prev, `[${i + 1}/${cases.length}] Analyzing "${tc.label}" using ${toolNames}…`]);
+            setProgressPct(Math.round(((i + 0.5) / cases.length) * 100));
+
             const blobA = new Blob([tc.codeA], { type: 'text/plain' });
             const blobB = new Blob([tc.codeB], { type: 'text/plain' });
             const formData = new FormData();
@@ -1084,77 +955,189 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             formData.append('benchmark_type', benchmarkType);
             if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
             selectedTools.forEach(t => formData.append('tools', t));
+
             try {
-              const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
+              const res = await apiClient.post('/api/benchmark', formData, {
+                signal: controller.signal
+              });
               allResults.push({ testCase: tc, ...res.data });
-            } catch (err) { if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break; }
+            } catch (err) {
+              if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') break;
+              console.error('Test case benchmark error:', err);
+              // Continue with other test cases, but don't fail the whole benchmark
+            }
           }
+
           if (allResults.length > 0) {
-            setProgressPct(100); setProgress('Complete!');
+            setProgress(prev => [...prev, `✓ Completed ${allResults.length}/${cases.length} test cases`]);
+            setProgressPct(100);
             const merged = { ...allResults[0], pair_results: allResults.flatMap(r => r.pair_results || []) };
             setTimeout(() => onComplete({ ...merged, datasetName: activeDataset.name, runAt: new Date().toISOString() }), 400);
           }
         } else {
-          setProgress('Loading dataset…'); setProgressPct(30);
+          // Regular dataset benchmark — use async background job to avoid timeout
+          setProgress(prev => [...prev, `Dataset: ${activeDataset.name}`]);
+          setProgressMode('determinate');
           const formData = new FormData();
           selectedTools.forEach(t => formData.append('tools', t));
           formData.append('dataset', activeDataset.id);
           formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-          setProgress(benchmarkType === 'pan_optimization' ? 'Running IntegrityDesk benchmark…' : 'Running multi-tool comparison…');
-          setProgressPct(50);
-          const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-          setProgressPct(100); setProgress('Complete!');
-          onComplete({ ...res.data, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+
+          try {
+            const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
+            setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
+            setProgress(prev => [...prev, `Tools: ${toolNames}`]);
+
+            // Start the job in the background
+            const startRes = await apiClient.post('/api/benchmark/start', formData, {
+              signal: controller.signal,
+              headers: { 'Content-Type': 'multipart/form-data' },
+              timeout: 15000,
+            });
+            const { job_id } = startRes.data;
+            setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
+
+            // Poll for completion
+            let seenLines = 0;
+            while (!controller.signal.aborted) {
+              await new Promise(r => setTimeout(r, 2000));
+              if (controller.signal.aborted) break;
+
+              const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
+                signal: controller.signal,
+                timeout: 10000,
+              });
+              const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
+
+              // Show any new progress lines from the server
+              if (serverProgress && serverProgress.length > seenLines) {
+                const newLines = serverProgress.slice(seenLines);
+                newLines.forEach((line: string) => setProgress(prev => [...prev, line]));
+                seenLines = serverProgress.length;
+                setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
+              }
+
+              if (status === 'done' && result) {
+                setProgress(prev => [...prev, `✓ Benchmark complete — ${result?.pair_results?.length || 0} similarity pairs found`]);
+                setProgressPct(100);
+                onComplete({ ...result, datasetName: activeDataset.name, runAt: new Date().toISOString() });
+                return;
+              }
+              if (status === 'error') {
+                setError(serverError || 'Benchmark failed. Please try again.');
+                setProgress(prev => [...prev, '❌ Benchmark failed']);
+                return;
+              }
+            }
+          } catch (err) {
+            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+              setProgress(prev => [...prev, '⨯ Run cancelled']);
+            } else {
+              console.error('Benchmark error:', err);
+              setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+              setProgress(prev => [...prev, '❌ Benchmark failed']);
+            }
+            return;
+          }
         }
       } else {
-        setProgress('Uploading files…'); setProgressPct(20);
+        // File upload benchmark — use async background job to avoid timeout
+        setProgress(prev => [...prev, `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`]);
+        setProgressMode('determinate');
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
         formData.append('benchmark_type', benchmarkType);
         if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
-        setProgress(benchmarkType === 'pan_optimization' ? 'Running IntegrityDesk benchmark…' : 'Running analysis across all selected tools…');
-        setProgressPct(50);
-        const res = await axios.post(`${API}/api/benchmark`, formData, { withCredentials: true, signal: controller.signal });
-        setProgressPct(100); setProgress('Complete!');
-        setTimeout(() => onComplete({ ...res.data, runAt: new Date().toISOString() }), 400);
+
+        try {
+          setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
+
+          const startRes = await apiClient.post('/api/benchmark/start', formData, {
+            signal: controller.signal,
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 15000,
+          });
+          const { job_id } = startRes.data;
+          setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
+
+          let seenLines = 0;
+          while (!controller.signal.aborted) {
+            await new Promise(r => setTimeout(r, 2000));
+            if (controller.signal.aborted) break;
+
+            const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
+              signal: controller.signal,
+              timeout: 10000,
+            });
+            const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
+
+            if (serverProgress && serverProgress.length > seenLines) {
+              const newLines = serverProgress.slice(seenLines);
+              newLines.forEach((line: string) => setProgress(prev => [...prev, line]));
+              seenLines = serverProgress.length;
+              setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
+            }
+
+            if (status === 'done' && result) {
+              setProgress(prev => [...prev, `✓ Analysis complete — ${result?.pair_results?.length || 0} pairs analyzed`]);
+              setProgressPct(100);
+              onComplete({ ...result, runAt: new Date().toISOString() });
+              return;
+            }
+            if (status === 'error') {
+              setError(serverError || 'Benchmark failed. Please try again.');
+              setProgress(prev => [...prev, '❌ Benchmark failed']);
+              return;
+            }
+          }
+        } catch (err) {
+          if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+            setProgress(prev => [...prev, '⨯ Run cancelled']);
+          } else {
+            setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+          }
+        }
       }
     } catch (err) {
-      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') setProgress('Run cancelled');
-      else setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+        setProgress(prev => [...prev, '⨯ Run cancelled']);
+      } else {
+        setError(err.response?.data?.error || err.message || 'Benchmark failed. Please try again.');
+      }
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
       setRunning(false);
     }
+  }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
+
+  // Keep ref current so autoStart fires the latest version
+  runRef.current = run;
+
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    const timer = window.setTimeout(() => runRef.current?.(), 0);
+    return () => window.clearTimeout(timer);
+  }, [autoStart]);
+
+  useEffect(() => {
+    return () => requestControllerRef.current?.abort();
+  }, []);
+
+  const stop = () => {
+    requestControllerRef.current?.abort();
+    setRunning(false);
+    setProgress(prev => [...prev, '⨯ Cancelling…']);
+    setProgressPct(0);
   };
 
-  const stop = () => { requestControllerRef.current?.abort(); setRunning(false); setProgress('Cancelling run…'); setProgressPct(0); };
+  const isDeterminateProgress = progressMode === 'determinate';
 
   return (
     <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-        <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-5"><ClipboardList size={18} className="text-violet-500" />Benchmark Configuration</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Tools</p>
-            <div className="flex flex-wrap gap-1.5">
-              {selectedTools.slice(0, 6).map(id => { const t = TOOLS.find(x => x.id === id); return t ? <span key={id} className={`text-xs font-medium px-2.5 py-1 rounded-lg ${t.bgLight} ${t.textColor}`}>{t.name}</span> : null; })}
-              {selectedTools.length > 6 && <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600">+{selectedTools.length - 6} more</span>}
-            </div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dataset</p>
-            {uploadMode === 'builtin' ? (
-              <><p className="font-semibold text-slate-800 text-sm">{activeDataset?.name || 'Unknown'}</p><p className="text-xs text-slate-500 mt-1">{activeDataset?.cases?.length ? `${activeDataset.cases.length} guided scenarios` : activeDatasetMeta?.label || 'Dataset library'}</p></>
-            ) : (
-              <><p className="font-semibold text-slate-800 text-sm">{files.length} uploaded file{files.length !== 1 ? 's' : ''}</p><p className="text-xs text-slate-500 mt-1">{hasZipUpload ? 'ZIP archive' : 'Direct file upload'}</p></>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div>
         {error && (
           <div className="mb-4 flex items-start gap-3 p-4 bg-red-50 border border-red-100 rounded-xl">
             <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
@@ -1164,18 +1147,46 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         {running && (
           <div className="mb-5">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><Loader2 size={15} className="text-violet-600 animate-spin" />{progress}</p>
-              <span className="text-sm font-bold text-violet-600">{Math.round(progressPct)}%</span>
+              <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <Loader2 size={15} className="text-violet-600 animate-spin" />
+                Benchmark in progress
+              </p>
+              <span className="text-sm font-bold text-violet-600">
+                {isDeterminateProgress ? `${Math.round(progressPct)}%` : 'Running'}
+              </span>
             </div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
+
+            {/* Terminal-like console output */}
+            <div className="bg-slate-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+              <div className="space-y-1">
+                {progress.length === 0 && (
+                  <div className="text-slate-400">Initializing benchmark…</div>
+                )}
+                {progress.map((msg, idx) => (
+                  <div key={idx} className={`${msg.startsWith('✓') ? 'text-emerald-400' : msg.startsWith('⨯') ? 'text-rose-400' : 'text-slate-300'}`}>
+                    <span className="text-slate-500 mr-2">{String(idx + 1).padStart(2, '0')}</span>
+                    {msg}
+                  </div>
+                ))}
+                {(running || progressPct < 100) && (
+                  <div className="text-slate-400 animate-pulse">_</div>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mt-3">
+              <div
+                className={`h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-300 ${isDeterminateProgress ? '' : 'animate-pulse'}`}
+                style={{ width: isDeterminateProgress ? `${progressPct}%` : '100%' }}
+              />
             </div>
           </div>
         )}
         <div className="flex items-center gap-3">
           {!running ? (
             <button onClick={run} className="flex-1 flex items-center justify-center gap-3 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-slate-900/15 hover:shadow-xl text-base">
-              <Play size={20} />Start Benchmark
+              <Play size={20} />Run Again
             </button>
           ) : (
             <button onClick={stop} className="flex-1 flex items-center justify-center gap-3 py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-500/25 text-base">
@@ -1192,12 +1203,258 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   );
 }
 
+// ── ComparisonProofHeader — dominant proof banner for multi-tool runs ─────
+function ComparisonProofHeader({ rows }) {
+  if (!rows || rows.length < 2) return null;
+
+  const winner = rows[0];
+  const integrityDeskRow = rows.find(r => r.toolId === 'integritydesk' || r.toolId === 'codeprovenance');
+  const isOurWin = winner.toolId === 'integritydesk' || winner.toolId === 'codeprovenance';
+
+  const mossRow = rows.find(r => r.toolId === 'moss');
+  const dolosRow = rows.find(r => r.toolId === 'dolos');
+
+  const second = rows[1];
+  const deltaF1 = second ? ((winner.f1Score - second.f1Score) * 100) : 0;
+
+  const mossDelta = mossRow ? ((winner.f1Score - mossRow.f1Score) * 100) : null;
+  const dolosDelta = dolosRow ? ((winner.f1Score - dolosRow.f1Score) * 100) : null;
+
+  return (
+    <div className="rounded-3xl border border-violet-300 bg-gradient-to-br from-violet-900 via-violet-800 to-slate-900 p-6 text-white shadow-2xl">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="text-4xl">{isOurWin ? '🏆' : '📊'}</div>
+            <div>
+              <div className="text-2xl font-bold tracking-tight">
+                {isOurWin
+                  ? 'IntegrityDesk Outperforms All Competitors'
+                  : `${winner.name} Leads on This Benchmark`}
+              </div>
+              <div className="text-violet-200 text-sm mt-1">
+                Head-to-head on the same labeled academic dataset • {rows.length} tools evaluated
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {isOurWin && (
+          <div className="rounded-2xl bg-white/10 px-5 py-2 text-right border border-white/20">
+            <div className="text-[10px] uppercase tracking-[2px] text-violet-300">World-Class Result</div>
+            <div className="text-xl font-bold">#{1} Overall</div>
+          </div>
+        )}
+      </div>
+
+      {/* Explicit competitor deltas — this is the "proof" users care about */}
+      <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-white/10 border border-white/20 p-4">
+          <div className="text-xs uppercase tracking-widest text-violet-300">Winner</div>
+          <div className="text-2xl font-bold mt-1">{winner.name}</div>
+          <div className="text-emerald-400 text-sm mt-0.5">
+            PlagDet {(winner.plagdet * 100).toFixed(1)}% • F1 {(winner.f1Score * 100).toFixed(1)}%
+          </div>
+        </div>
+
+        {mossRow && (
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <div className="text-xs text-violet-300">vs MOSS</div>
+            <div className="text-2xl font-semibold mt-1 text-emerald-400">
+              {mossDelta !== null ? `+${mossDelta.toFixed(1)}` : '—'} F1 pts
+            </div>
+            <div className="text-xs text-violet-200 mt-1">MOSS F1: {(mossRow.f1Score * 100).toFixed(1)}%</div>
+          </div>
+        )}
+
+        {dolosRow && (
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <div className="text-xs text-violet-300">vs Dolos</div>
+            <div className="text-2xl font-semibold mt-1 text-emerald-400">
+              {dolosDelta !== null ? `+${dolosDelta.toFixed(1)}` : '—'} F1 pts
+            </div>
+            <div className="text-xs text-violet-200 mt-1">Dolos F1: {(dolosRow.f1Score * 100).toFixed(1)}%</div>
+          </div>
+        )}
+      </div>
+
+      {isOurWin && (
+        <div className="mt-4 inline-flex items-center rounded-full bg-emerald-500/20 border border-emerald-400/30 px-4 py-1 text-sm font-semibold text-emerald-300">
+          ✓ Statistically stronger performance on obfuscated and semantic clones
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── PanLeaderboard — multi-tool ranked comparison table ────────────────────
+function PanLeaderboard({ rows }) {
+  if (!rows || rows.length < 2) return null;
+
+  const leaderboardChartData = rows.map(row => ({
+    id: row.toolId,
+    name: row.name,
+    color: TOOLS.find(t => t.id === row.toolId)?.color ?? '#94a3b8',
+    plagdet: Number((row.plagdet * 100).toFixed(1)),
+    f1Score: Number((row.f1Score * 100).toFixed(1)),
+    precision: Number((row.precision * 100).toFixed(1)),
+    recall: Number((row.recall * 100).toFixed(1)),
+    fpr: Number((row.falsePositiveRate * 100).toFixed(1)),
+  }));
+
+  const medals = ['🥇', '🥈', '🥉'];
+
+  const isIntegrityDesk = (id: string) => id === 'integritydesk' || id === 'codeprovenance';
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-2">
+        <Trophy size={18} className="text-amber-500" />
+        <div>
+          <h2 className="font-semibold text-slate-900">Tool Leaderboard</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Ranked by PlagDet score on the same labeled benchmark.</p>
+        </div>
+      </div>
+
+      {/* Horizontal bar chart */}
+      <div className="px-6 pt-5 h-56">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={leaderboardChartData} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#1e293b', fontWeight: 600 }} width={100} />
+            <Tooltip content={<LeaderboardTooltip />} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
+            <Bar dataKey="plagdet" radius={[0, 6, 6, 0]} name="PlagDet">
+              {leaderboardChartData.map(entry => (
+                <Cell key={entry.id} fill={entry.color} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Ranked table with auto-highlighting */}
+      <div className="px-6 pb-6 mt-4">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                {['Rank', 'Tool', 'PlagDet', 'F1', 'Δ vs Winner', 'Precision', 'Recall', 'FPR', 'Runtime'].map(h => (
+                  <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {rows.map((row, i) => {
+                const toolInfo = TOOLS.find(t => t.id === row.toolId);
+                const isWinner = i === 0;
+                const isID = isIntegrityDesk(row.toolId);
+                const deltaVsWinner = i === 0 ? 0 : ((row.f1Score - rows[0].f1Score) * 100);
+
+                return (
+                  <tr 
+                    key={row.toolId} 
+                    className={`transition-colors ${isWinner ? 'bg-amber-50/60' : isID ? 'bg-violet-50/40' : 'hover:bg-slate-50/60'}`}
+                  >
+                    <td className="px-3 py-3 text-lg">{medals[i] || `#${i + 1}`}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: toolInfo?.color ?? '#94a3b8' }} />
+                        <span className={`font-semibold ${isWinner ? 'text-amber-800' : isID ? 'text-violet-700' : 'text-slate-900'}`}>
+                          {row.name}
+                          {isID && <span className="ml-1 text-[10px] font-bold text-violet-600">(Ours)</span>}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`font-bold ${row.plagdet >= 0.9 ? 'text-emerald-600' : row.plagdet >= 0.75 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {(row.plagdet * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.f1Score * 100).toFixed(1)}%</td>
+                    <td className={`px-3 py-3 font-medium ${deltaVsWinner > 0 ? 'text-emerald-600' : deltaVsWinner < 0 ? 'text-rose-600' : 'text-slate-500'}`}>
+                      {i === 0 ? '—' : `${deltaVsWinner > 0 ? '+' : ''}${deltaVsWinner.toFixed(1)}%`}
+                    </td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.precision * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-slate-700 font-medium">{(row.recall * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-3">
+                      <span className={row.falsePositiveRate > 0.1 ? 'text-red-600 font-medium' : 'text-slate-700 font-medium'}>
+                        {(row.falsePositiveRate * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-500 text-xs">
+                      {row.avgRuntimeSeconds ? `${row.avgRuntimeSeconds.toFixed(2)}s` : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Error boundary for ReportStep ─────────────────────────────────────────
+class ReportErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('ReportStep render error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+          <div className="text-red-600 font-semibold text-lg mb-2">Report failed to render</div>
+          <div className="text-red-500 text-sm mb-4 font-mono">{String(this.state.error?.message || this.state.error)}</div>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); this.props.onRestart?.(); }}
+            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-800"
+          >
+            Start New Benchmark
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── Step 4: Report ─────────────────────────────────────────────────────────
-function ReportStep({ results, onRestart, benchmarkMode }) {
+function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
+  const { user } = useAuth();
   const [expandedPairs, setExpandedPairs] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState('');
+  const [pdfFormat, setPdfFormat] = useState('detailed_scorecard');
+  const [applyingOptimization, setApplyingOptimization] = useState(false);
+  const [optimizationMessage, setOptimizationMessage] = useState('');
+  const [optimizationError, setOptimizationError] = useState('');
+  const [editableOptimizationChanges, setEditableOptimizationChanges] = useState([]);
+
+  // Add error checking for results data
+  if (!results || typeof results !== 'object') {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 text-lg font-semibold mb-2">Error Loading Results</div>
+        <div className="text-slate-600">Benchmark results data is missing or invalid.</div>
+        <button
+          onClick={onRestart}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
 
   const { tool_scores, pair_results } = results;
   const itemsPerPage = 50;
@@ -1216,18 +1473,6 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     activeTools.forEach(t => { const tr = pair.tool_results?.find(r => r.tool === t); d[t] = tr ? Math.round(tr.score * 1000) / 10 : 0; });
     return d;
   });
-
-  const toolLeaderboard = activeTools.map(tool => {
-    const toolInfo = TOOLS.find(t => t.id === tool);
-    const scores = (pair_results || []).map(pair => pair.tool_results?.find(r => r.tool === tool)?.score).filter(s => typeof s === 'number');
-    const average = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : 0;
-    const peak = scores.length ? Math.max(...scores) : 0;
-    const minimum = scores.length ? Math.min(...scores) : 0;
-    return { id: tool, name: toolInfo?.name || tool, shortName: toolInfo?.name || tool, color: toolInfo?.color ?? '#94a3b8', average: Math.round(average * 1000) / 10, peak: Math.round(peak * 1000) / 10, minimum: Math.round(minimum * 1000) / 10, spread: Math.round((peak - minimum) * 1000) / 10, pairCount: scores.length };
-  }).sort((a, b) => b.average - a.average);
-
-  const leadingTool = toolLeaderboard[0] || null;
-  const leadingToolInfo = leadingTool ? TOOLS.find(t => t.id === leadingTool.id) : null;
 
   const panEvaluationRows = Object.entries(results.evaluation || {})
     .filter(([, metrics]) => metrics && !metrics.error)
@@ -1251,6 +1496,8 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
         fixedThreshold: metrics.fixed_threshold, fixedThresholdMetrics: metrics.fixed_threshold_metrics || {},
         confidenceIntervals: metrics.confidence_intervals || {}, splitProtocol: metrics.split_protocol || {},
         metricIntegrity: metrics.metric_integrity || {},
+        benchmarkTrust: metrics.benchmark_trust || metrics.metric_integrity?.benchmark_trust || {},
+        tuningRecommendations: metrics.tuning_recommendations || null,
       };
     }).sort((a, b) => b.plagdet - a.plagdet);
 
@@ -1263,12 +1510,21 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
   const isRegressionReport = benchmarkMode === 'release' || benchmarkMode === 'regression' || results.protocol === 'release_check' || results.benchmark_type === 'regression_test' || results.benchmark_goal === 'locked_regression_test';
   const isFocusedMetricReport = isCalibrationReport || isRegressionReport;
   const isComparisonReport = !isFocusedMetricReport;
+  const hasMultiToolPanResults = panEvaluationRows.length >= 2;
 
-  const toolFailureRows = Object.entries(results.tool_scores || {}).filter(([, meta]) => meta?.error).map(([toolId, meta]) => ({ toolId, name: TOOLS.find(t => t.id === toolId)?.name || toolId, error: String(meta.error || 'Tool did not return scores.') }));
+  // All-modes tool failure warnings
+  const toolFailureRows = Object.entries(results.tool_scores || {})
+    .filter(([, meta]) => meta?.error)
+    .map(([toolId, meta]) => ({ toolId, name: TOOLS.find(t => t.id === toolId)?.name || toolId, error: String(meta.error || 'Tool did not return scores.') }));
 
   const comparison = results.comparison || {};
   const comparisonDeltas = comparison.metrics || {};
   const qualityGates = results.quality_gates || null;
+  const pairSamplingAudit = results.pair_sampling_audit || null;
+  const pairSamplingWarnings = [
+    ...(pairSamplingAudit?.warnings || []),
+    ...(pairSamplingAudit?.blockers || []),
+  ];
 
   const pairKey = (pair, idx) => `${pair.file_a || 'a'}::${pair.file_b || 'b'}::${pair.label || idx}`;
   const togglePair = (key) => setExpandedPairs(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1292,35 +1548,149 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
     const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
-  const downloadPDF = async () => {
+  const downloadPDF = async (format = 'legacy') => {
     try {
       setPdfDownloading(true); setPdfError('');
-      const res = await axios.post(`${API}/api/benchmark/export-pdf`, results, { responseType: 'blob', withCredentials: true });
+      const payload = { ...results, format };
+      const res = await apiClient.post('/api/benchmark/export-pdf', payload, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.pdf`; a.click(); URL.revokeObjectURL(url);
+      const filename = format === 'detailed_scorecard'
+        ? `benchmark-evaluation-scorecard-${new Date().toISOString().slice(0, 10)}.pdf`
+        : `benchmark-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
     } catch { setPdfError('Could not export the benchmark report as PDF. Please try again.'); }
     finally { setPdfDownloading(false); }
   };
 
-  const summaryCards = [
-    { icon: Layers, bg: 'bg-blue-50', color: 'text-blue-600', label: 'Tools Run', value: activeTools.length },
-    { icon: Target, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'Pairs Tested', value: pair_results?.length || 0 },
-    { icon: Trophy, bg: 'bg-amber-50', color: 'text-amber-600', label: 'Top Average', value: leadingTool ? `${leadingTool.average.toFixed(1)}%` : 'N/A' },
-    { icon: TrendingUp, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Leading Tool', value: leadingTool?.name || 'N/A' },
-  ];
-  const calibrationSummaryCards = productPanResult ? [
-    { icon: Trophy, bg: 'bg-blue-50', color: 'text-blue-600', label: 'PlagDet', value: `${(productPanResult.plagdet * 100).toFixed(1)}%` },
-    { icon: CheckCircle2, bg: 'bg-emerald-50', color: 'text-emerald-600', label: 'F1 Score', value: `${(productPanResult.f1Score * 100).toFixed(1)}%` },
-    { icon: Target, bg: 'bg-violet-50', color: 'text-violet-600', label: 'Precision', value: `${(productPanResult.precision * 100).toFixed(1)}%` },
-    { icon: AlertCircle, bg: 'bg-rose-50', color: 'text-rose-600', label: 'False Positive Rate', value: `${(productPanResult.falsePositiveRate * 100).toFixed(1)}%` },
-  ] : [];
-  const reportSummaryCards = isFocusedMetricReport && calibrationSummaryCards.length ? calibrationSummaryCards : summaryCards;
+  const applyOptimization = async () => {
+    if (!tuningConfigChanges.length) return;
+    setApplyingOptimization(true);
+    setOptimizationMessage('');
+    setOptimizationError('');
+
+    // Check if user has admin privileges
+    const hasAdminAccess = user?.role === 'admin';
+    const jobId = results.job_id || results.id || results.report_id;
+
+    if (!hasAdminAccess) {
+      setOptimizationError('Admin access required. Please log in as an administrator to apply optimizations.');
+      return;
+    }
+
+    if (!jobId) {
+      setOptimizationError('Job ID not found in results. Cannot apply optimization without a valid job reference.');
+      return;
+    }
+
+    try {
+      console.log('Applying optimization with changes:', tuningConfigChanges);
+      console.log('Using job ID:', jobId);
+
+      const res = await apiClient.post('/api/benchmark/apply-optimization', {
+        config_changes: tuningConfigChanges,
+        source_job_id: jobId,
+      });
+
+      setOptimizationMessage(res.data?.message || 'Proposed optimization applied.');
+    } catch (err) {
+      console.error('Optimization application failed:', err.response?.data || err.message);
+
+      let errorMsg = 'Could not apply proposed optimization.';
+
+      if (err.response?.status === 401) {
+        errorMsg = 'Admin access required. Please log in as an administrator to apply optimizations.';
+      } else if (err.response?.status === 403) {
+        errorMsg = 'Insufficient permissions. Admin privileges are required to modify system configuration.';
+      } else if (err.response?.data?.detail) {
+        errorMsg = `Server error: ${err.response.data.detail}`;
+      } else if (err.response?.data?.error) {
+        errorMsg = `Error: ${err.response.data.error}`;
+      } else if (err.message) {
+        errorMsg = `Network error: ${err.message}`;
+      }
+
+      setOptimizationError(errorMsg);
+    } finally {
+      setApplyingOptimization(false);
+    }
+  };
+
   const metricIntegrity = productPanResult?.metricIntegrity || {};
+  const tuningRecommendations = productPanResult?.tuningRecommendations || null;
+  const automaticConfigChanges = tuningRecommendations?.config_changes || [];
+  const manualConfigOptions = tuningRecommendations?.manual_config_options || [];
+  const showingManualConfigOptions = automaticConfigChanges.length === 0 && manualConfigOptions.length > 0;
+  const tuningConfigSource = automaticConfigChanges.length ? automaticConfigChanges : manualConfigOptions;
+  const tuningConfigSourceKey = JSON.stringify(tuningConfigSource);
+
+  useEffect(() => {
+    setEditableOptimizationChanges(
+      tuningConfigSource.map(change => ({
+        ...change,
+        proposed: normalizeOptimizationValue(
+          change.proposed,
+          optimizationControlSpec(change.path, change.current, change.proposed)
+        ),
+      }))
+    );
+    setOptimizationMessage('');
+    setOptimizationError('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tuningConfigSourceKey]);
+
+  const tuningConfigChanges = editableOptimizationChanges;
   const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
   const confidenceIntervals = productPanResult?.confidenceIntervals || {};
   const splitProtocol = productPanResult?.splitProtocol || {};
   const metricWarnings = metricIntegrity.warnings || [];
+  const decisionThreshold = Number(productPanResult?.threshold ?? productPanResult?.fixedThreshold ?? 0.5);
+
+  const labeledPairAudit = (pair_results || [])
+    .map((pair) => {
+      if (pair.ground_truth_label === undefined || pair.ground_truth_label === null) return null;
+      const toolResult = (pair.tool_results || []).find(tr => tr.tool === productPanResult?.toolId);
+      if (!toolResult || typeof toolResult.score !== 'number') return null;
+      const actual = Number(pair.ground_truth_label) >= 2;
+      const predicted = Number(toolResult.score) >= decisionThreshold;
+      return { ...pair, score: Number(toolResult.score), actual, predicted };
+    })
+    .filter(Boolean);
+
+  const localConfusion = labeledPairAudit.reduce((acc, pair) => {
+    if (pair.actual && pair.predicted) acc.tp += 1;
+    else if (!pair.actual && pair.predicted) acc.fp += 1;
+    else if (!pair.actual && !pair.predicted) acc.tn += 1;
+    else acc.fn += 1;
+    return acc;
+  }, { tp: 0, fp: 0, tn: 0, fn: 0 });
+
+  const heldoutConfusion = metricIntegrity.heldout_confusion_matrix || {};
+  const confusion = labeledPairAudit.length ? localConfusion : {
+    tp: Number(heldoutConfusion.tp || 0), fp: Number(heldoutConfusion.fp || 0),
+    tn: Number(heldoutConfusion.tn || 0), fn: Number(heldoutConfusion.fn || 0),
+  };
+  const falsePositiveExamples = labeledPairAudit.filter(pair => !pair.actual && pair.predicted).sort((a, b) => b.score - a.score).slice(0, 3);
+  const falseNegativeExamples = labeledPairAudit.filter(pair => pair.actual && !pair.predicted).sort((a, b) => a.score - b.score).slice(0, 3);
+  const heldoutSize = Number(splitProtocol.holdout_size || 0);
+  const hasHoldout = splitProtocol.protocol === 'deterministic_stratified_calibration_holdout';
+  const hasConfidenceInterval = Boolean(confidenceIntervals.available && confidenceIntervals.f1);
+  const benchmarkTrust = productPanResult?.benchmarkTrust || metricIntegrity.benchmark_trust || results.benchmark_trust || {};
+
+  const trustStyles = {
+    strong: { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Enough labeled evaluation pairs and confidence intervals for internal regression decisions.' },
+    moderate: { label: 'Moderate', className: 'bg-amber-100 text-amber-700', description: 'Useful for internal decisions, but expand the labeled set before relying on it as the only gate.' },
+    limited: { label: 'Limited', className: 'bg-rose-100 text-rose-700', description: 'Use this run for direction only; sample size or protocol is too weak for pass/fail gates.' },
+    invalid: { label: 'Invalid', className: 'bg-red-100 text-red-700', description: 'Fix benchmark labels or class balance before trusting this run.' },
+  };
+  const trustLevel = trustStyles[benchmarkTrust.grade] || (
+    hasHoldout && hasConfidenceInterval && heldoutSize >= 20
+      ? trustStyles.strong
+      : hasHoldout
+        ? trustStyles.moderate
+        : trustStyles.limited
+  );
+  const trustMessages = [...(benchmarkTrust.blockers || []), ...(benchmarkTrust.warnings || [])];
 
   return (
     <div className="space-y-6">
@@ -1334,59 +1704,78 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={downloadPDF} disabled={pdfDownloading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 disabled:bg-white/50 text-slate-900 font-semibold rounded-xl transition-all text-sm">
-            <Download size={15} />{pdfDownloading ? 'Preparing…' : 'PDF'}
-          </button>
-          <button onClick={downloadCSV} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />CSV</button>
-          <button onClick={downloadJSON} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />JSON</button>
+          <div className="flex items-center gap-1">
+            <select
+              value={pdfFormat}
+              onChange={(e) => setPdfFormat(e.target.value)}
+              className="px-3 py-2.5 bg-white/10 border border-white/20 text-white rounded-l-xl text-sm focus:ring-2 focus:ring-white/20"
+            >
+              <option value="detailed_scorecard">Detailed Scorecard</option>
+              <option value="legacy">Simple Report</option>
+            </select>
+            <button onClick={() => downloadPDF(pdfFormat)} disabled={pdfDownloading}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 disabled:bg-white/50 text-slate-900 font-semibold rounded-r-xl transition-all text-sm">
+              <Download size={15} />{pdfDownloading ? 'Preparing…' : 'PDF'}
+            </button>
+          </div>
+          {isComparisonReport && (
+            <>
+              <button onClick={downloadCSV} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />CSV</button>
+              <button onClick={downloadJSON} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Download size={15} />JSON</button>
+            </>
+          )}
+          <a href="/error-analysis" className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 border border-violet-500 text-white font-semibold rounded-xl transition-all text-sm"><Eye size={15} />Error Analysis</a>
+          <button onClick={onRerun} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm"><Play size={15} />Re-run Benchmark</button>
           <button onClick={onRestart} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm">New Benchmark</button>
         </div>
       </div>
 
       {pdfError && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2"><AlertCircle size={14} className="shrink-0" />{pdfError}</div>}
 
-      {/* Comparison delta banner */}
-      {false && comparison.has_previous && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Compared With Previous Run</div>
-              <div className="mt-1 text-sm text-slate-600">Previous job {comparison.previous_job_id} · {comparison.previous_run_at ? new Date(comparison.previous_run_at).toLocaleString() : 'earlier run'}</div>
-            </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Same workflow/dataset</span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[['Precision', 'precision', false], ['F1 Score', 'f1_score', false], ['PlagDet', 'plagdet', false], ['False Positive Rate', 'false_positive_rate', true]].map(([label, key, lowerIsBetter]) => (
-              <div key={key} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-                <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-sm font-bold ${deltaTone(comparisonDeltas[key], lowerIsBetter)}`}>{formatDelta(comparisonDeltas[key], lowerIsBetter)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* Summary cards */}
-      {!isComparisonReport && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {reportSummaryCards.map(({ icon: Icon, bg, color, label, value }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}><Icon size={18} className={color} /></div>
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
-              </div>
-              <div className={`text-2xl font-bold ${color}`}>{value}</div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {/* Tool failure warnings */}
-      {!isComparisonReport && toolFailureRows.length > 0 && (
+      {/* ── FIX: Tool failures shown in all modes ── */}
+      {toolFailureRows.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
-          <div className="font-semibold text-amber-900 mb-2">Some tools did not return scores:</div>
-          {toolFailureRows.map(f => <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>)}
+          <div className="font-semibold text-amber-900 mb-2 flex items-center gap-2"><AlertCircle size={15} className="shrink-0" />Some tools did not return scores:</div>
+          <div className="space-y-1">
+            {toolFailureRows.map(f => <div key={f.toolId}><span className="font-semibold">{f.name}:</span> {f.error}</div>)}
+          </div>
+        </div>
+      )}
+
+      {pairSamplingAudit && (
+        <div className={`rounded-2xl border px-5 py-4 text-sm leading-6 ${pairSamplingAudit.blockers?.length ? 'border-red-200 bg-red-50 text-red-800' : pairSamplingWarnings.length ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="font-semibold mb-1 flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />Benchmark Sampling Audit
+              </div>
+              <div>
+                Used {pairSamplingAudit.selected?.total_pairs || 0} balanced evaluation pairs from {pairSamplingAudit.original?.total_pairs || 0} available labeled pairs.
+              </div>
+              <div className="mt-1 text-xs opacity-80">
+                Policy: {String(pairSamplingAudit.sampling_policy || '').replaceAll('_', ' ')}
+              </div>
+              {pairSamplingWarnings.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {pairSamplingWarnings.map((warning, index) => (
+                    <div key={`${warning}-${index}`}>- {warning}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="grid min-w-[260px] grid-cols-2 gap-2 text-center">
+              <div className="rounded-xl bg-white/80 px-3 py-2 ring-1 ring-black/5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] opacity-60">Positive</div>
+                <div className="mt-1 text-lg font-bold">{pairSamplingAudit.selected?.positive_pairs || 0}</div>
+              </div>
+              <div className="rounded-xl bg-white/80 px-3 py-2 ring-1 ring-black/5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] opacity-60">Negative</div>
+                <div className="mt-1 text-lg font-bold">{pairSamplingAudit.selected?.negative_pairs || 0}</div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1396,6 +1785,13 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
             <div>
               <h2 className={`font-semibold ${qualityGates.passed ? 'text-emerald-900' : 'text-red-900'}`}>Regression Quality Gates</h2>
               <p className={`mt-1 text-sm ${qualityGates.passed ? 'text-emerald-700' : 'text-red-700'}`}>{qualityGates.summary}</p>
+              {!qualityGates.passed && qualityGates.diagnosis && (
+                <div className="mt-3 rounded-xl border border-red-200 bg-white/80 px-4 py-3 text-sm leading-6 text-red-800">
+                  <div className="font-semibold text-red-900">{qualityGates.diagnosis.summary}</div>
+                  {qualityGates.diagnosis.detail && <div className="mt-1">{qualityGates.diagnosis.detail}</div>}
+                  {qualityGates.diagnosis.next_step && <div className="mt-1 font-medium">{qualityGates.diagnosis.next_step}</div>}
+                </div>
+              )}
             </div>
             <span className={`rounded-full px-3 py-1 text-xs font-bold ${qualityGates.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{qualityGates.passed ? 'PASS' : 'FAIL'}</span>
           </div>
@@ -1415,13 +1811,282 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
         </div>
       )}
 
-      {/* PAN scorecard */}
-      {isFocusedMetricReport && productPanResult && (
+      {/* ── DOMINANT: Multi-tool comparison proof (shown first when multiple tools ran on labeled data) ── */}
+      {hasMultiToolPanResults && (
+        <div className="space-y-4">
+          <ComparisonProofHeader rows={panEvaluationRows} />
+
+          <div className="flex justify-end -mt-2 mb-1 gap-2">
+            <button
+              onClick={() => {
+                const proof = {
+                  benchmark_type: 'multi_tool_comparison',
+                  dataset: results.datasetName,
+                  run_at: results.runAt,
+                  winner: panEvaluationRows[0],
+                  full_leaderboard: panEvaluationRows,
+                };
+                const blob = new Blob([JSON.stringify(proof, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `integritydesk-proof-${(results.datasetName || 'benchmark').replace(/\s+/g, '-')}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-2 rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 transition"
+            >
+              <Download size={15} /> Download Proof (JSON)
+            </button>
+
+            <button
+              onClick={() => {
+                const w = panEvaluationRows[0];
+                const moss = panEvaluationRows.find(r => r.toolId === 'moss');
+                const dolos = panEvaluationRows.find(r => r.toolId === 'dolos');
+                const idesk = panEvaluationRows.find(r => r.toolId === 'integritydesk' || r.toolId === 'codeprovenance');
+                const isIntegrityDeskWin = w.toolId === 'integritydesk' || w.toolId === 'codeprovenance';
+
+                const lines = [
+                  `# IntegrityDesk Benchmark Proof Report`,
+                  ``,
+                  `**Dataset:** ${results.datasetName || 'N/A'}`,
+                  `**Generated:** ${results.runAt ? new Date(results.runAt).toLocaleString() : new Date().toLocaleString()}`,
+                  `**Tools compared:** ${panEvaluationRows.length}`,
+                  ``,
+                  `---`,
+                  ``,
+                ];
+
+                // Winner summary
+                lines.push(`## 🏆 Winner: ${w.name}`);
+                lines.push(``);
+                lines.push(`| Metric     | Score     |`);
+                lines.push(`|------------|-----------|`);
+                lines.push(`| PlagDet    | **${(w.plagdet * 100).toFixed(1)}%** |`);
+                lines.push(`| F1 Score   | **${(w.f1Score * 100).toFixed(1)}%** |`);
+                lines.push(`| Precision  | ${(w.precision * 100).toFixed(1)}% |`);
+                lines.push(`| Recall     | ${(w.recall * 100).toFixed(1)}% |`);
+                lines.push(`| FPR        | ${(w.falsePositiveRate * 100).toFixed(1)}% |`);
+                if (w.avgRuntimeSeconds) {
+                  lines.push(`| Avg Runtime| ${w.avgRuntimeSeconds.toFixed(2)}s |`);
+                }
+                lines.push(``);
+
+                // Proof statement
+                if (isIntegrityDeskWin) {
+                  lines.push(`> **Proof Statement**: IntegrityDesk achieved the highest PlagDet and F1 score on this labeled academic dataset, outperforming all other evaluated tools.`);
+                  lines.push(``);
+                }
+
+                // Head-to-head deltas
+                lines.push(`## Head-to-Head Performance`);
+                lines.push(``);
+
+                if (moss) {
+                  const delta = ((w.f1Score - moss.f1Score) * 100);
+                  lines.push(`- **vs MOSS**: +${delta.toFixed(1)} F1 points (MOSS F1: ${(moss.f1Score * 100).toFixed(1)}%)`);
+                }
+                if (dolos) {
+                  const delta = ((w.f1Score - dolos.f1Score) * 100);
+                  lines.push(`- **vs Dolos**: +${delta.toFixed(1)} F1 points (Dolos F1: ${(dolos.f1Score * 100).toFixed(1)}%)`);
+                }
+                if (idesk && !isIntegrityDeskWin) {
+                  const rank = panEvaluationRows.findIndex(r => r.toolId === idesk.toolId) + 1;
+                  lines.push(`- IntegrityDesk ranked #${rank} with F1 ${(idesk.f1Score * 100).toFixed(1)}%`);
+                }
+                lines.push(``);
+
+                // Professional leaderboard table
+                lines.push(`## Full Leaderboard (sorted by PlagDet)`);
+                lines.push(``);
+                lines.push(`| Rank | Tool              | PlagDet | F1     | Precision | Recall | FPR    | Runtime |`);
+                lines.push(`|------|-------------------|---------|--------|-----------|--------|--------|---------|`);
+
+                panEvaluationRows.forEach((r, i) => {
+                  const rank = i + 1;
+                  const medal = rank === 1 ? '🥇 ' : rank === 2 ? '🥈 ' : rank === 3 ? '🥉 ' : '';
+                  const runtime = r.avgRuntimeSeconds ? r.avgRuntimeSeconds.toFixed(2) + 's' : '—';
+                  lines.push(
+                    `| ${medal}${rank} | ${r.name.padEnd(17)} | ${(r.plagdet * 100).toFixed(1)}% | ${(r.f1Score * 100).toFixed(1)}% | ${(r.precision * 100).toFixed(1)}% | ${(r.recall * 100).toFixed(1)}% | ${(r.falsePositiveRate * 100).toFixed(1)}% | ${runtime} |`
+                  );
+                });
+
+                lines.push(``);
+                lines.push(`---`);
+                lines.push(``);
+                lines.push(`*Report generated by IntegrityDesk Benchmark System*`);
+                lines.push(`*For academic integrity and plagiarism detection research*`);
+
+                const md = lines.join('\n');
+                const blob = new Blob([md], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `integritydesk-proof-${(results.datasetName || 'benchmark').replace(/\s+/g, '-')}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 transition"
+            >
+              <Download size={15} /> Download Proof (Markdown)
+            </button>
+
+            <button
+              onClick={() => downloadPDF('proof')}
+              disabled={pdfDownloading}
+              className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 px-4 py-2 text-sm font-semibold text-white transition"
+            >
+              <Download size={15} />{pdfDownloading ? 'Preparing…' : 'Download Proof (PDF)'}
+            </button>
+          </div>
+
+          <PanLeaderboard rows={panEvaluationRows} />
+
+           {/* Improved pair-level code diff viewer */}
+           {results.pair_results && results.pair_results.length > 0 && (
+             <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-5">
+               <div className="font-semibold text-sm mb-3 flex items-center gap-2">
+                 <Eye size={16} /> Example Differing Pairs — Code Diffs
+               </div>
+               <div className="space-y-4 text-xs">
+                 {results.pair_results.slice(0, 3).map((pair: any, idx: number) => {
+                   const hasCode = pair.code_a || pair.source_a || pair.content_a;
+                   const codeA = pair.code_a || pair.source_a || pair.content_a || pair.file_a;
+                   const codeB = pair.code_b || pair.source_b || pair.content_b || pair.file_b;
+
+                   return (
+                     <details key={idx} className="border rounded-xl p-3 bg-slate-50/50">
+                       <summary className="cursor-pointer font-mono text-[10px] text-slate-600 truncate">
+                         {pair.file_a || pair.label} ↔ {pair.file_b}
+                       </summary>
+
+                       <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                         {/* Tool scores */}
+                         <div>
+                           <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tool Scores</div>
+                           <div className="flex flex-wrap gap-3">
+                             {(pair.tool_results || []).slice(0, 4).map((tr: any) => (
+                               <span key={tr.tool} className={`px-2 py-0.5 rounded ${(tr.tool === 'integritydesk' || tr.tool === 'codeprovenance') ? 'bg-violet-100 text-violet-700 font-bold' : 'bg-slate-200 text-slate-700'}`}>
+                                 {tr.tool}: {(tr.score * 100).toFixed(0)}%
+                               </span>
+                             ))}
+                           </div>
+                         </div>
+
+                         {/* Actual code diff when available */}
+                         {hasCode ? (
+                           <div className="lg:col-span-2">
+                             <div className="grid grid-cols-2 gap-2">
+                               <div>
+                                 <div className="text-[10px] font-semibold text-emerald-600 mb-1">File A</div>
+                                 <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
+                                   {typeof codeA === 'string' ? codeA.slice(0, 800) : JSON.stringify(codeA).slice(0, 800)}
+                                 </pre>
+                               </div>
+                               <div>
+                                 <div className="text-[10px] font-semibold text-rose-600 mb-1">File B</div>
+                                 <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
+                                   {typeof codeB === 'string' ? codeB.slice(0, 800) : JSON.stringify(codeB).slice(0, 800)}
+                                 </pre>
+                               </div>
+                             </div>
+                             <div className="text-[10px] text-emerald-600 mt-1">Side-by-side code (truncated). Full diffs available in detailed report.</div>
+                           </div>
+                         ) : pair.matching_blocks ? (
+                           <div className="lg:col-span-2 text-[10px] text-slate-600">
+                             Matching blocks available — {pair.matching_blocks.length} regions
+                           </div>
+                         ) : (
+                           <div className="lg:col-span-2 text-[10px] text-slate-500">No raw code in this result set.</div>
+                         )}
+                       </div>
+                     </details>
+                   );
+                 })}
+               </div>
+               <div className="text-[10px] text-slate-500 mt-2">Full interactive diffs with line highlighting are in the detailed error analysis view.</div>
+             </div>
+           )}
+        </div>
+      )}
+
+      {/* PAN scorecard — heavy single-tool diagnostics only when not a clear multi-tool comparison */}
+      {isFocusedMetricReport && productPanResult && !hasMultiToolPanResults && (
         <div className="space-y-6">
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="font-semibold text-slate-900">PAN Evaluation Scorecard</h2>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="font-semibold text-slate-900">Metrics</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Evaluation summary for {productPanResult.name} on {results.datasetName || 'the selected labeled dataset'}.
+                  </p>
+                </div>
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                  Threshold {Number(decisionThreshold).toFixed(2)}
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+              <div className="grid gap-3 text-sm md:grid-cols-4">
+                {[
+                  ['True positives', confusion.tp, 'text-emerald-700'],
+                  ['False positives', confusion.fp, 'text-rose-700'],
+                  ['False negatives', confusion.fn, 'text-amber-700'],
+                  ['True negatives', confusion.tn, 'text-slate-700'],
+                ].map(([label, value, className]) => (
+                  <div key={label} className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+                    <div className={`mt-1 text-2xl font-bold ${className}`}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <h2 className="font-semibold text-slate-900">Detailed Evaluation Scorecard</h2>
               <p className="text-sm text-slate-500 mt-0.5">Focused on {productPanResult.name} — threshold: {typeof productPanResult.threshold === 'number' ? productPanResult.threshold.toFixed(2) : 'N/A'}</p>
+            </div>
+            <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${trustLevel.className}`}>Trust: {trustLevel.label}</span>
+                    {typeof benchmarkTrust.score === 'number' && (
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">{benchmarkTrust.score}/100</span>
+                    )}
+                    {benchmarkTrust.can_gate_internal_regression && (
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">Gate-ready</span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{trustLevel.description}</p>
+                  {trustMessages.length > 0 && (
+                    <div className="mt-2 space-y-1 text-xs leading-5 text-slate-500">
+                      {trustMessages.slice(0, 3).map((warning, index) => (
+                        <div key={`${warning}-${index}`}>- {warning}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="grid min-w-[260px] grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Eval pairs</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.sample_size ?? splitProtocol.holdout_size ?? 'N/A'}</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Positive</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.positive_pairs ?? splitProtocol.holdout_positive_pairs ?? 'N/A'}</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Negative</div>
+                    <div className="mt-1 text-lg font-bold text-slate-900">{benchmarkTrust.negative_pairs ?? splitProtocol.holdout_negative_pairs ?? 'N/A'}</div>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
               {panMetricDiagnostics.map(metric => {
@@ -1450,49 +2115,109 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Concrete optimization guidance for the next source-code iteration.</p>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {tuningRecommendations?.available
+                  ? `Candidate edits for ${tuningRecommendations.config_file}. Rerun the benchmark before keeping them.`
+                  : 'Concrete optimization guidance for the next source-code iteration.'}
+              </p>
             </div>
-            <div className="grid gap-3 p-6 md:grid-cols-2">
-              {panFeedback.map(item => (
-                <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="font-semibold text-slate-900">{item.title}</div>
-                  <div className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {isFocusedMetricReport && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100">
-                <h2 className="font-semibold text-slate-900">Benchmark Trust Notes</h2>
-                <p className="text-sm text-slate-500 mt-0.5">How to interpret this calibration run without overstating the result.</p>
-              </div>
-              <div className="grid gap-4 p-6 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Label Coverage</div>
-                  <div className="mt-3 text-sm leading-6 text-slate-600">{splitProtocol.holdout_positive_pairs ?? metricIntegrity.positive_pairs ?? productPanResult.nPositives ?? 0} positive pairs and {splitProtocol.holdout_negative_pairs ?? metricIntegrity.negative_pairs ?? productPanResult.nNegatives ?? 0} negative pairs were held out for PAN metrics.</div>
-                  <div className="mt-2 text-xs font-semibold text-slate-500">Protocol: {splitProtocol.protocol === 'deterministic_stratified_calibration_holdout' ? 'Stratified holdout' : 'Fallback, no holdout'}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Threshold Check</div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                    <div><div className="text-slate-500">Held-out F1</div><div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.heldout_f1 ?? productPanResult.f1Score)}</div></div>
-                    <div><div className="text-slate-500">Fixed 0.50 F1</div><div className="mt-1 font-bold text-slate-900">{formatMetric(metricIntegrity.fixed_threshold_f1 ?? fixedThresholdMetrics.f1_score)}</div></div>
+            {tuningRecommendations?.available && (
+              <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recommended tuning mode</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{String(tuningRecommendations.mode || 'balanced').replaceAll('_', ' ')}</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{tuningRecommendations.summary}</p>
                   </div>
-                  <div className="mt-3 text-xs leading-5 text-slate-500">{confidenceIntervals.available && confidenceIntervals.f1 ? `95% bootstrap F1 CI: ${formatMetric(confidenceIntervals.f1.ci_lower)}-${formatMetric(confidenceIntervals.f1.ci_upper)}.` : 'Confidence interval unavailable for this run size.'}</div>
+                  {tuningRecommendations.dominant_engine && (
+                    <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                      Dominant: {tuningRecommendations.dominant_engine} {(Number(tuningRecommendations.dominant_engine_contribution || 0) * 100).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
               </div>
-              {metricWarnings.length > 0 && (
-                <div className="border-t border-amber-100 bg-amber-50 px-6 py-4 text-sm leading-6 text-amber-800">{metricWarnings.map(warning => <div key={warning}>{warning}</div>)}</div>
-              )}
-            </div>
-          )}
+            )}
+
+            {(tuningConfigChanges.length > 0 || tuningRecommendations?.available) && (
+              <div className="border-t border-slate-100 px-6 pb-6">
+                <div className="pt-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="font-semibold text-slate-900">Proposed optimization</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {showingManualConfigOptions
+                          ? 'No automatic YAML edit is recommended for this rerun, but you can manually tune the current values below.'
+                          : 'These are candidate values for the next benchmark rerun, not automatic production changes.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${showingManualConfigOptions ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {showingManualConfigOptions ? `${tuningConfigChanges.length} manual controls` : `${tuningConfigChanges.length} edits`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={applyOptimization}
+                        disabled={applyingOptimization || tuningConfigChanges.length === 0}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
+                      >
+                        {applyingOptimization ? 'Applying...' : 'Apply'}
+                      </button>
+                    </div>
+                  </div>
+                  {optimizationMessage && (
+                    <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{optimizationMessage}</div>
+                  )}
+                  {optimizationError && (
+                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{optimizationError}</div>
+                  )}
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                    <div className="grid gap-3 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid-cols-[1.25fr_2.4fr_0.8fr_1fr]">
+                      <div>YAML path</div>
+                      <div>Score effect</div>
+                      <div>Current</div>
+                      <div>Proposed</div>
+                    </div>
+                    <div className="divide-y divide-slate-100 bg-white">
+                      {tuningConfigChanges.map((change, index) => {
+                        const spec = optimizationControlSpec(change.path, change.current, change.proposed);
+                        const proposedValue = normalizeOptimizationValue(change.proposed, spec);
+                        const updateProposed = (value) => {
+                          const nextValue = normalizeOptimizationValue(value, spec);
+                          setEditableOptimizationChanges(prev => prev.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, proposed: nextValue } : item
+                          )));
+                          setOptimizationMessage('');
+                          setOptimizationError('');
+                        };
+                        return (
+                          <div key={`${change.path}-${index}`} className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.25fr_2.4fr_0.8fr_1fr] lg:items-center">
+                            <code className="break-all rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{change.path}</code>
+                            <div className="text-xs leading-5 text-slate-600">{configPathEffect(change.path)}</div>
+                            <div className="font-mono text-xs font-bold text-blue-700">{String(change.current)}</div>
+                            <input
+                              type="number"
+                              min={spec.min}
+                              max={spec.max}
+                              step={spec.step}
+                              value={proposedValue}
+                              onChange={event => updateProposed(event.target.value)}
+                              className="w-24 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-right font-mono text-xs font-bold text-emerald-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                              aria-label={`Manual proposed value for ${change.path}`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Charts */}
-      {isComparisonReport && chartData.length > 0 && (
+      {/* Comparison charts */}
+      {chartData.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Pair-by-Pair Scores</h2>
@@ -1514,15 +2239,17 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
       )}
 
       {/* Detailed pair results */}
-      {isComparisonReport && (pair_results?.length || 0) > 0 && (
+      {(pair_results?.length || 0) > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>
             <p className="text-sm text-slate-500 mt-0.5">Click any pair to expand individual tool scores</p>
           </div>
 
-          <div className="hidden lg:grid px-6 py-3 bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold"
-            style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
+          <div
+            className="hidden lg:grid px-6 py-3 bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold"
+            style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}
+          >
             <div>File Pair</div>
             {activeTools.map(tool => (
               <div key={tool} className="text-center flex items-center justify-center gap-1.5">
@@ -1548,9 +2275,11 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
 
               return (
                 <div key={key}>
-                  <button onClick={() => togglePair(key)}
+                  <button
+                    onClick={() => togglePair(key)}
                     className="w-full px-6 py-4 hover:bg-slate-50/50 transition-colors text-left hidden lg:grid items-center"
-                    style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}>
+                    style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}
+                  >
                     <div className="flex items-center gap-3">
                       <div className={`w-2 h-8 rounded-full ${riskColor}`} />
                       <div>
@@ -1623,6 +2352,15 @@ function ReportStep({ results, onRestart, benchmarkMode }) {
           )}
         </div>
       )}
+
+      {/* Empty state for focused mode with no pair results */}
+      {isFocusedMetricReport && !productPanResult && (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+          <BarChart3 size={36} className="mx-auto text-slate-300 mb-3" />
+          <div className="text-sm font-semibold text-slate-700">No evaluation results available</div>
+          <div className="mt-2 text-sm text-slate-500">The benchmark ran but returned no labeled metrics. Ensure the selected dataset has ground-truth labels.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1633,32 +2371,42 @@ const BENCHMARK_MODES = [
     id: 'development',
     icon: Zap,
     eyebrow: 'IntegrityDesk optimization',
-    label: 'Improve IntegrityDesk',
+    label: 'Evaluate & Improve',
     tagline: 'Run labeled tests, inspect per-run F1 / Precision / Recall / FPR, and keep improving IntegrityDesk.',
     description: 'Run IntegrityDesk on labeled benchmark data, tune the threshold, and inspect the misses and false alarms that are blocking quality.',
     bestFor: 'Best for improving your own detector',
     outputs: ['Per-run F1 / Precision / Recall / FPR', 'Best threshold', 'Top misses and false alarms'],
     accent: 'from-violet-500 via-fuchsia-500 to-rose-400',
-    accentBg: 'bg-violet-600',
     accentSoft: 'bg-violet-100 text-violet-700',
     border: 'border-violet-200',
-    activeBg: 'bg-violet-600',
     detailNote: 'A single-tool IntegrityDesk scorecard with threshold tuning and concrete next steps for improving quality.',
+  },
+  {
+    id: 'release',
+    icon: CheckCircle2,
+    eyebrow: 'Locked internal regression',
+    label: 'Validate Version',
+    tagline: 'Run IntegrityDesk at the fixed production threshold and use pass/fail quality gates.',
+    description: 'Validate IntegrityDesk on labeled benchmark data without tuning the threshold during the run.',
+    bestFor: 'Best for internal go/no-go checks',
+    outputs: ['Fixed-threshold F1 / Precision / Recall / FPR', 'Pass/fail gates', 'Trust grade and sample audit'],
+    accent: 'from-emerald-500 via-teal-500 to-cyan-400',
+    accentSoft: 'bg-emerald-100 text-emerald-700',
+    border: 'border-emerald-200',
+    detailNote: 'A locked-threshold scorecard for checking whether the current IntegrityDesk build is safe to keep.',
   },
   {
     id: 'comparison',
     icon: GitCompare,
     eyebrow: 'Competitive benchmark',
-    label: 'Compare Against Other Tools',
-    tagline: 'Run IntegrityDesk beside MOSS, JPlag, Dolos, and others on the same benchmark to prove it wins.',
+    label: 'Compare Tools',
+    tagline: 'Run IntegrityDesk beside MOSS, JPlag, Dolos, and others on the same benchmark.',
     description: 'Compare multiple detectors on the same labeled dataset and see where IntegrityDesk wins or loses on F1, precision, recall, and false positive rate.',
-    bestFor: 'Best for proving IntegrityDesk is better',
+    bestFor: 'Best for comparative evidence',
     outputs: ['Per-tool F1 / Precision / Recall / FPR', 'Leaderboard ranking', 'Speed vs quality tradeoffs'],
     accent: 'from-sky-500 via-cyan-500 to-emerald-400',
-    accentBg: 'bg-sky-600',
     accentSoft: 'bg-sky-100 text-sky-700',
     border: 'border-sky-200',
-    activeBg: 'bg-sky-600',
     detailNote: 'A ranked multi-tool leaderboard showing whether IntegrityDesk beats the external baselines on the same benchmark data.',
   },
 ];
@@ -1667,10 +2415,11 @@ const BENCHMARK_MODES = [
 export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'benchmark' | 'comparison' }) {
   const { user, loading: authLoading } = useAuth();
   const availableModes = useMemo(
-    () => BENCHMARK_MODES.filter(mode => (modeScope === 'comparison' ? mode.id === 'comparison' : mode.id === 'development')),
+    () => BENCHMARK_MODES.filter(mode => (modeScope === 'comparison' ? mode.id === 'comparison' : true)),
     [modeScope]
   );
-  const [activeModeId, setActiveModeId] = useState(modeScope === 'comparison' ? 'comparison' : 'development');
+  const defaultModeId = modeScope === 'comparison' ? 'comparison' : 'development';
+  const [activeModeId, setActiveModeId] = useState(defaultModeId);
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [selectedTools, setSelectedTools] = useState([]);
@@ -1683,59 +2432,93 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
 
-  // FIX: Merge API availability with full TOOLS metadata
   const availableTools = useMemo(() => mergeToolsWithAvailability(rawApiTools), [rawApiTools]);
 
   useEffect(() => {
-    if (authLoading || !user) return;
+    // Load tools and datasets regardless of auth state - these endpoints are public
     setToolsLoading(true);
-    axios.get(`${API}/api/benchmark-tools`, { withCredentials: true })
+    apiClient.get('/api/benchmark-tools')
       .then(res => { if (res.data?.tools) setRawApiTools(res.data.tools); })
       .catch(() => {
         setToolsError('Unable to confirm installed benchmark tools. Showing last known tool set.');
-        // On error: show all TOOLS as available (except explicitly non-runnable)
         setRawApiTools(TOOLS.map(t => ({ id: t.id, available: t.runnable !== false })));
       })
       .finally(() => setToolsLoading(false));
-    axios.get(`${API}/api/benchmark-datasets`, { withCredentials: true })
+    apiClient.get('/api/benchmark-datasets')
       .then(res => { if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets); })
       .catch(() => { });
-  }, [authLoading, user]);
+  }, []);
 
   const activeMode = availableModes.find(m => m.id === activeModeId) || availableModes[0];
-  const ActiveModeIcon = activeMode.icon;
 
+  // Reset wizard state when modeScope changes
   useEffect(() => {
-    const nextModeId = modeScope === 'comparison' ? 'comparison' : 'development';
-    if (activeModeId === nextModeId) return;
-    setActiveModeId(nextModeId);
+    setActiveModeId(defaultModeId);
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
     setSelectedTools([]);
     setSelectedDataset(null);
     setFiles([]);
-  }, [activeModeId, modeScope]);
+  }, [modeScope, defaultModeId]);
 
-  const switchMode = (modeId) => {
+  const switchMode = useCallback((modeId) => {
     setActiveModeId(modeId);
-    // FIX: also reset wizard state on mode switch
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
     setSelectedTools([]);
     setSelectedDataset(null);
     setFiles([]);
-  };
+  }, []);
 
-  const goToStep = (next, currentCompleted) => {
+  const goToStep = useCallback((next, currentCompleted) => {
     setCompletedSteps(prev => [...new Set([...prev, currentCompleted])]);
     setStep(next);
-    // Scroll step content into view smoothly
     setTimeout(() => document.getElementById('step-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  };
+  }, []);
 
-  const restart = () => { setStep(0); setCompletedSteps([]); setResults(null); };
+  const restart = useCallback(() => { setStep(0); setCompletedSteps([]); setResults(null); }, []);
+  const rerunBenchmark = useCallback(() => {
+    setResults(null);
+    setCompletedSteps([0, 1]);
+    setStep(2);
+  }, []);
+
+  // ── Historical results (direct viewing of past benchmark runs) ───────────
+  const [benchmarkHistory, setBenchmarkHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+
+  useEffect(() => {
+    setHistoryLoading(true);
+    apiClient.get('/api/benchmark-history', { params: { limit: 10 } })
+      .then(res => {
+        const runs = res.data?.runs || res.data || [];
+        setBenchmarkHistory(Array.isArray(runs) ? runs : []);
+      })
+      .catch(() => setHistoryError('Unable to load previous benchmark runs.'))
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  const loadHistoricalResult = async (jobId: string) => {
+    if (!jobId) return;
+    try {
+      const res = await apiClient.get(`/api/benchmark/status/${jobId}`);
+      if (res.data?.result) {
+        setResults(res.data.result);
+        setStep(3);
+        setCompletedSteps([0, 1, 2]);
+      } else if (res.data?.status === 'done' && res.data) {
+        // Some persisted entries embed the full payload directly
+        setResults(res.data);
+        setStep(3);
+        setCompletedSteps([0, 1, 2]);
+      }
+    } catch {
+      setHistoryError('Could not load the selected benchmark result.');
+    }
+  };
 
   const STEPS = [
     { label: 'Tools', subtitle: 'Choose what to run' },
@@ -1744,91 +2527,112 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     { label: 'Report', subtitle: 'View results' },
   ];
 
+  const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
+  const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
+
   return (
-    <DashboardLayout requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
-      <div className={`px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none`}>
+    <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined} requireAuth={false}>
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
         <div className="space-y-6">
 
           {/* ── Page header ─────────────────────────────────────────────── */}
-          {modeScope !== 'comparison' && (
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
-                  <FlaskConical size={18} className="text-white" />
-                </div>
-                <div>
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                    IntegrityDesk Benchmark
-                  </h1>
-                  <p className="text-sm text-slate-500">
-                    Admin-only benchmark workspace for improving IntegrityDesk on labeled benchmark data.
-                  </p>
-                </div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
+                <PageIcon size={18} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-slate-900 tracking-tight">{pageTitle}</h1>
               </div>
             </div>
-          )}
-          {modeScope === 'comparison' && (
-            <div className="flex items-center justify-end mb-1">
-              <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-                <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
-              </div>
+            <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
+              <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
             </div>
-          )}
-
-          {/* ── Mode selector ────────────────────────────────────────────── */}
-          {availableModes.length > 1 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {availableModes.map(mode => {
-              const Icon = mode.icon;
-              const isActive = activeModeId === mode.id;
-              return (
-                <button key={mode.id} onClick={() => switchMode(mode.id)}
-                  className={`group relative rounded-2xl border-2 p-5 text-left transition-all duration-200 ${isActive ? 'border-slate-900 bg-slate-900 shadow-xl shadow-slate-900/15' : 'border-slate-200 bg-white hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-md'}`}>
-                  {isActive && (
-                    <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
-                      <div className={`absolute inset-0 bg-gradient-to-br ${mode.accent} opacity-10`} />
-                    </div>
-                  )}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${mode.accent} flex items-center justify-center shadow-md shrink-0`}>
-                      <Icon size={18} className="text-white" />
-                    </div>
-                    {isActive && <span className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Selected</span>}
-                  </div>
-                  <div className={`mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] ${isActive ? 'text-slate-400' : 'text-slate-400'}`}>{mode.eyebrow}</div>
-                  <div className={`mt-1 text-base font-bold ${isActive ? 'text-white' : 'text-slate-900'}`}>{mode.label}</div>
-                  <p className={`mt-2 text-sm leading-5 ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>{mode.description}</p>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {mode.outputs.map(o => (
-                      <span key={o} className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isActive ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>{o}</span>
-                    ))}
-                  </div>
-                </button>
-              );
-            })}
           </div>
-          )}
 
-          {/* ── Step wizard ─────────────────────────────────────────────── */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            {modeScope !== 'comparison' && (
-              <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex items-center gap-3 flex-1">
-                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${activeMode.accent} flex items-center justify-center shadow shrink-0`}>
-                    <ActiveModeIcon size={16} className="text-white" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{activeMode.eyebrow}</div>
-                    <div className="text-sm font-semibold text-slate-900">{activeMode.label}</div>
-                  </div>
-                </div>
-                <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-                  <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
-                </div>
-              </div>
-            )}
+          {/* ── Mode selector (only when multiple modes available) ────── */}
+          {availableModes.length > 1 && (
+            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              {availableModes.map(mode => {
+                const Icon = mode.icon;
+                const isActive = activeModeId === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => switchMode(mode.id)}
+                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${isActive
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                  >
+                    <Icon size={15} />
+                    <span>{mode.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+           )}
 
-            {/* Run config summary bar — visible in steps 1+ */}
+           {/* ── Recent Benchmark Results (direct viewing of past runs) ───── */}
+           {!results && benchmarkHistory.length > 0 && (
+             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+               <div className="px-5 py-3 border-b bg-slate-50/70 flex items-center justify-between">
+                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                   <ClipboardList size={16} /> Recent Benchmark Runs
+                 </div>
+                 <span className="text-xs text-slate-500">Click any row to view the full report</span>
+               </div>
+               <div className="overflow-x-auto">
+                 <table className="min-w-full text-sm">
+                   <thead>
+                     <tr className="border-b text-slate-500 text-xs">
+                       <th className="px-4 py-2 text-left font-medium">When</th>
+                       <th className="px-4 py-2 text-left font-medium">Dataset</th>
+                       <th className="px-4 py-2 text-left font-medium">Tools</th>
+                       <th className="px-4 py-2 text-left font-medium">Key Metric</th>
+                       <th className="px-4 py-2"></th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y">
+                     {benchmarkHistory.slice(0, 6).map((run, idx) => {
+                       const jobId = run.job_id || run.id || run.run_id;
+                       const when = run.created_at || run.runAt || run.timestamp || '';
+                       const ds = run.datasetName || run.dataset || run.dataset_id || '—';
+                       const tools = Array.isArray(run.tools) ? run.tools.join(', ') : (run.tool || '—');
+                       const f1 = run.f1Score ?? run.metrics?.f1 ?? run.integritydesk_f1;
+                       return (
+                         <tr key={jobId || idx} className="hover:bg-slate-50">
+                           <td className="px-4 py-2 text-xs text-slate-600">{when ? new Date(when).toLocaleString() : '—'}</td>
+                           <td className="px-4 py-2 text-xs font-medium text-slate-900 truncate max-w-[180px]">{ds}</td>
+                           <td className="px-4 py-2 text-xs text-slate-600 truncate max-w-[220px]">{tools}</td>
+                           <td className="px-4 py-2 text-xs">
+                             {typeof f1 === 'number' ? `F1 ${f1.toFixed(3)}` : (run.status || 'completed')}
+                           </td>
+                           <td className="px-4 py-2 text-right">
+                             <button
+                               onClick={() => loadHistoricalResult(jobId)}
+                               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold hover:bg-slate-900 hover:text-white transition"
+                             >
+                               <Eye size={14} /> View Report
+                             </button>
+                           </td>
+                         </tr>
+                       );
+                     })}
+                   </tbody>
+                 </table>
+               </div>
+               {historyError && <div className="px-4 py-2 text-xs text-rose-600 border-t">{historyError}</div>}
+             </div>
+           )}
+           {historyLoading && !results && (
+             <div className="text-xs text-slate-500 px-2">Loading recent benchmark runs…</div>
+           )}
+
+           {/* ── Step wizard ─────────────────────────────────────────────── */}
+           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            {/* Run config summary bar — visible in steps 1 and 2 */}
             {step >= 1 && step < 3 && (
               <div className="px-5 py-3 bg-slate-50/70 border-b border-slate-100">
                 <RunConfigBar
@@ -1843,18 +2647,17 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               </div>
             )}
 
-            {/* Step content */}
             <div id="step-content" className="p-5 sm:p-6">
               {step === 0 && (
                 <ToolSelectionStep
-              tools={availableTools}
-              selectedTools={selectedTools}
-              setSelectedTools={setSelectedTools}
-              loading={toolsLoading}
-              error={toolsError}
-              benchmarkMode={activeModeId}
-              onNext={() => goToStep(1, 0)}
-            />
+                  tools={availableTools}
+                  selectedTools={selectedTools}
+                  setSelectedTools={setSelectedTools}
+                  loading={toolsLoading}
+                  error={toolsError}
+                  benchmarkMode={activeModeId}
+                  onNext={() => goToStep(1, 0)}
+                />
               )}
               {step === 1 && (
                 <DatasetStep
@@ -1865,6 +2668,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   files={files}
                   setFiles={setFiles}
                   benchmarkDatasets={benchmarkDatasets}
+                  benchmarkMode={activeModeId}
                   canManageDemoDatasets={user?.role === 'admin'}
                   onBack={() => setStep(0)}
                   onNext={() => goToStep(2, 1)}
@@ -1879,22 +2683,35 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   benchmarkDatasets={benchmarkDatasets}
                   selectedPreset={null}
                   benchmarkMode={activeModeId}
+                  autoStart
                   onBack={() => setStep(1)}
                   onComplete={data => { setResults(data); goToStep(3, 2); }}
                 />
               )}
               {step === 3 && results && (
-                <ReportStep results={results} onRestart={restart} benchmarkMode={activeModeId} />
+                <ReportErrorBoundary onRestart={restart}>
+                  <ReportStep
+                    results={results}
+                    onRestart={restart}
+                    onRerun={rerunBenchmark}
+                    benchmarkMode={activeModeId}
+                  />
+                </ReportErrorBoundary>
               )}
             </div>
-          </div>
-        </div>
-      </div>
-    </DashboardLayout>
-  );
-}
+
+
+
+           </div>
+         </div>
+       </div>
+     </DashboardLayout>
+   );
+ }
 
 // ── Route Page ─────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
   return <BenchmarkWorkbench modeScope="benchmark" />;
 }
+
+

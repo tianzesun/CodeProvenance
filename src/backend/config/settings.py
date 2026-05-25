@@ -7,49 +7,49 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
-    "token": 0.10,
-    "ngram": 0.08,
-    "winnowing": 0.12,
-    "ast": 0.22,
-    "graph": 0.10,
-    "execution": 0.14,
-    "embedding": 0.16,
-    "llm": 0.08,
+    "token": 0.12,
+    "winnowing": 0.16,
+    "gst": 0.13,
+    "ast": 0.17,
+    "ngram": 0.10,
+    "graph": 0.15,
+    "embedding": 0.12,
+    "static_rules": 0.05,
 }
 
 ENGINE_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
     "standard": DEFAULT_ENGINE_WEIGHTS.copy(),
     "conservative": {
-        "token": 0.15,
+        "token": 0.16,
+        "winnowing": 0.20,
+        "gst": 0.16,
+        "ast": 0.18,
         "ngram": 0.12,
-        "winnowing": 0.18,
-        "ast": 0.20,
         "graph": 0.12,
-        "execution": 0.10,
-        "embedding": 0.10,
-        "llm": 0.03,
+        "embedding": 0.04,
+        "static_rules": 0.02,
     },
     "rewrite-sensitive": {
         "token": 0.05,
+        "winnowing": 0.07,
+        "gst": 0.08,
+        "ast": 0.24,
         "ngram": 0.04,
-        "winnowing": 0.06,
-        "ast": 0.25,
-        "graph": 0.18,
-        "execution": 0.20,
-        "embedding": 0.17,
-        "llm": 0.05,
-    }
+        "graph": 0.22,
+        "embedding": 0.22,
+        "static_rules": 0.08,
+    },
 }
 
 DEFAULT_DETECTION_MODES = [
     "token",
-    "ngram",
     "winnowing",
+    "gst",
     "ast",
+    "ngram",
     "graph",
-    "execution",
     "embedding",
-    "llm",
+    "static_rules",
 ]
 
 
@@ -65,7 +65,7 @@ class AppSettings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Similarity
-    DEFAULT_THRESHOLD: float = 0.5
+    DEFAULT_THRESHOLD: float = 0.82
 
     # LLM / AI
     OPENAI_API_KEY: Optional[str] = None
@@ -103,6 +103,16 @@ class AppSettings(BaseSettings):
     BATCH_SIZE: int = 32
     MAX_FILE_SIZE_MB: int = 10
     MAX_FILES_PER_JOB: int = 500
+
+    # Integrations
+    WEBHOOK_URL: str = ""
+
+    # Audit & Compliance
+    AUDIT_LOG_LEVEL: str = "INFO"
+    AUDIT_RETENTION_DAYS: int = 365
+
+    # Expert
+    DEBUG_MODE: bool = False
 
 
 settings = AppSettings()

@@ -46,6 +46,12 @@ def test_assignment_catalog_contains_professor_modes() -> None:
         "research_report_essay",
         "exam_mode",
         "custom",
+        "notebook_ai",
+        "sql_data_logic",
+        "systems_projects",
+        "reports_proofs",
+        "foundations_code",
+        "algorithmic_code",
     }
 
 

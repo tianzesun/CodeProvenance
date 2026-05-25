@@ -75,6 +75,8 @@ def test_run_competitor_tool_supports_expanded_repo_tools():
 
 
 def test_prepare_moss_script_uses_settings_and_writable_log(tmp_path):
+    from src.backend.benchmark.adapters.moss_adapter import MossAdapter
+
     script_path = tmp_path / "moss.pl"
     script_path.write_text(
         "\n".join(
@@ -87,7 +89,13 @@ def test_prepare_moss_script_uses_settings_and_writable_log(tmp_path):
         encoding="utf-8",
     )
 
-    patched_script = server._prepare_moss_script(script_path, tmp_path / "run", "12345")
+    adapter = MossAdapter(moss_user_id="12345")
+    original_script_path = adapter.SCRIPT_PATH
+    adapter.SCRIPT_PATH = script_path
+    try:
+        patched_script = adapter._patched_script(tmp_path / "run")
+    finally:
+        adapter.SCRIPT_PATH = original_script_path
 
     script_text = patched_script.read_text(encoding="utf-8")
     assert "$ENV{'MOSS_LOGFILE'}" in script_text

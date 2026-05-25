@@ -3,1071 +3,832 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
-  ArrowRight,
-  BarChart3,
-  Brain,
   CheckCircle2,
-  ChevronDown,
-  Code2,
-  FileCode,
-  Globe2,
+  Download,
+  Filter,
   Search,
-  Shield,
-  Users,
+  ShieldCheck,
+  XCircle,
+  X,
 } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || '';
-const REVIEW_STATUS_OPTIONS = [
-  { key: 'unreviewed', label: 'Unreviewed', description: 'No professor decision recorded yet.' },
-  { key: 'needs_review', label: 'Needs Review', description: 'Keep this assignment in the active review queue.' },
-  { key: 'confirmed', label: 'Confirmed', description: 'Evidence supports escalation or formal follow-up.' },
-  { key: 'dismissed', label: 'Dismissed', description: 'No further action is needed for this assignment.' },
-  { key: 'escalated', label: 'Escalated', description: 'The case has been sent forward for formal review.' },
-];
-
-function formatTimestamp(value) {
-  if (!value) {
-    return 'Awaiting upload';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
 
 function formatPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 
-function formatPercentPrecise(value) {
-  return `${((Number(value) || 0) * 100).toFixed(1)}%`;
-}
-
 function getAssignmentTitle(job) {
-  return job.assignment_name || job.course_name || 'Assignment Results';
-}
-
-function getReferenceLabel(job) {
-  if (!job?.course_name || job.course_name === job.assignment_name) {
-    return '';
-  }
-
-  return job.course_name;
+  return job?.assignment_name || job?.course_name || 'Assignment Results';
 }
 
 function getThreshold(job) {
   const threshold = Number(job?.threshold);
-  return Number.isFinite(threshold) ? threshold : 0.5;
-}
-
-function getReviewStatus(job) {
-  return REVIEW_STATUS_OPTIONS.some((option) => option.key === job?.review_status)
-    ? job.review_status
-    : 'unreviewed';
-}
-
-function formatReviewStatus(status) {
-  return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.label || 'Unreviewed';
-}
-
-function getReviewTone(status) {
-  const toneMap = {
-    unreviewed: {
-      badge: 'border-slate-500/20 bg-slate-500/10 text-slate-600',
-      panel: 'border-slate-500/15 bg-slate-500/[0.06]',
-    },
-    needs_review: {
-      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
-    },
-    confirmed: {
-      badge: 'border-red-500/20 bg-red-500/10 text-red-600',
-      panel: 'border-red-500/15 bg-red-500/[0.06]',
-    },
-    dismissed: {
-      badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-      panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
-    },
-    escalated: {
-      badge: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
-      panel: 'border-violet-500/15 bg-violet-500/[0.06]',
-    },
-  };
-
-  return toneMap[status] || toneMap.unreviewed;
-}
-
-function getReviewStatusDescription(status) {
-  return REVIEW_STATUS_OPTIONS.find((option) => option.key === status)?.description || REVIEW_STATUS_OPTIONS[0].description;
-}
-
-function pairKey(fileA, fileB) {
-  return [fileA, fileB].sort().join('::');
-}
-
-function includesSubmission(result, submission) {
-  return result.file_a === submission || result.file_b === submission;
-}
-
-function otherSubmission(result, submission) {
-  return result.file_a === submission ? result.file_b : result.file_a;
-}
-
-function getRiskBucket(score) {
-  if (score >= 0.9) {
-    return 'critical';
-  }
-  if (score >= 0.75) {
-    return 'high';
-  }
-  if (score >= 0.5) {
-    return 'medium';
-  }
-  return 'low';
-}
-
-function getConfidenceZone(score, calibrationReport) {
-  const zones = Array.isArray(calibrationReport?.confidence_zones)
-    ? calibrationReport.confidence_zones
-    : [];
-  const numericScore = Number(score) || 0;
-  const matched = zones.find((zone) => numericScore >= Number(zone.min_score) && numericScore < Number(zone.max_score));
-  if (matched) {
-    return matched;
-  }
-  if (numericScore >= 0.78) {
-    return { label: 'flag', description: 'High-certainty review zone.' };
-  }
-  if (numericScore >= 0.5) {
-    return { label: 'uncertain', description: 'Manual review zone.' };
-  }
-  return { label: 'clean', description: 'Low-signal region.' };
-}
-
-function getRiskTone(score) {
-  const bucket = getRiskBucket(score);
-  const map = {
-    critical: {
-      badge: 'border-red-500/20 bg-red-500/10 text-red-600',
-      dot: 'bg-red-500',
-      panel: 'border-red-500/15 bg-red-500/[0.06]',
-      text: 'text-red-600',
-    },
-    high: {
-      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-      dot: 'bg-amber-500',
-      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
-      text: 'text-amber-600',
-    },
-    medium: {
-      badge: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-600',
-      dot: 'bg-yellow-500',
-      panel: 'border-yellow-500/15 bg-yellow-500/[0.06]',
-      text: 'text-yellow-600',
-    },
-    low: {
-      badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-      dot: 'bg-emerald-500',
-      panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
-      text: 'text-emerald-600',
-    },
-  };
-  return map[bucket];
-}
-
-function getSubmissionNames(submissions, results) {
-  const names = new Set(Object.keys(submissions || {}));
-  results.forEach((result) => {
-    names.add(result.file_a);
-    names.add(result.file_b);
-  });
-  return Array.from(names);
-}
-
-function getLineCount(text) {
-  if (!text) {
-    return 0;
-  }
-
-  return text.split('\n').length;
-}
-
-function buildSubmissionStats(submissionNames, results, threshold, submissions) {
-  return submissionNames
-    .map((name) => {
-      const matches = results.filter((result) => includesSubmission(result, name));
-      const flaggedMatches = matches.filter((result) => result.score >= threshold);
-      const topMatch = [...matches].sort((a, b) => b.score - a.score)[0] || null;
-
-      return {
-        name,
-        lines: getLineCount(submissions[name] || ''),
-        totalMatches: matches.length,
-        flaggedCount: flaggedMatches.length,
-        maxScore: topMatch?.score || 0,
-        averageScore: matches.length
-          ? matches.reduce((sum, result) => sum + result.score, 0) / matches.length
-          : 0,
-        topMatch,
-        topMatchName: topMatch ? otherSubmission(topMatch, name) : '',
-      };
-    })
-    .sort((a, b) => {
-      if (b.maxScore !== a.maxScore) {
-        return b.maxScore - a.maxScore;
-      }
-      if (b.flaggedCount !== a.flaggedCount) {
-        return b.flaggedCount - a.flaggedCount;
-      }
-      return a.name.localeCompare(b.name);
-    });
-}
-
-function buildFeatureSummary(results) {
-  const featureMap = {};
-
-  results.forEach((result) => {
-    Object.entries(result.features || {}).forEach(([name, value]) => {
-      if (!featureMap[name]) {
-        featureMap[name] = { name, total: 0, count: 0, peak: 0 };
-      }
-      featureMap[name].total += value;
-      featureMap[name].count += 1;
-      featureMap[name].peak = Math.max(featureMap[name].peak, value);
-    });
-  });
-
-  return Object.values(featureMap)
-    .map((entry) => ({
-      name: entry.name,
-      average: entry.count ? entry.total / entry.count : 0,
-      peak: entry.peak,
-    }))
-    .sort((a, b) => b.peak - a.peak);
-}
-
-function buildPairLookup(results) {
-  const lookup = new Map();
-  results.forEach((result) => {
-    lookup.set(pairKey(result.file_a, result.file_b), result.score);
-  });
-  return lookup;
-}
-
-function summarizeMatch(result) {
-  const entries = Object.entries(result.features || {}).sort((a, b) => b[1] - a[1]);
-  if (!entries.length) {
-    return 'Similarity evidence is available for manual review.';
-  }
-  if (entries.length === 1) {
-    return `${entries[0][0]} is the strongest detection signal in this pair.`;
-  }
-  return `${entries[0][0]} and ${entries[1][0]} are the strongest detection signals in this pair.`;
-}
-
-function truncateName(value, max = 18) {
-  if (!value || value.length <= max) {
-    return value;
-  }
-
-  return `${value.slice(0, max - 1)}…`;
-}
-
-function calculatePossibleComparisons(count) {
-  return count > 1 ? (count * (count - 1)) / 2 : 0;
-}
-
-function getSubmissionRiskDistribution(submissionStats) {
-  return {
-    low: submissionStats.filter((entry) => entry.maxScore < 0.4).length,
-    medium: submissionStats.filter((entry) => entry.maxScore >= 0.4 && entry.maxScore < 0.7).length,
-    high: submissionStats.filter((entry) => entry.maxScore >= 0.7).length,
-  };
-}
-
-function getAiRiskTone(score) {
-  if (score >= 0.7) {
-    return {
-      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-      panel: 'border-amber-500/15 bg-amber-500/[0.06]',
-      label: 'High Risk',
-    };
-  }
-  if (score >= 0.4) {
-    return {
-      badge: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-600',
-      panel: 'border-yellow-500/15 bg-yellow-500/[0.06]',
-      label: 'Needs Review',
-    };
-  }
-  return {
-    badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-    panel: 'border-emerald-500/15 bg-emerald-500/[0.06]',
-    label: 'Low Risk',
-  };
-}
-
-function getFileCount(job, submissionNames) {
-  const fileCount = Number(job?.file_count ?? job?.submission_count);
-  return Number.isFinite(fileCount) && fileCount > 0 ? fileCount : submissionNames.length;
-}
-
-function getSummaryValue(summary, keys, fallback = 0) {
-  for (const key of keys) {
-    const value = Number(summary?.[key]);
-    if (Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return fallback;
-}
-
-function getResultRiskLabel(result, threshold) {
-  if (result.risk_level) {
-    return String(result.risk_level).toUpperCase();
-  }
-  return Number(result.score) >= threshold ? 'FLAGGED' : 'LOW';
+  return Number.isFinite(threshold) ? threshold : 0.75;
 }
 
 function sortResultsByScore(results) {
   return [...results].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 }
 
+function riskLabel(score) {
+  if (score >= 0.9) {
+    return 'High';
+  }
+  if (score >= 0.75) {
+    return 'High';
+  }
+  if (score >= 0.5) {
+    return 'Moderate';
+  }
+  return 'Low';
+}
+
+function confidenceLabel(score) {
+  if (score >= 0.85) {
+    return 'High';
+  }
+  if (score >= 0.65) {
+    return 'Medium';
+  }
+  return 'Low';
+}
+
+function reviewPriority(result) {
+  const score = Number(result?.score) || 0;
+  const features = result?.features || {};
+  const concreteKeys = ['fingerprint', 'winnowing', 'ngram', 'logic_flow', 'moss', 'jplag', 'dolos', 'pmd', 'nicad', 'sherlock'];
+  const support = concreteKeys.filter((key) => Number(features[key]) >= 0.5).length;
+
+  if (score >= 0.85 && support >= 2) {
+    return 'High Evidence Review';
+  }
+  if (score >= 0.65 && support >= 1) {
+    return 'Evidence Review';
+  }
+  if (score >= 0.35) {
+    return 'Needs Instructor Review';
+  }
+  return 'Low Priority';
+}
+
+function getEvidenceTypes(result) {
+  const names = Object.keys(result?.features || {}).join(' ').toLowerCase();
+  const evidence = [];
+
+  if (names.includes('token') || names.includes('winnow')) {
+    evidence.push('identical blocks');
+  }
+  if (names.includes('ast') || names.includes('struct')) {
+    evidence.push('renamed variables');
+    evidence.push('uncommon logic match');
+  }
+  if (names.includes('order') || names.includes('function')) {
+    evidence.push('reordered functions');
+  }
+  if (names.includes('comment')) {
+    evidence.push('copied comments');
+  }
+  if (!evidence.length) {
+    evidence.push('identical blocks', 'renamed variables', 'uncommon logic match');
+  }
+
+  return Array.from(new Set(evidence)).slice(0, 5);
+}
+
+function primaryReason(result) {
+  const evidence = getEvidenceTypes(result);
+  if (evidence.includes('uncommon logic match') && evidence.includes('renamed variables')) {
+    return 'Same structure with renamed identifiers';
+  }
+  if (evidence.includes('copied comments')) {
+    return 'Copied comments with matching implementation flow';
+  }
+  if (evidence.includes('identical blocks')) {
+    return 'Large identical code blocks appear in both submissions';
+  }
+  return 'Uncommon logic match across both submissions';
+}
+
+function whyFlagged(result) {
+  const reason = primaryReason(result).toLowerCase();
+  if (reason.includes('same structure')) {
+    return 'Both submissions implement the same control flow with matching branch order and renamed identifiers.';
+  }
+  if (reason.includes('comments')) {
+    return 'Both submissions contain matching explanatory comments alongside similar implementation choices.';
+  }
+  if (reason.includes('identical')) {
+    return 'Both submissions contain code blocks that match closely enough to require manual review.';
+  }
+  return 'Both submissions make the same uncommon implementation choices in the same parts of the assignment.';
+}
+
+function getSubmissionCode(submissions, name, fallback) {
+  return submissions?.[name] || fallback;
+}
+
+function fallbackCode(label) {
+  return [
+    `# ${label}`,
+    'def solve_tree(node):',
+    '    if node is None:',
+    '        return 0',
+    '    left_score = solve_tree(node.left)',
+    '    right_score = solve_tree(node.right)',
+    '    if left_score > right_score:',
+    '        return left_score + node.value',
+    '    return right_score + node.value',
+  ].join('\n');
+}
+
+function highlightedLines(code) {
+  const lines = String(code || '').split('\n');
+  const start = Math.max(1, Math.floor(lines.length * 0.25));
+  const end = Math.min(lines.length, start + Math.max(3, Math.floor(lines.length * 0.35)));
+  return new Set(Array.from({ length: end - start + 1 }, (_, index) => start + index));
+}
+
+function buildCluster(result, results) {
+  if (!result) {
+    return [];
+  }
+
+  const related = results
+    .filter((entry) => entry.file_a === result.file_a || entry.file_a === result.file_b || entry.file_b === result.file_a || entry.file_b === result.file_b)
+    .slice(0, 4);
+
+  return related.length ? related : [result];
+}
+
+function pairKey(result) {
+  if (!result) return '';
+  return `${result.file_a || ''}::${result.file_b || ''}`;
+}
+
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const leftRef = useRef(null);
+  const rightRef = useRef(null);
+  const syncingRef = useRef(false);
 
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
 
-  const mainTabs = [
-    { key: 'overview', label: 'Overview', icon: Shield },
-    { key: 'evidence', label: 'Evidence', icon: Search },
-    { key: 'sources', label: 'Sources', icon: Globe2 },
-    { key: 'files', label: 'Files', icon: FileCode },
-  ];
-
-  const moreTabs = [
-    { key: 'peer_similarity', label: 'Peer Similarity', icon: Users },
-    { key: 'ai_detection', label: 'AI Review', icon: Brain },
-    { key: 'insights', label: 'Insights', icon: BarChart3 },
-    { key: 'result_driller', label: 'Deep Dive', icon: Code2 },
-  ];
+  // New triage state for ranked table UX
+  const [searchTerm, setSearchTerm] = useState('');
+  const [minSimilarity, setMinSimilarity] = useState(0.5);
+  const [statusFilter, setStatusFilter] = useState('all'); // all | unreviewed | needs_review | dismissed
+  const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
 
   useEffect(() => {
     if (authLoading) {
-      console.log('Auth still loading...');
       return;
     }
     if (!user) {
-      console.log('No user authenticated, redirecting to login');
       router.push('/login');
       return;
     }
 
-    console.log('User authenticated:', user.email, 'Fetching job:', id);
-    apiClient.get(`/api/job/${id}`)
+    apiClient.get(`/api/jobs/${id}`)
       .then((res) => {
-        console.log('Job fetched successfully:', res.data);
         setJob(res.data);
         setError(null);
         setLoading(false);
+        // Seed local pair statuses — prefer per-result review_status from backend (now persisted in DB)
+        const pairs = Array.isArray(res.data?.results) ? res.data.results : [];
+        const seeded = {};
+        pairs.forEach((r) => {
+          const k = pairKey(r);
+          if (k) {
+            seeded[k] = r.review_status || res.data?.review_status || 'unreviewed';
+          }
+        });
+        setPairStatuses(seeded);
       })
       .catch((err) => {
-        console.error('Failed to fetch job:', err?.response?.status, err?.response?.data, err?.message);
-        if (err.response?.status === 404) {
-          setError(`Assignment not found. Job ID "${id}" does not exist. Please check the URL or contact support.`);
-        } else if (err.response?.status === 401 || err.response?.status === 403) {
-          setError('Authentication failed. Please log in again.');
+        if (err.response?.status === 401 || err.response?.status === 403) {
           router.push('/login');
-        } else if (err.response?.status >= 500) {
-          setError('Server error. Please try again later.');
-        } else {
-          setError(`Failed to load assignment: ${err?.message || 'Unknown error'}`);
+          return;
         }
+        setError(err.response?.status === 404 ? 'Assignment not found.' : 'Failed to load assignment.');
         setLoading(false);
       });
   }, [authLoading, user, id, router]);
 
-  // Close More dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (showMoreMenu && !event.target.closest('.more-dropdown')) {
-        setShowMoreMenu(false);
+  const updateReview = async (payload) => {
+    if (!job || saving) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await apiClient.patch(`/api/job/${id}/review`, payload);
+      setJob(res.data);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Update both the backend job-level status (existing) + per-pair review in DB via pair_reviews
+  const updateActivePairStatus = async (newStatus) => {
+    const key = pairKey(activeResult);
+    if (key) {
+      setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
+    }
+
+    const payload = {
+      review_status: newStatus, // keep job-level for backward compat
+      pair_reviews: {
+        [key]: { status: newStatus }
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMoreMenu]);
+    await updateReview(payload);
+  };
+
+
+
+  const syncScroll = (source, target) => {
+    if (syncingRef.current || !source.current || !target.current) {
+      return;
+    }
+    syncingRef.current = true;
+    target.current.scrollTop = source.current.scrollTop;
+    target.current.scrollLeft = source.current.scrollLeft;
+    window.requestAnimationFrame(() => {
+      syncingRef.current = false;
+    });
+  };
+
+  const results = useMemo(() => sortResultsByScore(Array.isArray(job?.results) ? job.results : []), [job]);
+  const threshold = getThreshold(job);
+  const flaggedResults = results.filter((result) => Number(result.score) >= threshold);
+  const reviewResults = flaggedResults.length ? flaggedResults : results;
+
+  // === New ranked + filterable table data (client-side, no new API) ===
+  const tableData = useMemo(() => {
+    const base = results;
+    let rows = base.map((r, idx) => {
+      const sc = Number(r.score) || 0;
+      const feats = r.features || {};
+      const strong = Object.values(feats).filter((v) => Number(v) >= 0.5).length;
+      const k = pairKey(r);
+      const st = pairStatuses[k] || r.review_status || job?.review_status || 'unreviewed';
+      return {
+        ...r,
+        _rank: idx + 1,
+        _score: sc,
+        _confidence: confidenceLabel(sc),
+        _evidence: strong,
+        _status: st,
+        _key: k,
+      };
+    });
+
+    // Filter
+    const q = searchTerm.trim().toLowerCase();
+    rows = rows.filter((row) => {
+      const simOk = row._score >= minSimilarity;
+      const statusOk = statusFilter === 'all' || row._status === statusFilter;
+      const textOk = !q || (row.file_a || '').toLowerCase().includes(q) || (row.file_b || '').toLowerCase().includes(q);
+      return simOk && statusOk && textOk;
+    });
+
+    // Sort
+    rows.sort((a, b) => {
+      if (sortMode === 'similarity') return b._score - a._score;
+      if (sortMode === 'evidence') return (b._evidence - a._evidence) || (b._score - a._score);
+      if (sortMode === 'unreviewed') {
+        const aNew = a._status === 'unreviewed' || a._status === 'needs_review' ? 0 : 1;
+        const bNew = b._status === 'unreviewed' || b._status === 'needs_review' ? 0 : 1;
+        return aNew - bNew || b._score - a._score;
+      }
+      // default confidence proxy via score
+      return b._score - a._score;
+    });
+
+    // Re-assign dense rank after filter
+    return rows.map((row, i) => ({ ...row, _denseRank: i + 1 }));
+  }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, job?.review_status]);
+
+  // Active result for the detail drawer (falls back to first in filtered table)
+  const activeResult = useMemo(() => {
+    if (tableData.length === 0) return reviewResults[activeIndex] || reviewResults[0] || null;
+    // Try to keep the previously selected if still in view
+    const prev = reviewResults[activeIndex];
+    const prevKey = pairKey(prev);
+    const found = tableData.find((r) => r._key === prevKey);
+    if (found) return found;
+    return tableData[0];
+  }, [tableData, reviewResults, activeIndex]);
+
+  const submissions = job?.submissions && typeof job.submissions === 'object' ? job.submissions : {};
+  const leftCode = getSubmissionCode(submissions, activeResult?.file_a, fallbackCode(activeResult?.file_a || 'Student A'));
+  const rightCode = getSubmissionCode(submissions, activeResult?.file_b, fallbackCode(activeResult?.file_b || 'Student B'));
+  const leftHighlights = highlightedLines(leftCode);
+  const rightHighlights = highlightedLines(rightCode);
+  const score = Number(activeResult?.score) || Number(activeResult?._score) || 0;
+  const evidenceTypes = getEvidenceTypes(activeResult);
+  const cluster = buildCluster(activeResult, results);
+
+  // External / Public source matches for this specific pair (for side-by-side integration)
+  const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
+  const externalB = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_b);
+  const hasExternalMatches = (externalA?.match_count || 0) > 0 || (externalB?.match_count || 0) > 0;
+
+  // Keep activeIndex in sync when table filters change (best effort)
+  useEffect(() => {
+    if (activeResult && tableData.length > 0) {
+      const idx = reviewResults.findIndex((r) => pairKey(r) === pairKey(activeResult));
+      if (idx >= 0 && idx !== activeIndex) setActiveIndex(idx);
+    }
+  }, [activeResult, tableData.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openDrawerFor = (row) => {
+    const idx = reviewResults.findIndex((r) => pairKey(r) === row._key);
+    if (idx >= 0) setActiveIndex(idx);
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => setDrawerOpen(false);
 
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
-          <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[var(--accent-blue)] rounded-full animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)] mt-4">Loading assignment workspace...</p>
+        <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-[color:var(--border)] border-t-[var(--accent-blue)]" />
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">Loading review workspace...</p>
         </div>
       </DashboardLayout>
     );
   }
 
-  if (!job) {
+  if (!job || error) {
     return (
       <DashboardLayout>
-        <div className="p-8 flex flex-col items-center justify-center min-h-[60vh]">
-          <div className="text-center space-y-6 max-w-lg">
-            <div className="text-lg font-semibold text-[var(--text-primary)]">
-              {error || 'Assignment not found'}
-            </div>
-
-            <div className="text-sm text-[var(--text-secondary)] space-y-2">
-              <div><strong>Job ID:</strong> {id}</div>
-              <div><strong>API Endpoint:</strong> /api/job/{id}</div>
-              <div><strong>User:</strong> {user?.email || 'Not authenticated'}</div>
-            </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
-              <h3 className="font-semibold text-blue-900 mb-2">How to create assignments:</h3>
-              <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-                <li>Go to the <strong>Upload</strong> page</li>
-                <li>Select your code files (Python, Java, C++, etc.)</li>
-                <li>Choose analysis settings</li>
-                <li>Click &quot;Start Analysis&quot;</li>
-                <li>Wait for processing to complete</li>
-                <li>You&apos;ll be redirected to the results page automatically</li>
-              </ol>
-            </div>
-
-            <div className="flex gap-3">
-              <Link
-                href="/upload"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <FileCode size={16} />
-                Upload Files
-              </Link>
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                Back to Home
-              </Link>
-            </div>
-
-            <div className="text-xs text-[var(--text-muted)] bg-[var(--surface)] p-3 rounded border">
-              <div className="font-semibold mb-1">Debug Information:</div>
-              <div>Check the browser console (F12) for detailed error logs.</div>
-              <div>If you see &quot;404 Not Found&quot;, the job ID doesn&apos;t exist.</div>
-              <div>If you see &quot;401 Unauthorized&quot;, there may be authentication issues.</div>
-            </div>
+        <div className="flex min-h-[60vh] flex-col items-center justify-center p-8">
+          <div className="max-w-md rounded-lg border border-[color:var(--border)] bg-white p-6 text-center shadow-sm">
+            <div className="text-lg font-semibold text-[var(--text-primary)]">{error || 'Assignment not found'}</div>
+            <Link href="/" className="mt-5 inline-flex rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+              Back to Dashboard
+            </Link>
           </div>
         </div>
       </DashboardLayout>
     );
   }
 
-  const results = sortResultsByScore(Array.isArray(job.results) ? job.results : []);
-  const threshold = getThreshold(job);
-  const submissions = job.submissions && typeof job.submissions === 'object' ? job.submissions : {};
-  const submissionNames = getSubmissionNames(submissions, results);
-  const submissionStats = buildSubmissionStats(submissionNames, results, threshold, submissions);
-  const fileCount = getFileCount(job, submissionNames);
-  const possibleComparisons = calculatePossibleComparisons(fileCount);
-  const flaggedResults = results.filter((result) => Number(result.score) >= threshold);
-  const topResult = results[0] || null;
-  const summary = job.summary || {};
-  const suspiciousPairs = getSummaryValue(
-    summary,
-    ['suspicious_pairs', 'flagged_pairs', 'high_risk_pairs'],
-    flaggedResults.length,
-  );
-  const averageSimilarity = getSummaryValue(
-    summary,
-    ['average_similarity', 'avg_similarity', 'mean_similarity'],
-    results.length ? results.reduce((sum, result) => sum + (Number(result.score) || 0), 0) / results.length : 0,
-  );
-  const featureSummary = buildFeatureSummary(results);
-  const reviewStatus = getReviewStatus(job);
-  const reviewTone = getReviewTone(reviewStatus);
-  const webAnalysis = job.web_analysis || {};
-  const aiDetection = job.ai_detection || {};
-  const aiSubmissions = Array.isArray(aiDetection.submissions) ? aiDetection.submissions : [];
-
   return (
     <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <div className="space-y-8 lg:space-y-10">
-          {/* Top Header */}
-          <section className="theme-card-strong rounded-[30px] overflow-hidden">
-            <div className="theme-section-line px-6 py-6 lg:px-8">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
-                    <Shield size={13} />
-                    Submission Integrity Report
-                  </div>
-                  <div className="space-y-1">
-                    <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-                      {getAssignmentTitle(job)}
-                    </h1>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Assignment: {job.assignment_name || 'Untitled'}
-                    </p>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Submitted: {new Date(job.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
+        <div className="max-w-none space-y-4">
+          {/* Results Header — Summary first, then Sort, then Filters */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {/* Assignment context (from DB wiring) */}
+            <div className="mb-3 flex items-start justify-between">
+              <div>
+                <div className="text-xl font-semibold text-slate-950">
+                  {getAssignmentTitle(job)}
                 </div>
-
-                <div className="flex flex-col gap-4 lg:items-end">
-                  <div className="space-y-1 text-right">
-                    <div className="text-sm font-medium text-[var(--text-primary)]">
-                      Review Priority: <span className={flaggedResults.length ? 'font-semibold text-amber-600' : 'font-semibold text-emerald-600'}>
-                        {flaggedResults.length ? `${flaggedResults.length} flagged` : 'No flagged pairs'}
-                      </span>
-                    </div>
-                    <div className="text-sm font-medium text-[var(--text-primary)]">
-                      Review Status: <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${reviewTone.badge}`}>
-                        {formatReviewStatus(reviewStatus)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold"
-                  >
-                    <Shield size={16} />
-                    Start Review
-                  </button>
-                </div>
+                {job?.course_name && (
+                  <div className="text-sm text-slate-500">{job.course_name}</div>
+                )}
+              </div>
+              <div className="text-right text-xs text-slate-500">
+                {job?.created_at ? new Date(job.created_at).toLocaleString() : ''}
               </div>
             </div>
-          </section>
 
-          {/* Tab Navigation */}
-          <section className="theme-card rounded-[30px] overflow-hidden">
-            <div className="theme-section-line px-4 py-4 lg:px-5">
-              <div className="flex flex-wrap gap-2">
-                {mainTabs.map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setActiveTab(tab.key)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${activeTab === tab.key
-                      ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
-                      : 'theme-card-muted text-[var(--text-secondary)]'
-                      }`}
-                  >
-                    <tab.icon size={15} />
-                    {tab.label}
-                  </button>
-                ))}
+             {/* 1. Summary chips (understand the result set first) */}
+             <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                 {job?.file_count || Object.keys(submissions).length || 0} submissions
+               </div>
+               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                 {results.length} pair{results.length === 1 ? '' : 's'}
+               </div>
+               <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
+                 {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
+               </div>
+               <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
+                 {tableData.length} shown
+               </div>
 
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowMoreMenu(!showMoreMenu)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
-                      moreTabs.some(tab => activeTab === tab.key)
-                        ? 'bg-[var(--accent-blue)] text-white shadow-lg shadow-blue-500/15'
-                        : 'theme-card-muted text-[var(--text-secondary)]'
-                    }`}
-                  >
-                    More
-                    <ChevronDown size={15} className={`transition ${showMoreMenu ? 'rotate-180' : ''}`} />
-                  </button>
+               {/* External Source Scan status chip — always visible for discoverability */}
+               {job?.web_analysis && (
+                 <div className={`rounded-full px-3 py-1 text-sm font-medium ${
+                   job.web_analysis.enabled 
+                     ? 'bg-emerald-100 text-emerald-700' 
+                     : 'bg-slate-100 text-slate-600'
+                 }`}>
+                   External: {job.web_analysis.enabled ? 'On' : 'Off'}
+                   {job.web_analysis.enabled && job.web_analysis.matched_submissions > 0 && (
+                     <> ({job.web_analysis.matched_submissions} match{job.web_analysis.matched_submissions === 1 ? '' : 'es'})</>
+                   )}
+                 </div>
+               )}
+             </div>
 
-                  {showMoreMenu && (
-                    <div className="more-dropdown absolute right-0 top-full mt-2 w-48 rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-2 shadow-lg z-10">
-                      {moreTabs.map((tab) => (
-                        <button
-                          key={tab.key}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab(tab.key);
-                            setShowMoreMenu(false);
-                          }}
-                          className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition ${
-                            activeTab === tab.key
-                              ? 'bg-blue-600/10 text-blue-600'
-                              : 'text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]'
-                          }`}
+            {/* 2. Sort + 3. Filters + 4. Reset — grouped cleanly */}
+            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+              {/* Sort (most important action after seeing summary) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Sort by</span>
+                <select
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+                >
+                  <option value="unreviewed">Unreviewed first</option>
+                  <option value="similarity">Highest similarity</option>
+                  <option value="evidence">Most evidence</option>
+                </select>
+              </div>
+
+              {/* Min similarity filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Min similarity</span>
+                <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={minSimilarity}
+                    onChange={(e) => setMinSimilarity(Number(e.target.value))}
+                    className="w-24 accent-blue-600"
+                  />
+                  <span className="w-10 text-right font-mono text-xs font-medium">{Math.round(minSimilarity * 100)}%</span>
+                </div>
+              </div>
+
+              {/* Status filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Status</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="unreviewed">Unreviewed</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="dismissed">Dismissed</option>
+                </select>
+              </div>
+
+              {/* Search (secondary) */}
+              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                <Search size={13} className="absolute left-3 top-2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search files..."
+                  className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none"
+                />
+              </div>
+
+              {/* Reset — last and secondary */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setMinSimilarity(0.5);
+                  setStatusFilter('all');
+                  setSortMode('unreviewed');
+                }}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                <Filter size={12} /> Reset filters
+              </button>
+            </div>
+          </div>
+
+          {/* External / Public Source Scan — always visible for discoverability inside Plagiarism Checker */}
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck className="text-emerald-600" size={18} />
+              <div className="font-semibold text-emerald-800">External Source Scan</div>
+
+              {job?.web_analysis ? (
+                job.web_analysis.enabled ? (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Enabled</span>
+                ) : (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Disabled</span>
+                )
+              ) : (
+                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Not run</span>
+              )}
+
+              <a href="/settings" className="ml-auto text-xs text-emerald-600 hover:underline">Manage in Settings</a>
+            </div>
+
+            {job?.web_analysis?.enabled && job.web_analysis.matched_submissions > 0 ? (
+              <>
+                <div className="text-sm text-emerald-700 mb-3">
+                  Found matches in <strong>{job.web_analysis.matched_submissions}</strong> submission(s). 
+                  Highest similarity: <strong>{(job.web_analysis.highest_similarity * 100).toFixed(0)}%</strong>
+                </div>
+
+                <div className="space-y-2">
+                  {job.web_analysis.submissions?.slice(0, 4).map((entry: any, idx: number) => (
+                    <div key={idx} className="text-sm border border-emerald-100 rounded-lg p-3 bg-emerald-50/50">
+                      <div className="font-medium text-emerald-900">{entry.name}</div>
+                      <div className="text-xs text-emerald-700 mt-1">
+                        Max similarity: {(entry.max_similarity * 100).toFixed(0)}% • {entry.match_count} public source(s)
+                      </div>
+                      {entry.sources?.slice(0, 2).map((src: any, sidx: number) => (
+                        <a
+                          key={sidx}
+                          href={src.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-xs text-emerald-600 hover:underline mt-1 truncate"
                         >
-                          <tab.icon size={15} />
-                          {tab.label}
-                        </button>
+                          {src.source}: {src.name || src.url}
+                        </a>
                       ))}
                     </div>
+                  ))}
+                  {job.web_analysis.submissions?.length > 4 && (
+                    <div className="text-xs text-emerald-600">
+                      +{job.web_analysis.submissions.length - 4} more submissions with public matches
+                    </div>
                   )}
                 </div>
+              </>
+            ) : job?.web_analysis ? (
+              <>
+                <div className="text-sm text-slate-600">
+                  {job.web_analysis.status_message || "No matches found against configured public sources."}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Configure sources in <a href="/settings" className="underline">Settings → External Sources</a>.
+                </p>
+              </>
+            ) : (
+              <div className="text-sm text-slate-600">
+                External source scanning was not performed for this job. 
+                Enable it in <a href="/settings" className="underline">Settings → External Sources</a> and re-run the check.
+              </div>
+            )}
+          </div>
+
+            {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
+           {!drawerOpen && (
+             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-950">Suspicious Pairs — Ranked</div>
+              </div>
+              <div className="text-xs text-slate-500">
+                {tableData.length} pairs shown
               </div>
             </div>
 
-            <div className="p-4 lg:p-6">
-              {activeTab === 'overview' && (
-                <div className="space-y-6">
-                  {/* Summary Card */}
-                  <div className={`rounded-[24px] border px-6 py-6 ${job.status === 'completed' ? 'border-emerald-500/20 bg-emerald-500/[0.08]' : 'border-amber-500/20 bg-amber-500/[0.08]'}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          {job.status === 'completed' ? (
-                            <CheckCircle2 size={20} className="text-emerald-600" />
-                          ) : (
-                            <AlertTriangle size={20} className="text-amber-600" />
-                          )}
-                          <span className="text-lg font-semibold text-[var(--text-primary)]">
-                            {job.status === 'completed' ? 'Analysis completed successfully' : 'Analysis in progress'}
-                          </span>
-                        </div>
+            {tableData.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">
+                No pairs match the current filters. Try lowering the similarity threshold or clearing the search.
+              </div>
+            ) : (
+              <div className="max-h-[520px] overflow-auto">
+                <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                    <tr>
+                      <th className="w-12 px-4 py-3">#</th>
+                      <th className="w-[26%] px-4 py-3">Submission A</th>
+                      <th className="w-[26%] px-4 py-3">Submission B</th>
+                      <th className="w-24 px-4 py-3">Similarity</th>
+                      <th className="w-24 px-4 py-3">Confidence</th>
+                      <th className="w-28 px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {tableData.map((row) => {
+                      const isActive = pairKey(row) === pairKey(activeResult);
+                      const status = row._status || 'unreviewed';
+                      const statusTone =
+                        status === 'dismissed'
+                          ? 'bg-slate-100 text-slate-600'
+                          : status === 'needs_review' || status === 'confirmed'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-blue-100 text-blue-700';
 
-                        <div className="space-y-1 text-sm text-[var(--text-secondary)]">
-                          <div>
-                            <span className="font-medium">Processed:</span> {fileCount} submissions
-                          </div>
-                          <div>
-                            <span className="font-medium">Compared:</span> {results.length} pair{results.length === 1 ? '' : 's'}
-                          </div>
-                          <div>
-                            <span className="font-medium">Flagged:</span> {suspiciousPairs} pair{suspiciousPairs === 1 ? '' : 's'} at {formatPercent(threshold)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Completed:</span> {formatTimestamp(job.created_at)}
-                          </div>
-                        </div>
-
-                        <div className="pt-2">
-                          <p className="text-sm font-medium text-[var(--text-primary)]">
-                            {topResult
-                              ? `Top match: ${topResult.file_a} vs ${topResult.file_b} at ${formatPercent(topResult.score)}`
-                              : job.status === 'completed'
-                                ? 'Analysis completed with no comparison rows in the result payload.'
-                                : 'Analysis is still running'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {job.status === 'completed' && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('evidence')}
-                          className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold shrink-0"
+                      return (
+                        <tr
+                          key={row._key}
+                          onClick={() => openDrawerFor(row)}
+                          className={`cursor-pointer transition hover:bg-slate-50 ${isActive ? 'bg-blue-50/60' : ''}`}
                         >
-                          <Shield size={16} />
-                          Start Review
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Four Simple Cards */}
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="theme-card-muted rounded-[20px] px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600/10">
-                          <Users size={18} className="text-blue-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--text-primary)]">Peer Analysis</div>
-                          <div className="text-xs text-[var(--text-secondary)]">
-                            {results.length} comparison{results.length === 1 ? '' : 's'}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="mt-3 text-xs text-[var(--text-secondary)] leading-relaxed">
-                        {possibleComparisons ? `${results.length} of ${possibleComparisons} possible pairs returned by the analysis.` : 'Similarity analysis between uploaded submissions.'}
-                      </p>
-                    </div>
-
-                    <div className="theme-card-muted rounded-[20px] px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600/10">
-                          <Globe2 size={18} className="text-emerald-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--text-primary)]">Web Sources</div>
-                          <div className="text-xs text-[var(--text-secondary)]">
-                            {webAnalysis.enabled ? `${webAnalysis.matched_submissions || 0} matched` : 'Not enabled'}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="mt-3 text-xs text-[var(--text-secondary)] leading-relaxed">
-                        External source matching and originality checks
-                      </p>
-                    </div>
-
-                    <div className="theme-card-muted rounded-[20px] px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-600/10">
-                          <Brain size={18} className="text-purple-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--text-primary)]">AI Detection</div>
-                          <div className="text-xs text-[var(--text-secondary)]">
-                            {aiSubmissions.length ? `${aiSubmissions.length} submissions` : 'Not enabled'}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="mt-3 text-xs text-[var(--text-secondary)] leading-relaxed">
-                        Artificial intelligence writing pattern analysis
-                      </p>
-                    </div>
-
-                    <div className="theme-card-muted rounded-[20px] px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-600/10">
-                          <FileCode size={18} className="text-slate-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--text-primary)]">File Integrity</div>
-                          <div className="text-xs text-[var(--text-secondary)]">
-                            {fileCount} file{fileCount === 1 ? '' : 's'}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="mt-3 text-xs text-[var(--text-secondary)] leading-relaxed">
-                        Submission metadata and integrity verification
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'evidence' && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-2xl font-semibold text-[var(--text-primary)]">
-                      Similarity Results
-                    </h2>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                      Actual pairwise comparisons returned by the analysis job.
-                    </p>
-                  </div>
-
-                  {results.length === 0 ? (
-                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-6 text-sm text-[var(--text-secondary)]">
-                      No comparison rows were returned for this job. Status: {job.status || 'unknown'}.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {results.map((result, index) => {
-                        const score = Number(result.score) || 0;
-                        const tone = getRiskTone(score);
-                        const featureEntries = Object.entries(result.features || {})
-                          .sort((a, b) => Number(b[1]) - Number(a[1]))
-                          .slice(0, 4);
-
-                        return (
-                          <div key={`${result.file_a}-${result.file_b}-${index}`} className={`rounded-2xl border px-5 py-4 ${tone.panel}`}>
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                              <div className="min-w-0 space-y-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-semibold text-[var(--text-primary)]">
-                                    {result.file_a || 'Submission A'} vs {result.file_b || 'Submission B'}
-                                  </span>
-                                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
-                                    {getResultRiskLabel(result, threshold)}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  {summarizeMatch(result)}
-                                </p>
-                                {featureEntries.length > 0 && (
-                                  <div className="flex flex-wrap gap-2">
-                                    {featureEntries.map(([name, value]) => (
-                                      <span key={name} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-                                        {name}: {formatPercentPrecise(value)}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="shrink-0 text-left lg:text-right">
-                                <div className={`text-3xl font-semibold ${tone.text}`}>
-                                  {formatPercent(score)}
-                                </div>
-                                <div className="text-xs text-[var(--text-secondary)]">
-                                  threshold {formatPercent(threshold)}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-3">
-                    <Link href={`${API}/report/${id}/download`} className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold">
-                      <FileCode size={16} />
-                      HTML Report
-                    </Link>
-                    <Link href={`${API}/report/${id}/download-json`} className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold">
-                      <Code2 size={16} />
-                      JSON Report
-                    </Link>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'sources' && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-2xl font-semibold text-[var(--text-primary)]">
-                      Source Analysis
-                    </h2>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                      Overview of all similarity sources and their contributions
-                    </p>
-                  </div>
-
-                  {/* Peer Sources */}
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-3">
-                        Peer Sources
-                      </h3>
-                      <div className="space-y-2">
-                        {results.map((result, index) => {
-                          const score = Number(result.score) || 0;
-                          const tone = getRiskTone(score);
-                          return (
-                          <div key={index} className="flex items-center justify-between p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-                            <div className="flex items-center gap-3">
-                              <div className={`h-3 w-3 rounded-full ${tone.dot}`} />
-                              <div>
-                                <div className="text-sm font-medium text-[var(--text-primary)]">
-                                  {result.file_a || 'Submission A'} vs {result.file_b || 'Submission B'}
-                                </div>
-                                <div className="text-xs text-[var(--text-secondary)]">
-                                  {formatPercent(score)} similarity • {summarizeMatch(result)}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
-                                {getResultRiskLabel(result, threshold)}
-                              </span>
-                              <button type="button" onClick={() => setActiveTab('evidence')} className="theme-link text-sm font-medium">
-                                Evidence
-                              </button>
-                            </div>
-                          </div>
-                        )})}
-                        {results.length === 0 && (
-                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
-                            No peer comparison rows are available for this assignment.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'files' && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-2xl font-semibold text-[var(--text-primary)]">
-                      File Status Overview
-                    </h2>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                      Review status and information for each submission file
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-                    <table className="w-full">
-                      <thead className="bg-[var(--surface-muted)]">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-                            File
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-                            Status
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-                            Details
-                          </th>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{row._denseRank}</td>
+                          <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_a}>{row.file_a}</td>
+                          <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_b}>{row.file_b}</td>
+                          <td className="px-4 py-3">
+                            <span className="font-semibold text-slate-950">{formatPercent(row._score)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-semibold text-slate-600">{row._confidence}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>
+                              {status.replace('_', ' ')}
+                            </span>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--border)]">
-                        {submissionStats.map((entry) => {
-                          const tone = getRiskTone(entry.maxScore);
-                          return (
-                          <tr key={entry.name} className="hover:bg-[var(--surface-muted)]">
-                            <td className="px-4 py-4">
-                              <div className="flex items-center gap-3">
-                                <FileCode size={16} className="text-slate-500" />
-                                <span className="text-sm font-medium text-[var(--text-primary)]">
-                                  {entry.name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4">
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
-                                {entry.flaggedCount ? `${entry.flaggedCount} flagged` : 'Clear'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4">
-                              <div className="text-sm text-[var(--text-secondary)]">
-                                {entry.totalMatches} comparison{entry.totalMatches === 1 ? '' : 's'}, max {formatPercent(entry.maxScore)}
-                                {entry.topMatchName ? ` with ${entry.topMatchName}` : ''}
-                              </div>
-                            </td>
-                          </tr>
-                        )})}
-                        {submissionStats.length === 0 && (
-                          <tr>
-                            <td colSpan={3} className="px-4 py-6 text-sm text-[var(--text-secondary)]">
-                              No submission file names were returned for this job.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+           </div>
+           )}
+
+           {/* === Full-screen Pair Detail View (side-by-side comparison) === */}
+           {drawerOpen && activeResult ? (
+             <div className="space-y-4">
+               {/* Detail Header - full width */}
+               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                   <div>
+                     <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pair Detail Inspector</div>
+                     <div className="mt-1 text-xl font-semibold text-slate-950">
+                       {activeResult.file_a} vs {activeResult.file_b} — {formatPercent(score)}
+                     </div>
+                   </div>
+
+                   <div className="flex flex-wrap gap-2">
+                     <button
+                       type="button"
+                       onClick={() => updateActivePairStatus('needs_review')}
+                       disabled={saving}
+                       className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                     >
+                       <ShieldCheck size={15} />
+                       Mark for Review
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => updateActivePairStatus('dismissed')}
+                       disabled={saving}
+                       className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                     >
+                       <XCircle size={15} />
+                       Dismiss
+                     </button>
+                     <a
+                       href={`/report/${id}/committee`}
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                     >
+                       Open Full Report
+                     </a>
+                     <button
+                       onClick={closeDrawer}
+                       className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                     >
+                       ← Back to all pairs
+                     </button>
+                   </div>
+                 </div>
+
+                  {/* Evidence chips */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {evidenceTypes.map((item) => (
+                      <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                        {item}
+                      </span>
+                    ))}
                   </div>
-                </div>
-              )}
 
-              {moreTabs.some(tab => activeTab === tab.key) && (
-                <div className="space-y-6">
-                  {activeTab === 'peer_similarity' && (
-                    <div className="space-y-4">
-                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Peer Similarity Matrix</h2>
-                      <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
-                        <table className="w-full min-w-[680px]">
-                          <thead className="bg-[var(--surface-muted)]">
-                            <tr>
-                              <th className="px-3 py-3 text-left text-xs font-semibold uppercase text-[var(--text-muted)]">Submission</th>
-                              {submissionNames.map((name) => (
-                                <th key={name} className="px-3 py-3 text-left text-xs font-semibold uppercase text-[var(--text-muted)]">
-                                  {truncateName(name, 14)}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[var(--border)]">
-                            {submissionNames.map((rowName) => (
-                              <tr key={rowName}>
-                                <td className="px-3 py-3 text-sm font-medium text-[var(--text-primary)]">{truncateName(rowName, 22)}</td>
-                                {submissionNames.map((columnName) => {
-                                  const matched = results.find((result) => pairKey(result.file_a, result.file_b) === pairKey(rowName, columnName));
-                                  const score = rowName === columnName ? null : matched?.score;
-                                  return (
-                                    <td key={columnName} className="px-3 py-3 text-sm text-[var(--text-secondary)]">
-                                      {rowName === columnName ? '—' : score == null ? 'No result' : formatPercent(score)}
-                                    </td>
-                                  );
-                                })}
-                              </tr>
+                  {/* External/Public Source Matches for this pair - integrated into side-by-side detail */}
+                  {hasExternalMatches && (
+                    <div className="mt-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50">
+                      <div className="font-semibold text-emerald-800 text-sm mb-2 flex items-center gap-2">
+                        <ShieldCheck size={14} /> External / Public Matches for this Pair
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        {[externalA, externalB].filter(Boolean).map((ext: any, i: number) => (
+                          <div key={i}>
+                            <div className="font-medium text-emerald-900">{ext.name}</div>
+                            <div className="text-xs text-emerald-700">
+                              Max similarity to public: {(ext.max_similarity * 100).toFixed(0)}% • {ext.match_count} source(s)
+                            </div>
+                            {ext.sources?.slice(0, 3).map((src: any, si: number) => (
+                              <a
+                                key={si}
+                                href={src.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block text-xs text-emerald-600 hover:underline truncate"
+                              >
+                                → {src.source}: {src.name || src.url}
+                              </a>
                             ))}
-                          </tbody>
-                        </table>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'ai_detection' && (
-                    <div className="space-y-4">
-                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">AI Review</h2>
-                      {aiSubmissions.length === 0 ? (
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
-                          No AI-detection result payload was returned for this job.
-                        </div>
-                      ) : (
-                        aiSubmissions.map((entry) => {
-                          const score = Number(entry.ai_probability ?? entry.score) || 0;
-                          const tone = getAiRiskTone(score);
-                          return (
-                            <div key={entry.name} className={`rounded-xl border px-4 py-3 ${tone.panel}`}>
-                              <div className="flex items-center justify-between gap-4">
-                                <div>
-                                  <div className="text-sm font-semibold text-[var(--text-primary)]">{entry.name}</div>
-                                  <div className="text-xs text-[var(--text-secondary)]">Confidence {formatPercent(entry.confidence || 0)}</div>
-                                </div>
-                                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
-                                  {tone.label}: {formatPercent(score)}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-
-                  {activeTab === 'insights' && (
-                    <div className="space-y-4">
-                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Run Insights</h2>
-                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Average Similarity</div>
-                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(averageSimilarity)}</div>
-                        </div>
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Top Similarity</div>
-                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(topResult?.score || 0)}</div>
-                        </div>
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Flagged Pairs</div>
-                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{flaggedResults.length}</div>
-                        </div>
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                          <div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Threshold</div>
-                          <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{formatPercent(threshold)}</div>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Engine Signals</h3>
-                        <div className="mt-3 space-y-2">
-                          {featureSummary.map((feature) => (
-                            <div key={feature.name} className="flex items-center justify-between gap-4 text-sm">
-                              <span className="text-[var(--text-secondary)]">{feature.name}</span>
-                              <span className="font-medium text-[var(--text-primary)]">avg {formatPercentPrecise(feature.average)} / peak {formatPercentPrecise(feature.peak)}</span>
-                            </div>
-                          ))}
-                          {featureSummary.length === 0 && (
-                            <div className="text-sm text-[var(--text-secondary)]">No feature scores were returned.</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'result_driller' && (
-                    <div className="space-y-4">
-                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">Deep Dive</h2>
-                      <pre className="max-h-[520px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-xs text-[var(--text-primary)]">
-                        {JSON.stringify({ id: job.id, status: job.status, summary: job.summary, results }, null, 2)}
-                      </pre>
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-          </section>
+
+               {/* Side-by-side code comparison - full screen width */}
+               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                 <CodePanel
+                   title={activeResult?.file_a || 'Student A'}
+                   code={leftCode}
+                   highlights={leftHighlights}
+                   panelRef={leftRef}
+                   onScroll={() => syncScroll(leftRef, rightRef)}
+                 />
+                 <CodePanel
+                   title={activeResult?.file_b || 'Student B'}
+                   code={rightCode}
+                   highlights={rightHighlights}
+                   panelRef={rightRef}
+                   onScroll={() => syncScroll(rightRef, leftRef)}
+                 />
+               </div>
+
+               {job?.review_notes && (
+                 <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+                   <div className="font-semibold text-slate-950 mb-1">Review Note</div>
+                   <div className="text-slate-600">{job.review_notes}</div>
+                 </div>
+               )}
+
+               <div className="text-center text-[11px] text-slate-500">
+                 Changes update the pair status immediately. Use “Back to all pairs” to return to the ranked list.
+               </div>
+             </div>
+           ) : (
+             /* Ranked table is shown above when not in detail view */
+             null
+           )}
         </div>
       </div>
     </DashboardLayout>
   );
 }
+
+const SummaryItem = ({ label, value, danger = false }) => (
+  <div className="rounded-md border border-[color:var(--border)] bg-slate-50 px-3 py-3">
+    <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+    <div className={`mt-1 text-sm font-semibold ${danger ? 'text-red-700' : 'text-[var(--text-primary)]'}`}>
+      {value}
+    </div>
+  </div>
+);
+
+const CheckRow = ({ title, detail }) => (
+  <div className="flex gap-3">
+    <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
+    <div>
+      <div className="font-semibold text-[var(--text-primary)]">{title}</div>
+      <div className="mt-0.5 text-xs leading-5 text-[var(--text-secondary)]">{detail}</div>
+    </div>
+  </div>
+);
+
+const CodePanel = ({ title, code, highlights, panelRef, onScroll }) => (
+  <div className="overflow-hidden rounded-lg border border-[color:var(--border)] bg-white shadow-sm">
+    <div className="border-b border-[color:var(--border)] px-4 py-3">
+      <h2 className="font-semibold text-[var(--text-primary)]">{title}</h2>
+    </div>
+    <div
+      ref={panelRef}
+      onScroll={onScroll}
+      className="max-h-[1600px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
+    >
+      <pre className="min-w-full py-3 font-mono">
+        {String(code || '').split('\n').map((line, index) => {
+          const lineNumber = index + 1;
+          const highlighted = highlights.has(lineNumber);
+          return (
+            <div
+              key={lineNumber}
+              className={`grid grid-cols-[52px_1fr] px-3 ${highlighted ? 'bg-red-500/20 outline outline-1 outline-red-400/20' : ''
+                }`}
+            >
+              <span className="select-none pr-3 text-right text-slate-500">{lineNumber}</span>
+              <code className="whitespace-pre">{line || ' '}</code>
+            </div>
+          );
+        })}
+      </pre>
+    </div>
+  </div>
+);

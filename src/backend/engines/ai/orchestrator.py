@@ -1,0 +1,143 @@
+"""AIDetectionOrchestrator
+
+Multi-layer AI code detector orchestrator.
+
+Current layers (code-only):
+- Layer 1: Binoculars (zero-shot, high precision, low FPR)
+- Layer 3: Statistical + Stylometric + Pattern signals (existing 8-signal engine)
+
+Future layers (when data is available):
+- Layer 2: Fine-tuned RoBERTa / CodeBERT classifier
+
+The orchestrator runs all available detectors, applies calibrated weights,
+and returns a unified result compatible with the existing AI detection pipeline.
+
+This design makes it easy to later support plain-text/essay detection by
+adding a TextOrchestrator or a "domain" parameter.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional
+
+from src.backend.engines.ai.binoculars_detector import BinocularsDetector
+from src.backend.engines.similarity.ai_detection import AIDetectionEngine
+
+logger = logging.getLogger(__name__)
+
+
+class AIDetectionOrchestrator:
+    """
+    Coordinates multiple AI detection layers and produces a fused result.
+
+    Usage:
+        orchestrator = AIDetectionOrchestrator()
+        result = orchestrator.analyze(code, language="python")
+    """
+
+    # Calibrated weights favoring Binoculars (Layer 1) for its published performance
+    # Total weight = 1.0
+    _LAYER_WEIGHTS: Dict[str, float] = {
+        "binoculars": 0.40,          # Zero-shot SOTA (ICML 2024)
+        "pattern_library": 0.15,
+        "perplexity": 0.12,
+        "stylometry": 0.10,
+        "burstiness": 0.08,
+        "structural_entropy": 0.07,
+        "vocabulary_richness": 0.04,
+        "whitespace_rhythm": 0.02,
+        "docstring_density": 0.02,
+    }
+
+    def __init__(self) -> None:
+        self.binoculars = BinocularsDetector()
+        self.legacy_engine = AIDetectionEngine()
+
+    def analyze(self, code: str, language: str = "python") -> Dict[str, Any]:
+        """
+        Run the full multi-layer detection pipeline.
+
+        Returns the same shape as the legacy AIDetectionEngine.analyze()
+        plus an extra "layers" key for debugging / UI.
+        """
+        if not code or len(code.strip()) < 20:
+            return {
+                "ai_probability": 0.0,
+                "confidence": 0.0,
+                "signals": {},
+                "signal_labels": {},
+                "indicators": ["Code too short for reliable detection"],
+                "flagged_lines": [],
+                "language": language,
+                "layers": {},
+            }
+
+        # Layer 1: Binoculars
+        bino_result = self.binoculars.analyze(code, language=language)
+
+        # Layer 3: Legacy multi-signal engine
+        legacy_result = self.legacy_engine.analyze(code, language=language)
+
+        # Merge signals
+        signals: Dict[str, float] = legacy_result.get("signals", {}).copy()
+
+        if bino_result.get("available"):
+            signals["binoculars"] = bino_result["ai_probability"]
+
+        # Re-fuse using the orchestrator's weights (which favor Binoculars)
+        fused_probability = self._weighted_fuse(signals)
+
+        # Combine confidence
+        legacy_conf = legacy_result.get("confidence", 0.5)
+        bino_conf = bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.3
+        combined_confidence = max(0.4, (0.6 * bino_conf + 0.4 * legacy_conf))
+
+        # Merge indicators (prefer Binoculars evidence when strong)
+        indicators = legacy_result.get("indicators", [])
+        if bino_result.get("available") and bino_result.get("ai_probability", 0) > 0.65:
+            indicators = [f"Binoculars: {bino_result.get('label', 'AI-like')}"] + indicators
+
+        layers = {
+            "binoculars": {
+                "ai_probability": bino_result.get("ai_probability"),
+                "confidence": bino_result.get("confidence"),
+                "available": bino_result.get("available", False),
+            },
+            "legacy": {
+                "ai_probability": legacy_result.get("ai_probability"),
+                "confidence": legacy_result.get("confidence"),
+            },
+        }
+
+        return {
+            "ai_probability": round(max(0.0, min(1.0, fused_probability)), 3),
+            "confidence": round(max(0.0, min(1.0, combined_confidence)), 3),
+            "signals": {k: round(v, 3) for k, v in signals.items()},
+            "signal_labels": self.legacy_engine._signal_labels(signals),
+            "indicators": indicators[:8],
+            "flagged_lines": legacy_result.get("flagged_lines", [])[:30],
+            "language": language,
+            "layers": layers,
+        }
+
+    def _weighted_fuse(self, signals: Dict[str, float]) -> float:
+        """Apply orchestrator weights (Binoculars gets the highest weight)."""
+        total = 0.0
+        weight_sum = 0.0
+
+        for name, w in self._LAYER_WEIGHTS.items():
+            if name in signals:
+                total += signals[name] * w
+                weight_sum += w
+
+        if weight_sum == 0:
+            return 0.5
+
+        raw = total / weight_sum
+
+        # Mild calibration (same style as legacy)
+        import math
+        k = 5.5
+        calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
+        return calibrated

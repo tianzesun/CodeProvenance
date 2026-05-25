@@ -1,486 +1,540 @@
-"use client";
+// @ts-nocheck
+'use client';
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import axios from "axios";
-import { Settings, Cpu, Zap, Shield, Database, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, Settings, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity } from 'lucide-react';
 
-const ENGINE_CATALOG = [
-  { key: "token", label: "Token", tier: "core", description: "Token-level overlap and lexical similarity." },
-  { key: "ast", label: "AST", tier: "core", description: "Structural similarity across parsed syntax trees." },
-  { key: "winnowing", label: "Winnowing", tier: "core", description: "K-gram fingerprinting for copy-paste style matches." },
-  { key: "gst", label: "GST", tier: "core", description: "Greedy String Tiling for long contiguous match blocks." },
-  { key: "semantic", label: "Semantic", tier: "core", description: "Meaning-level similarity via embedding analysis." },
-  { key: "web", label: "Web", tier: "core", description: "External-source similarity checks against web-accessible code." },
-];
-
-const DEFAULT_ENGINE_WEIGHTS = {
-  token: 0.18,
-  ast: 0.22,
-  winnowing: 0.16,
-  gst: 0.16,
-  semantic: 0.18,
-  web: 0.10,
+const DEFAULT_PROFILE = {
+  assignment_type: 'auto_detect',
+  sensitivity: 'balanced',
+  starter_code_handling: 'student_written_only',
+  previous_term_matching: 'same_course_only',
+  ai_rewrite_detection: 'balanced',
+  result_volume: 'top_25',
+  external_source_scan: true,
 };
 
-interface Settings {
-  default_threshold: number;
-  openai_api_key: string;
-  openai_api_key_configured: boolean;
-  openai_base_url: string;
-  openai_model: string;
-  anthropic_api_key: string;
-  anthropic_api_key_configured: boolean;
-  anthropic_model: string;
-  moss_user_id: string;
-  moss_user_id_configured: boolean;
-  embedding_runtime: string;
-  embedding_model: string;
-  embedding_server_host: string | null;
-  embedding_server_port: number;
-  embedding_device: string;
-  embedding_batch_size: number;
-  engine_weights: { [key: string]: number };
-  batch_size: number;
-  max_file_size_mb: number;
-  max_files_per_job: number;
-}
-
-type SettingsTab = "general" | "detection_engines" | "ai_models" | "matching_rules" | "sensitivity_scoring" | "review_evidence" | "external_sources" | "performance" | "integrations" | "audit_trail" | "expert_settings";
+const TABS = [
+  { id: 'general', label: 'General', icon: Database },
+  { id: 'engines', label: 'Detection Engines', icon: Cpu },
+  { id: 'ai_models', label: 'AI Analysis', icon: Bot },
+  { id: 'matching_rules', label: 'Matching Rules', icon: GitMerge },
+  { id: 'sensitivity_scoring', label: 'Scoring & Thresholds', icon: Target },
+  { id: 'review_evidence', label: 'Review Workflow', icon: Eye },
+  { id: 'external_sources', label: 'Evidence Sources', icon: ExternalLink },
+  { id: 'integrations', label: 'Integrations', icon: Zap },
+  { id: 'performance', label: 'Performance', icon: Activity },
+];
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState(null);
+  const [activeTab, setActiveTab] = useState('general');
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading || !user) return;
-
-    axios.get("/api/settings")
-      .then((res) => setSettings(res.data))
-      .catch(() => setError("Failed to load settings"));
+    axios.get('/api/settings')
+      .then((res) => {
+        setSettings(res.data);
+        setWebhookUrl(res.data.webhook_url || '');
+      })
+      .catch(() => setError('Failed to load settings'));
   }, [authLoading, user]);
+
+  const profile = settings?.professor_profile || DEFAULT_PROFILE;
+  const catalog = settings?.professor_profile_catalog || {};
+  const applied = settings?.applied_professor_profile || {};
+  const engineWeightTotal = useMemo(
+    () => Object.values(settings?.engine_weights || {}).reduce((sum, weight) => sum + Number(weight || 0), 0),
+    [settings?.engine_weights],
+  );
+
+  const updateSetting = (key, value) => {
+    setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateProfile = (key, value) => {
+    setSettings((current) => ({
+      ...current,
+      professor_profile: {
+        ...(current?.professor_profile || DEFAULT_PROFILE),
+        [key]: value,
+      },
+    }));
+  };
 
   const saveSettings = async () => {
     setSaving(true);
+    setError(null);
     try {
-      await axios.patch("/api/settings", settings);
-      setSuccess("Settings saved successfully");
+      const payload = {
+        professor_profile: settings.professor_profile || DEFAULT_PROFILE,
+        engine_weights: settings.engine_weights,
+        openai_api_key: settings.openai_api_key,
+        openai_base_url: settings.openai_base_url,
+        openai_model: settings.openai_model,
+        anthropic_api_key: settings.anthropic_api_key,
+        anthropic_model: settings.anthropic_model,
+        moss_user_id: settings.moss_user_id,
+        embedding_runtime: settings.embedding_runtime,
+        embedding_model: settings.embedding_model,
+        embedding_server_host: settings.embedding_server_host,
+        embedding_server_port: settings.embedding_server_port,
+        embedding_device: settings.embedding_device,
+        embedding_batch_size: settings.embedding_batch_size,
+        batch_size: settings.batch_size,
+        max_file_size_mb: settings.max_file_size_mb,
+        max_files_per_job: settings.max_files_per_job,
+        webhook_url: webhookUrl,
+        source_scan_enabled: Boolean(settings.source_scan_enabled),
+        source_scan_sites: settings.source_scan_sites || [],
+      };
+      await axios.patch('/api/settings', payload);
+      const fresh = await axios.get('/api/settings');
+      setSettings(fresh.data);
+      setSuccess('Settings saved. Recommended profile applied.');
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err: unknown) {
-      const message = axios.isAxiosError(err)
-        ? err.response?.data?.detail
-        : null;
-      setError(message || "Failed to save settings");
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Failed to save settings');
     } finally {
       setSaving(false);
     }
   };
 
-  const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    if (!settings) return;
-    setSettings({ ...settings, [key]: value });
-  };
-
   if (authLoading || !settings) {
     return (
       <DashboardLayout requiredRole="admin">
-        <div className="px-4 py-8 lg:px-6 flex items-center justify-center h-64">
-          <p className="text-slate-500">Loading settings...</p>
-        </div>
+        <div className="flex h-64 items-center justify-center px-4 py-8 text-slate-500">Loading settings...</div>
       </DashboardLayout>
     );
   }
 
-  const tabs: Array<{ id: SettingsTab; label: string }> = [
-    { id: "general", label: "General" },
-    { id: "detection_engines", label: "Detection engines" },
-    { id: "ai_models", label: "AI models" },
-    { id: "matching_rules", label: "Matching rules" },
-    { id: "sensitivity_scoring", label: "Sensitivity and scoring" },
-    { id: "review_evidence", label: "Review and evidence" },
-    { id: "external_sources", label: "External sources" },
-    { id: "performance", label: "Performance" },
-    { id: "integrations", label: "Integrations" },
-    { id: "audit_trail", label: "Audit trail" },
-    { id: "expert_settings", label: "Expert settings" },
-  ];
-
-  const coreEngines = ENGINE_CATALOG.filter((engine) => engine.tier === "core");
-  const engineWeightTotal = Object.values(settings.engine_weights).reduce(
-    (sum, weight) => sum + Number(weight || 0),
-    0,
-  );
-
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="px-4 py-6 lg:px-6 lg:py-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">System Settings</h1>
-          <p className="text-slate-500 mt-2 dark:text-slate-400">
-            Configure system behavior, detection engines, and integrations.
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
+      <div className="max-w-none space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* Header */}
+        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-sm font-medium text-slate-500">Settings</div>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Professor-friendly detection settings</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={saveSettings}
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Save size={16} />
+              {saving ? 'Saving...' : 'Save Settings'}
+            </button>
           </div>
-        )}
+        </section>
 
-        {success && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
-            <Shield size={16} className="mt-0.5 shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
+        {/* Notifications */}
+        {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
+        {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
 
-
-
-        <div className="mb-6 flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
-          {tabs.map((tab) => (
+        {/* Tab Navigation */}
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          {TABS.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${activeTab === tab.id
-                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${activeTab === tab.id
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/15'
+                : 'text-slate-600 hover:bg-slate-50'
                 }`}
             >
+              <tab.icon size={16} />
               {tab.label}
             </button>
           ))}
         </div>
 
-        <div className="bg-white rounded-[28px] border border-slate-200 p-6 shadow-sm dark:bg-slate-950 dark:border-slate-800">
-          {activeTab === "general" && (
+        {/* Tab Content */}
+        <div className="space-y-6">
+          {/* General Tab */}
+          {activeTab === 'general' && (
             <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Detection Thresholds
-                </label>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                      Default Similarity Threshold
-                    </label>
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="0.9"
-                        step="0.05"
-                        value={settings.default_threshold}
-                        onChange={(e) => updateSetting("default_threshold", parseFloat(e.target.value))}
-                        className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:bg-slate-800"
-                      />
-                      <span className="text-lg font-bold text-blue-600 w-16 text-right dark:text-blue-400">
-                        {(settings.default_threshold * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2 dark:text-slate-400">
-                      Pairs scoring above this threshold will be flagged for review.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "detection_engines" && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Engine Weights
-                </label>
-                <p className="text-xs text-slate-500 mb-4 dark:text-slate-400">
-                  Adjust contribution weights for each similarity detection engine. Values should sum to 1.0 (100%).
-                </p>
-
-                <div className="mb-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                      Engine coverage total
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      Current combined weight across all engines
-                    </div>
-                  </div>
-                  <div className={`text-lg font-bold ${Math.abs(engineWeightTotal - 1) < 0.01
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-amber-600 dark:text-amber-400"
-                    }`}>
-                    {(engineWeightTotal * 100).toFixed(0)}%
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {coreEngines.map((engine) => {
-                    const weight = settings.engine_weights[engine.key] || 0;
-                    return (
-                      <div key={engine.key} className="rounded-2xl border border-slate-200 p-5 dark:border-slate-800">
-                        <div className="mb-3 flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                              {engine.label}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              {engine.description}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={weight}
-                            onChange={(e) => updateSetting("engine_weights", {
-                              ...settings.engine_weights,
-                              [engine.key]: parseFloat(e.target.value),
-                            })}
-                            className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:bg-slate-800"
-                          />
-                          <span className="w-16 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
-                            {(weight * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "integrations" && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  OpenAI Configuration
-                </label>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Key</label>
-                    <input
-                      type="password"
-                      value={settings.openai_api_key}
-                      onChange={(e) => updateSetting("openai_api_key", e.target.value)}
-                      placeholder={
-                        settings.openai_api_key_configured
-                          ? "Leave blank to keep current key"
-                          : "Enter OpenAI API key"
-                      }
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Base URL</label>
-                      <input
-                        type="text"
-                        value={settings.openai_base_url}
-                        onChange={(e) => updateSetting("openai_base_url", e.target.value)}
-                        placeholder="https://api.openai.com/v1"
-                        className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Model</label>
-                      <input
-                        type="text"
-                        value={settings.openai_model}
-                        onChange={(e) => updateSetting("openai_model", e.target.value)}
-                        placeholder="gpt-3.5-turbo"
-                        className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Anthropic Configuration
-                </label>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Key</label>
-                    <input
-                      type="password"
-                      value={settings.anthropic_api_key}
-                      onChange={(e) => updateSetting("anthropic_api_key", e.target.value)}
-                      placeholder={
-                        settings.anthropic_api_key_configured
-                          ? "Leave blank to keep current key"
-                          : "Enter Anthropic API key"
-                      }
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Model</label>
-                    <input
-                      type="text"
-                      value={settings.anthropic_model}
-                      onChange={(e) => updateSetting("anthropic_model", e.target.value)}
-                      placeholder="claude-3-opus-20240229"
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  MOSS Integration
-                </label>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">User ID</label>
-                  <input
-                    type="password"
-                    value={settings.moss_user_id}
-                    onChange={(e) => updateSetting("moss_user_id", e.target.value)}
-                    placeholder={
-                      settings.moss_user_id_configured
-                        ? "Leave blank to keep current MOSS user ID"
-                        : "Enter MOSS user ID"
-                    }
-                    className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "performance" && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Embedding Configuration
-                </label>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Runtime</label>
-                    <select
-                      value={settings.embedding_runtime}
-                      onChange={(e) => updateSetting("embedding_runtime", e.target.value)}
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    >
-                      <option value="local_unixcoder">Local UniXcoder (GPU/CPU)</option>
-                      <option value="remote_openai_compatible">Remote OpenAI-Compatible Server</option>
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Device</label>
-                      <select
-                        value={settings.embedding_device}
-                        onChange={(e) => updateSetting("embedding_device", e.target.value)}
-                        className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      >
-                        <option value="auto">Auto Detect</option>
-                        <option value="cuda">CUDA / GPU</option>
-                        <option value="cpu">CPU</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Batch Size</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="256"
-                        value={settings.embedding_batch_size}
-                        onChange={(e) => updateSetting("embedding_batch_size", parseInt(e.target.value))}
-                        className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Resource Limits
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Maximum File Size (MB)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={settings.max_file_size_mb}
-                      onChange={(e) => updateSetting("max_file_size_mb", parseInt(e.target.value))}
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Maximum Files Per Job</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10000"
-                      value={settings.max_files_per_job}
-                      onChange={(e) => updateSetting("max_files_per_job", parseInt(e.target.value))}
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Processing Batch Size</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="1024"
-                      value={settings.batch_size}
-                      onChange={(e) => updateSetting("batch_size", parseInt(e.target.value))}
-                      className="h-12 w-full mt-1 px-4 border border-slate-200 rounded-2xl bg-white dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "expert_settings" && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-[0.16em] mb-3 dark:text-slate-400">
-                  Advanced Settings
-                </label>
-                <p className="text-xs text-slate-500 mb-4 dark:text-slate-400">
-                  These settings are for advanced configuration only. Modify only if you understand the implications.
-                </p>
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
-                  <p className="text-sm text-amber-700 dark:text-amber-300">
-                    ⚠️ Changing these values may affect detection accuracy and system performance.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
-            <div className="flex justify-end">
-              <button
-                onClick={saveSettings}
-                disabled={saving}
-                className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-blue-500 dark:hover:bg-blue-600"
+              <SettingsGroup
+                title="Basic Settings"
+                description="Configure general system settings and limits."
+                icon={Settings}
               >
-                {saving ? "Saving..." : "Save Settings"}
-              </button>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <TextInput label="Maximum File Size MB" type="number" value={settings.max_file_size_mb} onChange={(value) => updateSetting('max_file_size_mb', Number(value))} />
+                  <TextInput label="Maximum Files Per Job" type="number" value={settings.max_files_per_job} onChange={(value) => updateSetting('max_files_per_job', Number(value))} />
+                  <TextInput label="Processing Batch Size" type="number" value={settings.batch_size} onChange={(value) => updateSetting('batch_size', Number(value))} />
+                </div>
+              </SettingsGroup>
             </div>
-          </div>
-        </div>
+          )}
 
+          {/* Detection Engines Tab */}
+          {activeTab === 'engines' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Engine Weights"
+                description="Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above."
+                icon={Cpu}
+              >
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4">
+                  Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above.
+                </div>
+                <div className="text-sm font-semibold text-slate-950 mb-4">Total: {(engineWeightTotal * 100).toFixed(0)}%</div>
+                {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
+                  <AdvancedSlider
+                    key={key}
+                    label={key}
+                    value={Number(value || 0)}
+                    onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
+                  />
+                ))}
+              </SettingsGroup>
+            </div>
+          )}
 
+          {/* AI Models Tab */}
+          {activeTab === 'ai_models' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="AI Services"
+                description="Configure AI services for advanced detection features."
+                icon={Bot}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextInput label="OpenAI API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
+                  <TextInput label="OpenAI Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
+                  <TextInput label="OpenAI Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
+                  <TextInput label="Anthropic API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
+                  <TextInput label="Anthropic Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
+                </div>
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* Matching Rules Tab */}
+          {activeTab === 'matching_rules' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Detection Profile"
+                description="Auto Detect is recommended. It chooses the right assignment profile from language, file count, code shape, notebooks, starter code, and tests."
+                icon={GitMerge}
+              >
+                <OptionGrid
+                  options={catalog.assignment_types || []}
+                  value={profile.assignment_type}
+                  onChange={(value) => updateProfile('assignment_type', value)}
+                />
+
+                <div className="mt-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(profile.external_source_scan)}
+                      onChange={(event) => updateProfile('external_source_scan', event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950">Enable external / public source scan for this assignment type</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">Scan configured GitHub repos and websites (from Evidence Sources tab) when running checks for this assignment type.</span>
+                    </span>
+                  </label>
+                </div>
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Starter Code Handling"
+                description="Configure how starter code is handled in comparisons."
+              >
+                <SegmentedOptions
+                  options={catalog.starter_code_handling || []}
+                  value={profile.starter_code_handling}
+                  onChange={(value) => updateProfile('starter_code_handling', value)}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Previous Term Matching"
+                description="Configure matching against previous terms."
+              >
+                <SegmentedOptions
+                  options={catalog.previous_term_matching || []}
+                  value={profile.previous_term_matching}
+                  onChange={(value) => updateProfile('previous_term_matching', value)}
+                />
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* Sensitivity and Scoring Tab */}
+          {activeTab === 'sensitivity_scoring' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Review Mode"
+                description="Use Conservative for formal investigations, Balanced for everyday review, and Strict for broader triage."
+                icon={Target}
+              >
+                <SegmentedOptions
+                  options={catalog.review_modes || catalog.sensitivities || []}
+                  value={profile.sensitivity}
+                  onChange={(value) => updateProfile('sensitivity', value)}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="AI Rewrite Detection"
+                description="Configure detection of AI-generated rewrites."
+              >
+                <SegmentedOptions
+                  options={catalog.ai_rewrite_detection || []}
+                  value={profile.ai_rewrite_detection}
+                  onChange={(value) => updateProfile('ai_rewrite_detection', value)}
+                />
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* Review and Evidence Tab */}
+          {activeTab === 'review_evidence' && (
+            <div className="space-y-6">
+              <SettingsGroup title="Result Size" description="Top 25 is the recommended review queue size for most assignments." icon={Eye}>
+                <SegmentedOptions
+                  options={catalog.result_volume || []}
+                  value={profile.result_volume}
+                  onChange={(value) => updateProfile('result_volume', value)}
+                />
+              </SettingsGroup>
+
+              <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+                <div></div>
+                <aside className="space-y-6">
+                  <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+                    <div className="text-sm font-semibold text-blue-950">Recommended profile applied</div>
+                    <p className="mt-3 text-sm leading-6 text-blue-800">{applied.recommendation}</p>
+                    <div className="mt-4 rounded-lg bg-white/70 p-3 text-sm font-medium text-blue-950">
+                      {applied.summary}
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-950">Automatically handled</div>
+                    <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                      <div>Starter code removed before comparison.</div>
+                      <div>Previous-term matching enabled when history is available.</div>
+                      <div>Runtime behavior and same wrong answers compared.</div>
+                      <div>Thresholds calibrated per assignment using outliers, score gaps, and rare evidence.</div>
+                    </div>
+                  </section>
+
+                  {applied.warnings?.length > 0 && (
+                    <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+                      {applied.warnings.map((warning) => <div key={warning}>{warning}</div>)}
+                    </section>
+                  )}
+                </aside>
+              </div>
+            </div>
+          )}
+
+          {/* External Sources Tab */}
+          {activeTab === 'external_sources' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="External Source Scan"
+                description="Configure public source locations that Plagiarism Checker scans for copied code."
+                icon={ExternalLink}
+              >
+                <div className="space-y-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.source_scan_enabled)}
+                      onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950">Scan configured public sources during plagiarism checks</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">Use repository URLs such as https://github.com/owner/repo for practical public-code comparison.</span>
+                    </span>
+                  </label>
+                  <TextAreaInput
+                    label="Websites or repositories to scan"
+                    value={(settings.source_scan_sites || []).join('\n')}
+                    placeholder={'https://github.com/example/course-solutions\nhttps://raw.githubusercontent.com/example/repo/main/solution.py'}
+                    onChange={(value) => updateSetting('source_scan_sites', value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))}
+                  />
+                  <TextInput label="MOSS User ID" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
+                </div>
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* Integrations Tab */}
+          {activeTab === 'integrations' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Webhooks"
+                description="Configure webhooks for real-time notifications."
+                icon={Zap}
+              >
+                <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* Performance Tab */}
+          {activeTab === 'performance' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Performance Settings"
+                description="Configure processing performance and resource limits."
+                icon={Activity}
+              >
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SelectInput label="Embedding Runtime" value={settings.embedding_runtime} options={[['local_unixcoder', 'Local UniXcoder'], ['remote_openai_compatible', 'Remote OpenAI-Compatible Server']]} onChange={(value) => updateSetting('embedding_runtime', value)} />
+                  <SelectInput label="Embedding Device" value={settings.embedding_device} options={[['auto', 'Auto'], ['cuda', 'CUDA / GPU'], ['cpu', 'CPU']]} onChange={(value) => updateSetting('embedding_device', value)} />
+                  <TextInput label="Embedding Batch Size" type="number" value={settings.embedding_batch_size} onChange={(value) => updateSetting('embedding_batch_size', Number(value))} />
+                </div>
+              </SettingsGroup>
+            </div>
+          )}
+
+         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function SettingsGroup({ title, description, children, icon: Icon }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        {Icon && <Icon size={20} className="mt-0.5 shrink-0 text-slate-600" />}
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+        </div>
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function OptionGrid({ options, value, onChange }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          className={`rounded-xl border p-4 text-left transition ${value === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+            }`}
+        >
+          <div className="text-sm font-semibold text-slate-950">{option.label}</div>
+          <div className="mt-1 text-sm leading-5 text-slate-500">{option.description}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SegmentedOptions({ options, value, onChange }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AdvancedSlider({ label, value, onChange }) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-semibold capitalize text-slate-950">{label.replaceAll('_', ' ')}</div>
+        <div className="text-sm font-semibold text-blue-600">{Math.round(value * 100)}%</div>
+      </div>
+      <input type="range" min="0" max="1" step="0.05" value={value} onChange={(event) => onChange(Number(event.target.value))} className="w-full accent-blue-600" />
+    </div>
+  );
+}
+
+function TextInput({ label, value, onChange, type = 'text', placeholder = '' }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <input
+        type={type}
+        value={value ?? ''}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+      />
+    </label>
+  );
+}
+
+function TextAreaInput({ label, value, onChange, placeholder = '' }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <textarea
+        value={value ?? ''}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        rows={5}
+        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+      />
+    </label>
+  );
+}
+
+function SelectInput({ label, value, options, onChange }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <select
+        value={value ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+      >
+        {options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function Notice({ children, tone, icon: Icon }) {
+  const className = tone === 'red'
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return (
+    <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${className}`}>
+      <Icon size={16} className="mt-0.5 shrink-0" />
+      <span>{children}</span>
+    </div>
   );
 }

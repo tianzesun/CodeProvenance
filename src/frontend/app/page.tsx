@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
+  Bot,
   CheckCircle2,
   GripVertical,
   LayoutGrid,
@@ -19,7 +20,6 @@ import {
   Download,
   FileSearch,
   FileText,
-  FolderArchive,
   Loader2,
   Plus,
   RotateCcw,
@@ -36,8 +36,8 @@ const HOME_LAYOUT_TIP_STORAGE_KEY = 'integritydesk-home-layout-tip-v1';
 const HOME_CARD_DEFAULT_ORDER = [
   'recent-checks',
   'report-center',
-  'upload-files',
-  'upload-zip',
+  'plagiarism-checker',
+  'ai-detector',
   'settings',
 ];
 const HOME_CARD_OPTIONAL_ORDER = ['compare-tools', 'benchmark-suite', 'admin-console'];
@@ -424,21 +424,21 @@ export default function Home() {
             </div>
           </div>
 
-           {loading ? (
-             <div className="space-y-4 px-6 pb-6">
-               {[1, 2, 3, 4].map((item) => (
-                 <div key={item} className="rounded-[22px] border border-[color:var(--border)] bg-[var(--surface-muted)] p-4">
-                   <div className="flex items-center gap-4">
-                     <div className="h-12 w-12 rounded-2xl skeleton" />
-                     <div className="flex-1 space-y-2">
-                       <div className="h-4 rounded skeleton w-3/4" />
-                       <div className="h-3 rounded skeleton w-1/2" />
-                     </div>
-                     <div className="h-6 w-16 rounded-full skeleton" />
-                   </div>
-                 </div>
-               ))}
-             </div>
+          {loading ? (
+            <div className="space-y-4 px-6 pb-6">
+              {[1, 2, 3, 4].map((item) => (
+                <div key={item} className="rounded-[22px] border border-[color:var(--border)] bg-[var(--surface-muted)] p-4">
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-2xl skeleton" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 rounded skeleton w-3/4" />
+                      <div className="h-3 rounded skeleton w-1/2" />
+                    </div>
+                    <div className="h-6 w-16 rounded-full skeleton" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : recentJobs.length === 0 ? (
             <div className="px-6 pb-6">
               <div className="theme-card-muted rounded-[24px] px-6 py-12 text-center">
@@ -567,29 +567,29 @@ export default function Home() {
         </div>
       ),
     },
-    'upload-files': {
-      id: 'upload-files',
-      label: 'Upload individual files',
+    'plagiarism-checker': {
+      id: 'plagiarism-checker',
+      label: 'Plagiarism Checker',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
-          href="/upload?mode=individual"
+          href="/upload"
           icon={Upload}
-          title="Upload individual files"
-          description="Use this when the submissions are already split into separate source files."
+          title="Plagiarism Checker"
+          description="Upload two files, many files, or a ZIP. IntegrityDesk automatically runs pairwise or class-wide comparison."
         />
       ),
     },
-    'upload-zip': {
-      id: 'upload-zip',
-      label: 'Upload one ZIP archive',
+    'ai-detector': {
+      id: 'ai-detector',
+      label: 'AI Detector',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
-          href="/upload?mode=zip"
-          icon={FolderArchive}
-          title="Upload one ZIP archive"
-          description="Use this when the assignment comes as a folder export or submission bundle."
+          href="/ai-detector"
+          icon={Bot}
+          title="AI Detector"
+          description="Stage a single-submission detector for AI-generated code signals, explanations, and professor evidence."
         />
       ),
     },
@@ -634,20 +634,20 @@ export default function Home() {
     },
     ...(user?.role === 'admin'
       ? {
-          'admin-console': {
-            id: 'admin-console',
-            label: 'Admin console',
-            className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
-            content: (
-              <ActionCard
-                href="/admin"
-                icon={Users}
-                title="Open admin console"
-                description="Manage accounts, roles, and workspace access from the dashboard."
-              />
-            ),
-          },
-        }
+        'admin-console': {
+          id: 'admin-console',
+          label: 'Admin console',
+          className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
+          content: (
+            <ActionCard
+              href="/admin"
+              icon={Users}
+              title="Open admin console"
+              description="Manage accounts, roles, and workspace access from the dashboard."
+            />
+          ),
+        },
+      }
       : {}),
   };
   return (
@@ -679,7 +679,7 @@ export default function Home() {
                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-8 py-4 text-base font-semibold transition hover:scale-105"
                   >
                     <Plus size={18} />
-                    New Check
+                    Plagiarism Checker
                   </Link>
 
                   {latestCompleted && (
@@ -751,11 +751,10 @@ export default function Home() {
                   ) : (
                     <div className="space-y-4">
                       <div
-                        className={`rounded-[22px] border px-4 py-4 ${
-                          latestFlaggedResults.length > 0
+                        className={`rounded-[22px] border px-4 py-4 ${latestFlaggedResults.length > 0
                             ? 'border-amber-500/20 bg-amber-500/[0.08]'
                             : 'border-emerald-500/20 bg-emerald-500/[0.08]'
-                        }`}
+                          }`}
                       >
                         <div className="grid gap-4 2xl:grid-cols-[1.2fr_0.8fr] 2xl:items-start">
                           <div className="min-w-0">
@@ -825,22 +824,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      <div className="flex flex-wrap gap-3">
-                        <Link
-                          href={`/results/${latestCompleted.id}`}
-                          className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                        >
-                          <FileSearch size={16} />
-                          Open Result
-                        </Link>
-                        <Link
-                          href="/upload"
-                          className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold"
-                        >
-                          <Upload size={16} />
-                          Start New Check
-                        </Link>
-                      </div>
+
                     </div>
                   )}
                 </div>
@@ -1057,20 +1041,17 @@ const EditableDashboardCard = ({
     onClickCapture={onClickCapture}
   >
     <div
-      className={`transition ${editMode ? 'pointer-events-none select-none' : ''} ${
-        isActive ? 'scale-[0.995] opacity-95' : ''
-      } ${
-        isDragging ? 'opacity-60' : ''
-      }`}
+      className={`transition ${editMode ? 'pointer-events-none select-none' : ''} ${isActive ? 'scale-[0.995] opacity-95' : ''
+        } ${isDragging ? 'opacity-60' : ''
+        }`}
     >
       {children}
     </div>
 
     {editMode && (
       <div
-        className={`pointer-events-none absolute inset-0 rounded-[30px] border-2 border-dashed bg-blue-600/[0.04] ${
-          isActive ? 'border-blue-600/45 shadow-[0_0_0_1px_rgba(37,99,235,0.12)]' : 'border-blue-600/30'
-        }`}
+        className={`pointer-events-none absolute inset-0 rounded-[30px] border-2 border-dashed bg-blue-600/[0.04] ${isActive ? 'border-blue-600/45 shadow-[0_0_0_1px_rgba(37,99,235,0.12)]' : 'border-blue-600/30'
+          }`}
       >
         <div className="pointer-events-auto absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border border-blue-600/15 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm">
           <GripVertical size={14} className="text-blue-600" />
@@ -1081,11 +1062,10 @@ const EditableDashboardCard = ({
           <button
             type="button"
             onClick={onActivate}
-            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold ${
-              isActive
+            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold ${isActive
                 ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
                 : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]'
-            }`}
+              }`}
           >
             Select
           </button>

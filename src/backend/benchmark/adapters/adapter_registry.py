@@ -91,11 +91,11 @@ def initialize_registry() -> None:
     """Initialize registry with official benchmark participants."""
     from .baselines.lexical_baseline import LexicalBaselineAdapter
     from .baselines.ast_baseline import ASTBaselineAdapter
-    from .external.moss_adapter import MossAdapter
-    from .external.jplag_adapter import JPlagAdapter
-    from .external.dolos_adapter import DolosBenchmarkEngine
+    from .moss_adapter import MossAdapter
+    from .jplag_adapter import JPlagAdapter
+    from .dolos_adapter import DolosBenchmarkEngine
     from .external.nicad_adapter import NiCadAdapter
-    from .external.pmd_adapter import PMDBenchmarkEngine
+    from .pmd_adapter import PMDBenchmarkEngine
     from .internal.codeprovenance_engine import CodeProvenanceAdapter
 
     # Internal baselines

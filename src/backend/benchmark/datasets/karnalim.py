@@ -1,137 +1,221 @@
-"""
-Karnalim Classroom Dataset Loader.
+"""Karnalim classroom plagiarism dataset loader.
 
-Oscar Karnalim's classroom plagiarism dataset containing real student submissions
+Oscar Karnalim's classroom plagiarism dataset contains real student submissions
 with confirmed plagiarism cases from university programming assignments.
-
-Reference:
-Karnalim, O. (2019). A Dataset of Student Plagiarism in Programming Assignments.
-In Proceedings of the 2019 ACM Conference on Innovation and Technology in Computer
-Science Education (ITiCSE '19).
 """
+
 from __future__ import annotations
 
-import os
 import json
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Optional, Iterator, Tuple
+from typing import Any, Dict, Iterator, List, Optional
 
-from src.backend.benchmark.datasets.schema import Sample, ClonePair, DatasetContract
-from src.backend.benchmark.datasets.base import BaseDataset
+from src.backend.benchmark.datasets.schema import (
+    CanonicalDataset,
+    CloneType,
+    CodePair,
+    DatasetContract,
+    DatasetMetadata,
+    Difficulty,
+)
 
 
-class KarnalimDataset(BaseDataset, DatasetContract):
-    """
-    Loader for Karnalim Classroom Plagiarism Dataset.
+@dataclass
+class KarnalimSample:
+    """A single source-code submission from the Karnalim dataset."""
 
-    Dataset contains real student submissions from introductory programming courses
-    with manually verified plagiarism cases. Includes:
-    - 4 programming assignments
-    - Total 132 submissions
-    - 28 confirmed plagiarism pairs
-    - Ground truth for all pairs
-    """
+    id: str
+    content: str
+    language: str = "java"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class KarnalimClonePair:
+    """A manually confirmed plagiarism pair from the Karnalim dataset."""
+
+    id: str
+    sample_a_id: str
+    sample_b_id: str
+    clone_type: int = 2
+    is_plagiarism: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class KarnalimDataset(DatasetContract):
+    """Load Karnalim classroom submissions into the benchmark dataset contract."""
 
     dataset_id = "karnalim_classroom"
     dataset_name = "Karnalim Classroom Dataset"
-    dataset_description = "Real student programming submissions with confirmed plagiarism cases"
+    dataset_description = "Real student programming submissions with plagiarism labels"
     language = "java"
-    sample_count = 132
-    clone_pair_count = 28
+    expected_sample_count = 132
+    expected_clone_pair_count = 28
 
     def __init__(self, dataset_path: Optional[Path] = None):
-        super().__init__()
-        self.dataset_path = dataset_path or Path(os.environ.get(
-            "KARNALIM_DATASET_PATH",
-            "./datasets/karnalim"
-        ))
-        self._samples: List[Sample] = []
-        self._clone_pairs: List[ClonePair] = []
+        """Initialize the loader with an explicit or environment-provided path."""
+        self.dataset_path = dataset_path or Path(
+            os.environ.get("KARNALIM_DATASET_PATH", "./datasets/karnalim")
+        )
+        self.loaded = False
+        self._samples: List[KarnalimSample] = []
+        self._clone_pairs: List[KarnalimClonePair] = []
 
-    def load(self) -> None:
-        """Load and parse the Karnalim dataset."""
+    @property
+    def metadata(self) -> DatasetMetadata:
+        """Return static dataset metadata for validation and reporting."""
+        size = len(self._clone_pairs) or self.expected_clone_pair_count
+        return DatasetMetadata(
+            name=self.dataset_name,
+            version="2019",
+            language=self.language,
+            clone_types=[CloneType.TYPE_2, CloneType.TYPE_3],
+            difficulty=Difficulty.MEDIUM,
+            size=size,
+            source="https://github.com/oscarkarnalim/classroom_dataset",
+            license="research",
+            ground_truth_format="binary",
+            description=self.dataset_description,
+        )
+
+    def load(self, **kwargs: Any) -> CanonicalDataset:
+        """Load submissions and confirmed plagiarism pairs as a canonical dataset."""
+        if kwargs:
+            max_pairs = kwargs.get("max_pairs")
+        else:
+            max_pairs = None
+
         if not self.dataset_path.exists():
             raise FileNotFoundError(
                 f"Karnalim dataset not found at {self.dataset_path}. "
-                "Clone from https://github.com/oscarkarnalim/classroom_dataset.git "
-                "and set KARNALIM_DATASET_PATH environment variable."
+                "Clone https://github.com/oscarkarnalim/classroom_dataset and set "
+                "KARNALIM_DATASET_PATH."
             )
 
         self._load_samples()
         self._load_ground_truth()
+        if max_pairs is not None:
+            self._clone_pairs = self._clone_pairs[: int(max_pairs)]
         self.loaded = True
 
+        sample_by_id = {sample.id: sample for sample in self._samples}
+        pairs = [
+            self._to_code_pair(pair, sample_by_id)
+            for pair in self._clone_pairs
+            if pair.sample_a_id in sample_by_id and pair.sample_b_id in sample_by_id
+        ]
+        return CanonicalDataset(
+            name=self.dataset_id,
+            version=self.metadata.version,
+            pairs=pairs,
+            metadata=self.metadata,
+            submissions=list(self._samples),
+            language=self.language,
+        )
+
     def _load_samples(self) -> None:
-        """Load all submission samples from the dataset."""
+        """Load Java submissions from assignment directories."""
         self._samples = []
 
         for assignment_dir in sorted(self.dataset_path.glob("assignment*")):
             if not assignment_dir.is_dir():
                 continue
 
-            assignment_id = assignment_dir.name
             submissions_dir = assignment_dir / "submissions"
-
             if not submissions_dir.exists():
                 continue
 
-            for submission_file in submissions_dir.glob("*.java"):
-                sample_id = f"{assignment_id}_{submission_file.stem}"
-
-                with open(submission_file, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-
-                self._samples.append(Sample(
-                    id=sample_id,
-                    content=content,
-                    language="java",
-                    metadata={
-                        "assignment": assignment_id,
-                        "filename": submission_file.name,
-                        "student_id": submission_file.stem
-                    }
-                ))
+            for submission_file in sorted(submissions_dir.glob("*.java")):
+                content = submission_file.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                self._samples.append(
+                    KarnalimSample(
+                        id=f"{assignment_dir.name}_{submission_file.stem}",
+                        content=content,
+                        metadata={
+                            "assignment": assignment_dir.name,
+                            "filename": submission_file.name,
+                            "student_id": submission_file.stem,
+                        },
+                    )
+                )
 
     def _load_ground_truth(self) -> None:
-        """Load ground truth plagiarism pairs."""
+        """Load confirmed plagiarism pairs from ``ground_truth.json`` when present."""
         self._clone_pairs = []
 
         gt_file = self.dataset_path / "ground_truth.json"
-        if gt_file.exists():
-            with open(gt_file, 'r', encoding='utf-8') as f:
-                gt_data = json.load(f)
+        if not gt_file.exists():
+            return
 
-            for pair in gt_data.get("plagiarism_pairs", []):
-                self._clone_pairs.append(ClonePair(
-                    id=f"{pair['assignment']}_{pair['a']}_{pair['b']}",
-                    sample_a_id=f"{pair['assignment']}_{pair['a']}",
-                    sample_b_id=f"{pair['assignment']}_{pair['b']}",
-                    clone_type=pair.get("clone_type", 2),
-                    is_plagiarism=True,
+        gt_data = json.loads(gt_file.read_text(encoding="utf-8"))
+        for pair in gt_data.get("plagiarism_pairs", []):
+            assignment = pair["assignment"]
+            self._clone_pairs.append(
+                KarnalimClonePair(
+                    id=f"{assignment}_{pair['a']}_{pair['b']}",
+                    sample_a_id=f"{assignment}_{pair['a']}",
+                    sample_b_id=f"{assignment}_{pair['b']}",
+                    clone_type=int(pair.get("clone_type", 2)),
                     metadata={
-                        "assignment": pair['assignment'],
-                        "description": pair.get("description", "")
-                    }
-                ))
+                        "assignment": assignment,
+                        "description": pair.get("description", ""),
+                    },
+                )
+            )
 
-    def get_all_samples(self) -> Iterator[Sample]:
+    @staticmethod
+    def _to_code_pair(
+        pair: KarnalimClonePair,
+        sample_by_id: Dict[str, KarnalimSample],
+    ) -> CodePair:
+        """Convert a Karnalim pair into the shared canonical pair schema."""
+        sample_a = sample_by_id[pair.sample_a_id]
+        sample_b = sample_by_id[pair.sample_b_id]
+        return CodePair(
+            id_a=pair.sample_a_id,
+            id_b=pair.sample_b_id,
+            code_a=sample_a.content,
+            code_b=sample_b.content,
+            label=1 if pair.is_plagiarism else 0,
+            clone_type=pair.clone_type,
+            metadata=dict(pair.metadata),
+        )
+
+    def get_all_samples(self) -> Iterator[KarnalimSample]:
+        """Return an iterator over loaded samples, loading the dataset if needed."""
         self._ensure_loaded()
         return iter(self._samples)
 
-    def get_all_clone_pairs(self) -> Iterator[ClonePair]:
+    def get_all_clone_pairs(self) -> Iterator[KarnalimClonePair]:
+        """Return an iterator over loaded clone pairs, loading the dataset if needed."""
         self._ensure_loaded()
         return iter(self._clone_pairs)
 
-    def get_sample_by_id(self, sample_id: str) -> Optional[Sample]:
+    def get_sample_by_id(self, sample_id: str) -> Optional[KarnalimSample]:
+        """Return one sample by identifier, or ``None`` when it is absent."""
         self._ensure_loaded()
-        return next((s for s in self._samples if s.id == sample_id), None)
+        return next(
+            (sample for sample in self._samples if sample.id == sample_id), None
+        )
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> Dict[str, Any]:
+        """Return lightweight statistics for the loaded dataset."""
         self._ensure_loaded()
+        assignments = {sample.metadata["assignment"] for sample in self._samples}
         return {
             "name": self.dataset_name,
             "samples_count": len(self._samples),
             "clone_pairs_count": len(self._clone_pairs),
             "language": self.language,
-            "assignments": len(set(s.metadata["assignment"] for s in self._samples))
+            "assignments": len(assignments),
         }
+
+    def _ensure_loaded(self) -> None:
+        """Load the dataset before serving cached convenience data."""
+        if not self.loaded:
+            self.load()
