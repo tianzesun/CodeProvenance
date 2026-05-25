@@ -381,6 +381,7 @@ class Case(Base):
     created_by = relationship("User")
     result_links = relationship("CaseResultLink", back_populates="case", lazy="dynamic")
     comments = relationship("CaseComment", back_populates="case", lazy="dynamic")
+    reports = relationship("Report", back_populates="case")
 
 
 class CaseResultLink(Base):
@@ -573,3 +574,53 @@ class TenantSubscription(Base):
 
     # Relationships
     tenant = relationship("Tenant", back_populates="subscription")
+
+
+class FprValidationRun(Base):
+    """Stored Real FPR Validation runs for audit, comparison, and certification.
+
+    These are professor/admin-initiated tests on known-clean student corpora
+    to measure actual false positive risk before using the system in production courses.
+    """
+
+    __tablename__ = "fpr_validation_runs"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+
+    name = Column(String(255), nullable=False)
+    payload = Column(JSONB, nullable=False)  # full result from /api/benchmark/real-fpr
+
+    # Denormalized key metrics for fast filtering/listing without loading full payload
+    num_submissions = Column(Integer, nullable=True)
+    num_pairs = Column(Integer, nullable=True)
+    mean_score = Column(Numeric(5, 4), nullable=True)
+    max_score = Column(Numeric(5, 4), nullable=True)
+
+    # Key decision values captured at the time of the run
+    recommended_threshold = Column(Numeric(5, 2), nullable=True)
+    fpr_at_recommended_threshold = Column(Numeric(6, 4), nullable=True)
+
+    # User-provided notes and workflow status
+    notes = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="completed")
+
+    # Future-proofing for certification workflow
+    is_certified = Column(Boolean, nullable=False, default=False)
+    certified_by_user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    certified_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+
+    __table_args__ = (
+        Index("idx_fpr_runs_tenant_created", "tenant_id", "created_at"),
+        Index("idx_fpr_runs_user", "user_id"),
+        Index("idx_fpr_runs_tenant_status", "tenant_id", "status"),
+        Index("idx_fpr_runs_certified", "is_certified"),
+    )
+
+    # Relationships
+    tenant = relationship("Tenant")
+    user = relationship("User", foreign_keys=[user_id])
+    certified_by = relationship("User", foreign_keys=[certified_by_user_id])

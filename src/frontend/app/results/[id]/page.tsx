@@ -342,6 +342,11 @@ export default function ResultsPage() {
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
 
+  // External / Public source matches for this specific pair (for side-by-side integration)
+  const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
+  const externalB = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_b);
+  const hasExternalMatches = (externalA?.match_count || 0) > 0 || (externalB?.match_count || 0) > 0;
+
   // Keep activeIndex in sync when table filters change (best effort)
   useEffect(() => {
     if (activeResult && tableData.length > 0) {
@@ -405,21 +410,35 @@ export default function ResultsPage() {
               </div>
             </div>
 
-            {/* 1. Summary chips (understand the result set first) */}
-            <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                {job?.file_count || Object.keys(submissions).length || 0} submissions
-              </div>
-              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                {results.length} pair{results.length === 1 ? '' : 's'}
-              </div>
-              <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
-                {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
-              </div>
-              <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
-                {tableData.length} shown
-              </div>
-            </div>
+             {/* 1. Summary chips (understand the result set first) */}
+             <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                 {job?.file_count || Object.keys(submissions).length || 0} submissions
+               </div>
+               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                 {results.length} pair{results.length === 1 ? '' : 's'}
+               </div>
+               <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
+                 {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
+               </div>
+               <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
+                 {tableData.length} shown
+               </div>
+
+               {/* External Source Scan status chip — always visible for discoverability */}
+               {job?.web_analysis && (
+                 <div className={`rounded-full px-3 py-1 text-sm font-medium ${
+                   job.web_analysis.enabled 
+                     ? 'bg-emerald-100 text-emerald-700' 
+                     : 'bg-slate-100 text-slate-600'
+                 }`}>
+                   External: {job.web_analysis.enabled ? 'On' : 'Off'}
+                   {job.web_analysis.enabled && job.web_analysis.matched_submissions > 0 && (
+                     <> ({job.web_analysis.matched_submissions} match{job.web_analysis.matched_submissions === 1 ? '' : 'es'})</>
+                   )}
+                 </div>
+               )}
+             </div>
 
             {/* 2. Sort + 3. Filters + 4. Reset — grouped cleanly */}
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
@@ -497,7 +516,77 @@ export default function ResultsPage() {
             </div>
           </div>
 
-           {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
+          {/* External / Public Source Scan — always visible for discoverability inside Plagiarism Checker */}
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck className="text-emerald-600" size={18} />
+              <div className="font-semibold text-emerald-800">External Source Scan</div>
+
+              {job?.web_analysis ? (
+                job.web_analysis.enabled ? (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Enabled</span>
+                ) : (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Disabled</span>
+                )
+              ) : (
+                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Not run</span>
+              )}
+
+              <a href="/settings" className="ml-auto text-xs text-emerald-600 hover:underline">Manage in Settings</a>
+            </div>
+
+            {job?.web_analysis?.enabled && job.web_analysis.matched_submissions > 0 ? (
+              <>
+                <div className="text-sm text-emerald-700 mb-3">
+                  Found matches in <strong>{job.web_analysis.matched_submissions}</strong> submission(s). 
+                  Highest similarity: <strong>{(job.web_analysis.highest_similarity * 100).toFixed(0)}%</strong>
+                </div>
+
+                <div className="space-y-2">
+                  {job.web_analysis.submissions?.slice(0, 4).map((entry: any, idx: number) => (
+                    <div key={idx} className="text-sm border border-emerald-100 rounded-lg p-3 bg-emerald-50/50">
+                      <div className="font-medium text-emerald-900">{entry.name}</div>
+                      <div className="text-xs text-emerald-700 mt-1">
+                        Max similarity: {(entry.max_similarity * 100).toFixed(0)}% • {entry.match_count} public source(s)
+                      </div>
+                      {entry.sources?.slice(0, 2).map((src: any, sidx: number) => (
+                        <a
+                          key={sidx}
+                          href={src.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-xs text-emerald-600 hover:underline mt-1 truncate"
+                        >
+                          {src.source}: {src.name || src.url}
+                        </a>
+                      ))}
+                    </div>
+                  ))}
+                  {job.web_analysis.submissions?.length > 4 && (
+                    <div className="text-xs text-emerald-600">
+                      +{job.web_analysis.submissions.length - 4} more submissions with public matches
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : job?.web_analysis ? (
+              <>
+                <div className="text-sm text-slate-600">
+                  {job.web_analysis.status_message || "No matches found against configured public sources."}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Configure sources in <a href="/settings" className="underline">Settings → External Sources</a>.
+                </p>
+              </>
+            ) : (
+              <div className="text-sm text-slate-600">
+                External source scanning was not performed for this job. 
+                Enable it in <a href="/settings" className="underline">Settings → External Sources</a> and re-run the check.
+              </div>
+            )}
+          </div>
+
+            {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
            {!drawerOpen && (
              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
@@ -616,15 +705,45 @@ export default function ResultsPage() {
                    </div>
                  </div>
 
-                 {/* Evidence chips */}
-                 <div className="mt-3 flex flex-wrap gap-2">
-                   {evidenceTypes.map((item) => (
-                     <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
-                       {item}
-                     </span>
-                   ))}
-                 </div>
-               </div>
+                  {/* Evidence chips */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {evidenceTypes.map((item) => (
+                      <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* External/Public Source Matches for this pair - integrated into side-by-side detail */}
+                  {hasExternalMatches && (
+                    <div className="mt-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50">
+                      <div className="font-semibold text-emerald-800 text-sm mb-2 flex items-center gap-2">
+                        <ShieldCheck size={14} /> External / Public Matches for this Pair
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        {[externalA, externalB].filter(Boolean).map((ext: any, i: number) => (
+                          <div key={i}>
+                            <div className="font-medium text-emerald-900">{ext.name}</div>
+                            <div className="text-xs text-emerald-700">
+                              Max similarity to public: {(ext.max_similarity * 100).toFixed(0)}% • {ext.match_count} source(s)
+                            </div>
+                            {ext.sources?.slice(0, 3).map((src: any, si: number) => (
+                              <a
+                                key={si}
+                                href={src.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block text-xs text-emerald-600 hover:underline truncate"
+                              >
+                                → {src.source}: {src.name || src.url}
+                              </a>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                {/* Side-by-side code comparison - full screen width */}
                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

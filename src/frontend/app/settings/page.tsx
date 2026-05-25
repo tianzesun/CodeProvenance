@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, Cpu, Database, Save, Shield, Settings, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, Archive } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, Settings, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity } from 'lucide-react';
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
@@ -14,6 +14,7 @@ const DEFAULT_PROFILE = {
   previous_term_matching: 'same_course_only',
   ai_rewrite_detection: 'balanced',
   result_volume: 'top_25',
+  external_source_scan: true,
 };
 
 const TABS = [
@@ -26,7 +27,6 @@ const TABS = [
   { id: 'external_sources', label: 'Evidence Sources', icon: ExternalLink },
   { id: 'integrations', label: 'Integrations', icon: Zap },
   { id: 'performance', label: 'Performance', icon: Activity },
-  { id: 'audit_trail', label: 'Audit & Compliance', icon: Archive },
 ];
 
 export default function SettingsPage() {
@@ -34,9 +34,6 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState(null);
   const [activeTab, setActiveTab] = useState('general');
   const [webhookUrl, setWebhookUrl] = useState('');
-  const [auditLogLevel, setAuditLogLevel] = useState('INFO');
-  const [auditRetentionDays, setAuditRetentionDays] = useState(365);
-  const [debugMode, setDebugMode] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -47,9 +44,6 @@ export default function SettingsPage() {
       .then((res) => {
         setSettings(res.data);
         setWebhookUrl(res.data.webhook_url || '');
-        setAuditLogLevel(res.data.audit_log_level || 'INFO');
-        setAuditRetentionDays(res.data.audit_retention_days || 365);
-        setDebugMode(res.data.debug_mode || false);
       })
       .catch(() => setError('Failed to load settings'));
   }, [authLoading, user]);
@@ -99,9 +93,6 @@ export default function SettingsPage() {
         max_file_size_mb: settings.max_file_size_mb,
         max_files_per_job: settings.max_files_per_job,
         webhook_url: webhookUrl,
-        audit_log_level: auditLogLevel,
-        audit_retention_days: auditRetentionDays,
-        debug_mode: debugMode,
         source_scan_enabled: Boolean(settings.source_scan_enabled),
         source_scan_sites: settings.source_scan_sites || [],
       };
@@ -247,6 +238,21 @@ export default function SettingsPage() {
                   value={profile.assignment_type}
                   onChange={(value) => updateProfile('assignment_type', value)}
                 />
+
+                <div className="mt-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(profile.external_source_scan)}
+                      onChange={(event) => updateProfile('external_source_scan', event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950">Enable external / public source scan for this assignment type</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">Scan configured GitHub repos and websites (from Evidence Sources tab) when running checks for this assignment type.</span>
+                    </span>
+                  </label>
+                </div>
               </SettingsGroup>
 
               <SettingsGroup
@@ -406,27 +412,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Audit Trail Tab */}
-          {activeTab === 'audit_trail' && (
-            <div className="space-y-6">
-              <SettingsGroup
-                title="Audit & Compliance"
-                description="Configure logging, retention, and compliance settings."
-                icon={Archive}
-              >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectInput label="Log Level" value={auditLogLevel} options={[['DEBUG', 'Debug'], ['INFO', 'Info'], ['WARNING', 'Warning'], ['ERROR', 'Error']]} onChange={setAuditLogLevel} />
-                  <TextInput label="Audit Retention Days" type="number" value={auditRetentionDays} onChange={(value) => setAuditRetentionDays(Number(value))} />
-                </div>
-                <label className="flex items-center gap-3 mt-4">
-                  <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded" />
-                  <span className="text-sm font-medium text-slate-700">Enable Debug Mode</span>
-                </label>
-                <p className="text-xs text-slate-500 mt-1">Enables verbose logging and additional diagnostic information. Use only for troubleshooting.</p>
-              </SettingsGroup>
-            </div>
-          )}
-        </div>
+         </div>
       </div>
     </DashboardLayout>
   );

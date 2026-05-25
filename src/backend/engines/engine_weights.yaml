@@ -1,14 +1,12 @@
 weights:
-  token: 0.12
-  winnowing: 0.16
-  gst: 0.13
-  ast: 0.17
-  ngram: 0.10
-  graph: 0.15
-  embedding: 0.12
-  static_rules: 0.05
-  codebert: 0.0
-  sklearn_cosine: 0.0
+  token: 0.0916
+  winnowing: 0.0611
+  gst: 0.1374
+  ast: 0.229
+  ngram: 0.0763
+  graph: 0.1832
+  embedding: 0.1832
+  static_rules: 0.0382
 baseline_correction:
   baselines:
     winnowing: 0.25

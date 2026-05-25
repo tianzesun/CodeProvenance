@@ -57,6 +57,7 @@ from fastapi.responses import (
 from src.backend.api.middleware.request_id import RequestIdMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from pydantic import BaseModel
 from sqlalchemy import func, select, or_
 from sqlalchemy.orm import joinedload
 
@@ -76,8 +77,19 @@ from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
 )
 from src.backend.models.database import (
-    Tenant, User, ApiKey, Job, Submission, SimilarityResult,
-    WebhookEvent, UsageMetric, AuditLog, Course, Assignment, CourseInstructor
+    Tenant,
+    User,
+    ApiKey,
+    Job,
+    Submission,
+    SimilarityResult,
+    WebhookEvent,
+    UsageMetric,
+    AuditLog,
+    Course,
+    Assignment,
+    CourseInstructor,
+    FprValidationRun,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -3510,12 +3522,31 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a single per-submission AI detection result.
+
+    Preserves the richer fields added by the new engine (signal_labels,
+    flagged_lines, annotated_snippet) so the results page can display them.
+    """
     signals = {
         name: round(_coerce_float(value), 3)
         for name, value in (entry.get("signals") or {}).items()
     }
     indicators = [
         str(indicator) for indicator in (entry.get("indicators") or []) if indicator
+    ]
+    signal_labels = {
+        str(k): str(v) for k, v in (entry.get("signal_labels") or {}).items()
+    }
+    flagged_lines = [int(ln) for ln in (entry.get("flagged_lines") or []) if ln]
+    # annotated_snippet: list of {line, text, flagged} — pass through as-is
+    annotated_snippet = [
+        {
+            "line": int(item.get("line", 0)),
+            "text": str(item.get("text", "")),
+            "flagged": bool(item.get("flagged", False)),
+        }
+        for item in (entry.get("annotated_snippet") or [])
+        if isinstance(item, dict)
     ]
 
     return {
@@ -3525,7 +3556,10 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         "confidence": round(_coerce_float(entry.get("confidence")), 3),
         "status": str(entry.get("status") or "Low Risk"),
         "signals": signals,
-        "indicators": indicators[:5],
+        "signal_labels": signal_labels,
+        "indicators": indicators[:6],
+        "flagged_lines": flagged_lines[:30],
+        "annotated_snippet": annotated_snippet,
         "error": str(entry.get("error") or ""),
     }
 
@@ -3738,7 +3772,9 @@ def _persist_job(job_id: str) -> None:
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
-def _update_job_status_in_db(job_id: str, status: str, error_message: str | None = None) -> None:
+def _update_job_status_in_db(
+    job_id: str, status: str, error_message: str | None = None
+) -> None:
     """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
     try:
         with SessionLocal() as db:
@@ -3889,28 +3925,46 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                 "id": job_id,
                 "status": db_job.status or "completed",
                 "assignment_name": db_job.name or f"Job {job_id}",
-                "threshold": float(db_job.threshold) if db_job.threshold is not None else 0.5,
+                "threshold": (
+                    float(db_job.threshold) if db_job.threshold is not None else 0.5
+                ),
                 "file_count": db_job.file_count or len(subs),
-                "created_at": db_job.created_at.isoformat() if db_job.created_at else None,
+                "created_at": (
+                    db_job.created_at.isoformat() if db_job.created_at else None
+                ),
                 "tenant_id": db_job.tenant_id,
                 "results": [
                     {
                         "file_a": r.submission_a_id,
                         "file_b": r.submission_b_id,
-                        "score": float(r.similarity_score) if r.similarity_score is not None else 0.0,
+                        "score": (
+                            float(r.similarity_score)
+                            if r.similarity_score is not None
+                            else 0.0
+                        ),
                         "risk_level": (
                             "CRITICAL"
                             if float(r.similarity_score or 0) >= 0.85
-                            else "HIGH"
-                            if float(r.similarity_score or 0) >= 0.7
-                            else "MEDIUM"
-                            if float(r.similarity_score or 0) >= 0.5
-                            else "LOW"
+                            else (
+                                "HIGH"
+                                if float(r.similarity_score or 0) >= 0.7
+                                else (
+                                    "MEDIUM"
+                                    if float(r.similarity_score or 0) >= 0.5
+                                    else "LOW"
+                                )
+                            )
                         ),
-                        "confidence": float(r.confidence_level) if r.confidence_level is not None else None,
+                        "confidence": (
+                            float(r.confidence_level)
+                            if r.confidence_level is not None
+                            else None
+                        ),
                         "matching_blocks": r.matching_blocks or [],
                         "features": r.algorithm_scores or {},
-                        "external_evidence": (r.algorithm_scores or {}).get("external_evidence", {}),
+                        "external_evidence": (r.algorithm_scores or {}).get(
+                            "external_evidence", {}
+                        ),
                         "review_status": r.review_status or "unreviewed",
                         "review_notes": r.review_notes or "",
                     }
@@ -3921,9 +3975,11 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                 "review_status": "unreviewed",
                 "review_notes": "",
                 "submission_count": len(subs),
-                "review_summary": {
-                    (s.review_status or "unreviewed"): 0 for s in sim_results
-                } if sim_results else {},
+                "review_summary": (
+                    {(s.review_status or "unreviewed"): 0 for s in sim_results}
+                    if sim_results
+                    else {}
+                ),
             }
 
             # Compute actual review counts from DB
@@ -3949,8 +4005,16 @@ def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, 
         if report_path.exists():
             data = json.loads(report_path.read_text(encoding="utf-8"))
             # Merge common rich fields the results page expects
-            for key in ("summary", "calibration_report", "reproducibility", "ai_detection",
-                        "web_analysis", "ai_text_trust", "assignment_mode", "assignment_mode_name"):
+            for key in (
+                "summary",
+                "calibration_report",
+                "reproducibility",
+                "ai_detection",
+                "web_analysis",
+                "ai_text_trust",
+                "assignment_mode",
+                "assignment_mode_name",
+            ):
                 if key in data and key not in job_dict:
                     job_dict[key] = data[key]
             if "external_tool_results" in data:
@@ -4587,6 +4651,7 @@ async def create_user(request: Request):
 # Admin - Course Instructor Management (new many-to-many)
 # ============================================================
 
+
 @app.get("/api/admin/courses-with-instructors")
 async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any]:
     """Admin view: all courses with their assigned instructors."""
@@ -4610,22 +4675,26 @@ async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any
                     .all()
                 )
 
-                result.append({
-                    "id": course.id,
-                    "name": course.name,
-                    "code": course.code,
-                    "organization_id": course.organization_id,
-                    "organization_name": course.organization.name if course.organization else None,
-                    "instructors": [
-                        {
-                            "id": u.id,
-                            "email": u.email,
-                            "full_name": u.full_name,
-                            "role": u.role,
-                        }
-                        for u in instructors
-                    ],
-                })
+                result.append(
+                    {
+                        "id": course.id,
+                        "name": course.name,
+                        "code": course.code,
+                        "organization_id": course.organization_id,
+                        "organization_name": (
+                            course.organization.name if course.organization else None
+                        ),
+                        "instructors": [
+                            {
+                                "id": u.id,
+                                "email": u.email,
+                                "full_name": u.full_name,
+                                "role": u.role,
+                            }
+                            for u in instructors
+                        ],
+                    }
+                )
 
             return {"courses": result}
     except Exception:
@@ -4644,15 +4713,21 @@ async def admin_assign_instructor_to_course(request: Request):
     role = data.get("role", "instructor")
 
     if not course_id or not user_id:
-        return JSONResponse(status_code=400, content={"error": "course_id and user_id are required"})
+        return JSONResponse(
+            status_code=400, content={"error": "course_id and user_id are required"}
+        )
 
     try:
         with SessionLocal() as db:
             # Check if already exists
-            existing = db.query(CourseInstructor).filter(
-                CourseInstructor.course_id == course_id,
-                CourseInstructor.user_id == user_id
-            ).first()
+            existing = (
+                db.query(CourseInstructor)
+                .filter(
+                    CourseInstructor.course_id == course_id,
+                    CourseInstructor.user_id == user_id,
+                )
+                .first()
+            )
 
             if existing:
                 existing.role = role
@@ -4660,9 +4735,7 @@ async def admin_assign_instructor_to_course(request: Request):
                 return {"success": True, "message": "Role updated"}
 
             assignment = CourseInstructor(
-                course_id=course_id,
-                user_id=user_id,
-                role=role
+                course_id=course_id, user_id=user_id, role=role
             )
             db.add(assignment)
             db.commit()
@@ -4670,7 +4743,9 @@ async def admin_assign_instructor_to_course(request: Request):
             return {"success": True, "message": "Instructor assigned"}
     except Exception:
         logger.exception("Failed to assign instructor")
-        return JSONResponse(status_code=500, content={"error": "Failed to assign instructor"})
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to assign instructor"}
+        )
 
 
 @app.delete("/api/admin/course-instructors")
@@ -4683,20 +4758,28 @@ async def admin_remove_instructor_from_course(request: Request):
     user_id = data.get("user_id")
 
     if not course_id or not user_id:
-        return JSONResponse(status_code=400, content={"error": "course_id and user_id are required"})
+        return JSONResponse(
+            status_code=400, content={"error": "course_id and user_id are required"}
+        )
 
     try:
         with SessionLocal() as db:
-            deleted = db.query(CourseInstructor).filter(
-                CourseInstructor.course_id == course_id,
-                CourseInstructor.user_id == user_id
-            ).delete()
+            deleted = (
+                db.query(CourseInstructor)
+                .filter(
+                    CourseInstructor.course_id == course_id,
+                    CourseInstructor.user_id == user_id,
+                )
+                .delete()
+            )
             db.commit()
 
             return {"success": True, "removed": deleted > 0}
     except Exception:
         logger.exception("Failed to remove instructor")
-        return JSONResponse(status_code=500, content={"error": "Failed to remove instructor"})
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to remove instructor"}
+        )
 
 
 @app.post("/api/admin/create-demo-dataset")
@@ -5695,10 +5778,12 @@ async def upload_files(
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
+    source_scan_enabled: bool = Form(default=True),
 ):
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -5757,6 +5842,7 @@ async def upload_zip(
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
+    source_scan_enabled: bool = Form(default=True),
 ):
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
@@ -5766,6 +5852,7 @@ async def upload_zip(
         )
 
     job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -5914,10 +6001,14 @@ async def _run_analysis(
                 if assignment:
                     if getattr(assignment, "name", None):
                         assignment_name = assignment.name
-                    if getattr(assignment, "course", None) and getattr(assignment.course, "name", None):
+                    if getattr(assignment, "course", None) and getattr(
+                        assignment.course, "name", None
+                    ):
                         course_name = assignment.course.name
         except Exception:
-            logger.warning(f"Failed to resolve assignment_id={assignment_id} for name lookup")
+            logger.warning(
+                f"Failed to resolve assignment_id={assignment_id} for name lookup"
+            )
 
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
@@ -6021,7 +6112,8 @@ async def _run_analysis(
                             id=job_id,
                             tenant_id=tenant_id,
                             assignment_id=_jobs[job_id].get("assignment_id"),
-                            name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
+                            name=_jobs[job_id].get("assignment_name")
+                            or f"Upload {job_id}",
                             status=_jobs[job_id].get("status", "analyzing"),
                             threshold=_jobs[job_id].get("threshold", 0.5),
                             created_at=datetime.now(),
@@ -6040,9 +6132,13 @@ async def _run_analysis(
                             )
                         db.commit()
                     else:
-                        logger.warning(f"DB persist skipped for job {job_id} - no tenant available")
+                        logger.warning(
+                            f"DB persist skipped for job {job_id} - no tenant available"
+                        )
         except Exception:
-            logger.warning(f"DB persist skipped for job {job_id} (file storage still used)")
+            logger.warning(
+                f"DB persist skipped for job {job_id} (file storage still used)"
+            )
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -6071,6 +6167,24 @@ async def _run_analysis(
         settings_payload = _build_settings_payload(
             current_user.get("tenant_id") if current_user else None
         )
+
+        # Per-assignment override for external source scanning (uses existing Assignment.settings JSONB)
+        assignment_id = _jobs[job_id].get("assignment_id")
+        if assignment_id:
+            try:
+                with SessionLocal() as db:
+                    ass = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+                    if ass and ass.settings:
+                        for key in ("source_scan_enabled", "source_scan_sites"):
+                            if key in ass.settings:
+                                settings_payload[key] = ass.settings[key]
+            except Exception:
+                logger.warning("Failed to load per-assignment external scan settings override")
+
+        # Per-submission override from upload form (highest priority)
+        if job_id in _jobs and "source_scan_enabled_override" in _jobs[job_id]:
+            settings_payload["source_scan_enabled"] = _jobs[job_id]["source_scan_enabled_override"]
+
         web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
@@ -6214,8 +6328,12 @@ async def _run_analysis(
                     external_ev = _external_evidence_for_pair(
                         r.file_a, r.file_b, external_tool_results
                     )
-                    mb = getattr(r, "matching_blocks", None) or getattr(r, "features", {}).get("matching_blocks", [])
-                    conf = getattr(r, "confidence", None) or getattr(r, "confidence_level", None)
+                    mb = getattr(r, "matching_blocks", None) or getattr(
+                        r, "features", {}
+                    ).get("matching_blocks", [])
+                    conf = getattr(r, "confidence", None) or getattr(
+                        r, "confidence_level", None
+                    )
 
                     db.add(
                         SimilarityResult(
@@ -6239,7 +6357,9 @@ async def _run_analysis(
                     )
                 db.commit()
         except Exception:
-            logger.exception(f"DB results persist skipped for job {job_id}")  # shows full traceback in logs
+            logger.exception(
+                f"DB results persist skipped for job {job_id}"
+            )  # shows full traceback in logs
 
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
     except Exception as e:
@@ -6275,7 +6395,11 @@ async def update_job_review(job_id: str, request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid review payload")
 
-    if "review_status" not in payload and "review_notes" not in payload and "pair_reviews" not in payload:
+    if (
+        "review_status" not in payload
+        and "review_notes" not in payload
+        and "pair_reviews" not in payload
+    ):
         raise HTTPException(status_code=400, detail="No review updates provided")
 
     if "review_status" in payload:
@@ -6297,25 +6421,46 @@ async def update_job_review(job_id: str, request: Request):
                 for pair_key, review_data in payload["pair_reviews"].items():
                     if not isinstance(review_data, dict):
                         continue
-                    parts = str(pair_key).split("::") if "::" in str(pair_key) else str(pair_key).split(":")
+                    parts = (
+                        str(pair_key).split("::")
+                        if "::" in str(pair_key)
+                        else str(pair_key).split(":")
+                    )
                     if len(parts) >= 2:
                         a_id, b_id = parts[0], parts[1]
-                        sim = db.query(SimilarityResult).filter(
-                            SimilarityResult.job_id == job_id,
-                            SimilarityResult.submission_a_id == a_id,
-                            SimilarityResult.submission_b_id == b_id
-                        ).first()
+                        sim = (
+                            db.query(SimilarityResult)
+                            .filter(
+                                SimilarityResult.job_id == job_id,
+                                SimilarityResult.submission_a_id == a_id,
+                                SimilarityResult.submission_b_id == b_id,
+                            )
+                            .first()
+                        )
                         if sim:
-                            if "status" in review_data or "review_status" in review_data:
-                                sim.review_status = review_data.get("status") or review_data.get("review_status")
+                            if (
+                                "status" in review_data
+                                or "review_status" in review_data
+                            ):
+                                sim.review_status = review_data.get(
+                                    "status"
+                                ) or review_data.get("review_status")
                             if "notes" in review_data or "review_notes" in review_data:
-                                sim.review_notes = (review_data.get("notes") or review_data.get("review_notes") or "").strip() or None
+                                sim.review_notes = (
+                                    review_data.get("notes")
+                                    or review_data.get("review_notes")
+                                    or ""
+                                ).strip() or None
                 db.commit()
         except Exception:
             logger.warning(f"Failed to persist per-pair reviews for job {job_id}")
 
     # Also reflect in in-memory results if present
-    if "results" in job and isinstance(job["results"], list) and "pair_reviews" in payload:
+    if (
+        "results" in job
+        and isinstance(job["results"], list)
+        and "pair_reviews" in payload
+    ):
         for r in job["results"]:
             k = f"{r.get('file_a')}::{r.get('file_b')}"
             if k in payload["pair_reviews"]:
@@ -6372,7 +6517,10 @@ async def compute_real_fpr_on_clean_corpus(
     Used for professor-release validation of the plagiarism checker.
     """
     if len(files) < 2:
-        raise HTTPException(status_code=400, detail="At least 2 submissions are required to compute FPR.")
+        raise HTTPException(
+            status_code=400,
+            detail="At least 2 submissions are required to compute FPR.",
+        )
 
     submissions: Dict[str, str] = {}
     for upload in files:
@@ -6384,7 +6532,9 @@ async def compute_real_fpr_on_clean_corpus(
             continue
 
     if len(submissions) < 2:
-        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
+        raise HTTPException(
+            status_code=400, detail="Could not load enough valid submissions."
+        )
 
     try:
         # Use very low threshold to capture full distribution
@@ -6396,43 +6546,151 @@ async def compute_real_fpr_on_clean_corpus(
         num_submissions = len(submissions)
     except Exception as e:
         logger.exception("Real FPR computation failed")
-        raise HTTPException(status_code=500, detail=f"Internal error during FPR computation: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Internal error during FPR computation: {str(e)}"
+        ) from e
 
-    # Standard thresholds we care about for professor use
-    thresholds_to_evaluate = [0.50, 0.55, 0.60, 0.65, 0.70, 0.72, 0.75, 0.80, 0.85, 0.90]
+    # Very fine-grained thresholds focused on the critical professor decision zone
+    # Extra density between 0.65 – 0.78 (most common range where professors tune)
+    thresholds_to_evaluate = [
+        0.40,
+        0.45,
+        0.50,
+        0.52,
+        0.55,
+        0.58,
+        0.60,
+        0.62,
+        0.64,
+        0.65,
+        0.66,
+        0.67,
+        0.68,
+        0.69,
+        0.70,
+        0.71,
+        0.72,
+        0.73,
+        0.74,
+        0.75,
+        0.76,
+        0.77,
+        0.78,
+        0.80,
+        0.82,
+        0.85,
+        0.88,
+        0.90,
+        0.95,
+    ]
 
     fpr_table = []
     for t in thresholds_to_evaluate:
         above = sum(1 for s in scores if s >= t)
         fpr = above / num_pairs if num_pairs > 0 else 0.0
 
-        if fpr <= 0.02:
-            label = "Excellent - very safe"
-        elif fpr <= 0.04:
-            label = "Good - acceptable for professors"
-        elif fpr <= 0.07:
-            label = "Borderline - review carefully"
+        if fpr <= 0.015:
+            label = "Excellent – very safe"
+        elif fpr <= 0.03:
+            label = "Good – comfortable for most courses"
+        elif fpr <= 0.05:
+            label = "Acceptable – use with evidence review"
+        elif fpr <= 0.08:
+            label = "Borderline – caution recommended"
         else:
-            label = "High risk - too many false positives"
+            label = "High risk – too many false positives"
 
-        fpr_table.append({
-            "threshold": round(t, 2),
-            "fpr": round(fpr, 4),
-            "fpr_percent": round(fpr * 100, 2),
-            "label": label,
-            "flagged_pairs": above,
-        })
+        fpr_table.append(
+            {
+                "threshold": round(t, 2),
+                "fpr": round(fpr, 4),
+                "fpr_percent": round(fpr * 100, 2),
+                "label": label,
+                "flagged_pairs": above,
+            }
+        )
 
-    # Simple recommendation
-    best = next((row for row in reversed(fpr_table) if row["fpr"] <= 0.04), fpr_table[-1])
-    recommendation = f"At {best['threshold']*100:.0f}% similarity the measured FPR on your clean data is {best['fpr_percent']:.1f}%. "
+    # === Sophisticated Multi-Factor Recommendation Logic ===
+    # Find the most conservative "very safe" threshold (FPR ≤ 1.5%)
+    very_safe = next((row for row in fpr_table if row["fpr"] <= 0.015), None)
+    # Find the best balanced threshold (FPR ≤ 3%)
+    balanced = next((row for row in fpr_table if row["fpr"] <= 0.03), None)
+    # Find the highest recall threshold that is still acceptable (FPR ≤ 5%)
+    high_recall = next((row for row in fpr_table if row["fpr"] <= 0.05), None)
 
-    if best["fpr"] <= 0.03:
-        recommendation += "This is considered safe for professor use with the current evidence display."
-    elif best["fpr"] <= 0.05:
-        recommendation += "Acceptable if you require reviewers to look at the detailed evidence."
+    # Context from the clean corpus
+    mean_clean = sum(scores) / len(scores) if scores else 0
+    max_clean = max(scores) if scores else 0
+
+    recommendations = []
+
+    if very_safe:
+        recommendations.append(
+            {
+                "threshold": very_safe["threshold"],
+                "fpr": very_safe["fpr_percent"],
+                "type": "very_safe",
+                "title": "Maximum Safety",
+                "advice": f"At {very_safe['threshold']*100:.0f}% the FPR on your clean data is only {very_safe['fpr_percent']:.1f}%. This is the most conservative setting and minimizes risk of false accusations.",
+            }
+        )
+
+    if balanced:
+        recommendations.append(
+            {
+                "threshold": balanced["threshold"],
+                "fpr": balanced["fpr_percent"],
+                "type": "balanced",
+                "title": "Recommended Default",
+                "advice": f"At {balanced['threshold']*100:.0f}% you get a good balance (FPR ≈ {balanced['fpr_percent']:.1f}%). Strong choice for most undergraduate courses.",
+            }
+        )
+
+    if high_recall:
+        recommendations.append(
+            {
+                "threshold": high_recall["threshold"],
+                "fpr": high_recall["fpr_percent"],
+                "type": "high_recall",
+                "title": "Higher Detection (with review)",
+                "advice": f"At {high_recall['threshold']*100:.0f}% you catch more cases (FPR ≈ {high_recall['fpr_percent']:.1f}%). Best used when every flagged pair is manually reviewed.",
+            }
+        )
+
+    # Overall assessment
+    if mean_clean > 0.25:
+        overall_risk = "Your clean corpus shows unusually high baseline similarity. Consider stronger starter-code / template filtering."
+    elif max_clean > 0.65:
+        overall_risk = "Some very similar clean pairs exist. Review the highest-scoring clean pairs to understand why."
     else:
-        recommendation += "Consider raising the default threshold or improving starter-code filtering before release."
+        overall_risk = "Your clean data looks healthy. The system behaves as expected on non-plagiarized work."
+
+    # Actionable suggestions
+    suggested_actions = []
+    if not very_safe or very_safe["fpr"] > 0.02:
+        suggested_actions.append(
+            "Raise the default decision threshold by 5–8 percentage points."
+        )
+    if mean_clean > 0.20:
+        suggested_actions.append(
+            "Enable or improve starter-code / boilerplate suppression."
+        )
+    if max_clean > 0.70:
+        suggested_actions.append(
+            "Manually review the top 5–10 clean pairs with the highest scores."
+        )
+    if not suggested_actions:
+        suggested_actions.append(
+            "Current settings appear well calibrated for your student population."
+        )
+
+    # Legacy single recommendation string (for backward compatibility)
+    best = balanced or very_safe or fpr_table[-1]
+    recommendation = (
+        f"Recommended starting threshold: {best['threshold']*100:.0f}% "
+        f"(FPR on your clean data ≈ {best['fpr_percent']:.1f}%). "
+        f"{overall_risk}"
+    )
 
     # Basic histogram (10 bins)
     bins = [0] * 10
@@ -6440,17 +6698,210 @@ async def compute_real_fpr_on_clean_corpus(
         idx = min(int(s * 10), 9)
         bins[idx] += 1
 
-    histogram = [{"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)]
+    histogram = [
+        {"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)
+    ]
 
-    return JSONResponse(content={
-        "num_submissions": num_submissions,
-        "num_pairs": num_pairs,
-        "fpr_table": fpr_table,
-        "score_histogram": histogram,
-        "recommendation": recommendation,
-        "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
-        "max_score": round(max(scores), 4) if scores else 0,
-    })
+    return JSONResponse(
+        content={
+            "num_submissions": num_submissions,
+            "num_pairs": num_pairs,
+            "fpr_table": fpr_table,
+            "score_histogram": histogram,
+            "recommendation": recommendation,  # legacy string
+            "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
+            "max_score": round(max(scores), 4) if scores else 0,
+            # New structured data for better frontend experience
+            "recommendations": recommendations,
+            "overall_assessment": overall_risk,
+            "suggested_actions": suggested_actions,
+        }
+    )
+
+
+class FprValidationRunCreate(BaseModel):
+    """Request body for saving an FPR validation run (internal tool endpoint)."""
+
+    name: Optional[str] = None
+    result: Dict[str, Any]
+    notes: Optional[str] = None
+
+
+# ============================================================
+# FPR Validation Runs History (Database-backed)
+# ============================================================
+
+
+@app.post("/api/fpr-validation-runs")
+async def save_fpr_validation_run(
+    request: Request,
+    payload: FprValidationRunCreate,
+):
+    """Save a completed FPR validation run to the database."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+        user_id = current_user.get("id")
+
+        if not tenant_id:
+            raise HTTPException(
+                status_code=400, detail="No tenant associated with user"
+            )
+
+        name = (
+            payload.name
+            or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        )
+        result_data = payload.result
+
+        run = FprValidationRun(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            payload=result_data,
+            num_submissions=result_data.get("num_submissions"),
+            num_pairs=result_data.get("num_pairs"),
+            mean_score=result_data.get("mean_score"),
+            max_score=result_data.get("max_score"),
+            recommended_threshold=result_data.get("recommended_threshold"),
+            fpr_at_recommended_threshold=result_data.get(
+                "fpr_at_recommended_threshold"
+            ),
+            notes=payload.notes,
+            status="completed",
+        )
+
+        with SessionLocal() as db:
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+        return {"id": run.id, "name": run.name, "created_at": run.created_at}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to save FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/fpr-validation-runs")
+async def list_fpr_validation_runs(
+    request: Request,
+    limit: int = 50,
+):
+    """List historical FPR validation runs for the current tenant."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            runs = (
+                db.query(FprValidationRun)
+                .filter(FprValidationRun.tenant_id == tenant_id)
+                .order_by(FprValidationRun.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+            return {
+                "runs": [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "created_at": r.created_at,
+                        "num_submissions": r.num_submissions,
+                        "num_pairs": r.num_pairs,
+                        "recommended_threshold": r.recommended_threshold,
+                        "fpr_at_recommended_threshold": r.fpr_at_recommended_threshold,
+                        "is_certified": r.is_certified,
+                        "status": r.status,
+                    }
+                    for r in runs
+                ]
+            }
+
+    except Exception as e:
+        logger.exception("Failed to list FPR validation runs")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/fpr-validation-runs/{run_id}")
+async def get_fpr_validation_run(run_id: str, request: Request):
+    """Retrieve a single saved FPR validation run."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            run = (
+                db.query(FprValidationRun)
+                .filter(
+                    FprValidationRun.id == run_id,
+                    FprValidationRun.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not run:
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
+
+            return {
+                "id": run.id,
+                "name": run.name,
+                "created_at": run.created_at,
+                "notes": run.notes,
+                "is_certified": run.is_certified,
+                "certified_at": run.certified_at,
+                "result": run.payload,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/fpr-validation-runs/{run_id}")
+async def delete_fpr_validation_run(run_id: str, request: Request):
+    """Delete a saved FPR validation run."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+        tenant_id = current_user.get("tenant_id")
+
+        with SessionLocal() as db:
+            run = (
+                db.query(FprValidationRun)
+                .filter(
+                    FprValidationRun.id == run_id,
+                    FprValidationRun.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not run:
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
+
+            db.delete(run)
+            db.commit()
+
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete FPR validation run")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# End of FPR Validation Runs History
+# ============================================================
 
 
 BENCHMARK_DATASETS = []
@@ -6667,7 +7118,9 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
                 if not db_job:
                     run_at = summary.get("run_at")
                     try:
-                        created_at = datetime.fromisoformat(run_at) if run_at else datetime.now()
+                        created_at = (
+                            datetime.fromisoformat(run_at) if run_at else datetime.now()
+                        )
                     except Exception:
                         created_at = datetime.now()
 
@@ -6781,8 +7234,9 @@ async def get_courses(request: Request) -> Dict[str, Any]:
             if user_id:
                 filters.append(
                     Course.id.in_(
-                        db.query(CourseInstructor.course_id)
-                        .filter(CourseInstructor.user_id == user_id)
+                        db.query(CourseInstructor.course_id).filter(
+                            CourseInstructor.user_id == user_id
+                        )
                     )
                 )
             if user_org_id:
@@ -6812,7 +7266,9 @@ async def get_courses(request: Request) -> Dict[str, Any]:
 
 
 @app.get("/api/assignments")
-async def get_assignments(course_id: Optional[str] = None, request: Request = None) -> Dict[str, Any]:
+async def get_assignments(
+    course_id: Optional[str] = None, request: Request = None
+) -> Dict[str, Any]:
     """Return assignments visible to the current user (instructor + org scoped)."""
     try:
         try:
@@ -6832,8 +7288,9 @@ async def get_assignments(course_id: Optional[str] = None, request: Request = No
             if user_id:
                 filters.append(
                     Course.id.in_(
-                        db.query(CourseInstructor.course_id)
-                        .filter(CourseInstructor.user_id == user_id)
+                        db.query(CourseInstructor.course_id).filter(
+                            CourseInstructor.user_id == user_id
+                        )
                     )
                 )
             if user_org_id:

@@ -228,6 +228,8 @@ export default function UploadPage() {
   const [animateFiles, setAnimateFiles] = useState(false);
   const [dragCount, setDragCount] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
+  const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
@@ -242,6 +244,27 @@ export default function UploadPage() {
     }, 600);
     return () => window.clearInterval(timer);
   }, [uploading]);
+
+  // Fetch tenant-level external source scan setting + source count for visibility
+  const [configuredSourceCount, setConfiguredSourceCount] = useState(0);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await apiClient.get('/api/settings');
+        const enabled = Boolean(res.data?.source_scan_enabled);
+        const sites = res.data?.source_scan_sites || [];
+        setTenantExternalScanEnabled(enabled);
+        setConfiguredSourceCount(Array.isArray(sites) ? sites.length : 0);
+      } catch (e) {
+        setTenantExternalScanEnabled(false);
+        setConfiguredSourceCount(0);
+      }
+    };
+    if (user) {
+      fetchSettings();
+    }
+  }, [user]);
 
   const startPolling = useCallback((jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -410,6 +433,7 @@ export default function UploadPage() {
     fd.append('threshold', String(threshold));
     fd.append('engine_keys', JSON.stringify(activeEngines));
     fd.append('tool_ids', JSON.stringify(selectedToolIds));
+    fd.append('source_scan_enabled', String(sourceScanEnabled));
     try {
       const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
       const res = await axios.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -444,16 +468,29 @@ export default function UploadPage() {
                       Plagiarism Checker
                     </h1>
                   </div>
-                  <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                    Upload files and IntegrityDesk chooses the right comparison scope automatically. Admin-configured GitHub and web sources are scanned when enabled in settings.
-                  </p>
+                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+                     Upload files and IntegrityDesk compares them using similarity engines + AI detection. 
+                     When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code.
+                   </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!canRunCheck}
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
-                  >
+                 <div className="flex flex-wrap items-center gap-3">
+                   {/* Small external scan status pill next to Analyze button */}
+                   {tenantExternalScanEnabled !== null && (
+                     <div className={`hidden md:flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
+                       tenantExternalScanEnabled 
+                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
+                         : 'border-amber-200 bg-amber-50 text-amber-700'
+                     }`}>
+                       <div className={`w-1.5 h-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                       External: {tenantExternalScanEnabled ? 'On' : 'Off'}
+                     </div>
+                   )}
+
+                   <button
+                     onClick={handleSubmit}
+                     disabled={!canRunCheck}
+                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+                   >
                     {uploading
                       ? <>
                         <svg width="18" height="18" viewBox="0 0 20 20">
@@ -493,19 +530,32 @@ export default function UploadPage() {
             </section>
           )}
 
-          {inferredComparisonScope && (
-            <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-              <div className="flex items-start gap-3">
-                <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                <div>
-                  <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
-                  <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
-                </div>
-              </div>
-            </section>
-          )}
+           {inferredComparisonScope && (
+             <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+               <div className="flex items-start gap-3">
+                 <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                 <div>
+                   <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
+                   <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
+                 </div>
+               </div>
+             </section>
+           )}
 
-           {/* Context Fields - DB-backed hierarchy only (legacy free-text inputs removed) */}
+           {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
+           {tenantExternalScanEnabled === false && !sourceScanEnabled && (
+             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
+               <div className="flex items-center gap-3 text-sm">
+                 <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                 <div className="flex-1 text-amber-900">
+                   External source scanning (GitHub + web) is disabled at the tenant level.
+                   <a href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</a>
+                 </div>
+               </div>
+             </div>
+           )}
+
+            {/* Context Fields - DB-backed hierarchy only (legacy free-text inputs removed) */}
            <div className="mb-4">
              <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -560,9 +610,37 @@ export default function UploadPage() {
                    </select>
                  </div>
                </div>
-               <p className="text-[10px] text-slate-500 mt-2">Selecting an Assignment links this upload in the database for reporting and review.</p>
-             </div>
-           </div>
+                 <p className="text-[10px] text-slate-500 mt-2">Selecting an Assignment links this upload in the database for reporting and review.</p>
+
+                 {/* External Source Scan status + per-submission control */}
+                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                   <div className="flex items-center gap-2">
+                     <span className="text-slate-500">External Source Scan:</span>
+                     {tenantExternalScanEnabled === true ? (
+                       <span className="font-medium text-emerald-700">
+                         Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
+                       </span>
+                     ) : tenantExternalScanEnabled === false ? (
+                       <span className="font-medium text-amber-700">Disabled</span>
+                     ) : (
+                       <span className="text-slate-400">Loading…</span>
+                     )}
+                   </div>
+
+                   <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                     <input
+                       type="checkbox"
+                       checked={sourceScanEnabled}
+                       onChange={(e) => setSourceScanEnabled(e.target.checked)}
+                       className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                     />
+                     <span>Scan for this submission</span>
+                   </label>
+
+                   <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
+                 </div>
+              </div>
+            </div>
 
           {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">

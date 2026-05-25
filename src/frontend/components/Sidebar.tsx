@@ -20,6 +20,7 @@ import {
   SearchCheck,
   Settings,
   Shield,
+  ShieldCheck,
   SunMedium,
   Upload,
   X,
@@ -88,6 +89,12 @@ export default function Sidebar() {
               label: 'Benchmark',
               icon: ClipboardList,
               activeOn: ['/benchmark'],
+            },
+            {
+              href: '/tools/fpr-validation',
+              label: 'FPR Validation',
+              icon: ShieldCheck,
+              activeOn: ['/tools/fpr-validation'],
             },
             {
               href: '/datasets',

@@ -334,7 +334,7 @@ export default function AIDetectorReportPage() {
   const highestScore = Number(ai.highest_score) || 0;
   const overallTone = riskTone(highestScore);
 
-  if (loading) {
+  if (loading || !job) {
     return (
       <DashboardLayout requireAuth={false}>
         <div className="flex min-h-[60vh] items-center justify-center gap-3 text-slate-500">
@@ -360,13 +360,6 @@ export default function AIDetectorReportPage() {
 
   return (
     <DashboardLayout requireAuth={false}>
-      <style jsx global>{`
-        @media print {
-          .no-print { display: none !important; }
-          aside, nav, button { display: none !important; }
-          body { background: white !important; }
-        }
-      `}</style>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-6">
 
