@@ -14,12 +14,29 @@ We value:
 
 ## Critical Rules for This Session
 
-1. **Never read the full `src/backend/models/database.py`** (626 lines) unless the user explicitly says so.
-   - Always prefer `@docs/SCHEMA_OVERVIEW.md` for schema questions.
-2. Read `.ai-rules.md` and `AGENTS.md` before making changes.
-3. Keep changes **minimal and localized**.
-4. Fix root cause before changing code.
-5. Treat anything touching DB schema, auth, or infra as high risk.
+**Session Start Ritual (Always do this):**
+At the beginning of every new session, read in this order:
+1. `docs/CURRENT_FOCUS.md`
+2. `docs/SCHEMA_OVERVIEW.md`
+3. `docs/BENCHMARK_WORK.md`
+
+Then continue with normal rules.
+
+**Schema Work Mode (Current Reality):**
+The user is **currently editing** `src/backend/models/database.py`.
+
+- **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly says:  
+  “read the full database.py” or “check the implementation in the model file”.
+- When the user is doing schema work, you **must** default to this order:
+  1. `docs/SCHEMA_WORK_NOTES.md`
+  2. `docs/SCHEMA_OVERVIEW.md`
+  3. `docs/CURRENT_FOCUS.md`
+- Only read the full model file as a last resort after getting explicit permission.
+
+1. Read `.ai-rules.md` and `AGENTS.md` before making changes.
+2. Keep changes **minimal and localized**.
+3. Fix root cause before changing code.
+4. Treat anything touching DB schema, auth, or infra as high risk.
 
 ## Vibe Coding Mode (Long Exploratory Sessions)
 
@@ -48,15 +65,17 @@ When the user is in "vibe coding" mode:
 
 | File | When to Read | Notes |
 |------|--------------|-------|
-| `docs/SCHEMA_OVERVIEW.md` | Almost always for schema work | Primary schema reference |
+| `docs/CURRENT_FOCUS.md` | **Start of every session** | Current goals and active work |
+| `docs/SCHEMA_OVERVIEW.md` | Schema questions | Primary schema reference (use instead of full model file) |
+| `docs/BENCHMARK_WORK.md` | Benchmark-related work | Current benchmark focus and risks |
 | `src/backend/models/database.py` | Only when user explicitly asks | 626 lines — very expensive |
 | `.ai-rules.md` | Before any code change | Detailed coding standards |
 | `AGENTS.md` | Before any code change | Working agreements |
-| `docs/PROJECT_STRUCTURE.md` | When unsure about file locations | High-level structure |
 
 ## What to Avoid
 
-- Reading large model files by default
+- Reading large model files by default (use the small focus files instead)
+- Skipping the Session Start Ritual (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`)
 - Proposing big refactors during vibe sessions without confirmation
 - Touching DB schema without discussing migration strategy
 - Adding new dependencies without asking

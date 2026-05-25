@@ -4,16 +4,31 @@ This file contains project-specific rules that Cursor AI follows automatically.
 
 ## IMPORTANT: Read Before Any Task
 
-1. **Always read** `CLAUDE.md` first for session context and token rules
-2. **Always read** `.ai-rules.md` before making any changes
-3. **Follow** all guidelines in `.ai-rules.md` and `AGENTS.md` without exception
-4. **For schema work**: Use `docs/SCHEMA_OVERVIEW.md` instead of reading `src/backend/models/database.py` (626 lines)
+**Session Start Protocol (Mandatory):**
+At the beginning of every session, read these three files in order:
+1. `docs/CURRENT_FOCUS.md`
+2. `docs/SCHEMA_OVERVIEW.md`
+3. `docs/BENCHMARK_WORK.md`
+
+Then:
+4. Read `CLAUDE.md` for vibe coding and token rules
+5. Read `.ai-rules.md` before making code changes
+
+**Hard Rules (Current Reality - You are in Schema Work Mode):**
+- The user is **actively editing** `src/backend/models/database.py`.
+- **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly writes: “read the full database.py” or “check the implementation in the model file”.
+- When doing schema work, you **must** default to this order:
+  1. `docs/SCHEMA_WORK_NOTES.md`
+  2. `docs/SCHEMA_OVERVIEW.md`
+  3. `docs/CURRENT_FOCUS.md`
+- Only read the full model file as a last resort, and only after the user explicitly permits it.
+- Always prefer the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) + `SCHEMA_WORK_NOTES.md` over large source files.
 
 ## Token Efficiency & Context Rules (Critical for Long Sessions)
 
-- **Never** read the full `src/backend/models/database.py` unless the user explicitly asks.
-- **Always prefer** `@docs/SCHEMA_OVERVIEW.md` for any schema or model questions.
-- Read `CLAUDE.md` at the start of every major session for vibe coding guidance.
+- **Session Start**: You must read `CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, and `BENCHMARK_WORK.md` at the start of every session.
+- **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly asks.
+- **Always prefer** the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) over large source files.
 - Only load files directly relevant to the current task.
 - When exploring, summarize findings instead of dumping large code blocks.
 - During "vibe coding" mode, be exploratory but actively protect context size.
@@ -72,11 +87,13 @@ For the full detailed structure, see `docs/PROJECT_STRUCTURE.md`.
 
 ## Current Context (May 2026)
 
-- Active work on large production database schema and benchmark system
-- Heavy focus on `src/backend/models/database.py` + benchmark metrics
-- Frontend upgraded to Next.js 16 + React 19
+- Active work on large production database schema + benchmark metric integrity
+- Primary files: `src/backend/models/database.py`, `tests/unit/test_benchmark_metric_integrity.py`, `src/frontend/app/benchmark/page.tsx`
 
-**For any schema-related discussion, always use `docs/SCHEMA_OVERVIEW.md` instead of the full model file.**
+**Mandatory Reading at Session Start:**
+- `docs/CURRENT_FOCUS.md`
+- `docs/SCHEMA_OVERVIEW.md`
+- `docs/BENCHMARK_WORK.md`
 
 See `CLAUDE.md` for detailed vibe coding rules and token efficiency guidelines.
 

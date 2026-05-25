@@ -10,17 +10,15 @@
 
 ### Environment Setup
 
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
+Environment configuration has been centralized. Please follow the dedicated guide:
 
-2. Edit `.env` with your configuration:
-   ```env
-   DATABASE_URL=postgresql://user:password@host:port/dbname
-   REDIS_URL=redis://localhost:6379
-   WEBHOOK_SECRET_KEY=your-secret-key-here
-   ```
+→ **[docs/ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)**
+
+This guide covers:
+- Local development setup using `src/backend/.env.example`
+- Production configuration using `src/backend/.env.production.example`
+- Security best practices and secret management
+- Common pitfalls (including previous issues with stray `.env.local` files)
 
 ### Local Development Deployment
 
