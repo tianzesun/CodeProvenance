@@ -100,6 +100,9 @@ reports/
 ###############
 experiments/runs/
 
+# Benchmark proofs (generated promotional content)
+proof_of_excellence/
+
 ###############
 # Backend runtime workspaces
 ###############
