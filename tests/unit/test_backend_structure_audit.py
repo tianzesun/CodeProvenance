@@ -55,11 +55,11 @@ def test_find_bootstrap_disabled_importers_limits_to_production_roots(
     api_dir.mkdir()
     benchmark_dir.mkdir()
     (api_dir / "server.py").write_text(
-        "from src.backend.bootstrap_disabled import get_container\n",
+        "from src.backend.bootstrap.container import Container\n",
         encoding="utf-8",
     )
     (benchmark_dir / "runner.py").write_text(
-        "from src.backend.bootstrap_disabled import get_container\n",
+        "from src.backend.bootstrap.app import get_application\n",
         encoding="utf-8",
     )
 

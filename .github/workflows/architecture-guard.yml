@@ -20,8 +20,8 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Run strict architecture guard
-        run: python bootstrap/architecture_guard.py
+- name: Run strict architecture guard
+         run: python scripts/architecture_guard.py
       
       - name: Architecture check passed
         if: success()
