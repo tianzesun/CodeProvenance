@@ -15,6 +15,8 @@ from src.backend.benchmark.validation.metric_validators import (
 )
 from src.backend.benchmark.validation.label_validators import (
     LabelValidator,
+    LabelValidationResult,
+    DatasetLabelValidator,
     LabelValidationReport,
 )
 from src.backend.benchmark.validation.tool_validators import (

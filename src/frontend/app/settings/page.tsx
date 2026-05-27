@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, Cpu, Database, Save, Shield, Settings, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, ChevronDown } from 'lucide-react';
+import { AlertTriangle, Cpu, Database, Save, Shield, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, ChevronDown, FolderTree, Brain, Workflow, Server } from 'lucide-react';
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
@@ -17,22 +17,18 @@ const DEFAULT_PROFILE = {
   external_source_scan: true,
 };
 
-const TABS = [
-  { id: 'general', label: 'General', icon: Database },
-  { id: 'engines', label: 'Detection Engines', icon: Cpu },
-  { id: 'ai_models', label: 'AI Detection', icon: Bot },
-  { id: 'matching_rules', label: 'Matching Rules', icon: GitMerge },
-  { id: 'sensitivity_scoring', label: 'Sensitivity & Scoring', icon: Target },
-  { id: 'review_evidence', label: 'Review Workflow', icon: Eye },
-  { id: 'external_sources', label: 'Evidence Sources', icon: ExternalLink },
-  { id: 'integrations', label: 'Notifications', icon: Zap },
-  { id: 'performance', label: 'Performance & Limits', icon: Activity },
+// 4 main categories - each shows all sections on one page
+const MAIN_TABS = [
+  { id: 'detection', label: 'Detection Settings', icon: FolderTree },
+  { id: 'intelligence', label: 'AI & Evidence', icon: Brain },
+  { id: 'workflow', label: 'Review & Workflow', icon: Workflow },
+  { id: 'system', label: 'System Settings', icon: Server },
 ];
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState(null);
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState('detection');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -40,18 +36,11 @@ export default function SettingsPage() {
   const [showEngineWeights, setShowEngineWeights] = useState(false);
   const [showPerformanceAdvanced, setShowPerformanceAdvanced] = useState(false);
 
-  // Simple accordion state for Detection Policy tab (first introduction of accordions)
   const [accordions, setAccordions] = useState({
-    starterCode: false,
-    previousTerm: false,
+    systemLimits: true,
     publicSources: true,
     legacyTools: false,
-    reviewStrictness: true,
-    aiRewrites: false,
-    reviewQueueSize: true,
-    autoHandled: false,
     webhooks: true,
-    systemLimits: true,
   });
 
   useEffect(() => {
@@ -161,9 +150,10 @@ export default function SettingsPage() {
         {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
         {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
 
-        {/* Tab Navigation */}
-        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-          {TABS.map((tab) => (
+        {/* Main Tab Navigation */}
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Settings Categories</div>
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm mb-6">
+          {MAIN_TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -179,91 +169,108 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {/* Context description (small improvement for scanability) */}
-        <div className="px-1 text-sm text-slate-600">
-          {activeTab === 'general' && 'System Limits (open by default).'}
-          {activeTab === 'engines' && 'Advanced engine weights — hidden by default. For custom preset validation only.'}
-          {activeTab === 'ai_models' && 'Configure OpenAI and Anthropic services for AI-generated code detection.'}
-          {activeTab === 'matching_rules' && 'Core policy settings. Starter Code and Previous Term sections are collapsed by default.'}
-          {activeTab === 'sensitivity_scoring' && 'Review Strictness (open) and AI Rewrites (collapsed by default).'}
-          {activeTab === 'review_evidence' && 'Review Queue Size (open) + auto-handled behaviors (collapsed).'}
-          {activeTab === 'external_sources' && 'Public sources (open by default) and legacy tools (collapsed).'}
-          {activeTab === 'integrations' && 'Webhook configuration (open by default).'}
-          {activeTab === 'performance' && 'Advanced embedding & resource settings — hidden by default.'}
-        </div>
-
-        {/* Tab Content */}
-        <div className="space-y-6">
-            {/* General Tab */}
-            {activeTab === 'general' && (
-              <div className="space-y-6">
-                <Accordion
-                  title="System Limits"
-                  description="Control maximum file size, files per job, and processing batch size."
-                  isOpen={accordions.systemLimits}
-                  onToggle={() => setAccordions(prev => ({ ...prev, systemLimits: !prev.systemLimits }))}
-                >
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <TextInput label="Max File Size (MB)" type="number" value={settings.max_file_size_mb} onChange={(value) => updateSetting('max_file_size_mb', Number(value))} />
-                    <TextInput label="Max Files Per Job" type="number" value={settings.max_files_per_job} onChange={(value) => updateSetting('max_files_per_job', Number(value))} />
-                    <TextInput label="Processing Batch Size" type="number" value={settings.batch_size} onChange={(value) => updateSetting('batch_size', Number(value))} />
-                  </div>
-                </Accordion>
-              </div>
-            )}
-
-            {/* Detection Engines Tab */}
-            {activeTab === 'engines' && (
-              <div className="space-y-6">
-                <button
-                  type="button"
-                  onClick={() => setShowEngineWeights(!showEngineWeights)}
-                  className="mb-3 flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"
-                >
-                  <span>Advanced: Engine Weights (admin only)</span>
-                  <span>{showEngineWeights ? 'Hide' : 'Show'}</span>
-                </button>
-
-                {showEngineWeights && (
-                  <>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4">
-                      Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above.
-                    </div>
-                    <div className="text-sm font-semibold text-slate-950 mb-4">Total: {(engineWeightTotal * 100).toFixed(0)}%</div>
-                    {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
-                      <AdvancedSlider
-                        key={key}
-                        label={key}
-                        value={Number(value || 0)}
-                        onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-            )}
-
-           {/* AI Models Tab */}
-           {activeTab === 'ai_models' && (
-             <div className="space-y-6">
-               <div className="grid gap-4 md:grid-cols-2">
-                 <TextInput label="OpenAI API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
-                 <TextInput label="OpenAI Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
-                 <TextInput label="OpenAI Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
-                 <TextInput label="Anthropic API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
-                 <TextInput label="Anthropic Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
-               </div>
-             </div>
-           )}
-
-          {/* Matching Rules Tab */}
-          {activeTab === 'matching_rules' && (
+        {/* Tab Content - All sections shown per category */}
+        <div className="space-y-8">
+          {/* DETECTION SETTINGS */}
+          {activeTab === 'detection' && (
             <div className="space-y-6">
-               <SettingsGroup
-                 title="Assignment Type & Profile"
-                 description="Auto Detect is recommended. It automatically chooses the right rules based on your assignment language, size, notebooks, starter code, and tests."
-                 icon={GitMerge}
-               >
+              <Accordion
+                title="System Limits"
+                description="Control maximum file size, files per job, and processing batch size."
+                isOpen={accordions.systemLimits}
+                onToggle={() => setAccordions(prev => ({ ...prev, systemLimits: !prev.systemLimits }))}
+              >
+                <div className="grid gap-4 md:grid-cols-3">
+                  <TextInput label="Max File Size (MB)" type="number" value={settings.max_file_size_mb} onChange={(value) => updateSetting('max_file_size_mb', Number(value))} />
+                  <TextInput label="Max Files Per Job" type="number" value={settings.max_files_per_job} onChange={(value) => updateSetting('max_files_per_job', Number(value))} />
+                  <TextInput label="Processing Batch Size" type="number" value={settings.batch_size} onChange={(value) => updateSetting('batch_size', Number(value))} />
+                </div>
+              </Accordion>
+
+              <button
+                type="button"
+                onClick={() => setShowEngineWeights(!showEngineWeights)}
+                className="mb-3 flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                <span>Advanced: Engine Weights (admin only)</span>
+                <span>{showEngineWeights ? 'Hide' : 'Show'}</span>
+              </button>
+
+              {showEngineWeights && (
+                <>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4">
+                    Engine weights are for administrators validating custom presets. Normal professors should use the simple profile above.
+                  </div>
+                  <div className="text-sm font-semibold text-slate-950 mb-4">Total: {(engineWeightTotal * 100).toFixed(0)}%</div>
+                  {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
+                    <AdvancedSlider
+                      key={key}
+                      label={key}
+                      value={Number(value || 0)}
+                      onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* AI & EVIDENCE */}
+          {activeTab === 'intelligence' && (
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextInput label="OpenAI API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
+                <TextInput label="OpenAI Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
+                <TextInput label="OpenAI Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
+                <TextInput label="Anthropic API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
+                <TextInput label="Anthropic Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
+              </div>
+
+              <Accordion
+                title="Public Source Scanning"
+                description="Scan GitHub repos and public websites for copied code."
+                isOpen={accordions.publicSources}
+                onToggle={() => setAccordions(prev => ({ ...prev, publicSources: !prev.publicSources }))}
+              >
+                <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.source_scan_enabled)}
+                    onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-950">Scan public sources when running checks</span>
+                    <span className="mt-1 block text-sm leading-6 text-slate-500">Add GitHub repositories or raw file URLs (e.g. https://github.com/org/course-solutions).</span>
+                  </span>
+                </label>
+                <TextAreaInput
+                  label="Public sources to scan (one per line)"
+                  value={(settings.source_scan_sites || []).join('\n')}
+                  placeholder={'https://github.com/org/course-solutions\nhttps://raw.githubusercontent.com/org/repo/main/solution.py'}
+                  onChange={(value) => updateSetting('source_scan_sites', value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))}
+                />
+              </Accordion>
+
+              <Accordion
+                title="Legacy Tools"
+                description="MOSS integration and other legacy external tools."
+                isOpen={accordions.legacyTools}
+                onToggle={() => setAccordions(prev => ({ ...prev, legacyTools: !prev.legacyTools }))}
+              >
+                <TextInput label="MOSS User ID (legacy / advanced)" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
+              </Accordion>
+            </div>
+          )}
+
+          {/* REVIEW & WORKFLOW */}
+          {activeTab === 'workflow' && (
+            <div className="space-y-6">
+              <SettingsGroup
+                title="Assignment Type & Profile"
+                description="Auto Detect is recommended. It automatically chooses the right rules based on your assignment language, size, notebooks, starter code, and tests."
+                icon={GitMerge}
+              >
                 <OptionGrid
                   options={catalog.assignment_types || []}
                   value={profile.assignment_type}
@@ -286,194 +293,112 @@ export default function SettingsPage() {
                 </div>
               </SettingsGroup>
 
-                <Accordion
-                  title="Starter Code"
-                  description="How should code that was provided to students be treated during comparison?"
-                  isOpen={accordions.starterCode}
-                  onToggle={() => setAccordions(prev => ({ ...prev, starterCode: !prev.starterCode }))}
-                >
-                  <SegmentedOptions
-                    options={catalog.starter_code_handling || []}
-                    value={profile.starter_code_handling}
-                    onChange={(value) => updateProfile('starter_code_handling', value)}
-                  />
-                </Accordion>
-
-                <Accordion
-                  title="Previous Term Submissions"
-                  description="Should submissions from earlier terms be included when looking for matches?"
-                  isOpen={accordions.previousTerm}
-                  onToggle={() => setAccordions(prev => ({ ...prev, previousTerm: !prev.previousTerm }))}
-                >
-                  <SegmentedOptions
-                    options={catalog.previous_term_matching || []}
-                    value={profile.previous_term_matching}
-                    onChange={(value) => updateProfile('previous_term_matching', value)}
-                  />
-                </Accordion>
-            </div>
-          )}
-
-            {/* Sensitivity and Scoring Tab */}
-            {activeTab === 'sensitivity_scoring' && (
-              <div className="space-y-6">
-                <Accordion
-                  title="Review Strictness"
-                  description="Conservative for formal investigations, Balanced for normal use, and Strict when you want broader detection."
-                  isOpen={accordions.reviewStrictness}
-                  onToggle={() => setAccordions(prev => ({ ...prev, reviewStrictness: !prev.reviewStrictness }))}
-                >
-                  <SegmentedOptions
-                    options={catalog.review_modes || catalog.sensitivities || []}
-                    value={profile.sensitivity}
-                    onChange={(value) => updateProfile('sensitivity', value)}
-                  />
-                </Accordion>
-
-                <Accordion
-                  title="AI-Generated Rewrites"
-                  description="How sensitive should detection be to AI-rewritten or paraphrased student code?"
-                  isOpen={accordions.aiRewrites}
-                  onToggle={() => setAccordions(prev => ({ ...prev, aiRewrites: !prev.aiRewrites }))}
-                >
-                  <SegmentedOptions
-                    options={catalog.ai_rewrite_detection || []}
-                    value={profile.ai_rewrite_detection}
-                    onChange={(value) => updateProfile('ai_rewrite_detection', value)}
-                  />
-                </Accordion>
-              </div>
-            )}
-
-           {/* Review and Evidence Tab */}
-           {activeTab === 'review_evidence' && (
-             <div className="space-y-6">
-                <Accordion
-                  title="Review Queue Size"
-                  description="How many results should appear in your review list. Top 25 works well for most assignments."
-                  isOpen={accordions.reviewQueueSize}
-                  onToggle={() => setAccordions(prev => ({ ...prev, reviewQueueSize: !prev.reviewQueueSize }))}
-                >
-                  <SegmentedOptions
-                    options={catalog.result_volume || []}
-                    value={profile.result_volume}
-                    onChange={(value) => updateProfile('result_volume', value)}
-                  />
-                </Accordion>
-
               <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-                <div></div>
-                <aside className="space-y-6">
-                  <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-                    <div className="text-sm font-semibold text-blue-950">Recommended profile applied</div>
-                    <p className="mt-3 text-sm leading-6 text-blue-800">{applied.recommendation}</p>
-                    <div className="mt-4 rounded-lg bg-white/70 p-3 text-sm font-medium text-blue-950">
+                <div className="space-y-6">
+                  <Accordion
+                    title="Review Queue Size"
+                    description="How many results should appear in your review list. Top 25 works well for most assignments."
+                    isOpen={accordions.reviewQueueSize}
+                    onToggle={() => setAccordions(prev => ({ ...prev, reviewQueueSize: !prev.reviewQueueSize }))}
+                  >
+                    <SegmentedOptions
+                      options={catalog.result_volume || []}
+                      value={profile.result_volume}
+                      onChange={(value) => updateProfile('result_volume', value)}
+                    />
+                  </Accordion>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-950">Recommended profile applied</div>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{applied.recommendation}</p>
+                    <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm font-medium text-slate-950">
                       {applied.summary}
                     </div>
                   </section>
-
-                    <Accordion
-                      title="What the system already handles automatically"
-                      isOpen={accordions.autoHandled}
-                      onToggle={() => setAccordions(prev => ({ ...prev, autoHandled: !prev.autoHandled }))}
-                    >
-                      <div className="space-y-3 text-sm leading-6 text-slate-600">
-                        <div>Starter code is excluded from comparisons</div>
-                        <div>Previous-term submissions are matched when available</div>
-                        <div>Runtime behavior and identical wrong answers are compared</div>
-                        <div>Thresholds are automatically adjusted using score patterns</div>
-                      </div>
-                    </Accordion>
 
                   {applied.warnings?.length > 0 && (
                     <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
                       {applied.warnings.map((warning) => <div key={warning}>{warning}</div>)}
                     </section>
                   )}
+                </div>
+
+                <aside className="space-y-6">
+                  <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+                    <div className="text-sm font-semibold text-blue-950">System handles automatically</div>
+                    <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800">
+                      <div>• Starter code is excluded from comparisons</div>
+                      <div>• Previous-term submissions are matched when available</div>
+                      <div>• Runtime behavior and identical wrong answers are compared</div>
+                      <div>• Thresholds are automatically adjusted</div>
+                    </div>
+                  </section>
                 </aside>
               </div>
             </div>
           )}
 
-            {/* External Sources Tab */}
-            {activeTab === 'external_sources' && (
-              <div className="space-y-6">
-                <Accordion
-                  title="Public Source Scanning"
-                  description="Scan GitHub repos and public websites for copied code."
-                  isOpen={accordions.publicSources}
-                  onToggle={() => setAccordions(prev => ({ ...prev, publicSources: !prev.publicSources }))}
-                >
-                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(settings.source_scan_enabled)}
-                      onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
-                    />
-                    <span>
-                      <span className="block text-sm font-semibold text-slate-950">Scan public sources when running checks</span>
-                      <span className="mt-1 block text-sm leading-6 text-slate-500">Add GitHub repositories or raw file URLs (e.g. https://github.com/org/course-solutions).</span>
-                    </span>
-                  </label>
-                  <TextAreaInput
-                    label="Public sources to scan (one per line)"
-                    value={(settings.source_scan_sites || []).join('\n')}
-                    placeholder={'https://github.com/org/course-solutions\nhttps://raw.githubusercontent.com/org/repo/main/solution.py'}
-                    onChange={(value) => updateSetting('source_scan_sites', value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))}
-                  />
-                </Accordion>
+          {/* SYSTEM SETTINGS */}
+          {activeTab === 'system' && (
+            <div className="space-y-6">
+              <Accordion
+                title="Webhooks"
+                description="Configure webhooks for real-time notifications."
+                isOpen={accordions.webhooks}
+                onToggle={() => setAccordions(prev => ({ ...prev, webhooks: !prev.webhooks }))}
+              >
+                <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
+              </Accordion>
 
-                <Accordion
-                  title="Legacy Tools"
-                  description="MOSS integration and other legacy external tools."
-                  isOpen={accordions.legacyTools}
-                  onToggle={() => setAccordions(prev => ({ ...prev, legacyTools: !prev.legacyTools }))}
-                >
-                  <TextInput label="MOSS User ID (legacy / advanced)" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
-                </Accordion>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={() => setShowPerformanceAdvanced(!showPerformanceAdvanced)}
+                className="mb-3 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                <span>Advanced: Embedding & Resource Settings</span>
+                <span>{showPerformanceAdvanced ? 'Hide' : 'Show'}</span>
+              </button>
 
-            {/* Integrations / Notifications Tab */}
-            {activeTab === 'integrations' && (
-              <div className="space-y-6">
-                <Accordion
-                  title="Webhooks"
-                  description="Configure webhooks for real-time notifications."
-                  isOpen={accordions.webhooks}
-                  onToggle={() => setAccordions(prev => ({ ...prev, webhooks: !prev.webhooks }))}
-                >
-                  <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
-                </Accordion>
-              </div>
-            )}
-
-            {/* Performance Tab */}
-            {activeTab === 'performance' && (
-              <div className="space-y-6">
-                <button
-                  type="button"
-                  onClick={() => setShowPerformanceAdvanced(!showPerformanceAdvanced)}
-                  className="mb-3 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  <span>Advanced: Embedding & Resource Settings</span>
-                  <span>{showPerformanceAdvanced ? 'Hide' : 'Show'}</span>
-                </button>
-
-                {showPerformanceAdvanced && (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <SelectInput label="Embedding Runtime" value={settings.embedding_runtime} options={[['local_unixcoder', 'Local (UniXcoder)'], ['remote_openai_compatible', 'Remote Server']]} onChange={(value) => updateSetting('embedding_runtime', value)} />
-                    <SelectInput label="Hardware Acceleration" value={settings.embedding_device} options={[['auto', 'Auto'], ['cuda', 'CUDA / GPU'], ['cpu', 'CPU only']]} onChange={(value) => updateSetting('embedding_device', value)} />
-                    <TextInput label="Embedding Batch Size" type="number" value={settings.embedding_batch_size} onChange={(value) => updateSetting('embedding_batch_size', Number(value))} />
-                  </div>
-                )}
-              </div>
-            )}
-
-         </div>
+              {showPerformanceAdvanced && (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SelectInput label="Embedding Runtime" value={settings.embedding_runtime} options={[['local_unixcoder', 'Local (UniXcoder)'], ['remote_openai_compatible', 'Remote Server']]} onChange={(value) => updateSetting('embedding_runtime', value)} />
+                  <SelectInput label="Hardware Acceleration" value={settings.embedding_device} options={[['auto', 'Auto'], ['cuda', 'CUDA / GPU'], ['cpu', 'CPU only']]} onChange={(value) => updateSetting('embedding_device', value)} />
+                  <TextInput label="Embedding Batch Size" type="number" value={settings.embedding_batch_size} onChange={(value) => updateSetting('embedding_batch_size', Number(value))} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function Accordion({ title, description, isOpen, onToggle, children }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-xl"
+      >
+        <div>
+          <div className="text-lg font-semibold text-slate-950">{title}</div>
+          {description && (
+            <div className="mt-1 text-sm leading-6 text-slate-600">{description}</div>
+          )}
+        </div>
+        <ChevronDown
+          size={20}
+          className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-blue-600' : ''}`}
+        />
+      </button>
+      {isOpen && (
+        <div className="border-t border-slate-200 px-5 pb-5 pt-4 transition-all duration-200">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -594,47 +519,6 @@ function Notice({ children, tone, icon: Icon }) {
     <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${className}`}>
       <Icon size={16} className="mt-0.5 shrink-0" />
       <span>{children}</span>
-    </div>
-  );
-}
-
-// Simple reusable accordion component (extracted from inline patterns)
-function Accordion({
-  title,
-  description,
-  isOpen,
-  onToggle,
-  children,
-}: {
-  title: string;
-  description?: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-xl"
-      >
-        <div>
-          <div className="text-lg font-semibold text-slate-950">{title}</div>
-          {description && (
-            <div className="mt-1 text-sm leading-6 text-slate-600">{description}</div>
-          )}
-        </div>
-        <ChevronDown
-          size={20}
-          className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-blue-600' : ''}`}
-        />
-      </button>
-      {isOpen && (
-        <div className="border-t border-slate-200 px-5 pb-5 pt-4 transition-all duration-200">
-          {children}
-        </div>
-      )}
     </div>
   );
 }
