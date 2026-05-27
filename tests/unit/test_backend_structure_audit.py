@@ -55,14 +55,15 @@ def test_find_bootstrap_disabled_importers_limits_to_production_roots(
     api_dir.mkdir()
     benchmark_dir.mkdir()
     (api_dir / "server.py").write_text(
-        "from src.backend.bootstrap.container import Container\n",
+        "from src.backend.bootstrap_disabled.container import Container\n",
         encoding="utf-8",
     )
     (benchmark_dir / "runner.py").write_text(
-        "from src.backend.bootstrap.app import get_application\n",
+        "from src.backend.bootstrap_disabled.app import get_application\n",
         encoding="utf-8",
     )
 
     importers = find_bootstrap_disabled_importers(tmp_path)
 
+    # Only api/ is in PRODUCTION_IMPORT_ROOTS, benchmark/ is excluded
     assert importers == [api_dir / "server.py"]

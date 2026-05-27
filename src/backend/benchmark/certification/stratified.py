@@ -273,6 +273,129 @@ def compute_stratified_metrics(
     )
 
 
+def compute_operational_metrics(
+    records: List[BenchmarkRecord],
+    k_values: List[int] = [5, 10, 20, 50],
+    threshold: float = 0.7,
+) -> Dict[str, Any]:
+    """Compute professor-facing operational metrics.
+
+    These metrics reflect real-world usage: how many wrong flags will
+    a professor actually see, and how much manual work is required.
+
+    Args:
+        records: List of benchmark records with predictions.
+        k_values: Top-K values for alert precision analysis.
+        threshold: Similarity score threshold for flagging.
+
+    Returns:
+        Dictionary with operational metrics:
+        - alert_precision@k: Fraction of top-k flagged that are actual clones
+        - alerts_at_threshold: Number of pairs above threshold
+        - review_burden: Estimated manual reviews needed
+        - false_accusation_rate: FP rate relative to total population
+    """
+    if not records:
+        return {
+            "status": "no_records",
+            "alert_precision": {str(k): 0.0 for k in k_values},
+            "alerts_at_threshold": 0,
+            "review_burden": 0,
+            "false_accusation_rate": 0.0,
+        }
+
+    results = {}
+
+    # Sort by predicted score descending
+    sorted_records = sorted(records, key=lambda r: r.score, reverse=True)
+
+    # Alert precision at top-K
+    alert_precision = {}
+    for k in k_values:
+        top_k = sorted_records[:k]
+        tp_k = sum(1 for r in top_k if r.label == 1)
+        alert_precision[str(k)] = tp_k / len(top_k) if top_k else 0.0
+
+    # Alerts at threshold (what professor sees)
+    alerts = [r for r in sorted_records if r.score >= threshold]
+    fp_in_alerts = sum(1 for r in alerts if r.label == 0)
+    false_ac_in_alerts = fp_in_alerts / len(alerts) if alerts else 0.0
+
+    # Review burden
+    review_burden = len(alerts)
+
+    # False accusation rate (false positives relative to total population)
+    # This is critical for academic integrity - how many innocent students flagged?
+    total_pairs = len(records)
+    false_positives = sum(1 for r in records if r.label == 0 and r.decision)
+    false_accusation_rate = false_positives / total_pairs if total_pairs > 0 else 0.0
+
+    return {
+        "alert_precision": alert_precision,
+        "alerts_at_threshold": len(alerts),
+        "false_alerts_in_top_k": {str(k): sum(1 for r in sorted_records[:k] if r.label == 0) for k in k_values},
+        "review_burden": review_burden,
+        "false_accusation_rate": false_accusation_rate,
+        "burden_per_100_submissions": (review_burden / total_pairs * 100) if total_pairs > 0 else 0.0,
+    }
+
+
+def analyze_fpr_by_subgroup(
+    records: List[BenchmarkRecord],
+    subgroup_attribute: str,
+) -> Dict[str, Any]:
+    """Analyze false positive rate across subgroups.
+
+    Critical for identifying when FPR spikes on smaller classes,
+    certain languages, or assignment types.
+
+    Args:
+        records: List of benchmark records.
+        subgroup_attribute: Attribute to group by (language, difficulty, etc.).
+
+    Returns:
+        Dictionary with FPR analysis by subgroup.
+    """
+    from collections import defaultdict
+
+    # Group by attribute
+    groups = defaultdict(list)
+    for r in records:
+        key = getattr(r, subgroup_attribute, "unknown")
+        groups[str(key)].append(r)
+
+    analysis = {}
+    for group_name, group_records in groups.items():
+        # Compute FPR for this group
+        false_positives = sum(1 for r in group_records if r.label == 0 and r.decision)
+        actual_negatives = sum(1 for r in group_records if r.label == 0)
+
+        fpr = false_positives / actual_negatives if actual_negatives > 0 else 0.0
+
+        analysis[group_name] = {
+            "n_samples": len(group_records),
+            "n_negatives": actual_negatives,
+            "false_positives": false_positives,
+            "fpr": round(fpr, 4),
+            "fpr_pct": round(fpr * 100, 2),
+        }
+
+    # Identify high-risk subgroups (FPR > 2x overall average)
+    all_fps = sum(1 for r in records if r.label == 0 and r.decision)
+    all_negs = sum(1 for r in records if r.label == 0)
+    overall_fpr = all_fps / all_negs if all_negs > 0 else 0.0
+
+    analysis["_meta"] = {
+        "overall_fpr": round(overall_fpr, 4),
+        "high_risk_subgroups": [
+            k for k, v in analysis.items()
+            if k != "_meta" and v["fpr"] > overall_fpr * 2 and v["n_negatives"] >= 10
+        ],
+    }
+
+    return analysis
+
+
 class StratifiedAnalyzer:
     """Analyzer for stratified results across multiple dimensions.
 

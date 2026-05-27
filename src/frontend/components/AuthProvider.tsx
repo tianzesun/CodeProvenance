@@ -60,7 +60,25 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Check for debug mode to bypass auth
+  const isDebugMode = typeof window !== 'undefined' && localStorage.getItem('integritydesk_debug_mode') === 'true';
+
   const [user, setUser] = useState<AuthUser | null>(() => {
+    // In debug mode, return a mock user
+    if (isDebugMode) {
+      return {
+        id: 'debug-user-1',
+        email: 'admin@debug.local',
+        full_name: 'Debug Admin',
+        role: 'admin' as AuthRole,
+        tenant_id: 'debug-tenant',
+        tenant_name: 'Debug Workspace',
+        is_active: true,
+        suspended: false,
+        last_login_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+    }
     // Try to restore user from localStorage on initial load
     if (typeof window !== 'undefined') {
       try {
@@ -83,6 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   });
   const [status, setStatus] = useState<AuthStatus>(() => {
+    // In debug mode, return authenticated
+    if (isDebugMode) {
+      return 'authenticated';
+    }
     // Set initial status based on stored user
     if (typeof window !== 'undefined') {
       try {
@@ -103,8 +125,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return 'loading';
   });
   const [bootstrapped, setBootstrapped] = useState(() => {
-    // Initialize bootstrapped to true if we have stored user data
+    // In debug mode, consider system bootstrapped
+    if (isDebugMode) {
+      return true;
+    }
+    // Initialize bootstrapped from localStorage if available
     if (typeof window !== 'undefined') {
+      const storedBootstrapped = localStorage.getItem('integritydesk_bootstrapped');
+      if (storedBootstrapped === 'true') {
+        return true;
+      }
+      // Also assume bootstrapped if we have stored user data
       const stored = localStorage.getItem('integritydesk_auth_user');
       if (stored) {
         try {
@@ -217,8 +248,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [bootstrapped, handleSessionExpired, refreshSession, clearSession]);
 
-  // Periodic session validation (every 5 minutes)
+// Periodic session validation (every 5 minutes) - skip in debug mode
   useEffect(() => {
+    if (isDebugMode) return;
     if (!user || status !== 'authenticated') return;
 
     const interval = setInterval(async () => {
@@ -231,7 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 5 * 60 * 1000); // 5 minutes
 
     return () => clearInterval(interval);
-  }, [user, status, clearSession]);
+  }, [user, status, clearSession, isDebugMode]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiClient.post('/api/auth/login', { email, password });

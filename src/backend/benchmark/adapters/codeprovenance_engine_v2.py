@@ -139,3 +139,7 @@ class CodeProvenanceEngineV2(BaseSimilarityEngine):
         if not tokens_a or not tokens_b:
             return 0.0
         return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+# Alias for registry compatibility
+CodeProvenanceAdapterV2 = CodeProvenanceEngineV2

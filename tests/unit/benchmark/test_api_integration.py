@@ -112,8 +112,8 @@ class TestBenchmarkValidationService:
     def test_validate_dataset(self):
         """Test dataset validation through service."""
         pairs = [
-            {"source_code": "x" * 100, "suspicious_code": "y" * 100},
-            {"source_code": "a" * 100, "suspicious_code": "b" * 100},
+            {"code_a": "x" * 100, "code_b": "y" * 100},
+            {"code_a": "a" * 100, "code_b": "b" * 100},
         ]
         labels = [0, 1]
         pair_ids = ["p1", "p2"]
@@ -162,7 +162,7 @@ class TestBenchmarkValidationService:
             source_span=TextSpan(0, 100)
         )]
         expected = PANMetrics(1.0, 1.0, 1.0, 1.0, 1.0)
-        pairs = [{"source_code": "x" * 100, "suspicious_code": "y" * 100}]
+        pairs = [{"code_a": "x" * 100, "code_b": "y" * 100}]
         labels = [0]
         pair_ids = ["p1"]
         tool_outputs = {"jplag": [{"score": 0.75, "matches": []}]}
@@ -222,7 +222,7 @@ class TestValidationAPIEndpoints:
                 "granularity": 1.0,
                 "plagdet": 1.0,
             },
-            pairs=[{"source_code": "x" * 100, "suspicious_code": "y" * 100}],
+            pairs=[{"code_a": "x" * 100, "code_b": "y" * 100}],
             labels=[0],
             pair_ids=["p1"],
             tool_outputs={"jplag": [{"score": 0.75, "matches": []}]},

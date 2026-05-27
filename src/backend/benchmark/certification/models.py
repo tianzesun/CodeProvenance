@@ -11,11 +11,14 @@ from typing import Any, Dict, List, Optional
 
 
 class CloneType(IntEnum):
-    """Clone type classification (Type I-IV)."""
-    TYPE_1 = 1  # Exact clones (textual copies)
-    TYPE_2 = 2  # Renamed clones (variable/function names changed)
-    TYPE_3 = 3  # Near-miss clones (statements added/removed/modified)
-    TYPE_4 = 4  # Semantic clones (different implementation, same behavior)
+    """Clone type classification (Type I-VI)."""
+    NON_CLONE = 0
+    TYPE_1 = 1   # Exact clones (textual copies)
+    TYPE_2 = 2   # Renamed clones (variable/function names changed)
+    TYPE_3 = 3   # Near-miss clones (statements added/removed/modified)
+    TYPE_4 = 4   # Semantic clones (different implementation, same behavior)
+    TYPE_5 = 5   # Adversarial obfuscated (professional cheating techniques)
+    TYPE_6 = 6   # LLM rewritten (GPT-4o/Claude rewritten submissions)
 
 
 class Difficulty(IntEnum):
@@ -38,7 +41,8 @@ class BenchmarkRecord:
         engine: Name of the detection engine.
         score: Similarity score from engine (0.0 to 1.0).
         decision: Binary classification decision (threshold applied).
-        clone_type: Type of clone (1-4) or 0 for non-clones.
+        clone_type: Type of clone (0-6) where 0=non-clone, 1-4=standard types,
+                  5=adversarial obfuscated, 6=LLM rewritten.
         difficulty: Detection difficulty level.
         language: Programming language of the code pair.
         metadata: Additional metadata (file paths, timestamps, etc.).
@@ -59,8 +63,8 @@ class BenchmarkRecord:
             raise ValueError(f"Label must be 0 or 1, got {self.label}")
         if not 0.0 <= self.score <= 1.0:
             raise ValueError(f"Score must be in [0, 1], got {self.score}")
-        if self.clone_type < 0 or self.clone_type > 4:
-            raise ValueError(f"Clone type must be 0-4, got {self.clone_type}")
+        if self.clone_type < 0 or self.clone_type > 6:
+            raise ValueError(f"Clone type must be 0-6, got {self.clone_type}")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

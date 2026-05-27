@@ -89,7 +89,7 @@ def test_assignment_modes_payload_includes_cross_mode_policy() -> None:
     payload = assignment_modes_payload()
 
     assert payload["default_mode_id"] == DEFAULT_ASSIGNMENT_MODE_ID
-    assert len(payload["modes"]) == 11
+    assert len(payload["modes"]) == 17  # Current mode count
     assert "universal_preprocessing" in payload
     assert "professor_feedback_loop" in payload["cross_mode_policy"]
 
@@ -99,7 +99,7 @@ def test_engine_config_publishes_assignment_modes() -> None:
     config = load_engine_config()
 
     assert config["assignment_modes"]["default_mode_id"] == DEFAULT_ASSIGNMENT_MODE_ID
-    assert len(config["assignment_modes"]["modes"]) == 11
+    assert len(config["assignment_modes"]["modes"]) == 17  # Current mode count
 
 
 def test_mode_recommender_detects_sql_assignment_from_content_hints() -> None:
