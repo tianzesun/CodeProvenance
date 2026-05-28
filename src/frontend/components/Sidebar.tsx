@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
-  BookOpen,
   Bot,
   ChevronLeft,
   ChevronRight,
@@ -95,12 +94,6 @@ export default function Sidebar() {
               label: 'FPR Validation',
               icon: ShieldCheck,
               activeOn: ['/tools/fpr-validation'],
-            },
-            {
-              href: '/datasets',
-              label: 'Datasets',
-              icon: BookOpen,
-              activeOn: ['/datasets'],
             },
           ]
           : []),
