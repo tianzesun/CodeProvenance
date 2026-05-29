@@ -1352,8 +1352,8 @@ function PanLeaderboard({ rows }) {
                 const deltaVsWinner = i === 0 ? 0 : ((row.f1Score - rows[0].f1Score) * 100);
 
                 return (
-                  <tr 
-                    key={row.toolId} 
+                  <tr
+                    key={row.toolId}
                     className={`transition-colors ${isWinner ? 'bg-amber-50/60' : isID ? 'bg-violet-50/40' : 'hover:bg-slate-50/60'}`}
                   >
                     <td className="px-3 py-3 text-lg">{medals[i] || `#${i + 1}`}</td>
@@ -1943,71 +1943,71 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
 
           <PanLeaderboard rows={panEvaluationRows} />
 
-           {/* Improved pair-level code diff viewer */}
-           {results.pair_results && results.pair_results.length > 0 && (
-             <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-5">
-               <div className="font-semibold text-sm mb-3 flex items-center gap-2">
-                 <Eye size={16} /> Example Differing Pairs — Code Diffs
-               </div>
-               <div className="space-y-4 text-xs">
-                 {results.pair_results.slice(0, 3).map((pair: any, idx: number) => {
-                   const hasCode = pair.code_a || pair.source_a || pair.content_a;
-                   const codeA = pair.code_a || pair.source_a || pair.content_a || pair.file_a;
-                   const codeB = pair.code_b || pair.source_b || pair.content_b || pair.file_b;
+          {/* Improved pair-level code diff viewer */}
+          {results.pair_results && results.pair_results.length > 0 && (
+            <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="font-semibold text-sm mb-3 flex items-center gap-2">
+                <Eye size={16} /> Example Differing Pairs — Code Diffs
+              </div>
+              <div className="space-y-4 text-xs">
+                {results.pair_results.slice(0, 3).map((pair: any, idx: number) => {
+                  const hasCode = pair.code_a || pair.source_a || pair.content_a;
+                  const codeA = pair.code_a || pair.source_a || pair.content_a || pair.file_a;
+                  const codeB = pair.code_b || pair.source_b || pair.content_b || pair.file_b;
 
-                   return (
-                     <details key={idx} className="border rounded-xl p-3 bg-slate-50/50">
-                       <summary className="cursor-pointer font-mono text-[10px] text-slate-600 truncate">
-                         {pair.file_a || pair.label} ↔ {pair.file_b}
-                       </summary>
+                  return (
+                    <details key={idx} className="border rounded-xl p-3 bg-slate-50/50">
+                      <summary className="cursor-pointer font-mono text-[10px] text-slate-600 truncate">
+                        {pair.file_a || pair.label} ↔ {pair.file_b}
+                      </summary>
 
-                       <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                         {/* Tool scores */}
-                         <div>
-                           <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tool Scores</div>
-                           <div className="flex flex-wrap gap-3">
-                             {(pair.tool_results || []).slice(0, 4).map((tr: any) => (
-                               <span key={tr.tool} className={`px-2 py-0.5 rounded ${(tr.tool === 'integritydesk' || tr.tool === 'codeprovenance') ? 'bg-violet-100 text-violet-700 font-bold' : 'bg-slate-200 text-slate-700'}`}>
-                                 {tr.tool}: {(tr.score * 100).toFixed(0)}%
-                               </span>
-                             ))}
-                           </div>
-                         </div>
+                      <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Tool scores */}
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tool Scores</div>
+                          <div className="flex flex-wrap gap-3">
+                            {(pair.tool_results || []).slice(0, 4).map((tr: any) => (
+                              <span key={tr.tool} className={`px-2 py-0.5 rounded ${(tr.tool === 'integritydesk' || tr.tool === 'codeprovenance') ? 'bg-violet-100 text-violet-700 font-bold' : 'bg-slate-200 text-slate-700'}`}>
+                                {tr.tool}: {(tr.score * 100).toFixed(0)}%
+                              </span>
+                            ))}
+                          </div>
+                        </div>
 
-                         {/* Actual code diff when available */}
-                         {hasCode ? (
-                           <div className="lg:col-span-2">
-                             <div className="grid grid-cols-2 gap-2">
-                               <div>
-                                 <div className="text-[10px] font-semibold text-emerald-600 mb-1">File A</div>
-                                 <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
-                                   {typeof codeA === 'string' ? codeA.slice(0, 800) : JSON.stringify(codeA).slice(0, 800)}
-                                 </pre>
-                               </div>
-                               <div>
-                                 <div className="text-[10px] font-semibold text-rose-600 mb-1">File B</div>
-                                 <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
-                                   {typeof codeB === 'string' ? codeB.slice(0, 800) : JSON.stringify(codeB).slice(0, 800)}
-                                 </pre>
-                               </div>
-                             </div>
-                             <div className="text-[10px] text-emerald-600 mt-1">Side-by-side code (truncated). Full diffs available in detailed report.</div>
-                           </div>
-                         ) : pair.matching_blocks ? (
-                           <div className="lg:col-span-2 text-[10px] text-slate-600">
-                             Matching blocks available — {pair.matching_blocks.length} regions
-                           </div>
-                         ) : (
-                           <div className="lg:col-span-2 text-[10px] text-slate-500">No raw code in this result set.</div>
-                         )}
-                       </div>
-                     </details>
-                   );
-                 })}
-               </div>
-               <div className="text-[10px] text-slate-500 mt-2">Full interactive diffs with line highlighting are in the detailed error analysis view.</div>
-             </div>
-           )}
+                        {/* Actual code diff when available */}
+                        {hasCode ? (
+                          <div className="lg:col-span-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <div className="text-[10px] font-semibold text-emerald-600 mb-1">File A</div>
+                                <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
+                                  {typeof codeA === 'string' ? codeA.slice(0, 800) : JSON.stringify(codeA).slice(0, 800)}
+                                </pre>
+                              </div>
+                              <div>
+                                <div className="text-[10px] font-semibold text-rose-600 mb-1">File B</div>
+                                <pre className="max-h-40 overflow-auto bg-white border p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
+                                  {typeof codeB === 'string' ? codeB.slice(0, 800) : JSON.stringify(codeB).slice(0, 800)}
+                                </pre>
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-emerald-600 mt-1">Side-by-side code (truncated). Full diffs available in detailed report.</div>
+                          </div>
+                        ) : pair.matching_blocks ? (
+                          <div className="lg:col-span-2 text-[10px] text-slate-600">
+                            Matching blocks available — {pair.matching_blocks.length} regions
+                          </div>
+                        ) : (
+                          <div className="lg:col-span-2 text-[10px] text-slate-500">No raw code in this result set.</div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2">Full interactive diffs with line highlighting are in the detailed error analysis view.</div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2485,41 +2485,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     setStep(2);
   }, []);
 
-  // ── Historical results (direct viewing of past benchmark runs) ───────────
-  const [benchmarkHistory, setBenchmarkHistory] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState('');
-
-  useEffect(() => {
-    setHistoryLoading(true);
-    apiClient.get('/api/benchmark-history', { params: { limit: 10 } })
-      .then(res => {
-        const runs = res.data?.runs || res.data || [];
-        setBenchmarkHistory(Array.isArray(runs) ? runs : []);
-      })
-      .catch(() => setHistoryError('Unable to load previous benchmark runs.'))
-      .finally(() => setHistoryLoading(false));
-  }, []);
-
-  const loadHistoricalResult = async (jobId: string) => {
-    if (!jobId) return;
-    try {
-      const res = await apiClient.get(`/api/benchmark/status/${jobId}`);
-      if (res.data?.result) {
-        setResults(res.data.result);
-        setStep(3);
-        setCompletedSteps([0, 1, 2]);
-      } else if (res.data?.status === 'done' && res.data) {
-        // Some persisted entries embed the full payload directly
-        setResults(res.data);
-        setStep(3);
-        setCompletedSteps([0, 1, 2]);
-      }
-    } catch {
-      setHistoryError('Could not load the selected benchmark result.');
-    }
-  };
-
   const STEPS = [
     { label: 'Tools', subtitle: 'Choose what to run' },
     { label: 'Dataset', subtitle: 'Pick or upload data' },
@@ -2572,66 +2537,11 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 );
               })}
             </div>
-           )}
+          )}
 
-           {/* ── Recent Benchmark Results (direct viewing of past runs) ───── */}
-           {!results && benchmarkHistory.length > 0 && (
-             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-               <div className="px-5 py-3 border-b bg-slate-50/70 flex items-center justify-between">
-                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                   <ClipboardList size={16} /> Recent Benchmark Runs
-                 </div>
-                 <span className="text-xs text-slate-500">Click any row to view the full report</span>
-               </div>
-               <div className="overflow-x-auto">
-                 <table className="min-w-full text-sm">
-                   <thead>
-                     <tr className="border-b text-slate-500 text-xs">
-                       <th className="px-4 py-2 text-left font-medium">When</th>
-                       <th className="px-4 py-2 text-left font-medium">Dataset</th>
-                       <th className="px-4 py-2 text-left font-medium">Tools</th>
-                       <th className="px-4 py-2 text-left font-medium">Key Metric</th>
-                       <th className="px-4 py-2"></th>
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y">
-                     {benchmarkHistory.slice(0, 6).map((run, idx) => {
-                       const jobId = run.job_id || run.id || run.run_id;
-                       const when = run.created_at || run.runAt || run.timestamp || '';
-                       const ds = run.datasetName || run.dataset || run.dataset_id || '—';
-                       const tools = Array.isArray(run.tools) ? run.tools.join(', ') : (run.tool || '—');
-                       const f1 = run.f1Score ?? run.metrics?.f1 ?? run.integritydesk_f1;
-                       return (
-                         <tr key={jobId || idx} className="hover:bg-slate-50">
-                           <td className="px-4 py-2 text-xs text-slate-600">{when ? new Date(when).toLocaleString() : '—'}</td>
-                           <td className="px-4 py-2 text-xs font-medium text-slate-900 truncate max-w-[180px]">{ds}</td>
-                           <td className="px-4 py-2 text-xs text-slate-600 truncate max-w-[220px]">{tools}</td>
-                           <td className="px-4 py-2 text-xs">
-                             {typeof f1 === 'number' ? `F1 ${f1.toFixed(3)}` : (run.status || 'completed')}
-                           </td>
-                           <td className="px-4 py-2 text-right">
-                             <button
-                               onClick={() => loadHistoricalResult(jobId)}
-                               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold hover:bg-slate-900 hover:text-white transition"
-                             >
-                               <Eye size={14} /> View Report
-                             </button>
-                           </td>
-                         </tr>
-                       );
-                     })}
-                   </tbody>
-                 </table>
-               </div>
-               {historyError && <div className="px-4 py-2 text-xs text-rose-600 border-t">{historyError}</div>}
-             </div>
-           )}
-           {historyLoading && !results && (
-             <div className="text-xs text-slate-500 px-2">Loading recent benchmark runs…</div>
-           )}
 
-           {/* ── Step wizard ─────────────────────────────────────────────── */}
-           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {/* ── Step wizard ─────────────────────────────────────────────── */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             {/* Run config summary bar — visible in steps 1 and 2 */}
             {step >= 1 && step < 3 && (
               <div className="px-5 py-3 bg-slate-50/70 border-b border-slate-100">
@@ -2702,12 +2612,12 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
 
 
-           </div>
-         </div>
-       </div>
-     </DashboardLayout>
-   );
- }
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
 
 // ── Route Page ─────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {

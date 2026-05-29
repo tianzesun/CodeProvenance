@@ -30,6 +30,9 @@ class ComparisonResult:
     risk_level: str
     features: Dict[str, float] = field(default_factory=dict)
     contributions: Dict[str, float] = field(default_factory=dict)
+    matching_blocks: List[Dict[str, Any]] = field(default_factory=list)
+    code_a: Optional[str] = None
+    code_b: Optional[str] = None
 
 
 def _risk_level(score: float) -> str:
@@ -218,8 +221,12 @@ class BatchDetectionService:
 
     def compare_all_pairs(self, submissions: Dict[str, str]) -> List[ComparisonResult]:
         """Compare all pairs of submissions and return ranked results."""
+        from src.backend.engines.similarity.code_matching import CodeHighlighter
+        
         results = []
         files = list(submissions.keys())
+        highlighter = CodeHighlighter(min_match_length=4)
+        
         for i, fa in enumerate(files):
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
@@ -234,6 +241,20 @@ class BatchDetectionService:
                     features.ngram,
                     features.winnowing,
                 )
+
+                # Compute matching blocks for highlighting
+                match_result = highlighter.find_matching_segments(ca, cb)
+                matching_blocks = [
+                    {
+                        "file_a": fa,
+                        "file_b": fb,
+                        "lines_a": f"{seg.start_line_a}-{seg.end_line_a}",
+                        "lines_b": f"{seg.start_line_b}-{seg.end_line_b}",
+                        "similarity": seg.similarity,
+                        "clone_type": seg.clone_type.value if seg.clone_type else None,
+                    }
+                    for seg in match_result.segments
+                ]
 
                 pair_result = ComparisonResult(
                     file_a=fa,
@@ -253,6 +274,9 @@ class BatchDetectionService:
                         if v is not None
                     },
                     contributions=dict(fused.contributions),
+                    matching_blocks=matching_blocks,
+                    code_a=ca,
+                    code_b=cb,
                 )
                 results.append(pair_result)
 
@@ -264,6 +288,9 @@ class BatchDetectionService:
         self, submissions: Dict[str, str], pairs: List[Dict[str, Any]]
     ) -> List[ComparisonResult]:
         """Compare an explicit set of labeled benchmark pairs."""
+        from src.backend.engines.similarity.code_matching import CodeHighlighter
+        
+        highlighter = CodeHighlighter(min_match_length=4)
         scored_pairs = []
         for pair in pairs:
             fa = str(pair.get("file_a", ""))
@@ -274,9 +301,10 @@ class BatchDetectionService:
                 )
                 continue
 
-            features = self.extractor.extract(submissions[fa], submissions[fb])
+            ca, cb = submissions[fa], submissions[fb]
+            features = self.extractor.extract(ca, cb)
             fused = self.fusion.fuse(features)
-            logic_flow = _logic_flow_similarity(submissions[fa], submissions[fb])
+            logic_flow = _logic_flow_similarity(ca, cb)
             raw_score = _apply_structure_sensitivity_floor(
                 fused.final_score,
                 features.ast,
@@ -285,6 +313,20 @@ class BatchDetectionService:
                 features.ngram,
                 features.winnowing,
             )
+            
+            # Compute matching blocks
+            match_result = highlighter.find_matching_segments(ca, cb)
+            matching_blocks = [
+                {
+                    "file_a": fa,
+                    "file_b": fb,
+                    "lines_a": f"{seg.start_line_a}-{seg.end_line_a}",
+                    "lines_b": f"{seg.start_line_b}-{seg.end_line_b}",
+                    "similarity": seg.similarity,
+                }
+                for seg in match_result.segments
+            ]
+            
             scored_pairs.append(
                 {
                     "file_a": fa,
@@ -296,6 +338,9 @@ class BatchDetectionService:
                     "logic_flow": logic_flow,
                     "features": features,
                     "contributions": dict(fused.contributions),
+                    "matching_blocks": matching_blocks,
+                    "code_a": ca,
+                    "code_b": cb,
                 }
             )
 
@@ -331,6 +376,9 @@ class BatchDetectionService:
                         if v is not None
                     },
                     contributions=item["contributions"],
+                    matching_blocks=item.get("matching_blocks", []),
+                    code_a=item.get("code_a"),
+                    code_b=item.get("code_b"),
                 )
             )
 

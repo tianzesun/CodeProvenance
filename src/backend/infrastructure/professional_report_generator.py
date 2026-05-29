@@ -247,7 +247,7 @@ class ReportGenerator:
             f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
             f'<meta charset="UTF-8">\n'
             f'<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-            f"<title>IntegrityDesk Originality Report \u2014 {escape(self.institution_name)}</title>\n"
+            f"<title>Originality Report — {escape(self.institution_name)}</title>\n"
             f'<style>{css}</style>\n</head>\n<body>\n<div class="shell">\n\n'
             f'<div class="conf-banner">Confidential \u2014 Academic Integrity Evidence Report \u2014 Authorized Use Only</div>\n\n'
             f'<header class="rpt-header">\n'
@@ -255,9 +255,8 @@ class ReportGenerator:
             f'    <div class="rpt-brand">\n'
             f'      <div class="rpt-logo">ID</div>\n'
             f'      <div class="rpt-title-block">\n'
-            f'        <div class="eyebrow">{escape(self.institution_name)} \u2014 Evidence Packet</div>\n'
-            f"        <h1>IntegrityDesk Originality Report</h1>\n"
-            f'        <div class="subtitle">Seven-engine fusion analysis &middot; {tools_str}</div>\n'
+            f'        <div class="eyebrow">{escape(self.institution_name)} — Evidence Packet</div>\n'
+            f"        <h1>Originality Report</h1>\n"
             f"      </div>\n    </div>\n"
             f'    <div class="rpt-meta-block">\n'
             f"      <div><strong>Generated</strong><br>{timestamp}</div>\n"
@@ -265,14 +264,14 @@ class ReportGenerator:
             f"    </div>\n  </div>\n"
             f'  <div class="action-bar no-print">\n'
             f'    <a href="/report/{escape(report_id)}/download-pdf"\n'
-            f'       class="btn btn-dl"\n'
+            f'       class="btn btn-dl" style="display:none"\n'
             f'       onclick="event.preventDefault();downloadPDF(this)"\n'
             f'       data-job-id="{escape(report_id)}">\n'
-            f'      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>\n'
-            f"      Download PDF\n    </a>\n"
-            f'    <button class="btn btn-pr" onclick="window.print()">\n'
-            f'      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>\n'
-            f"      Print Report\n    </button>\n  </div>\n</header>\n\n"
+            f'      Download PDF\n'
+            f"    </a>\n"
+            f'    <button class="btn btn-pr" onclick="window.print()" style="display:none">\n'
+            f'      Print Report\n'
+            f"    </button>\n  </div>\n</header>\n\n"
             f'<div class="score-banner">\n'
             f'  <div class="score-circle"><span>{score_pct}</span></div>\n'
             f'  <div class="score-info">\n'

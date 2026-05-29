@@ -146,11 +146,33 @@ function fallbackCode(label) {
   ].join('\n');
 }
 
-function highlightedLines(code) {
-  const lines = String(code || '').split('\n');
-  const start = Math.max(1, Math.floor(lines.length * 0.25));
-  const end = Math.min(lines.length, start + Math.max(3, Math.floor(lines.length * 0.35)));
-  return new Set(Array.from({ length: end - start + 1 }, (_, index) => start + index));
+function highlightedLines(code, matchingBlocks, isLeft = true) {
+  // Returns a Map of line number -> similarity score for colored highlighting
+  // If matching_blocks provided, parse line ranges from backend data
+  if (matchingBlocks && Array.isArray(matchingBlocks) && matchingBlocks.length > 0) {
+    const lineScores = new Map();
+    for (const block of matchingBlocks) {
+      // Use lines_a for left panel, lines_b for right panel
+      const rangeKey = isLeft ? 'lines_a' : 'lines_b';
+      const range = block[rangeKey];
+      // Use block's similarity if available, otherwise default to 0.75 (medium-high)
+      const similarity = typeof block.similarity === 'number' ? block.similarity : 0.75;
+      if (range) {
+        const [start, end] = range.split('-').map(Number);
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = start; i <= end; i++) {
+            // Keep highest similarity score for each line
+            if (!lineScores.has(i) || lineScores.get(i) < similarity) {
+              lineScores.set(i, similarity);
+            }
+          }
+        }
+      }
+    }
+    return lineScores;
+  }
+  // Fallback: no matching blocks data available
+  return new Map();
 }
 
 function buildCluster(result, results) {
@@ -334,10 +356,11 @@ export default function ResultsPage() {
   }, [tableData, reviewResults, activeIndex]);
 
   const submissions = job?.submissions && typeof job.submissions === 'object' ? job.submissions : {};
-  const leftCode = getSubmissionCode(submissions, activeResult?.file_a, fallbackCode(activeResult?.file_a || 'Student A'));
-  const rightCode = getSubmissionCode(submissions, activeResult?.file_b, fallbackCode(activeResult?.file_b || 'Student B'));
-  const leftHighlights = highlightedLines(leftCode);
-  const rightHighlights = highlightedLines(rightCode);
+  // Use code_a/code_b from result if available, otherwise fall back to submissions
+  const leftCode = activeResult?.code_a || getSubmissionCode(submissions, activeResult?.file_a, fallbackCode(activeResult?.file_a || 'Student A'));
+  const rightCode = activeResult?.code_b || getSubmissionCode(submissions, activeResult?.file_b, fallbackCode(activeResult?.file_b || 'Student B'));
+  const leftHighlights = highlightedLines(leftCode, activeResult?.matching_blocks, true);
+  const rightHighlights = highlightedLines(rightCode, activeResult?.matching_blocks, false);
   const score = Number(activeResult?.score) || Number(activeResult?._score) || 0;
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
@@ -745,23 +768,39 @@ export default function ResultsPage() {
                   )}
                 </div>
 
-               {/* Side-by-side code comparison - full screen width */}
-               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                 <CodePanel
-                   title={activeResult?.file_a || 'Student A'}
-                   code={leftCode}
-                   highlights={leftHighlights}
-                   panelRef={leftRef}
-                   onScroll={() => syncScroll(leftRef, rightRef)}
-                 />
-                 <CodePanel
-                   title={activeResult?.file_b || 'Student B'}
-                   code={rightCode}
-                   highlights={rightHighlights}
-                   panelRef={rightRef}
-                   onScroll={() => syncScroll(rightRef, leftRef)}
-                 />
-               </div>
+{/* Side-by-side code comparison - full screen width */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <CodePanel
+                    title={activeResult?.file_a || 'Student A'}
+                    code={leftCode}
+                    highlights={leftHighlights}
+                    panelRef={leftRef}
+                    onScroll={() => syncScroll(leftRef, rightRef)}
+                  />
+                  <CodePanel
+                    title={activeResult?.file_b || 'Student B'}
+                    code={rightCode}
+                    highlights={rightHighlights}
+                    panelRef={rightRef}
+                    onScroll={() => syncScroll(rightRef, leftRef)}
+                  />
+                </div>
+
+                {/* Similarity Legend */}
+                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-red-500/30 border border-red-400/50"></span>
+                    High similarity (75%+)
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-amber-500/25 border border-amber-400/40"></span>
+                    Moderate similarity (50-74%)
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-emerald-500/20 border border-emerald-400/30"></span>
+                    Low similarity (30-49%)
+                  </span>
+                </div>
 
                {job?.review_notes && (
                  <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
@@ -803,32 +842,45 @@ const CheckRow = ({ title, detail }) => (
   </div>
 );
 
-const CodePanel = ({ title, code, highlights, panelRef, onScroll }) => (
-  <div className="overflow-hidden rounded-lg border border-[color:var(--border)] bg-white shadow-sm">
-    <div className="border-b border-[color:var(--border)] px-4 py-3">
-      <h2 className="font-semibold text-[var(--text-primary)]">{title}</h2>
+const CodePanel = ({ title, code, highlights, panelRef, onScroll, isLeft }) => {
+  // Get highlight color based on similarity score
+  const getHighlightClass = (score) => {
+    if (score >= 0.75) return 'bg-red-500/30 outline-red-400/50'; // High similarity - red
+    if (score >= 0.5) return 'bg-amber-500/25 outline-amber-400/40'; // Medium - amber
+    return 'bg-emerald-500/20 outline-emerald-400/30'; // Low - emerald
+  };
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-[color:var(--border)] bg-white shadow-sm">
+      <div className="border-b border-[color:var(--border)] px-4 py-3">
+        <h2 className="font-semibold text-[var(--text-primary)]">{title}</h2>
+      </div>
+      <div
+        ref={panelRef}
+        onScroll={onScroll}
+        className="max-h-[1600px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
+      >
+        <pre className="min-w-full py-3 font-mono">
+          {String(code || '').split('\n').map((line, index) => {
+            const lineNumber = index + 1;
+            const similarity = highlights.get(lineNumber) || 0;
+            const isMatched = similarity > 0;
+            // Color coding: Red = highly similar, Amber = moderately similar, Emerald = low similarity
+            const highlightClass = isMatched 
+              ? `${getHighlightClass(similarity)} outline outline-1`
+              : '';
+            return (
+              <div
+                key={lineNumber}
+                className={`grid grid-cols-[52px_1fr] px-3 ${highlightClass}`}
+              >
+                <span className="select-none pr-3 text-right text-slate-500">{lineNumber}</span>
+                <code className="whitespace-pre">{line || ' '}</code>
+              </div>
+            );
+          })}
+        </pre>
+      </div>
     </div>
-    <div
-      ref={panelRef}
-      onScroll={onScroll}
-      className="max-h-[1600px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
-    >
-      <pre className="min-w-full py-3 font-mono">
-        {String(code || '').split('\n').map((line, index) => {
-          const lineNumber = index + 1;
-          const highlighted = highlights.has(lineNumber);
-          return (
-            <div
-              key={lineNumber}
-              className={`grid grid-cols-[52px_1fr] px-3 ${highlighted ? 'bg-red-500/20 outline outline-1 outline-red-400/20' : ''
-                }`}
-            >
-              <span className="select-none pr-3 text-right text-slate-500">{lineNumber}</span>
-              <code className="whitespace-pre">{line || ' '}</code>
-            </div>
-          );
-        })}
-      </pre>
-    </div>
-  </div>
-);
+  );
+};
