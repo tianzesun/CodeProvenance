@@ -175,6 +175,7 @@ class SimilarityResult(Base):
     __table_args__ = (
         Index("idx_results_job_score", "job_id", "similarity_score"),
         Index("idx_similarity_results_review_status", "review_status"),
+        Index("idx_similarity_results_verdict", "verdict"),
         Index("idx_similarity_results_created_at", "created_at"),
         Index("idx_similarity_results_submission_a", "submission_a_id"),
         Index("idx_similarity_results_submission_b", "submission_b_id"),
@@ -193,6 +194,7 @@ class SimilarityResult(Base):
     matching_blocks = Column(JSONB, nullable=True)
     excluded_matches = Column(JSONB, nullable=True)
     algorithm_scores = Column(JSONB, nullable=True)
+    verdict = Column(String(20), nullable=True)  # TRUE, PROBABLE, REVIEW, FLAG, CLEAN
     review_status = Column(String(50), nullable=True)
     review_notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))

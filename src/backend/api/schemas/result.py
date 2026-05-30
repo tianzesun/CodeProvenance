@@ -38,6 +38,7 @@ class SimilarityResultBase(BaseModel):
     matching_blocks: List[MatchingBlock] = Field(default_factory=list)
     excluded_matches: List[ExcludedMatch] = Field(default_factory=list)
     algorithm_scores: Optional[Dict[str, float]] = None
+    verdict: Optional[str] = Field(None, description="Rule-based verdict: TRUE, PROBABLE, REVIEW, FLAG, CLEAN")
 
 
 class SimilarityResultCreate(SimilarityResultBase):

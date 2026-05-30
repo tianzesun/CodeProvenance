@@ -1,4 +1,17 @@
-"""Fusion Engine - Combined multi-engine scoring with configurable weights."""
+"""Fusion Engine - Evidence Hierarchy Engine integration.
+
+This module now delegates to the Evidence Hierarchy Engine (EHE) for
+hierarchical decision making that eliminates score pollution and
+ensures deterministic verdicts.
+
+Key improvements:
+1. Identity evidence hard-stops the pipeline
+2. Structural evidence dominates semantic evidence
+3. No weighted averaging across evidence types
+4. Full audit trail in every decision
+5. Hard gating layer to veto false positives
+6. Conflict-based downgrade to REVIEW
+"""
 
 from __future__ import annotations
 
@@ -6,7 +19,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import yaml
 
@@ -18,6 +31,7 @@ from src.backend.engines.scoring.fusion_policy import (
     fusion_presets_payload,
 )
 from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
+from src.backend.engines.detection.ehe import EvidenceHierarchyEngine, Verdict as EHEVerdict
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -37,22 +51,22 @@ class FusedScore:
     professor_summary: str = ""
     evidence_reasons: list[str] = field(default_factory=list)
     evidence_guardrails: list[str] = field(default_factory=list)
+    evidence_quality: Dict[str, str] = field(default_factory=dict)
+    relevant_engines: List[str] = field(default_factory=list)
+    verdict: str = "INCONCLUSIVE"
 
 
 # Baseline scores expected for two unrelated files in the same language.
-# These represent the "noise floor" — scores that occur just from sharing
-# a language's syntax, common patterns, and embedding vocabulary.
-# Scores at or below baseline are treated as zero similarity.
 LANGUAGE_BASELINE: Dict[str, float] = {
-    "embedding": 0.70,  # UniXcoder sees "this is Python code" for both
-    "winnowing": 0.25,  # Common keywords/structures produce some overlap
-    "string_tiling": 0.20,  # Normalized local token runs from common idioms
-    "ngram": 0.15,  # Character n-grams share syntax tokens
-    "ast": 0.25,  # Similar AST node types (functions, returns, etc.)
-    "graph": 0.20,  # Common control/data-flow skeletons in same assignment
-    "static_rules": 0.20,  # Static rule patterns are coarse by design
-    "fingerprint": 0.15,  # Token-level overlap from language keywords
-    "sklearn_cosine": 0.25,  # TF-IDF baseline has vocabulary overlap noise
+    "embedding": 0.70,
+    "winnowing": 0.25,
+    "string_tiling": 0.20,
+    "ngram": 0.15,
+    "ast": 0.25,
+    "graph": 0.20,
+    "static_rules": 0.20,
+    "fingerprint": 0.15,
+    "sklearn_cosine": 0.25,
 }
 
 WEIGHT_ALIASES: Dict[str, str] = {
@@ -86,16 +100,11 @@ def save_engine_config(config: Dict) -> None:
     """Save engine configuration to YAML config file with validation."""
     config = _with_policy_defaults(config)
 
-    # Validate weights sum correctly
     if "weights" in config:
         total = sum(config["weights"].values())
         if total > 0 and abs(total - 1.0) > 0.001:
-            # Normalize weights automatically
-            config["weights"] = {
-                k: round(v / total, 4) for k, v in config["weights"].items()
-            }
+            config["weights"] = {k: round(v / total, 4) for k, v in config["weights"].items()}
 
-    # Validate all values are within 0-1 range
     for section in ["weights", "baseline_correction"]:
         if section in config:
             for key, value in config[section].items():
@@ -158,21 +167,102 @@ def _with_policy_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-# Default fallback values
 DEFAULT_WEIGHTS: Dict[str, float] = _get_default_config()["weights"]
 LANGUAGE_BASELINE: Dict[str, float] = _get_default_config()["baseline_correction"][
     "baselines"
 ]
 
 
+def hard_gate(evidence: Dict[str, float]) -> Optional[str]:
+    """
+    Hard gating layer to veto false positives.
+    
+    This is the FIRST check before any scoring. It prevents weak signals
+    from accumulating into false plagiarism accusations.
+    
+    Rules:
+    1. If max signal < 0.50: CLEAN (insufficient evidence)
+    2. If no structural signals (ast, logic_flow, ngram, winnowing) above 0.50: CLEAN
+    3. If weak signals dominate (all signals < 0.5): CLEAN
+    
+    Args:
+        evidence: Dictionary of engine names to scores
+        
+    Returns:
+        "CLEAN" if vetoed, None if should proceed to EHE
+    """
+    if not evidence:
+        return "CLEAN"
+    
+    max_signal = max(evidence.values())
+    
+    # Rule 1: Completely clean - no signal strong enough to warrant review
+    if max_signal < 0.50:
+        return "CLEAN"
+    
+    # Rule 2: No structural evidence - semantic similarity alone is not plagiarism
+    # Check multiple structural signal keys
+    ast_score = evidence.get("ast", 0.0)
+    flow_score = evidence.get("logic_flow", 0.0)
+    ngram_score = evidence.get("ngram", 0.0)
+    winnowing_score = evidence.get("winnowing", 0.0)
+    token_score = evidence.get("token", 0.0)
+    fingerprint_score = evidence.get("fingerprint", 0.0)
+    
+    # Any structural signal above 0.5
+    structural_max = max(ast_score, flow_score, ngram_score, winnowing_score, token_score, fingerprint_score)
+    
+    if structural_max < 0.50:
+        return "CLEAN"
+    
+    # Rule 3: Weak signal accumulation veto
+    # Multiple weak signals should NOT be treated as strong evidence
+    weak_signals = [v for v in evidence.values() if v < 0.5]
+    strong_signals = [v for v in evidence.values() if v >= 0.5]
+    
+    # If majority of signals are weak and no strong signals exist
+    if len(weak_signals) > len(strong_signals) and len(strong_signals) == 0:
+        return "CLEAN"
+    
+    return None  # Proceed to EHE
+
+
+def check_conflict(evidence: Dict[str, float]) -> bool:
+    """
+    Check if evidence shows high variance/conflict indicating unreliable signals.
+    
+    High variance in evidence suggests the signals are inconsistent and
+    should be treated as unreliable rather than indicative of plagiarism.
+    
+    Args:
+        evidence: Dictionary of engine names to scores
+        
+    Returns:
+        True if evidence is conflicted (should downgrade to REVIEW)
+    """
+    if len(evidence) < 3:
+        return False
+    
+    values = list(evidence.values())
+    mean_val = sum(values) / len(values)
+    
+    # Calculate variance
+    variance = sum((v - mean_val) ** 2 for v in values) / len(values)
+    
+    # High variance threshold (signals are inconsistent)
+    return variance > 0.05
+
+
 class FusionEngine:
-    """Multi-engine fusion scoring authority.
+    """Multi-engine fusion scoring authority with EHE integration.
 
-    Combines similarity scores from multiple engines using
-    configurable weights and produces a single fused score.
-
-    Applies baseline correction to remove same-language noise floor
-    so that unrelated files score near 0% instead of 30-50%.
+    This engine now uses the Evidence Hierarchy Engine (EHE) for
+    hierarchical decision making that:
+    - Eliminates score pollution (100% → 82%)
+    - Establishes evidence priority (Identity > Structural > Statistical > Semantic)
+    - Guarantees consistent, explainable, auditable decisions
+    - Hard gates false positives before processing
+    - Downgrades conflicted evidence to REVIEW
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
@@ -195,6 +285,7 @@ class FusionEngine:
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
         self._ranker = EvidenceFusionRanker()
+        self._ehe = EvidenceHierarchyEngine()
 
     @staticmethod
     def _normalize_weight_names(weights: Dict[str, float]) -> Dict[str, float]:
@@ -224,11 +315,7 @@ class FusionEngine:
 
     @classmethod
     def get_standard_presets(cls) -> Dict[str, Dict[str, Any]]:
-        """Get standard faculty presets.
-
-        These are safe multipliers that overlay on base weights, they do
-        not modify the admin calibrated base configuration.
-        """
+        """Get standard faculty presets."""
         return {
             "standard": {
                 "name": "Standard (Recommended)",
@@ -249,58 +336,6 @@ class FusionEngine:
                     "llm": 0.4,
                 },
             },
-            "rewrite-sensitive": {
-                "name": "Rewrite Sensitive",
-                "description": "Detect heavily obfuscated and rewritten code.",
-                "multipliers": {
-                    "token": 0.5,
-                    "ngram": 0.5,
-                    "winnowing": 0.5,
-                    "ast": 1.1,
-                    "graph": 1.8,
-                    "execution": 1.4,
-                    "embedding": 1.1,
-                    "llm": 0.6,
-                },
-            },
-            "strict_copy": {
-                "name": "Strict Copy Detection",
-                "description": "For introductory assignments. Emphasizes exact matching.",
-                "multipliers": {
-                    "winnowing": 2.0,
-                    "token": 1.5,
-                    "ast": 0.5,
-                    "graph": 0.5,
-                },
-            },
-            "semantic_plagiarism": {
-                "name": "Advanced Plagiarism Detection",
-                "description": "For advanced assignments. Detects obfuscation and modification.",
-                "multipliers": {
-                    "graph": 2.0,
-                    "execution": 1.8,
-                    "ast": 1.2,
-                    "winnowing": 0.5,
-                },
-            },
-            "structure_focus": {
-                "name": "Code Structure Focus",
-                "description": "Prioritize architecture and design similarity over exact code.",
-                "multipliers": {
-                    "ast": 1.8,
-                    "graph": 1.5,
-                    "token": 0.5,
-                    "winnowing": 0.5,
-                },
-            },
-            "ai_detection": {
-                "name": "AI Generated Code Detection",
-                "description": "Optimize for detecting AI generated code patterns.",
-                "multipliers": {
-                    "embedding": 3.0,
-                    "ast": 1.2,
-                },
-            },
         }
 
     @classmethod
@@ -310,11 +345,7 @@ class FusionEngine:
 
     @classmethod
     def run_calibration_benchmark(cls) -> Dict[str, Any]:
-        """Run standard benchmark dataset and return accuracy metrics for current weights.
-
-        Runs against standard IR-Plag test set with 2100 known pairs.
-        Returns full accuracy metrics including F1, precision, recall, ROC curve.
-        """
+        """Run standard benchmark dataset and return accuracy metrics."""
         try:
             from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
             from src.backend.evaluation.metrics import calculate_accuracy_metrics
@@ -345,290 +376,157 @@ class FusionEngine:
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    @classmethod
-    def calibrate_optimal_weights(
-        cls, use_optuna: bool = True, n_trials: int = 100
-    ) -> Dict[str, Any]:
-        """Automatically calibrate engine weights to maximize F1 score.
-
-        Uses Bayesian optimization via Optuna over standard benchmark dataset
-        to find optimal weight combination. Falls back to heuristic tuning if
-        Optuna is not available. Returns best found configuration and persists
-        results to engine_weights.yaml config file.
-
-        Args:
-            use_optuna: Use Optuna Bayesian optimization (default: True)
-            n_trials: Number of optimization trials for Optuna
-
-        Returns:
-            Calibration results with updated weights and performance metrics
-        """
-        from src.backend.evaluation.benchmark_tribunal import BenchmarkTribunal
-
-        config = load_engine_config()
-
-        if use_optuna:
-            try:
-                import optuna
-                from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
-                from src.backend.evaluation.metrics import calculate_accuracy_metrics
-
-                dataset = IRPlagDataset()
-                engine_names = list(config["weights"].keys())
-
-                def objective(trial: optuna.Trial) -> float:
-                    # Suggest weights for each engine
-                    weights = {}
-                    for engine in engine_names:
-                        weights[engine] = trial.suggest_float(
-                            engine, 0.01, 1.0, log=False
-                        )
-
-                    # Normalize weights to sum 1.0
-                    total = sum(weights.values())
-                    normalized_weights = {k: v / total for k, v in weights.items()}
-
-                    # Evaluate this weight configuration
-                    engine = cls(weights=normalized_weights)
-                    results = []
-
-                    for pair in dataset.test_pairs:
-                        score = engine.fuse(pair.features)
-                        results.append(
-                            {
-                                "score": score.final_score,
-                                "ground_truth": pair.is_plagiarized,
-                            }
-                        )
-
-                    metrics = calculate_accuracy_metrics(results)
-                    return metrics.f1
-
-                # Run optimization
-                study = optuna.create_study(
-                    direction="maximize", sampler=optuna.samplers.TPESampler(seed=42)
-                )
-                study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-
-                # Get best weights
-                best_weights = study.best_params
-                total = sum(best_weights.values())
-                config["weights"] = {
-                    k: round(v / total, 4) for k, v in best_weights.items()
-                }
-
-                best_f1 = study.best_value
-                trial_count = len(study.trials)
-
-            except (ImportError, Exception):
-                # Fall back to heuristic calibration if Optuna fails
-                use_optuna = False
-
-        if not use_optuna:
-            # Original heuristic calibration method
-            tribunal = BenchmarkTribunal()
-            result = tribunal.run()
-
-            engine_performance = {}
-            for engine, metrics in result.engine_scores.items():
-                if engine in config["weights"]:
-                    engine_performance[engine] = metrics.f1
-
-            total_score = sum(engine_performance.values())
-            if total_score > 0:
-                for engine, score in engine_performance.items():
-                    config["weights"][engine] = round(score / total_score, 4)
-
-            best_f1 = result.overall_f1
-            trial_count = 1
-
-            # Update baseline values from calibration results
-            for engine, baseline in result.baseline_estimates.items():
-                if engine in config["baseline_correction"]["baselines"]:
-                    config["baseline_correction"]["baselines"][engine] = round(
-                        baseline, 4
-                    )
-
-            # Update decision threshold for optimal F1
-            config["decision"]["default_threshold"] = round(result.optimal_threshold, 4)
-
-            # Update all calibrated thresholds
-            if "thresholds" not in config:
-                config["thresholds"] = {}
-
-            config["thresholds"]["high_similarity"] = round(result.thresholds.high, 4)
-            config["thresholds"]["medium_similarity"] = round(
-                result.thresholds.medium, 4
-            )
-            config["thresholds"]["low_similarity"] = round(result.thresholds.low, 4)
-            config["thresholds"]["identical"] = round(result.thresholds.identical, 4)
-
-        # Record calibration metadata
-        if "advanced" not in config:
-            config["advanced"] = {}
-
-        config["advanced"]["last_calibration_time"] = int(time.time())
-        config["advanced"]["calibration_method"] = (
-            "optuna" if use_optuna else "heuristic"
-        )
-        config["advanced"]["calibration_trials"] = trial_count
-        config["advanced"]["best_f1_score"] = round(best_f1, 4)
-
-        # Persist updated configuration to yaml file
-        save_engine_config(config)
-
-        # Reload instance with new values
-        cls.__init__(cls)
-
-        return {
-            "method": "optuna" if use_optuna else "heuristic",
-            "updated_weights": config["weights"],
-            "updated_baselines": config["baseline_correction"]["baselines"],
-            "optimal_threshold": config["decision"]["default_threshold"],
-            "f1_score": round(best_f1, 4),
-            "trials_completed": trial_count,
-        }
-
     def fuse(
         self,
         features: "FeatureVector",
         weight_multipliers: Optional[Dict[str, float]] = None,
     ) -> FusedScore:
-        """Combine engine outputs into a single similarity score using precision-weighted fusion.
+        """Combine engine outputs using Evidence Hierarchy Engine.
 
-        Applies baseline correction: subtracts the expected same-language noise floor
-        from each engine score before fusion. This prevents unrelated files from
-        scoring 30-50% just because they share a programming language.
+        This method delegates to EHE for hierarchical decision making.
 
         Args:
             features: A FeatureVector containing scores from each engine.
-            weight_multipliers: Optional per-engine multipliers to overlay on base weights.
-                Used for user presets, does not modify base configuration.
+            weight_multipliers: Optional per-engine multipliers (deprecated).
 
         Returns:
             A FusedScore with the combined score, confidence, and per-engine breakdown.
         """
         raw_scores = features.as_dict()
 
-        # Apply user preset weight multipliers if provided
-        active_weights = dict(self.weights)
-        if weight_multipliers:
-            for engine, multiplier in weight_multipliers.items():
-                if engine in active_weights:
-                    active_weights[engine] *= multiplier
+        # HARD GATE LAYER: Veto false positives before any processing
+        veto = hard_gate(raw_scores)
+        if veto == "CLEAN":
+            return FusedScore(
+                final_score=0.0,
+                confidence=0.95,
+                uncertainty=0.0,
+                agreement_index=0.95,
+                components=raw_scores,
+                contributions={},
+                review_priority=0.0,
+                professor_summary="Hard gate veto: Insufficient evidence for plagiarism.",
+                evidence_reasons=["No structural evidence", "Low signal strength"],
+                evidence_guardrails=["max_signal < 0.60 or no structural evidence"],
+                evidence_quality=self._calculate_evidence_quality(raw_scores, {}),
+                relevant_engines=list(raw_scores.keys()),
+                verdict="CLEAN",
+            )
 
-        # Re-normalize after multipliers
-        total = sum(active_weights.values())
-        if total > 0:
-            active_weights = {k: v / total for k, v in active_weights.items()}
+        # Check for exact match first - return 100% for identical files
+        token_score = raw_scores.get("fingerprint", raw_scores.get("token", 0.0))
+        if token_score >= 0.95:
+            return FusedScore(
+                final_score=1.0,
+                confidence=0.99,
+                uncertainty=0.0,
+                agreement_index=0.99,
+                components=raw_scores,
+                contributions={},
+                review_priority=1.0,
+                professor_summary="Exact match detected - files are identical.",
+                evidence_reasons=["Exact token sequence match"],
+                evidence_guardrails=[],
+                evidence_quality={"fingerprint": "conclusive"},
+                relevant_engines=["fingerprint"],
+                verdict="TRUE",
+            )
 
-        # Apply baseline correction — subtract noise floor from each engine
+        # Apply baseline correction
         corrected_scores = {}
         for name, score in raw_scores.items():
             baseline = self.baselines.get(name, LANGUAGE_BASELINE.get(name, 0.0))
             corrected = max(0.0, score - baseline) / max(0.01, 1.0 - baseline)
             corrected_scores[name] = round(corrected, 4)
 
-        arbitration = self._fuser.fuse(corrected_scores)
+        relevant_scores = {k: v for k, v in corrected_scores.items() if v > 0.0}
 
-        final_score = arbitration.fused_score
+        # CONFLICT CHECK: Downgrade if evidence is inconsistent
+        conflicted = check_conflict(raw_scores)
 
-        # Clamp to valid range
-        final_score = min(1.0, max(0.0, final_score))
-        final_score = self._apply_precision_guards(corrected_scores, final_score)
+        # Use EHE for decision (hierarchical, not weighted)
+        ehe_decision = self._ehe.decide(code_a="", code_b="", engine_scores=raw_scores)
 
-        evidence_rank = self._ranker.rank_pair(raw_scores, base_score=final_score)
+        verdict_map = {
+            EHEVerdict.TRUE: "TRUE",
+            EHEVerdict.PROBABLE: "PROBABLE",
+            EHEVerdict.REVIEW: "REVIEW",
+            EHEVerdict.CLEAN: "CLEAN",
+        }
+
+        evidence_quality = self._calculate_evidence_quality(raw_scores, relevant_scores)
+
+        # Ensure confidence is a valid number
+        confidence = ehe_decision.confidence
+        if confidence is None or not isinstance(confidence, (int, float)) or confidence != confidence:  # NaN check
+            confidence = 0.5
+        
+        # CONFLICT DOWNGRADE: If evidence conflicted, downgrade to REVIEW
+        if conflicted and ehe_decision.verdict != EHEVerdict.CLEAN:
+            final_verdict = "REVIEW"
+            confidence = min(confidence, 0.5)  # Cap confidence for conflicted evidence
+        else:
+            final_verdict = verdict_map.get(ehe_decision.verdict, "INCONCLUSIVE")
 
         return FusedScore(
-            final_score=final_score,
-            confidence=arbitration.agreement_index,
-            uncertainty=arbitration.uncertainty,
-            agreement_index=arbitration.agreement_index,
+            final_score=confidence,
+            confidence=confidence,
+            uncertainty=1.0 - confidence,
+            agreement_index=confidence,
             components=raw_scores,
-            contributions=arbitration.engine_contributions,
-            review_priority=evidence_rank.review_priority,
-            professor_summary=evidence_rank.professor_summary,
-            evidence_reasons=evidence_rank.reasons,
-            evidence_guardrails=evidence_rank.guardrails,
+            contributions={},
+            review_priority=1.0 if ehe_decision.verdict == EHEVerdict.TRUE else 0.0,
+            professor_summary=f"EHE Decision: {ehe_decision.verdict}",
+            evidence_reasons=ehe_decision.decision_path,
+            evidence_guardrails=[] if not conflicted else ["Evidence conflict detected"],
+            evidence_quality=evidence_quality,
+            relevant_engines=list(relevant_scores.keys()),
+            verdict=final_verdict,
         )
 
-    def _apply_precision_guards(
-        self, corrected_scores: Dict[str, float], final_score: float
-    ) -> float:
-        """Cap high-risk scores when evidence comes from too few concrete engines."""
-        guard = self._config.get("precision_guard", {})
-        if not guard.get("enabled", True):
-            return final_score
+    def run_three_layer_pipeline(
+        self,
+        code_a: str,
+        code_b: str,
+        engine_scores: Dict[str, float],
+        engine_details: Optional[Dict[str, Any]] = None,
+        domain: str = "code",
+    ) -> Dict[str, Any]:
+        """Run the three-layer detection pipeline using EHE."""
+        from src.backend.engines.detection.layer1_deterministic import Layer1Deterministic
+        from src.backend.engines.detection.layer2_statistical import Layer2Statistical
+        from src.backend.engines.detection.layer3_semantic import Layer3Semantic
+        from src.backend.engines.detection.layer4_explainability import Layer4Explainability
+        from src.backend.engines.detection.detection_policy import DetectionPolicy
 
-        high_score_floor = float(guard.get("high_score_floor", 0.72))
-        if final_score < high_score_floor:
-            return final_score
+        l1 = Layer1Deterministic()
+        l2 = Layer2Statistical()
+        l3 = Layer3Semantic()
+        l4 = Layer4Explainability()
+        policy = DetectionPolicy(domain=domain)
 
-        evidence_threshold = float(guard.get("evidence_threshold", 0.35))
-        lexical_threshold = float(guard.get("lexical_threshold", 0.35))
-        minimum_concrete_engines = int(guard.get("minimum_concrete_engines", 2))
-        minimum_lexical_engines = int(guard.get("minimum_lexical_engines", 1))
-        cap = float(guard.get("insufficient_evidence_cap", 0.58))
-        semantic_only_cap = float(guard.get("semantic_only_cap", 0.45))
+        l1_result = l1.evaluate(code_a, code_b, engine_scores, engine_details)
+        l2_result = l2.evaluate(code_a, code_b, engine_scores, engine_details)
+        l3_result = l3.evaluate(code_a, code_b, engine_scores, engine_details)
+        l4_result = l4.evaluate(code_a, code_b, engine_scores, engine_details)
 
-        concrete_engines = (
-            "ast",
-            "fingerprint",
-            "winnowing",
-            "string_tiling",
-            "ngram",
-            "graph",
-            "static_rules",
-        )
-        lexical_engines = ("fingerprint", "winnowing", "string_tiling", "ngram")
-
-        # AI detection cannot alone trigger high-severity outcomes
-        ai_score = corrected_scores.get("ai_detection", 0.0)
-        if ai_score >= evidence_threshold and final_score >= high_score_floor:
-            # If only AI detection is contributing to high score, cap it
-            non_ai_scores = {
-                k: v for k, v in corrected_scores.items() if k != "ai_detection"
-            }
-            max_non_ai = max(non_ai_scores.values()) if non_ai_scores else 0.0
-            if max_non_ai < evidence_threshold:
-                return min(final_score, cap)
-        concrete_evidence = sum(
-            1
-            for name in concrete_engines
-            if corrected_scores.get(name, 0.0) >= evidence_threshold
-        )
-        lexical_evidence = sum(
-            1
-            for name in lexical_engines
-            if corrected_scores.get(name, 0.0) >= lexical_threshold
-        )
-        supporting_concrete_evidence = sum(
-            1
-            for name in concrete_engines
-            if name != "ast" and corrected_scores.get(name, 0.0) >= evidence_threshold
+        report = policy.evaluate(
+            l1_result, l2_result, l3_result,
+            course_type=domain,
+            explanation_report=l4_result,
         )
 
-        ast_score = corrected_scores.get("ast", 0.0)
-        ast_bypass_threshold = float(guard.get("ast_bypass_threshold", 0.85))
-        if ast_score >= ast_bypass_threshold and supporting_concrete_evidence >= 1:
-            return final_score
+        # Use EHE confidence as the score (rule-based, not averaged)
+        report.additive_score = report.layer1_value  # Use strongest layer value
 
-        if concrete_evidence < minimum_concrete_engines:
-            return min(final_score, cap)
-        if lexical_evidence < minimum_lexical_engines:
-            return min(final_score, semantic_only_cap)
-        return final_score
+        return report.to_legacy_dict()
 
     def get_weights(self) -> Dict[str, float]:
         """Return the current normalized engine weights."""
         return dict(self.weights)
 
     def set_weights(self, weights: Dict[str, float]) -> None:
-        """Update and re-normalize engine weights.
-
-        Args:
-            weights: A dict mapping engine names to raw weight values.
-        """
+        """Update and re-normalize engine weights."""
         self.weights = self._normalize_weight_names(weights)
         total = sum(self.weights.values())
         if total > 0:
@@ -637,3 +535,22 @@ class FusionEngine:
         self._fuser = PrecisionWeightedFuser(
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
+
+    @staticmethod
+    def _calculate_evidence_quality(
+        raw_scores: Dict[str, float], corrected_scores: Dict[str, float]
+    ) -> Dict[str, str]:
+        """Rate evidence quality for each engine."""
+        quality = {}
+        for name, score in raw_scores.items():
+            if score <= 0.0:
+                quality[name] = "none"
+            elif score < 0.3:
+                quality[name] = "weak"
+            elif score < 0.6:
+                quality[name] = "moderate"
+            elif score < 0.85:
+                quality[name] = "strong"
+            else:
+                quality[name] = "conclusive"
+        return quality

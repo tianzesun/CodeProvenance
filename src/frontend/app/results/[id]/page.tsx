@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 
 function formatPercent(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
+  const num = Number(value) || 0;
+  return `${Math.round(num * 100)}`;
 }
 
 function getAssignmentTitle(job) {
@@ -58,22 +59,26 @@ function confidenceLabel(score) {
   return 'Low';
 }
 
-function reviewPriority(result) {
-  const score = Number(result?.score) || 0;
-  const features = result?.features || {};
-  const concreteKeys = ['fingerprint', 'winnowing', 'ngram', 'logic_flow', 'moss', 'jplag', 'dolos', 'pmd', 'nicad', 'sherlock'];
-  const support = concreteKeys.filter((key) => Number(features[key]) >= 0.5).length;
+function getVerdictStyle(verdict) {
+  const styles = {
+    TRUE: 'bg-red-100 text-red-700 border-red-200',
+    PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200',
+    REVIEW: 'bg-blue-100 text-blue-700 border-blue-200',
+    FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  };
+  return styles[verdict] || 'bg-slate-100 text-slate-600 border-slate-200';
+}
 
-  if (score >= 0.85 && support >= 2) {
-    return 'High Evidence Review';
+function VerdictBadge({ verdict }) {
+  if (!verdict) {
+    return null;
   }
-  if (score >= 0.65 && support >= 1) {
-    return 'Evidence Review';
-  }
-  if (score >= 0.35) {
-    return 'Needs Instructor Review';
-  }
-  return 'Low Priority';
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${getVerdictStyle(verdict)}`}>
+      {verdict}
+    </span>
+  );
 }
 
 function getEvidenceTypes(result) {
@@ -362,8 +367,10 @@ export default function ResultsPage() {
   const leftHighlights = highlightedLines(leftCode, activeResult?.matching_blocks, true);
   const rightHighlights = highlightedLines(rightCode, activeResult?.matching_blocks, false);
   const score = Number(activeResult?.score) || Number(activeResult?._score) || 0;
+  const safeScore = isNaN(score) ? 0 : score;
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
+  const confidenceDisplay = Math.round(safeScore * 100);
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
@@ -570,7 +577,7 @@ export default function ResultsPage() {
                     <div key={idx} className="text-sm border border-emerald-100 rounded-lg p-3 bg-emerald-50/50">
                       <div className="font-medium text-emerald-900">{entry.name}</div>
                       <div className="text-xs text-emerald-700 mt-1">
-                        Max similarity: {(entry.max_similarity * 100).toFixed(0)}% • {entry.match_count} public source(s)
+                        Max similarity: {(entry.max_similarity * 100).toFixed(0)}% • {entry.match_count} source
                       </div>
                       {entry.sources?.slice(0, 2).map((src: any, sidx: number) => (
                         <a
@@ -587,7 +594,7 @@ export default function ResultsPage() {
                   ))}
                   {job.web_analysis.submissions?.length > 4 && (
                     <div className="text-xs text-emerald-600">
-                      +{job.web_analysis.submissions.length - 4} more submissions with public matches
+                      +{job.web_analysis.submissions.length - 4} more submissions
                     </div>
                   )}
                 </div>
@@ -634,6 +641,7 @@ export default function ResultsPage() {
                       <th className="w-[26%] px-4 py-3">Submission A</th>
                       <th className="w-[26%] px-4 py-3">Submission B</th>
                       <th className="w-24 px-4 py-3">Similarity</th>
+                      <th className="w-24 px-4 py-3">Verdict</th>
                       <th className="w-24 px-4 py-3">Confidence</th>
                       <th className="w-28 px-4 py-3">Status</th>
                     </tr>
@@ -659,10 +667,16 @@ export default function ResultsPage() {
                           <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_a}>{row.file_a}</td>
                           <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_b}>{row.file_b}</td>
                           <td className="px-4 py-3">
-                            <span className="font-semibold text-slate-950">{formatPercent(row._score)}</span>
+                            <span className="font-semibold text-slate-950">{Math.round(row._score * 100)}</span>
+                            <span className="text-xs text-slate-400 ml-1">%</span>
                           </td>
                           <td className="px-4 py-3">
-                            <span className="text-xs font-semibold text-slate-600">{row._confidence}</span>
+                            <VerdictBadge verdict={row.verdict} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-semibold text-slate-600">
+                              {Math.round((Number(row._confidence) || 0) * 100)}%
+                            </span>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>
@@ -682,15 +696,19 @@ export default function ResultsPage() {
            {/* === Full-screen Pair Detail View (side-by-side comparison) === */}
            {drawerOpen && activeResult ? (
              <div className="space-y-4">
-               {/* Detail Header - full width */}
-               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                   <div>
-                     <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pair Detail Inspector</div>
-                     <div className="mt-1 text-xl font-semibold text-slate-950">
-                       {activeResult.file_a} vs {activeResult.file_b} — {formatPercent(score)}
-                     </div>
-                   </div>
+{/* Detail Header - full width */}
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pair Detail Inspector</div>
+                       <div className="mt-1 text-xl font-semibold text-slate-950">
+                         {activeResult.file_a} vs {activeResult.file_b}
+                       </div>
+                       <div className="mt-1 flex items-center gap-2">
+                         <VerdictBadge verdict={activeResult.verdict} />
+                         <span className="text-sm text-slate-500">{confidenceDisplay}% confidence</span>
+                       </div>
+                    </div>
 
                    <div className="flex flex-wrap gap-2">
                      <button

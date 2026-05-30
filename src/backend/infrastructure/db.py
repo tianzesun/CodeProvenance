@@ -315,7 +315,8 @@ class SimilarityResultService:
         confidence_upper: float,
         matching_blocks: List[Dict[str, Any]],
         excluded_matches: Optional[List[Dict[str, Any]]] = None,
-        algorithm_scores: Optional[Dict[str, float]] = None
+        algorithm_scores: Optional[Dict[str, float]] = None,
+        verdict: Optional[str] = None
     ) -> SimilarityResult:
         """
         Create a new similarity result.
@@ -331,6 +332,7 @@ class SimilarityResultService:
             matching_blocks: List of matching blocks
             excluded_matches: Optional list of excluded matches
             algorithm_scores: Optional dictionary of algorithm scores
+            verdict: Optional rule-based verdict (TRUE, PROBABLE, REVIEW, FLAG, CLEAN)
             
         Returns:
             Created SimilarityResult instance
@@ -348,7 +350,8 @@ class SimilarityResultService:
             confidence_upper=confidence_upper,
             matching_blocks=matching_blocks,
             excluded_matches=excluded_matches or [],
-            algorithm_scores=algorithm_scores
+            algorithm_scores=algorithm_scores,
+            verdict=verdict
         )
         db.add(result)
         db.commit()
