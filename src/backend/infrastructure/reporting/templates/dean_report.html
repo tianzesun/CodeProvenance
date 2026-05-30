@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Academic Integrity Evidence Report — {{ case_id }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            color: #1a1a1a;
+            background: #fff;
+            font-size: 10pt;
+            line-height: 1.5;
+        }
+        @page {
+            size: A4;
+            margin: 18mm 15mm 20mm 15mm;
+            @bottom-center {
+                content: "Confidential – Academic Integrity Committee Only | Page " counter(page) " of " counter(pages);
+                font-size: 7pt;
+                color: #999;
+            }
+        }
+        .color-blue { color: #0070c0; }
+        .color-green { color: #2e7d32; }
+        .color-yellow { color: #f57f17; }
+        .color-orange { color: #e65100; }
+        .color-red { color: #b71c1c; }
+        .bg-blue { background-color: #e3f2fd; }
+        .bg-green { background-color: #e8f5e9; }
+        .bg-yellow { background-color: #fff8e1; }
+        .bg-orange { background-color: #fff3e0; }
+        .bg-red { background-color: #ffebee; }
+        h2 {
+            font-size: 13pt;
+            color: #1e3a5f;
+            border-bottom: 2px solid #1e3a5f;
+            padding-bottom: 4px;
+            margin: 24px 0 12px 0;
+        }
+        h3 {
+            font-size: 11pt;
+            color: #333;
+            margin: 14px 0 6px 0;
+        }
+        .verdict-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 9pt;
+            text-transform: uppercase;
+        }
+        .verdict-clean { background: #e8f5e9; color: #2e7d32; border: 1px solid #2e7d32; }
+        .verdict-review { background: #fff8e1; color: #f57f17; border: 1px solid #f57f17; }
+        .verdict-strong { background: #ffebee; color: #b71c1c; border: 1px solid #b71c1c; }
+        .evidence-grid {
+            display: flex;
+            gap: 12px;
+            margin: 12px 0;
+            flex-wrap: wrap;
+        }
+        .evidence-card {
+            flex: 1;
+            min-width: 120px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 10px;
+            background: #f9fafb;
+        }
+        .evidence-card .label {
+            font-size: 7pt;
+            text-transform: uppercase;
+            color: #777;
+        }
+        .evidence-card .value {
+            font-size: 14pt;
+            font-weight: bold;
+            margin: 2px 0;
+        }
+        .evidence-card .confidence {
+            font-size: 7pt;
+            color: #666;
+        }
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0 16px 0;
+            font-size: 9pt;
+        }
+        table.data th {
+            background: #1e3a5f;
+            color: #fff;
+            padding: 6px 8px;
+            text-align: left;
+            font-size: 8pt;
+            text-transform: uppercase;
+        }
+        table.data td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        table.data tr:nth-child(even) td { background: #f9f9f9; }
+        .explanation {
+            font-size: 8.5pt;
+            color: #555;
+            margin-top: 4px;
+        }
+        .disclaimer {
+            font-size: 8pt;
+            color: #888;
+            font-style: italic;
+            margin: 8px 0;
+            padding: 6px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .cover {
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 90vh;
+            text-align: center;
+            border-bottom: 3px solid #1e3a5f;
+            padding-bottom: 40px;
+        }
+        .cover h1 {
+            font-size: 22pt;
+            color: #1e3a5f;
+            margin-bottom: 30px;
+        }
+        .cover-meta table {
+            width: 70%;
+            text-align: left;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+        .cover-meta td {
+            padding: 5px 10px;
+            font-size: 10pt;
+        }
+        .cover-meta td:first-child {
+            font-weight: bold;
+            color: #555;
+        }
+        .watermark {
+            text-align: center;
+            font-size: 7pt;
+            color: #bbb;
+            margin-top: 20px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="cover">
+    <div style="font-size: 14pt; font-weight: bold; color: #1e3a5f; margin-bottom: 8px;">INTEGRITYDESK</div>
+    <div style="font-size: 8pt; color: #888; margin-bottom: 40px;">Forensic Evidence Engine</div>
+    <h1>Academic Integrity<br>Evidence Report</h1>
+    <div class="cover-meta">
+        <table>
+            <tr><td>Case ID</td><td>{{ case_id }}</td></tr>
+            <tr><td>Course</td><td>{{ course_id }}</td></tr>
+            <tr><td>Assignment</td><td>{{ assignment_id }}</td></tr>
+            <tr><td>Submissions</td><td>{{ submission_a_id }} vs {{ submission_b_id }}</td></tr>
+            <tr><td>Report Date</td><td>{{ generated_at }}</td></tr>
+        </table>
+    </div>
+</div>
+
+<h2>1. Executive Summary</h2>
+<p><strong>Final Classification:</strong> <span class="verdict-badge verdict-{{ final_verdict|lower }}">{{ final_verdict }}</span></p>
+<p class="explanation">{{ verdict_label }}</p>
+<p>{{ summary_paragraph }}</p>
+
+<h2>2. Evidence Overview</h2>
+<div class="evidence-grid">
+    {% if structural_score is defined %}
+    <div class="evidence-card">
+        <div class="label">Structural</div>
+        <div class="value">{{ "%.0f"|format(structural_score * 100) }}%</div>
+        <div class="confidence">{{ structural_confidence }}</div>
+        <div class="explanation">{{ structural_explanation }}</div>
+    </div>
+    {% endif %}
+    {% if lexical_score is defined %}
+    <div class="evidence-card">
+        <div class="label">Lexical</div>
+        <div class="value">{{ "%.0f"|format(lexical_score * 100) }}%</div>
+        <div class="confidence">{{ lexical_confidence }}</div>
+        <div class="explanation">{{ lexical_explanation }}</div>
+    </div>
+    {% endif %}
+    {% if semantic_score is defined %}
+    <div class="evidence-card">
+        <div class="label">Semantic</div>
+        <div class="value">{{ "%.0f"|format(semantic_score * 100) }}%</div>
+        <div class="confidence">{{ semantic_confidence }}</div>
+        <div class="explanation">{{ semantic_explanation }}</div>
+    </div>
+    {% endif %}
+    {% if control_flow_score is defined %}
+    <div class="evidence-card">
+        <div class="label">Control Flow</div>
+        <div class="value">{{ "%.0f"|format(control_flow_score * 100) }}%</div>
+        <div class="confidence">{{ control_flow_confidence }}</div>
+        <div class="explanation">{{ control_flow_explanation }}</div>
+    </div>
+    {% endif %}
+    {% if divergence_score is defined %}
+    <div class="evidence-card">
+        <div class="label">Divergence</div>
+        <div class="value">{{ "%.0f"|format(divergence_score * 100) }}%</div>
+        <div class="confidence">HIGH</div>
+        <div class="explanation">Implementation differences</div>
+    </div>
+    {% endif %}
+</div>
+
+{% if semantic_disclaimer %}
+<div class="disclaimer">
+    <strong>Note:</strong> {{ semantic_disclaimer }}
+</div>
+{% endif %}
+
+{% if cluster_disclaimer %}
+<div class="disclaimer">
+    <strong>Note:</strong> {{ cluster_disclaimer }}
+</div>
+{% endif %}
+
+<h2>3. Structural Evidence</h2>
+{% for item in structural_evidence %}
+<table class="data">
+    <tr><th width="120">Type</th><td>{{ item.description }}</td></tr>
+    <tr><th>Value</th><td>{{ "%.1f"|format(item.value * 100) }}%</td></tr>
+    <tr><th>Confidence</th><td>{{ item.confidence }}</td></tr>
+    <tr><th>Explanation</th><td>{{ item.explanation }}</td></tr>
+</table>
+{% endfor %}
+
+<h2>4. Lexical Evidence</h2>
+{% for item in lexical_evidence %}
+<table class="data">
+    <tr><th>Type</th><td>{{ item.description }}</td></tr>
+    <tr><th>Value</th><td>{{ "%.1f"|format(item.value * 100) }}%</td></tr>
+    <tr><th>Confidence</th><td>{{ item.confidence }}</td></tr>
+    <tr><th>Explanation</th><td>{{ item.explanation }}</td></tr>
+</table>
+{% endfor %}
+
+<h2>5. Semantic Evidence</h2>
+{% for item in semantic_evidence %}
+<table class="data">
+    <tr><th>Type</th><td>{{ item.description }}</td></tr>
+    <tr><th>Value</th><td>{{ "%.1f"|format(item.value * 100) }}%</td></tr>
+    <tr><th>Confidence</th><td>{{ item.confidence }}</td></tr>
+    <tr><th>Explanation</th><td>{{ item.explanation }}</td></tr>
+</table>
+{% endfor %}
+
+<h2>6. Control Flow Evidence</h2>
+{% for item in control_flow_evidence %}
+<table class="data">
+    <tr><th>Type</th><td>{{ item.description }}</td></tr>
+    <tr><th>Value</th><td>{{ "%.1f"|format(item.value * 100) }}%</td></tr>
+    <tr><th>Confidence</th><td>{{ item.confidence }}</td></tr>
+    <tr><th>Explanation</th><td>{{ item.explanation }}</td></tr>
+</table>
+{% endfor %}
+
+<h2>7. Divergence Analysis</h2>
+{% for item in divergence_evidence %}
+<table class="data">
+    <tr><th>Type</th><td>{{ item.description }}</td></tr>
+    <tr><th>Value</th><td>{{ "%.1f"|format(item.value * 100) }}%</td></tr>
+    <tr><th>Confidence</th><td>{{ item.confidence }}</td></tr>
+    <tr><th>Explanation</th><td>{{ item.explanation }}</td></tr>
+</table>
+{% endfor %}
+
+{% if reviewer_notes %}
+<h2>8. Reviewer Notes</h2>
+{% for note in reviewer_notes %}
+<p style="margin: 6px 0; padding: 6px; background: #f5f5f5; border-radius: 4px;">{{ note }}</p>
+{% endfor %}
+{% endif %}
+
+<h2>9. Final Recommendation</h2>
+<div style="border: 2px solid #1e3a5f; border-radius: 6px; padding: 12px; margin: 12px 0; background: #f0f4f8;">
+    <h4 style="font-size: 10pt; color: #1e3a5f; margin-bottom: 6px;">Conclusion</h4>
+    <p><strong>{{ final_verdict }}</strong></p>
+    <p style="margin-top: 6px; font-size: 9pt;">{{ verdict_label }}</p>
+</div>
+
+<h2>10. Report Integrity</h2>
+<table class="data">
+    <tr><th>Generated</th><td>{{ generated_at }}</td></tr>
+    <tr><th>Report SHA-256</th><td style="font-family: monospace; font-size: 8pt;">{{ report_hash }}</td></tr>
+</table>
+
+<div class="watermark">
+    Confidential – Academic Integrity Committee Only<br>
+    Generated by IntegrityDesk Forensic Evidence Engine
+</div>
+
+</body>
+</html>
