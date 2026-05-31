@@ -5,6 +5,7 @@ Provides content-hashed LRU caches for:
 - AST parse results
 - Token fingerprints
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +22,7 @@ def _sha256(content: str) -> str:
 
 
 # ── Embedding cache (most expensive: ML model forward pass) ──────────
+
 
 class EmbeddingCache:
     """In-memory LRU cache for dense vector embeddings.
@@ -74,6 +76,7 @@ class EmbeddingCache:
 
 
 # ── Token / fingerprint cache (fast but called many times) ───────────
+
 
 class TokenCache:
     """LRU cache for tokenized / fingerprinted code.

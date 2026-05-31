@@ -373,14 +373,18 @@ class Case(Base):
     organization_id = Column(UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False)
     assignment_id = Column(UUID(as_uuid=False), ForeignKey("assignments.id"), nullable=True)
     title = Column(String(255), nullable=False)
-    status = Column(String(50), default="open")
+    status = Column(String(50), default="OPEN")  # OPEN, UNDER_REVIEW, ESCALATED, CLOSED
+    priority = Column(String(20), default="MEDIUM")  # LOW, MEDIUM, HIGH, URGENT
+    investigator_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     created_by_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), onupdate=text('now()'))
+    closed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     organization = relationship("Organization")
     assignment = relationship("Assignment")
-    created_by = relationship("User")
+    investigator = relationship("User", foreign_keys=[investigator_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
     result_links = relationship("CaseResultLink", back_populates="case", lazy="dynamic")
     comments = relationship("CaseComment", back_populates="case", lazy="dynamic")
     reports = relationship("Report", back_populates="case")
@@ -626,3 +630,33 @@ class FprValidationRun(Base):
     tenant = relationship("Tenant")
     user = relationship("User", foreign_keys=[user_id])
     certified_by = relationship("User", foreign_keys=[certified_by_user_id])
+
+
+class TimelineEvent(Base):
+    """Timeline event for investigation audit trail."""
+    __tablename__ = "timeline_events"
+
+    __table_args__ = (
+        Index("idx_timeline_case", "case_id"),
+        Index("idx_timeline_job", "job_id"),
+        Index("idx_timeline_user", "user_id"),
+        Index("idx_timeline_created_at", "created_at"),
+        Index("idx_timeline_case_created", "case_id", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+
+    event_type = Column(String(100), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    event_metadata = Column("metadata", JSONB, nullable=False, default=dict)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+
+    # Relationships
+    case = relationship("Case")
+    job = relationship("Job")
+    user = relationship("User")

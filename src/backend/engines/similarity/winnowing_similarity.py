@@ -123,22 +123,33 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
                 tokens_b = self._tokenize_raw_code(raw_b)
 
         if not tokens_a and not tokens_b:
-            return Finding(engine=self.name, score=1.0, confidence=1.0,
-                         methodology="Enhanced winnowing similarity")
+            return Finding(
+                engine=self.name,
+                score=1.0,
+                confidence=1.0,
+                methodology="Enhanced winnowing similarity",
+            )
         if not tokens_a or not tokens_b:
-            return Finding(engine=self.name, score=0.0, confidence=1.0,
-                         methodology="Enhanced winnowing similarity")
+            return Finding(
+                engine=self.name,
+                score=0.0,
+                confidence=1.0,
+                methodology="Enhanced winnowing similarity",
+            )
 
         # Normalize tokens (remove whitespace, comments, normalize identifiers)
         normalized_a = self._normalize_tokens(tokens_a)
         normalized_b = self._normalize_tokens(tokens_b)
 
-        if (
-            [token["value"] for token in normalized_a] == [token["value"] for token in normalized_b]
-            and parsed_a.get("raw", "").strip() == parsed_b.get("raw", "").strip()
-        ):
-            return Finding(engine=self.name, score=1.0, confidence=1.0,
-                         methodology="Enhanced winnowing similarity (exact match)")
+        if [token["value"] for token in normalized_a] == [
+            token["value"] for token in normalized_b
+        ] and parsed_a.get("raw", "").strip() == parsed_b.get("raw", "").strip():
+            return Finding(
+                engine=self.name,
+                score=1.0,
+                confidence=1.0,
+                methodology="Enhanced winnowing similarity (exact match)",
+            )
 
         # Multi-pass fingerprinting
         if self.multi_pass:
@@ -163,8 +174,12 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
             + ai_bonus * 0.1  # AI detection bonus
         )
 
-        return Finding(engine=self.name, score=min(1.0, max(0.0, final_similarity)), confidence=0.85,
-                      methodology="Enhanced winnowing similarity with multi-pass fingerprinting")
+        return Finding(
+            engine=self.name,
+            score=min(1.0, max(0.0, final_similarity)),
+            confidence=0.85,
+            methodology="Enhanced winnowing similarity with multi-pass fingerprinting",
+        )
 
     def _tokenize_raw_code(self, raw: str) -> List[Dict]:
         """Tokenize raw source code into a list of token dicts."""

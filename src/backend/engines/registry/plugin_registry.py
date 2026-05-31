@@ -1,4 +1,5 @@
 """Plugin registry - single source of truth for execution plugins."""
+
 from typing import Dict
 from engines.registry.plugin_base import ExecutionPlugin
 

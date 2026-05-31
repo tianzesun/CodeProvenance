@@ -31,6 +31,18 @@ VERDICT_LABELS = {
     "STRONG_SIMILARITY_OBSERVED": "Strong structural and lexical overlap observed",
 }
 
+# Dean-friendly terminology mapping
+DEAN_TERMINOLOGY = {
+    "structural": "Code Structure Alignment",
+    "lexical": "Sequence Overlap",
+    "semantic": "Conceptual Content Match",
+    "control_flow": "Logic Flow Similarity",
+    "historical": "Work Pattern Consistency",
+    "cluster": "Peer Group Analysis",
+    "divergence": "Implementation Differences",
+    "ai_indicators": "Generative AI Signals",
+}
+
 EVIDENCE_DESCRIPTIONS = {
     "structural": "Structural analysis reveals matching code organization patterns",
     "lexical": "Lexical analysis shows overlapping code sequences",
@@ -98,6 +110,15 @@ class DeanGradeReport:
     # Reviewer notes
     reviewer_notes: List[str] = field(default_factory=list)
 
+    # Dean-specific fields
+    executive_summary: Optional[Dict[str, Any]] = field(default_factory=dict)
+    policy_references: List[str] = field(default_factory=list)
+    precedent_comparison: List[Dict[str, Any]] = field(default_factory=list)
+    student_context: Optional[Dict[str, Any]] = field(default_factory=dict)
+    timeline: List[Dict[str, str]] = field(default_factory=list)
+    confidence_interval: Optional[Dict[str, float]] = field(default_factory=dict)
+    recommendation: Optional[Dict[str, Any]] = field(default_factory=dict)
+
     # Metadata
     generated_at: str = ""
     report_version: str = "1.0"
@@ -132,6 +153,13 @@ class DeanGradeReport:
             "divergence_evidence": self._items_to_dict(self.divergence_evidence),
             "ai_indicators": self._items_to_dict(self.ai_indicators),
             "reviewer_notes": self.reviewer_notes,
+            # Dean-specific sections
+            "policy_references": self.policy_references,
+            "precedent_comparison": self.precedent_comparison,
+            "student_context": self.student_context,
+            "timeline": self.timeline,
+            "confidence_interval": self.confidence_interval,
+            "recommendation": self.recommendation,
         }
 
     def _items_to_dict(self, items: List[EvidenceItem]) -> List[Dict[str, Any]]:
@@ -286,7 +314,9 @@ class DeanReportGenerator:
                     description="Semantic node similarity",
                     value=semantic_nodes,
                     confidence=(
-                        "HIGH" if semantic_nodes > 0.7 else "MEDIUM" if semantic_nodes > 0.4 else "LOW"
+                        "HIGH"
+                        if semantic_nodes > 0.7
+                        else "MEDIUM" if semantic_nodes > 0.4 else "LOW"
                     ),
                     explanation="Function logic and operations show conceptual alignment",
                 )

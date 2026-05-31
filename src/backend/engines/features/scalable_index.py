@@ -15,6 +15,7 @@ Storage:
 - LSH index: hash-table buckets, O(n) space
 - Query time: O(B * log(n/B)) where B = number of bands
 """
+
 from typing import Dict, List, Any, Optional, Tuple, Set
 from pathlib import Path
 import hashlib
@@ -27,11 +28,12 @@ from collections import defaultdict
 @dataclass
 class MinHashSignature:
     """MinHash signature for a code document."""
+
     doc_id: str
     hash_values: List[int]
     num_permutations: int = 200
 
-    def jaccard_estimate(self, other: 'MinHashSignature') -> float:
+    def jaccard_estimate(self, other: "MinHashSignature") -> float:
         """Estimate Jaccard similarity between two MinHash signatures."""
         if len(self.hash_values) != len(other.hash_values):
             raise ValueError("Signature lengths must match")
@@ -42,6 +44,7 @@ class MinHashSignature:
 @dataclass
 class LSHEncodedCode:
     """Code document with MinHash + original metadata."""
+
     doc_id: str
     signature: MinHashSignature
     file_hash: str  # SHA-256 for exact duplicate detection
@@ -73,11 +76,11 @@ class TokenShingler:
         """
         tokens = self._tokenize(code, language)
         if len(tokens) < self.k:
-            return [' '.join(tokens)] if tokens else []
+            return [" ".join(tokens)] if tokens else []
 
         shingles = []
         for i in range(len(tokens) - self.k + 1):
-            shingle = ' '.join(tokens[i:i + self.k])
+            shingle = " ".join(tokens[i : i + self.k])
             shingles.append(shingle)
         return shingles
 
@@ -87,45 +90,102 @@ class TokenShingler:
 
         # Remove comments
         if language == "python":
-            code = re.sub(r'#.*?$', '', code, flags=re.MULTILINE)
+            code = re.sub(r"#.*?$", "", code, flags=re.MULTILINE)
         else:
-            code = re.sub(r'//.*?$', '', code, flags=re.MULTILINE)
-            code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+            code = re.sub(r"//.*?$", "", code, flags=re.MULTILINE)
+            code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
 
         # Replace string literals
-        code = re.sub(r'"[^"]*"', ' __STR__ ', code)
-        code = re.sub(r"'[^']*'", ' __STR__ ', code)
+        code = re.sub(r'"[^"]*"', " __STR__ ", code)
+        code = re.sub(r"'[^']*'", " __STR__ ", code)
 
         # Replace numbers
-        code = re.sub(r'\b\d+(\.\d+)?\b', ' __NUM__ ', code)
+        code = re.sub(r"\b\d+(\.\d+)?\b", " __NUM__ ", code)
 
         # Normalize identifiers (but keep keywords)
         keywords = self._get_keywords(language)
-        tokens = re.findall(r'\b[a-zA-Z_]\w*\b', code)
+        tokens = re.findall(r"\b[a-zA-Z_]\w*\b", code)
         normalized = []
         for t in tokens:
             if t in keywords:
                 normalized.append(t)
             else:
-                normalized.append('__ID__')
+                normalized.append("__ID__")
 
         return normalized
 
     def _get_keywords(self, language: str) -> Set[str]:
         """Get language keywords."""
         if language == "python":
-            return {'def', 'class', 'if', 'else', 'elif', 'for', 'while',
-                    'return', 'import', 'from', 'try', 'except', 'with',
-                    'as', 'lambda', 'yield', 'raise', 'pass', 'break',
-                    'continue', 'and', 'or', 'not', 'is', 'in', 'True',
-                    'False', 'None', 'print', 'len', 'range', 'self'}
+            return {
+                "def",
+                "class",
+                "if",
+                "else",
+                "elif",
+                "for",
+                "while",
+                "return",
+                "import",
+                "from",
+                "try",
+                "except",
+                "with",
+                "as",
+                "lambda",
+                "yield",
+                "raise",
+                "pass",
+                "break",
+                "continue",
+                "and",
+                "or",
+                "not",
+                "is",
+                "in",
+                "True",
+                "False",
+                "None",
+                "print",
+                "len",
+                "range",
+                "self",
+            }
         elif language == "java":
-            return {'public', 'private', 'protected', 'static', 'final',
-                    'class', 'interface', 'extends', 'implements', 'if',
-                    'else', 'for', 'while', 'do', 'switch', 'case',
-                    'return', 'void', 'int', 'long', 'float', 'double',
-                    'String', 'boolean', 'try', 'catch', 'finally', 'throw',
-                    'throws', 'new', 'this', 'super'}
+            return {
+                "public",
+                "private",
+                "protected",
+                "static",
+                "final",
+                "class",
+                "interface",
+                "extends",
+                "implements",
+                "if",
+                "else",
+                "for",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "return",
+                "void",
+                "int",
+                "long",
+                "float",
+                "double",
+                "String",
+                "boolean",
+                "try",
+                "catch",
+                "finally",
+                "throw",
+                "throws",
+                "new",
+                "this",
+                "super",
+            }
         return set()
 
 
@@ -144,10 +204,10 @@ class MinHashGenerator:
 
         # Generate deterministic random coefficients
         import random
+
         rng = random.Random(seed)
         self.coefficients = [
-            (rng.randint(1, self.MOD_PRIME - 1),
-             rng.randint(0, self.MOD_PRIME - 1))
+            (rng.randint(1, self.MOD_PRIME - 1), rng.randint(0, self.MOD_PRIME - 1))
             for _ in range(num_permutations)
         ]
 
@@ -187,8 +247,8 @@ class MinHashGenerator:
 
     def _hash_shingle(self, shingle: str) -> int:
         """Hash a single shingle to a 32-bit integer."""
-        h = hashlib.md5(shingle.encode('utf-8')).digest()
-        return struct.unpack('<I', h[:4])[0]
+        h = hashlib.md5(shingle.encode("utf-8")).digest()
+        return struct.unpack("<I", h[:4])[0]
 
 
 class LSHIndex:
@@ -237,8 +297,9 @@ class LSHIndex:
             band_hash = self._hash_band(sig[start:end])
             self.buckets[band_idx][band_hash].add(doc.doc_id)
 
-    def query(self, signature: MinHashSignature,
-              min_jaccard: float = 0.5) -> List[Tuple[str, float]]:
+    def query(
+        self, signature: MinHashSignature, min_jaccard: float = 0.5
+    ) -> List[Tuple[str, float]]:
         """
         Find near-duplicate documents.
 
@@ -278,10 +339,9 @@ class LSHIndex:
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
         total_buckets = sum(len(b) for b in self.buckets)
-        avg_bucket_size = (
-            sum(len(docs) for b in self.buckets for docs in b.values())
-            / max(1, total_buckets)
-        )
+        avg_bucket_size = sum(
+            len(docs) for b in self.buckets for docs in b.values()
+        ) / max(1, total_buckets)
 
         return {
             "num_documents": len(self.documents),
@@ -296,7 +356,7 @@ class LSHIndex:
 
     def _hash_band(self, values: List[int]) -> int:
         """Hash a band of MinHash values."""
-        data = struct.pack(f'{len(values)}I', *values)
+        data = struct.pack(f"{len(values)}I", *values)
         return int(hashlib.md5(data).hexdigest()[:8], 16)
 
     def remove(self, doc_id: str) -> bool:
@@ -337,15 +397,20 @@ class ScalableCodeIndex:
         results = index.find_similar("def foo(): ...")
     """
 
-    def __init__(self, num_permutations: int = 200,
-                 num_bands: int = 20, rows_per_band: int = 10):
+    def __init__(
+        self, num_permutations: int = 200, num_bands: int = 20, rows_per_band: int = 10
+    ):
         self.shingler = TokenShingler(k=5)
         self.minhash_gen = MinHashGenerator(num_permutations, seed=42)
         self.lsh = LSHIndex(num_bands, rows_per_band)
 
-    def add_file(self, doc_id: str, code: str,
-                 language: str = "python",
-                 metadata: Dict[str, Any] = None) -> LSHEncodedCode:
+    def add_file(
+        self,
+        doc_id: str,
+        code: str,
+        language: str = "python",
+        metadata: Dict[str, Any] = None,
+    ) -> LSHEncodedCode:
         """
         Add a code file to the index.
 
@@ -379,9 +444,13 @@ class ScalableCodeIndex:
         self.lsh.add(doc)
         return doc
 
-    def find_similar(self, code: str, language: str = "python",
-                     min_jaccard: float = 0.5,
-                     top_k: int = 10) -> List[Tuple[str, float]]:
+    def find_similar(
+        self,
+        code: str,
+        language: str = "python",
+        min_jaccard: float = 0.5,
+        top_k: int = 10,
+    ) -> List[Tuple[str, float]]:
         """
         Find similar code in the index.
 
@@ -404,7 +473,8 @@ class ScalableCodeIndex:
         """Find exact duplicates by file hash."""
         target_hash = hashlib.sha256(code.encode()).hexdigest()
         return [
-            doc.doc_id for doc in self.lsh.documents.values()
+            doc.doc_id
+            for doc in self.lsh.documents.values()
             if doc.file_hash == target_hash
         ]
 

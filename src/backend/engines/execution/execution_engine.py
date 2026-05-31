@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutionResult:
     """Result of an external tool execution."""
+
     tool_name: str
     success: bool
     exit_code: int
@@ -107,7 +108,9 @@ class SandboxExecutor:
         try:
             result = subprocess.run(
                 ["docker", "info"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -158,7 +161,8 @@ class SandboxExecutor:
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
                 timeout=self.timeout,
             )
             elapsed = time.monotonic() - start
@@ -229,7 +233,8 @@ class BaseToolRunner(ABC):
         run_env = env or self.det_env.build_env()
         return subprocess.run(
             cmd,
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             timeout=self.timeout,
             env=run_env,
             cwd=str(cwd) if cwd else None,
@@ -303,7 +308,11 @@ class MossRunner(BaseToolRunner):
             )
 
         moss_lang = self.MOSS_LANG_MAP.get(language.lower(), "cc")
-        files = list(code_dir.rglob("*.py")) if language.lower() == "python" else list(code_dir.rglob("*"))
+        files = (
+            list(code_dir.rglob("*.py"))
+            if language.lower() == "python"
+            else list(code_dir.rglob("*"))
+        )
         files = [f for f in files if f.is_file() and not f.name.startswith(".")]
 
         if not files:
@@ -329,7 +338,9 @@ class MossRunner(BaseToolRunner):
             if result.returncode == 0 and result.stdout.strip():
                 url_line = result.stdout.strip().split("\n")[-1]
                 if url_line.startswith("http"):
-                    output_html.write_text(f"<html><body><p>Results: {url_line}</p></body></html>")
+                    output_html.write_text(
+                        f"<html><body><p>Results: {url_line}</p></body></html>"
+                    )
 
             return ExecutionResult(
                 tool_name=self.tool_name,
@@ -463,9 +474,13 @@ class JPlagRunner(BaseToolRunner):
         self, code_dir: Path, language: str, output_dir: Path
     ) -> ExecutionResult:
         cmd = [
-            "java", "-jar", str(self.jplag_jar),
-            "-l", language,
-            "-r", str(output_dir),
+            "java",
+            "-jar",
+            str(self.jplag_jar),
+            "-l",
+            language,
+            "-r",
+            str(output_dir),
             str(code_dir),
         ]
         start = time.monotonic()
@@ -579,9 +594,12 @@ class DolosRunner(BaseToolRunner):
             )
 
         cmd = [
-            dolos_cmd, "run",
-            "--format", "csv",
-            "--output", str(output_dir / "dolos_results.csv"),
+            dolos_cmd,
+            "run",
+            "--format",
+            "csv",
+            "--output",
+            str(output_dir / "dolos_results.csv"),
             str(code_dir),
         ]
 
@@ -736,7 +754,9 @@ class ExecutionEngine:
         if tool_name not in self._runners:
             cls = self.TOOL_REGISTRY.get(tool_name.lower())
             if not cls:
-                raise ValueError(f"Unknown tool: {tool_name}. Available: {list(self.TOOL_REGISTRY.keys())}")
+                raise ValueError(
+                    f"Unknown tool: {tool_name}. Available: {list(self.TOOL_REGISTRY.keys())}"
+                )
             config = self.tool_configs.get(tool_name, {})
             config.setdefault("timeout", self.timeout)
             config.setdefault("deterministic_env", self.det_env)

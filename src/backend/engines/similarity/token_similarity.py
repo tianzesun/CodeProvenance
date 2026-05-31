@@ -149,7 +149,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         if filtered_a and filtered_b:
             tokens_a = filtered_a
             tokens_b = filtered_b
-        
+
         # Normalize identifiers to handle renaming
         norm_tokens_a = self._normalize_identifiers(tokens_a)
         norm_tokens_b = self._normalize_identifiers(tokens_b)
@@ -182,17 +182,17 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             matcher = SequenceMatcher(None, code_a, code_b)
             match = matcher.find_longest_match(0, len(code_a), 0, len(code_b))
             if match.size > 10:  # Only if match is substantial
-                a_snippet = code_a[match.a:match.a + match.size]
-                b_snippet = code_b[match.b:match.b + match.size]
+                a_snippet = code_a[match.a : match.a + match.size]
+                b_snippet = code_b[match.b : match.b + match.size]
                 evidence.append(
                     EvidenceBlock(
                         engine=self.name,
                         score=final_score,
                         confidence=0.8,
-                        a_start_line=code_a[:match.a].count('\n') + 1,
-                        a_end_line=code_a[:match.a + match.size].count('\n') + 1,
-                        b_start_line=code_b[:match.b].count('\n') + 1,
-                        b_end_line=code_b[:match.b + match.size].count('\n') + 1,
+                        a_start_line=code_a[: match.a].count("\n") + 1,
+                        a_end_line=code_a[: match.a + match.size].count("\n") + 1,
+                        b_start_line=code_b[: match.b].count("\n") + 1,
+                        b_end_line=code_b[: match.b + match.size].count("\n") + 1,
                         a_snippet=a_snippet,
                         b_snippet=b_snippet,
                         transformation_notes=["Exact substring match"],
@@ -252,13 +252,13 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         # Tokenize
         tokens = re.findall(r"[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]", text)
         return [t for t in tokens if t]
-    
+
     def _normalize_identifiers(self, tokens: List[str]) -> List[str]:
         """Normalize identifiers by replacing them with sequential placeholders (var1, var2, etc.)"""
         identifier_map = {}
         counter = 1
         normalized = []
-        
+
         for token in tokens:
             if token in self.keywords:
                 normalized.append(token)
@@ -272,7 +272,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
                     identifier_map[token] = f"__VAR{counter}__"
                     counter += 1
                 normalized.append(identifier_map[token])
-        
+
         return normalized
 
     # ── Metrics ─────────────────────────────────────────────────────────

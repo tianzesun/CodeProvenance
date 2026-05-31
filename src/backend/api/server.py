@@ -3960,6 +3960,7 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                             if r.confidence_level is not None
                             else None
                         ),
+                        "verdict": r.verdict,
                         "matching_blocks": r.matching_blocks or [],
                         "features": r.algorithm_scores or {},
                         "external_evidence": (r.algorithm_scores or {}).get(

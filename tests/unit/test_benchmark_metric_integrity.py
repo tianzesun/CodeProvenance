@@ -71,11 +71,11 @@ def test_benchmark_pair_scores_keep_raw_score_as_primary() -> None:
     """Benchmark gates should evaluate the detector score, not baseline-adjusted diagnostics."""
 
     class Extractor:
-        def extract(self, code_a: str, code_b: str) -> _DummyFeatures:
+        def extract(self, code_a: str, code_b: str, filename_a: str = None, filename_b: str = None) -> _DummyFeatures:
             return _DummyFeatures(0.60 if "plag" in code_b else 0.60)
 
     class Fusion:
-        def fuse(self, features: _DummyFeatures) -> _DummyFused:
+        def fuse(self, features: _DummyFeatures, logic_flow: float = 0.0) -> _DummyFused:
             return _DummyFused(features.ast)
 
     service = BatchDetectionService.__new__(BatchDetectionService)
@@ -473,7 +473,7 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
     assert "poj104" in dataset_ids
     if (server.BENCHMARK_DATA_DIR / "poolc_600k_python").exists():
         assert "poolc_600k_python" in dataset_ids
-    assert "codexglue_clone" in dataset_ids
+    assert "codexglue_clone" not in dataset_ids  # Not runnable - missing HF splits
     assert "google_codejam" not in dataset_ids
     assert "codesearchnet" not in dataset_ids
 

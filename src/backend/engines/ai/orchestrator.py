@@ -39,7 +39,7 @@ class AIDetectionOrchestrator:
     # Calibrated weights favoring Binoculars (Layer 1) for its published performance
     # Total weight = 1.0
     _LAYER_WEIGHTS: Dict[str, float] = {
-        "binoculars": 0.40,          # Zero-shot SOTA (ICML 2024)
+        "binoculars": 0.40,  # Zero-shot SOTA (ICML 2024)
         "pattern_library": 0.15,
         "perplexity": 0.12,
         "stylometry": 0.10,
@@ -90,13 +90,17 @@ class AIDetectionOrchestrator:
 
         # Combine confidence
         legacy_conf = legacy_result.get("confidence", 0.5)
-        bino_conf = bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.3
+        bino_conf = (
+            bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.3
+        )
         combined_confidence = max(0.4, (0.6 * bino_conf + 0.4 * legacy_conf))
 
         # Merge indicators (prefer Binoculars evidence when strong)
         indicators = legacy_result.get("indicators", [])
         if bino_result.get("available") and bino_result.get("ai_probability", 0) > 0.65:
-            indicators = [f"Binoculars: {bino_result.get('label', 'AI-like')}"] + indicators
+            indicators = [
+                f"Binoculars: {bino_result.get('label', 'AI-like')}"
+            ] + indicators
 
         layers = {
             "binoculars": {
@@ -138,6 +142,7 @@ class AIDetectionOrchestrator:
 
         # Mild calibration (same style as legacy)
         import math
+
         k = 5.5
         calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
         return calibrated

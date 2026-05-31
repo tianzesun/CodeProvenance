@@ -16,6 +16,9 @@ import {
   ShieldCheck,
   XCircle,
   X,
+  TreePine,
+  GitBranch,
+  BookOpen,
 } from 'lucide-react';
 
 function formatPercent(value) {
@@ -59,13 +62,25 @@ function confidenceLabel(score) {
   return 'Low';
 }
 
+function mapVerdictToLabel(verdict) {
+  // Map old verdict labels to new ones
+  const labels = {
+    CLEAN: 'CLEAN',
+    REVIEW_REQUIRED: 'REVIEW REQUIRED',
+    STRONG_SIMILARITY_OBSERVED: 'STRONG SIMILARITY OBSERVED',
+    TRUE: 'STRONG SIMILARITY OBSERVED',
+    PROBABLE: 'REVIEW REQUIRED',
+    REVIEW: 'REVIEW REQUIRED',
+    FLAG: 'REVIEW REQUIRED',
+  };
+  return labels[verdict] || 'REVIEW REQUIRED';
+}
+
 function getVerdictStyle(verdict) {
   const styles = {
-    TRUE: 'bg-red-100 text-red-700 border-red-200',
-    PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200',
-    REVIEW: 'bg-blue-100 text-blue-700 border-blue-200',
-    FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    REVIEW_REQUIRED: 'bg-blue-100 text-blue-700 border-blue-200',
+    STRONG_SIMILARITY_OBSERVED: 'bg-red-100 text-red-700 border-red-200',
   };
   return styles[verdict] || 'bg-slate-100 text-slate-600 border-slate-200';
 }
@@ -197,6 +212,105 @@ function pairKey(result) {
   return `${result.file_a || ''}::${result.file_b || ''}`;
 }
 
+function buildEvidenceTree(result) {
+  // Build evidence tree from features/scores
+  const features = result?.features || {};
+  const score = Number(result?.score) || 0;
+  
+  const evidenceTree = {
+    root: {
+      name: 'Similarity Analysis',
+      score: Math.round(score * 100),
+      status: score >= 0.75 ? 'strong' : score >= 0.5 ? 'moderate' : 'weak',
+    },
+    children: []
+  };
+  
+  // Structural evidence (AST, control flow)
+  const structuralScore = features?.ast_similarity || features?.control_flow_similarity || 0;
+  if (structuralScore > 0) {
+    evidenceTree.children.push({
+      name: 'Structural Evidence',
+      type: 'branch',
+      score: Math.round(structuralScore * 100),
+      status: structuralScore >= 0.7 ? 'strong' : structuralScore >= 0.4 ? 'moderate' : 'weak',
+      children: [
+        {
+          name: 'AST Structure',
+          type: 'leaf',
+          score: Math.round(structuralScore * 100),
+          description: 'Code organization patterns show alignment'
+        },
+        {
+          name: 'Control Flow',
+          type: 'leaf',
+          score: Math.round(structuralScore * 100),
+          description: 'Program execution patterns show alignment'
+        }
+      ]
+    });
+  }
+  
+  // Lexical evidence (token, fingerprint)
+  const lexicalScore = features?.fingerprint || features?.token_similarity || features?.winnowing || 0;
+  if (lexicalScore > 0) {
+    evidenceTree.children.push({
+      name: 'Lexical Evidence',
+      type: 'branch',
+      score: Math.round(lexicalScore * 100),
+      status: lexicalScore >= 0.7 ? 'strong' : lexicalScore >= 0.4 ? 'moderate' : 'weak',
+      children: [
+        {
+          name: 'Token Sequence',
+          type: 'leaf',
+          score: Math.round(lexicalScore * 100),
+          description: 'Code sequences show overlapping patterns'
+        }
+      ]
+    });
+  }
+  
+  // Semantic evidence
+  const semanticScore = features?.embedding_similarity || 0;
+  if (semanticScore > 0) {
+    evidenceTree.children.push({
+      name: 'Semantic Evidence',
+      type: 'branch',
+      score: Math.round(semanticScore * 100),
+      status: semanticScore >= 0.7 ? 'strong' : semanticScore >= 0.4 ? 'moderate' : 'weak',
+      children: [
+        {
+          name: 'Embedding Similarity',
+          type: 'leaf',
+          score: Math.round(semanticScore * 100),
+          description: 'Conceptual alignment between submissions'
+        }
+      ]
+    });
+  }
+  
+  // Divergence evidence (differences)
+  const divergenceScore = features?.divergence_score || 0;
+  if (divergenceScore > 0) {
+    evidenceTree.children.push({
+      name: 'Divergence Analysis',
+      type: 'branch',
+      score: Math.round((1 - divergenceScore) * 100),
+      status: divergenceScore >= 0.7 ? 'strong' : divergenceScore >= 0.4 ? 'moderate' : 'weak',
+      children: [
+        {
+          name: 'Structural Differences',
+          type: 'leaf',
+          score: Math.round((1 - divergenceScore) * 100),
+          description: 'Implementation differences reduce similarity concerns'
+        }
+      ]
+    });
+  }
+  
+  return evidenceTree;
+}
+
 export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -215,7 +329,7 @@ export default function ResultsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [minSimilarity, setMinSimilarity] = useState(0.5);
   const [statusFilter, setStatusFilter] = useState('all'); // all | unreviewed | needs_review | dismissed
-  const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence
+  const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence | verdict
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
 
@@ -312,14 +426,20 @@ export default function ResultsPage() {
       const strong = Object.values(feats).filter((v) => Number(v) >= 0.5).length;
       const k = pairKey(r);
       const st = pairStatuses[k] || r.review_status || job?.review_status || 'unreviewed';
+      // Use verdict from API if available, otherwise derive from score
+      const rawVerdict = r.verdict || (sc >= 0.75 ? (sc >= 0.9 ? 'TRUE' : 'PROBABLE') : sc >= 0.5 ? 'REVIEW' : 'CLEAN');
+      const verdict = mapVerdictToLabel(rawVerdict);
+      // Use confidence from API if available, otherwise derive from score
+      const conf = typeof r.confidence === 'number' ? r.confidence : confidenceLabel(sc);
       return {
         ...r,
         _rank: idx + 1,
         _score: sc,
-        _confidence: confidenceLabel(sc),
+        _confidence: conf,
         _evidence: strong,
         _status: st,
         _key: k,
+        verdict: verdict,
       };
     });
 
@@ -336,6 +456,12 @@ export default function ResultsPage() {
     rows.sort((a, b) => {
       if (sortMode === 'similarity') return b._score - a._score;
       if (sortMode === 'evidence') return (b._evidence - a._evidence) || (b._score - a._score);
+      if (sortMode === 'verdict') {
+        const verdictOrder = { 'STRONG_SIMILARITY_OBSERVED': 0, 'REVIEW_REQUIRED': 1, 'CLEAN': 2 };
+        const aOrder = verdictOrder[a.verdict] ?? 1;
+        const bOrder = verdictOrder[b.verdict] ?? 1;
+        return aOrder - bOrder || b._score - a._score;
+      }
       if (sortMode === 'unreviewed') {
         const aNew = a._status === 'unreviewed' || a._status === 'needs_review' ? 0 : 1;
         const bNew = b._status === 'unreviewed' || b._status === 'needs_review' ? 0 : 1;
@@ -368,9 +494,10 @@ export default function ResultsPage() {
   const rightHighlights = highlightedLines(rightCode, activeResult?.matching_blocks, false);
   const score = Number(activeResult?.score) || Number(activeResult?._score) || 0;
   const safeScore = isNaN(score) ? 0 : score;
+  const confidenceDisplay = Math.round(safeScore * 100);
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
-  const confidenceDisplay = Math.round(safeScore * 100);
+  const evidenceTree = buildEvidenceTree(activeResult);
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
@@ -454,20 +581,6 @@ export default function ResultsPage() {
                <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
                  {tableData.length} shown
                </div>
-
-               {/* External Source Scan status chip — always visible for discoverability */}
-               {job?.web_analysis && (
-                 <div className={`rounded-full px-3 py-1 text-sm font-medium ${
-                   job.web_analysis.enabled 
-                     ? 'bg-emerald-100 text-emerald-700' 
-                     : 'bg-slate-100 text-slate-600'
-                 }`}>
-                   External: {job.web_analysis.enabled ? 'On' : 'Off'}
-                   {job.web_analysis.enabled && job.web_analysis.matched_submissions > 0 && (
-                     <> ({job.web_analysis.matched_submissions} match{job.web_analysis.matched_submissions === 1 ? '' : 'es'})</>
-                   )}
-                 </div>
-               )}
              </div>
 
             {/* 2. Sort + 3. Filters + 4. Reset — grouped cleanly */}
@@ -483,6 +596,7 @@ export default function ResultsPage() {
                   <option value="unreviewed">Unreviewed first</option>
                   <option value="similarity">Highest similarity</option>
                   <option value="evidence">Most evidence</option>
+                  <option value="verdict">By verdict priority</option>
                 </select>
               </div>
 
@@ -546,79 +660,9 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {/* External / Public Source Scan — always visible for discoverability inside Plagiarism Checker */}
-          <div className="mb-6 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <ShieldCheck className="text-emerald-600" size={18} />
-              <div className="font-semibold text-emerald-800">External Source Scan</div>
-
-              {job?.web_analysis ? (
-                job.web_analysis.enabled ? (
-                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Enabled</span>
-                ) : (
-                  <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Disabled</span>
-                )
-              ) : (
-                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Not run</span>
-              )}
-
-              <a href="/settings" className="ml-auto text-xs text-emerald-600 hover:underline">Manage in Settings</a>
-            </div>
-
-            {job?.web_analysis?.enabled && job.web_analysis.matched_submissions > 0 ? (
-              <>
-                <div className="text-sm text-emerald-700 mb-3">
-                  Found matches in <strong>{job.web_analysis.matched_submissions}</strong> submission(s). 
-                  Highest similarity: <strong>{(job.web_analysis.highest_similarity * 100).toFixed(0)}%</strong>
-                </div>
-
-                <div className="space-y-2">
-                  {job.web_analysis.submissions?.slice(0, 4).map((entry: any, idx: number) => (
-                    <div key={idx} className="text-sm border border-emerald-100 rounded-lg p-3 bg-emerald-50/50">
-                      <div className="font-medium text-emerald-900">{entry.name}</div>
-                      <div className="text-xs text-emerald-700 mt-1">
-                        Max similarity: {(entry.max_similarity * 100).toFixed(0)}% • {entry.match_count} source
-                      </div>
-                      {entry.sources?.slice(0, 2).map((src: any, sidx: number) => (
-                        <a
-                          key={sidx}
-                          href={src.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block text-xs text-emerald-600 hover:underline mt-1 truncate"
-                        >
-                          {src.source}: {src.name || src.url}
-                        </a>
-                      ))}
-                    </div>
-                  ))}
-                  {job.web_analysis.submissions?.length > 4 && (
-                    <div className="text-xs text-emerald-600">
-                      +{job.web_analysis.submissions.length - 4} more submissions
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : job?.web_analysis ? (
-              <>
-                <div className="text-sm text-slate-600">
-                  {job.web_analysis.status_message || "No matches found against configured public sources."}
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  Configure sources in <a href="/settings" className="underline">Settings → External Sources</a>.
-                </p>
-              </>
-            ) : (
-              <div className="text-sm text-slate-600">
-                External source scanning was not performed for this job. 
-                Enable it in <a href="/settings" className="underline">Settings → External Sources</a> and re-run the check.
-              </div>
-            )}
-          </div>
-
-            {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
-           {!drawerOpen && (
-             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
+         {!drawerOpen && (
+           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <div>
                 <div className="text-sm font-semibold text-slate-950">Suspicious Pairs — Ranked</div>
@@ -640,9 +684,7 @@ export default function ResultsPage() {
                       <th className="w-12 px-4 py-3">#</th>
                       <th className="w-[26%] px-4 py-3">Submission A</th>
                       <th className="w-[26%] px-4 py-3">Submission B</th>
-                      <th className="w-24 px-4 py-3">Similarity</th>
-                      <th className="w-24 px-4 py-3">Verdict</th>
-                      <th className="w-24 px-4 py-3">Confidence</th>
+                      <th className="w-32 px-4 py-3">Verdict</th>
                       <th className="w-28 px-4 py-3">Status</th>
                     </tr>
                   </thead>
@@ -667,16 +709,7 @@ export default function ResultsPage() {
                           <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_a}>{row.file_a}</td>
                           <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_b}>{row.file_b}</td>
                           <td className="px-4 py-3">
-                            <span className="font-semibold text-slate-950">{Math.round(row._score * 100)}</span>
-                            <span className="text-xs text-slate-400 ml-1">%</span>
-                          </td>
-                          <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-xs font-semibold text-slate-600">
-                              {Math.round((Number(row._confidence) || 0) * 100)}%
-                            </span>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>
@@ -746,7 +779,53 @@ export default function ResultsPage() {
                    </div>
                  </div>
 
-                  {/* Evidence chips */}
+                  {/* Evidence Tree */}
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950">
+                      <TreePine size={16} className="text-blue-600" />
+                      Evidence Tree
+                    </div>
+                    <EvidenceTreeNode node={evidenceTree} />
+                  </div>
+
+                  {/* Evidence Blocks - matching code blocks between submissions */}
+                  {activeResult?.matching_blocks && activeResult.matching_blocks.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950">
+                        <GitBranch size={16} className="text-purple-600" />
+                        Evidence Blocks
+                      </div>
+                      <div className="space-y-3">
+                        {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
+                          <div key={idx} className="rounded-lg border border-purple-100 bg-purple-50 p-3">
+                            <div className="flex items-center gap-2 text-xs font-medium text-purple-700 mb-2">
+                              <span>Block {idx + 1}</span>
+                              <span className="px-2 py-0.5 bg-purple-100 rounded">
+                                {Math.round((block.similarity || 0.75) * 100)}% match
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 text-xs">
+                              <div>
+                                <span className="text-slate-500">File A lines:</span>
+                                <span className="ml-1 font-mono text-slate-700">{block.lines_a || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">File B lines:</span>
+                                <span className="ml-1 font-mono text-slate-700">{block.lines_b || 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {activeResult.matching_blocks.length > 5 && (
+                          <div className="text-xs text-slate-500">
+                            +{activeResult.matching_blocks.length - 5} more blocks
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Evidence chips (simplified view) */}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {evidenceTypes.map((item) => (
                       <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
@@ -755,36 +834,7 @@ export default function ResultsPage() {
                     ))}
                   </div>
 
-                  {/* External/Public Source Matches for this pair - integrated into side-by-side detail */}
-                  {hasExternalMatches && (
-                    <div className="mt-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50">
-                      <div className="font-semibold text-emerald-800 text-sm mb-2 flex items-center gap-2">
-                        <ShieldCheck size={14} /> External / Public Matches for this Pair
-                      </div>
-                      <div className="space-y-2 text-sm">
-                        {[externalA, externalB].filter(Boolean).map((ext: any, i: number) => (
-                          <div key={i}>
-                            <div className="font-medium text-emerald-900">{ext.name}</div>
-                            <div className="text-xs text-emerald-700">
-                              Max similarity to public: {(ext.max_similarity * 100).toFixed(0)}% • {ext.match_count} source(s)
-                            </div>
-                            {ext.sources?.slice(0, 3).map((src: any, si: number) => (
-                              <a
-                                key={si}
-                                href={src.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block text-xs text-emerald-600 hover:underline truncate"
-                              >
-                                → {src.source}: {src.name || src.url}
-                              </a>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                 </div>
 
 {/* Side-by-side code comparison - full screen width */}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -828,7 +878,7 @@ export default function ResultsPage() {
                )}
 
                <div className="text-center text-[11px] text-slate-500">
-                 Changes update the pair status immediately. Use “Back to all pairs” to return to the ranked list.
+                 Changes update the pair status immediately. Use "Back to all pairs" to return to the ranked list.
                </div>
              </div>
            ) : (
@@ -859,6 +909,53 @@ const CheckRow = ({ title, detail }) => (
     </div>
   </div>
 );
+
+function EvidenceTreeNode({ node, depth = 0 }) {
+  const statusColors = {
+    strong: 'text-red-600 bg-red-50 border-red-100',
+    moderate: 'text-amber-600 bg-amber-50 border-amber-200',
+    weak: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+  };
+  const statusColor = statusColors[node.status] || 'text-slate-600 bg-slate-50';
+  
+  return (
+    <div className={`relative ${depth > 0 ? 'ml-4 pl-4 before:absolute before:left-2 before:top-0 before:bottom-0 before:border-slate-200' : ''}`}>
+      <div className={`rounded-lg border p-3 mb-2 ${statusColor}`}>
+        <div className="flex items-center gap-2">
+          {node.type === 'branch' && (
+            <GitBranch size={14} className="shrink-0" />
+          )}
+          {node.type === 'leaf' && (
+            <BookOpen size={14} className="shrink-0" />
+          )}
+          <div className="flex-1">
+            <div className="font-semibold text-sm">{node.name}</div>
+            {node.description && (
+              <div className="text-xs text-slate-500 mt-1">{node.description}</div>
+            )}
+            {node.score !== undefined && (
+              <div className="flex items-center gap-2 mt-1 text-xs">
+                <span className="font-medium">{node.score}%</span>
+                <span className="text-slate-400">similarity</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      {node.children && node.children.length > 0 && (
+        <div className="space-y-2">
+          {node.children.map((child, idx) => (
+            <EvidenceTreeNode 
+              key={idx} 
+              node={child} 
+              depth={depth + 1} 
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const CodePanel = ({ title, code, highlights, panelRef, onScroll, isLeft }) => {
   // Get highlight color based on similarity score

@@ -20,6 +20,7 @@ This approach is robust because obfuscation that changes surface text
 (renaming, reordering comments, inserting unreachable dead code)
 will NOT change the CFG/PDG structure.
 """
+
 from typing import Dict, List, Any, Optional, Tuple, Set
 from pathlib import Path
 import ast
@@ -32,6 +33,7 @@ from collections import defaultdict
 @dataclass
 class CFGNode:
     """Node in the Control Flow Graph."""
+
     node_id: int
     node_type: str
     stmt_hash: str  # Hash of normalized statement
@@ -44,6 +46,7 @@ class CFGNode:
 @dataclass
 class PDGNode:
     """Node in the Program Dependency Graph."""
+
     node_id: int
     variable: str
     definition_line: int
@@ -54,6 +57,7 @@ class PDGNode:
 @dataclass
 class NormalizedProgram:
     """Fully normalized program representation."""
+
     ast_structure_hash: str
     cfg_nodes: List[CFGNode]
     cfg_edges: List[Tuple[int, int]]
@@ -70,11 +74,9 @@ class NormalizedProgram:
         cfg_sorted = sorted(self.cfg_edges)
         parts.append(str(cfg_sorted))
         # PDG structure
-        pdg_deps = sorted(
-            (n.variable, sorted(n.dep_from)) for n in self.pdg_nodes
-        )
+        pdg_deps = sorted((n.variable, sorted(n.dep_from)) for n in self.pdg_nodes)
         parts.append(str(pdg_deps))
-        return hashlib.sha256('|'.join(parts).encode()).hexdigest()
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
 class DeadCodeRemover:
@@ -140,7 +142,9 @@ class DeadCodeRemoverVisitor(ast.NodeTransformer):
         node.orelse = self._mark_dead_after(node.orelse)
         # Remove if both branches are empty
         if not node.body and not node.orelse:
-            return ast.Expr(value=ast.Constant(value=None))  # Replace with pass equivalent
+            return ast.Expr(
+                value=ast.Constant(value=None)
+            )  # Replace with pass equivalent
         return node
 
     def visit_For(self, node: ast.For) -> ast.For:
@@ -211,8 +215,13 @@ class CFGBuilder:
 
         return self._nodes, self._edges
 
-    def _make_node(self, node_type: str, source_node: Any = None,
-                   is_entry: bool = False, is_exit: bool = False) -> CFGNode:
+    def _make_node(
+        self,
+        node_type: str,
+        source_node: Any = None,
+        is_entry: bool = False,
+        is_exit: bool = False,
+    ) -> CFGNode:
         """Create a new CFG node."""
         node_id = self._node_counter
         self._node_counter += 1
@@ -252,8 +261,9 @@ class CFGBuilder:
                     if from_id not in n.predecessors:
                         n.predecessors.append(from_id)
 
-    def _build_function_cfg(self, func: ast.FunctionDef,
-                            entry: CFGNode, exit_node: CFGNode) -> None:
+    def _build_function_cfg(
+        self, func: ast.FunctionDef, entry: CFGNode, exit_node: CFGNode
+    ) -> None:
         """Build CFG for a function definition."""
         # Entry → function body
         func_body_entry = self._make_node("FunctionDef", func)
@@ -272,8 +282,9 @@ class CFGBuilder:
         for lid in last_nodes:
             self._add_edge(lid, exit_node.node_id)
 
-    def _build_module_body_cfg(self, module: ast.Module,
-                                 entry: CFGNode, exit_node: CFGNode) -> None:
+    def _build_module_body_cfg(
+        self, module: ast.Module, entry: CFGNode, exit_node: CFGNode
+    ) -> None:
         """Build CFG for module-level statements."""
         last_id = entry.node_id
         for stmt in module.body:
@@ -281,8 +292,7 @@ class CFGBuilder:
             last_id = exits[-1] if exits else last_id
         self._add_edge(last_id, exit_node.node_id)
 
-    def _build_stmt_cfg(self, stmt: ast.AST, entry_id: int,
-                        exit_id: int) -> List[int]:
+    def _build_stmt_cfg(self, stmt: ast.AST, entry_id: int, exit_id: int) -> List[int]:
         """Build CFG for a single statement. Returns list of exit node IDs."""
         if isinstance(stmt, ast.Assign):
             node = self._make_node("Assign", stmt)
@@ -442,7 +452,9 @@ class PDGBuilder:
             List of PDGNode with dependency relationships
         """
         self._pdg_nodes: List[PDGNode] = []
-        self._definitions: Dict[str, List[int]] = defaultdict(list)  # var → [PDG node IDs]
+        self._definitions: Dict[str, List[int]] = defaultdict(
+            list
+        )  # var → [PDG node IDs]
         self._node_counter = 0
 
         for node in ast.walk(tree):
@@ -475,7 +487,9 @@ class PDGBuilder:
                 # Definition: left side targets
                 for target in stmt.targets:
                     if isinstance(target, ast.Name):
-                        def_node = self._make_pdg_node(target.id, getattr(stmt, 'lineno', 0))
+                        def_node = self._make_pdg_node(
+                            target.id, getattr(stmt, "lineno", 0)
+                        )
                         new_defs = [def_node.node_id]
 
                         # Find where this variable was defined before (data dep)
@@ -492,8 +506,9 @@ class PDGBuilder:
             elif isinstance(stmt, ast.For):
                 # Loop variable is a definition
                 if isinstance(stmt.target, ast.Name):
-                    def_node = self._make_pdg_node(stmt.target.id,
-                                                    getattr(stmt, 'lineno', 0))
+                    def_node = self._make_pdg_node(
+                        stmt.target.id, getattr(stmt, "lineno", 0)
+                    )
 
 
 class ASTNormalizer:
@@ -561,16 +576,20 @@ class ASTNormalizer:
 
     def _compute_ast_hash(self, tree: ast.AST) -> str:
         """Compute AST hash with all identifiers normalized."""
+
         class Normalizer(ast.NodeTransformer):
             def visit_Name(self, node):
                 node.id = "__ID__"
                 return node
+
             def visit_FunctionDef(self, node):
                 node.name = "__FUNC__"
                 return self.generic_visit(node)
+
             def visit_arg(self, node):
                 node.arg = "__ID__"
                 return node
+
             def visit_Attribute(self, node):
                 node.attr = "__ATTR__"
                 return self.generic_visit(node)
@@ -605,32 +624,33 @@ class ASTNormalizer:
     def _compute_complexity(self, tree: ast.AST) -> Dict[str, float]:
         """Compute cyclomatic and other complexity metrics."""
         counts = {
-            'branches': 0,
-            'loops': 0,
-            'functions': 0,
-            'statements': 0,
+            "branches": 0,
+            "loops": 0,
+            "functions": 0,
+            "statements": 0,
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.If):
-                counts['branches'] += 1
+                counts["branches"] += 1
             elif isinstance(node, (ast.For, ast.While)):
-                counts['loops'] += 1
+                counts["loops"] += 1
             elif isinstance(node, ast.FunctionDef):
-                counts['functions'] += 1
-            elif isinstance(node, (ast.Assign, ast.Expr, ast.AugAssign,
-                                   ast.Return, ast.Call)):
-                counts['statements'] += 1
+                counts["functions"] += 1
+            elif isinstance(
+                node, (ast.Assign, ast.Expr, ast.AugAssign, ast.Return, ast.Call)
+            ):
+                counts["statements"] += 1
 
         # Cyclomatic complexity = edges - nodes + 2*P
         # Approximation: 1 + branches + loops
-        cyclomatic = 1 + counts['branches'] + counts['loops']
+        cyclomatic = 1 + counts["branches"] + counts["loops"]
 
         return {
-            'cyclomatic_complexity': float(cyclomatic),
-            'num_functions': float(counts['functions']),
-            'num_statements': float(counts['statements']),
-            'branch_density': counts['branches'] / max(1, counts['statements']),
-            'loop_density': counts['loops'] / max(1, counts['statements']),
+            "cyclomatic_complexity": float(cyclomatic),
+            "num_functions": float(counts["functions"]),
+            "num_statements": float(counts["statements"]),
+            "branch_density": counts["branches"] / max(1, counts["statements"]),
+            "loop_density": counts["loops"] / max(1, counts["statements"]),
         }
 
 
@@ -658,13 +678,17 @@ class CFGComparator:
         # 1. Node type distribution similarity
         types1 = set(n.node_type for n in cfg1.cfg_nodes)
         types2 = set(n.node_type for n in cfg2.cfg_nodes)
-        type_sim = len(types1 & types2) / len(types1 | types2) if (types1 | types2) else 0
+        type_sim = (
+            len(types1 & types2) / len(types1 | types2) if (types1 | types2) else 0
+        )
 
         # 2. Edge pattern similarity
         edges1 = set(cfg1.cfg_edges)
         edges2 = set(cfg2.cfg_edges)
         # Normalize by size
-        edge_sim = 1.0 - abs(len(edges1) - len(edges2)) / max(len(edges1), len(edges2), 1)
+        edge_sim = 1.0 - abs(len(edges1) - len(edges2)) / max(
+            len(edges1), len(edges2), 1
+        )
 
         # 3. Complexity similarity
         c1 = cfg1.complexity_scores
@@ -735,7 +759,9 @@ def compare_robust(code1: str, code2: str) -> Dict[str, float]:
     # AST token similarity
     tokens1 = set(prog1.token_sequence)
     tokens2 = set(prog2.token_sequence)
-    ast_sim = len(tokens1 & tokens2) / len(tokens1 | tokens2) if (tokens1 | tokens2) else 0
+    ast_sim = (
+        len(tokens1 & tokens2) / len(tokens1 | tokens2) if (tokens1 | tokens2) else 0
+    )
 
     # CFG comparison
     cfg_sim = CFGComparator.compare(prog1, prog2)

@@ -32,6 +32,7 @@ from .base_similarity import BaseSimilarityAlgorithm
 @dataclass
 class GraphSimilarityResult:
     """Result from graph similarity comparison."""
+
     overall_score: float = 0.0
     structural_score: float = 0.0
     dataflow_score: float = 0.0
@@ -134,7 +135,11 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         )
 
     def compare_functions(
-        self, code_a: str, code_b: str, func_a: str, func_b: str,
+        self,
+        code_a: str,
+        code_b: str,
+        func_a: str,
+        func_b: str,
     ) -> Optional[GraphSimilarityResult]:
         """Compare specific functions from two files."""
         g_a = self._builder.build_for_function(code_a, func_a)
@@ -376,8 +381,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         if not keys:
             return 1.0
         dot = sum(a.get(k, 0) * b.get(k, 0) for k in keys)
-        na = math.sqrt(sum(v ** 2 for v in a.values()))
-        nb = math.sqrt(sum(v ** 2 for v in b.values()))
+        na = math.sqrt(sum(v**2 for v in a.values()))
+        nb = math.sqrt(sum(v**2 for v in b.values()))
         if na == 0 or nb == 0:
             return 0.0
         return dot / (na * nb)

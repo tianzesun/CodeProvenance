@@ -56,15 +56,18 @@ def test_list_benchmark_tools_reflects_repo_inventory(tmp_path, monkeypatch):
 
 
 def test_run_competitor_tool_supports_expanded_repo_tools():
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
+
     submissions = {
         "a.py": "def add(a, b):\n    return a + b\n",
         "b.py": "def sum_numbers(x, y):\n    return x + y\n",
     }
     pairs = [("a.py", "b.py")]
 
+    runner = ExternalToolRunner()
     for tool_id in ["moss", "jplag", "dolos", "nicad", "pmd", "sherlock"]:
         try:
-            result = server._run_competitor_tool(tool_id, submissions, pairs)
+            result = runner.run_tool(tool_id, submissions, pairs)
         except RuntimeError:
             continue
         if result is None:

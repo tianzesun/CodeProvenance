@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 #  Model config
 # ─────────────────────────────────────────────
 DEFAULT_MODEL = "microsoft/unixcoder-base"
-MAX_LENGTH = 512          # UniXcoder token limit
-BATCH_SIZE = 32           # Safe batch size for a single GPU (tune up/down as needed)
+MAX_LENGTH = 512  # UniXcoder token limit
+BATCH_SIZE = 32  # Safe batch size for a single GPU (tune up/down as needed)
 CACHE_DIR = Path("./.unixcoder_cache")
 
 
@@ -57,7 +57,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         cache_dir: Path = CACHE_DIR,
         batch_size: int = BATCH_SIZE,
     ):
-        super().__init__("embedding")          # keeps "embedding" key → fusion unchanged
+        super().__init__("embedding")  # keeps "embedding" key → fusion unchanged
         self.model_name = model_name
         self.batch_size = batch_size
 
@@ -77,7 +77,8 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
 
         logger.info(
             "UniXcoderSimilarity initialised — model=%s device=%s",
-            self.model_name, self.device,
+            self.model_name,
+            self.device,
         )
 
     # ─────────────────────────────────────────
@@ -88,6 +89,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     def _resolve_device() -> str:
         try:
             import torch
+
             if torch.cuda.is_available():
                 name = torch.cuda.get_device_name(0)
                 logger.info("GPU detected: %s", name)
@@ -118,13 +120,20 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
 
         # Suppress warnings during model loading (known issue with unixcoder-base)
         import warnings
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*embeddings\\.position_ids.*")
-            warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="transformers"
+            )
 
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = (
-                AutoModel.from_pretrained(self.model_name, ignore_mismatched_sizes=True, trust_remote_code=True)
+                AutoModel.from_pretrained(
+                    self.model_name,
+                    ignore_mismatched_sizes=True,
+                    trust_remote_code=True,
+                )
                 .to(self.device)
                 .eval()
             )
@@ -148,7 +157,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 with open(p, "rb") as f:
                     return pickle.load(f)
             except Exception:
-                p.unlink(missing_ok=True)   # evict corrupt entry
+                p.unlink(missing_ok=True)  # evict corrupt entry
         return None
 
     def _save_to_cache(self, text: str, embedding: np.ndarray) -> None:
@@ -189,7 +198,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             all_embeddings: List[np.ndarray] = []
 
             for batch_start in range(0, len(uncached_texts), self.batch_size):
-                batch = uncached_texts[batch_start: batch_start + self.batch_size]
+                batch = uncached_texts[batch_start : batch_start + self.batch_size]
                 inputs = self._tokenizer(
                     batch,
                     return_tensors="pt",
@@ -215,7 +224,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 self._save_to_cache(text, emb)
                 results[idx] = emb
 
-        return np.stack(results)   # (N, hidden_size)
+        return np.stack(results)  # (N, hidden_size)
 
     # ─────────────────────────────────────────
     #  Public API (matches BaseSimilarityAlgorithm)
@@ -232,17 +241,29 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         text_b = self._extract_text(parsed_b)
 
         if not text_a and not text_b:
-            return Finding(engine=self.name, score=1.0, confidence=1.0,
-                         methodology="UniXcoder semantic similarity")
+            return Finding(
+                engine=self.name,
+                score=1.0,
+                confidence=1.0,
+                methodology="UniXcoder semantic similarity",
+            )
         if not text_a or not text_b:
-            return Finding(engine=self.name, score=0.0, confidence=1.0,
-                         methodology="UniXcoder semantic similarity")
+            return Finding(
+                engine=self.name,
+                score=0.0,
+                confidence=1.0,
+                methodology="UniXcoder semantic similarity",
+            )
 
         # Skip very short snippets — noise dominates embeddings below ~5 tokens
         if len(text_a.split()) < 5 or len(text_b.split()) < 5:
             fallback_result = self._token_fallback(parsed_a, parsed_b)
-            return Finding(engine=self.name, score=fallback_result.score, confidence=fallback_result.confidence,
-                         methodology="UniXcoder semantic similarity (token fallback)")
+            return Finding(
+                engine=self.name,
+                score=fallback_result.score,
+                confidence=fallback_result.confidence,
+                methodology="UniXcoder semantic similarity (token fallback)",
+            )
 
         try:
             embeddings = self._embed_texts([text_a, text_b])
@@ -250,13 +271,21 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             score = float(np.dot(embeddings[0], embeddings[1]))
             # Map cosine [-1, 1] → [0, 1]
             normalized_score = max(0.0, min(1.0, (score + 1.0) / 2.0))
-            return Finding(engine=self.name, score=normalized_score, confidence=0.9,
-                         methodology="UniXcoder semantic similarity using CLS token embeddings")
+            return Finding(
+                engine=self.name,
+                score=normalized_score,
+                confidence=0.9,
+                methodology="UniXcoder semantic similarity using CLS token embeddings",
+            )
         except Exception as e:
             logger.warning("UniXcoder compare failed: %s — using token fallback", e)
             fallback_result = self._token_fallback(parsed_a, parsed_b)
-            return Finding(engine=self.name, score=fallback_result.score, confidence=fallback_result.confidence,
-                         methodology="UniXcoder semantic similarity (fallback due to error)")
+            return Finding(
+                engine=self.name,
+                score=fallback_result.score,
+                confidence=fallback_result.confidence,
+                methodology="UniXcoder semantic similarity (fallback due to error)",
+            )
 
     def similarity_matrix(self, codes: List[str]) -> np.ndarray:
         """
@@ -273,10 +302,10 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         if not codes:
             return np.zeros((0, 0))
 
-        embeddings = self._embed_texts(codes)          # (N, hidden)
-        cosine = embeddings @ embeddings.T             # (N, N), values in [-1, 1]
-        similarity = (cosine + 1.0) / 2.0             # map to [0, 1]
-        np.fill_diagonal(similarity, 1.0)             # self-similarity = 1.0
+        embeddings = self._embed_texts(codes)  # (N, hidden)
+        cosine = embeddings @ embeddings.T  # (N, N), values in [-1, 1]
+        similarity = (cosine + 1.0) / 2.0  # map to [0, 1]
+        np.fill_diagonal(similarity, 1.0)  # self-similarity = 1.0
         return similarity
 
     def top_suspicious_pairs(
@@ -346,7 +375,12 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         """Fallback to token similarity when embedding is unavailable / unreliable."""
         try:
             from .token_similarity import TokenSimilarity
+
             return TokenSimilarity().compare(parsed_a, parsed_b)
         except Exception:
-            return Finding(engine="token", score=0.0, confidence=0.1,
-                         methodology="Token similarity fallback")
+            return Finding(
+                engine="token",
+                score=0.0,
+                confidence=0.1,
+                methodology="Token similarity fallback",
+            )

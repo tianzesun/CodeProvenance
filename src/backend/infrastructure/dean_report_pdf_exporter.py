@@ -131,7 +131,13 @@ class DeanReportPdfExporter:
             "control_flow_explanation": cf_ev.explanation if cf_ev else None,
             "divergence_score": div_ev.value if div_ev else None,
             "reviewer_notes": report.reviewer_notes,
-            "cluster_disclaimer": "Cluster membership alone does not imply misconduct.",
+            # Dean-specific fields
+            "policy_references": report.policy_references,
+            "precedent_comparison": report.precedent_comparison,
+            "student_context": report.student_context,
+            "timeline": report.timeline,
+            "confidence_interval": report.confidence_interval,
+            "recommendation": report.recommendation,
         }
 
     def _generate_summary_paragraph(self, report: DeanGradeReport) -> str:

@@ -588,7 +588,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "No starter code provided. Similarity scores may be inflated by shared template content.",
-                "Beginner assignments often have naturally similar correct solutions."
+                "Beginner assignments often have naturally similar correct solutions.",
             ],
         ),
         AssignmentMode(
@@ -658,7 +658,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "Algorithm assignments often have multiple correct implementations.",
-                "Focus on logic preservation rather than syntax similarity."
+                "Focus on logic preservation rather than syntax similarity.",
             ],
         ),
         AssignmentMode(
@@ -726,7 +726,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "Large projects often share framework code legitimately.",
-                "Focus on architectural and design similarities over individual functions."
+                "Focus on architectural and design similarities over individual functions.",
             ],
         ),
         AssignmentMode(
@@ -795,7 +795,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "SQL has many equivalent ways to express the same logic.",
-                "Focus on query semantics rather than exact syntax matching."
+                "Focus on query semantics rather than exact syntax matching.",
             ],
         ),
         AssignmentMode(
@@ -866,7 +866,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "Notebooks mix code, text, and AI-generated content.",
-                "AI detection helps prioritize but should not dominate scoring."
+                "AI detection helps prioritize but should not dominate scoring.",
             ],
         ),
         AssignmentMode(
@@ -936,7 +936,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
             ],
             warnings=[
                 "Text assignments are highly susceptible to AI generation and source copying.",
-                "Focus on authorship patterns and source attribution rather than exact matching."
+                "Focus on authorship patterns and source attribution rather than exact matching.",
             ],
         ),
         AssignmentMode(

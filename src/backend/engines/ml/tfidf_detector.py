@@ -10,6 +10,7 @@ Approach:
 3. Use KMeans or cosine similarity to cluster similar codes
 4. Return similarity scores based on cosine distance
 """
+
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import re
@@ -22,6 +23,7 @@ import math
 @dataclass
 class CodeFeatures:
     """Extracted features from a code snippet."""
+
     filename: str
     tokens: List[str]
     ngrams: List[str]
@@ -35,27 +37,79 @@ class CodeTokenizer:
 
     # Language-specific keyword sets
     PYTHON_KEYWORDS = {
-        'def', 'class', 'if', 'else', 'elif', 'for', 'while', 'return',
-        'import', 'from', 'try', 'except', 'finally', 'with', 'as',
-        'lambda', 'yield', 'raise', 'pass', 'break', 'continue',
-        'and', 'or', 'not', 'is', 'in', 'True', 'False', 'None',
+        "def",
+        "class",
+        "if",
+        "else",
+        "elif",
+        "for",
+        "while",
+        "return",
+        "import",
+        "from",
+        "try",
+        "except",
+        "finally",
+        "with",
+        "as",
+        "lambda",
+        "yield",
+        "raise",
+        "pass",
+        "break",
+        "continue",
+        "and",
+        "or",
+        "not",
+        "is",
+        "in",
+        "True",
+        "False",
+        "None",
     }
 
     JAVA_KEYWORDS = {
-        'public', 'private', 'protected', 'static', 'final', 'class',
-        'interface', 'extends', 'implements', 'if', 'else', 'for',
-        'while', 'do', 'switch', 'case', 'return', 'void', 'int',
-        'long', 'float', 'double', 'String', 'boolean', 'try', 'catch',
-        'finally', 'throw', 'throws', 'new', 'this', 'super',
+        "public",
+        "private",
+        "protected",
+        "static",
+        "final",
+        "class",
+        "interface",
+        "extends",
+        "implements",
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "return",
+        "void",
+        "int",
+        "long",
+        "float",
+        "double",
+        "String",
+        "boolean",
+        "try",
+        "catch",
+        "finally",
+        "throw",
+        "throws",
+        "new",
+        "this",
+        "super",
     }
 
     def __init__(self, language: str = "python", ngram_size: int = 3):
         self.language = language.lower()
         self.ngram_size = ngram_size
         self.keywords = (
-            self.PYTHON_KEYWORDS if self.language == "python"
-            else self.JAVA_KEYWORDS if self.language == "java"
-            else set()
+            self.PYTHON_KEYWORDS
+            if self.language == "python"
+            else self.JAVA_KEYWORDS if self.language == "java" else set()
         )
 
     def tokenize(self, code: str) -> List[str]:
@@ -64,16 +118,16 @@ class CodeTokenizer:
         code = self._remove_comments(code)
 
         # Remove string literals (replace with STRING_LITERAL)
-        code = re.sub(r'["\'].*?["\']', ' STRING_LITERAL ', code, flags=re.DOTALL)
+        code = re.sub(r'["\'].*?["\']', " STRING_LITERAL ", code, flags=re.DOTALL)
 
         # Remove single-line comments
-        code = re.sub(r'//.*?$', '', code, flags=re.MULTILINE)
+        code = re.sub(r"//.*?$", "", code, flags=re.MULTILINE)
 
         # Remove multi-line comments
-        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
 
         # Extract identifiers and keywords
-        tokens = re.findall(r'\b[a-zA-Z_]\w*\b', code)
+        tokens = re.findall(r"\b[a-zA-Z_]\w*\b", code)
 
         # Keep keywords as-is, normalize identifiers
         result = []
@@ -82,18 +136,18 @@ class CodeTokenizer:
                 result.append(token)
             else:
                 # Normalize variable names to ID
-                result.append('__ID__')
+                result.append("__ID__")
 
         return result
 
     def extract_ngrams(self, tokens: List[str]) -> List[str]:
         """Extract n-grams from token sequence."""
         if len(tokens) < self.ngram_size:
-            return [' '.join(tokens)]
+            return [" ".join(tokens)]
 
         ngrams = []
         for i in range(len(tokens) - self.ngram_size + 1):
-            ngram = ' '.join(tokens[i:i + self.ngram_size])
+            ngram = " ".join(tokens[i : i + self.ngram_size])
             ngrams.append(ngram)
 
         return ngrams
@@ -115,11 +169,11 @@ class CodeTokenizer:
         """Remove comments based on language."""
         if self.language == "python":
             # Python: # comments
-            code = re.sub(r'#.*?$', '', code, flags=re.MULTILINE)
+            code = re.sub(r"#.*?$", "", code, flags=re.MULTILINE)
         elif self.language in ["java", "cpp", "c", "javascript"]:
             # C-style: // and /* */
-            code = re.sub(r'//.*?$', '', code, flags=re.MULTILINE)
-            code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+            code = re.sub(r"//.*?$", "", code, flags=re.MULTILINE)
+            code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
         return code
 
 
@@ -211,8 +265,9 @@ class TFIDFSimilarityDetector:
     3. Computing cosine similarity between code pairs
     """
 
-    def __init__(self, language: str = "python", ngram_size: int = 3,
-                 threshold: float = 0.5):
+    def __init__(
+        self, language: str = "python", ngram_size: int = 3, threshold: float = 0.5
+    ):
         self.language = language
         self.ngram_size = ngram_size
         self.threshold = threshold
@@ -283,11 +338,13 @@ class TFIDFSimilarityDetector:
         for i in range(n):
             for j in range(i + 1, n):
                 sim = float(np.dot(self._matrix[i], self._matrix[j]))
-                predictions.append({
-                    "file1": self._filenames[i],
-                    "file2": self._filenames[j],
-                    "similarity": round(sim, 4),
-                })
+                predictions.append(
+                    {
+                        "file1": self._filenames[i],
+                        "file2": self._filenames[j],
+                        "similarity": round(sim, 4),
+                    }
+                )
 
         return predictions
 
@@ -320,8 +377,9 @@ class TFIDFSimilarityDetector:
 
 
 # Convenience function for quick use
-def detect_similarity(code1: str, code2: str, language: str = "python",
-                      threshold: float = 0.5) -> Dict[str, Any]:
+def detect_similarity(
+    code1: str, code2: str, language: str = "python", threshold: float = 0.5
+) -> Dict[str, Any]:
     """
     Quick similarity detection between two code snippets.
 

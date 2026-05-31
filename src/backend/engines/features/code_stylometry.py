@@ -15,6 +15,7 @@ AI Detection features:
 - Exception handling patterns
 - Code complexity distribution
 """
+
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import ast
@@ -35,6 +36,7 @@ class StylometryFeatures:
     - AI detection (human vs AI-generated?)
     - Style clustering (group similar styles)
     """
+
     doc_id: str = ""
 
     # === Lexical features ===
@@ -120,18 +122,35 @@ class StylometryFeatures:
     def feature_names() -> List[str]:
         """Names corresponding to to_vector() indices."""
         return [
-            "avg_identifier_length", "identifier_length_std",
-            "camel_case_ratio", "snake_case_ratio",
-            "single_char_var_ratio", "descriptive_var_ratio",
+            "avg_identifier_length",
+            "identifier_length_std",
+            "camel_case_ratio",
+            "snake_case_ratio",
+            "single_char_var_ratio",
+            "descriptive_var_ratio",
             "var_naming_entropy",
-            "avg_statements_per_func", "avg_nesting_depth",
-            "max_nesting_depth", "loop_ratio", "branch_ratio",
-            "func_call_ratio", "num_functions", "num_classes",
-            "num_imports", "avg_func_length", "import_order_score",
-            "comment_density", "docstring_ratio", "inline_comment_count",
-            "cyclomatic_complexity", "unique_keywords", "keyword_diversity",
-            "has_try_except", "exception_handling_ratio",
-            "list_comprehension_ratio", "f_string_ratio", "type_hint_ratio",
+            "avg_statements_per_func",
+            "avg_nesting_depth",
+            "max_nesting_depth",
+            "loop_ratio",
+            "branch_ratio",
+            "func_call_ratio",
+            "num_functions",
+            "num_classes",
+            "num_imports",
+            "avg_func_length",
+            "import_order_score",
+            "comment_density",
+            "docstring_ratio",
+            "inline_comment_count",
+            "cyclomatic_complexity",
+            "unique_keywords",
+            "keyword_diversity",
+            "has_try_except",
+            "exception_handling_ratio",
+            "list_comprehension_ratio",
+            "f_string_ratio",
+            "type_hint_ratio",
         ]
 
 
@@ -205,10 +224,12 @@ class StylometryExtractor:
             features.most_common_suffix = self._suffix_counter.most_common(1)[0][0]
 
         # Syntactic
-        features.avg_statements_per_func = (
-            self._total_statements / max(1, self._total_functions)
+        features.avg_statements_per_func = self._total_statements / max(
+            1, self._total_functions
         )
-        features.avg_nesting_depth = self._avg(self._nesting_depths) if self._nesting_depths else 0
+        features.avg_nesting_depth = (
+            self._avg(self._nesting_depths) if self._nesting_depths else 0
+        )
         features.loop_ratio = self._total_loops / max(1, self._total_statements)
         features.branch_ratio = self._total_branches / max(1, self._total_statements)
         features.func_call_ratio = self._total_calls / max(1, self._total_statements)
@@ -216,30 +237,36 @@ class StylometryExtractor:
         # Structural
         features.num_functions = self._total_functions
         features.avg_func_length = self._avg(self._func_lengths)
-        features.num_classes = len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)])
-        features.num_imports = len([n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))])
+        features.num_classes = len(
+            [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+        )
+        features.num_imports = len(
+            [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+        )
 
         # Comment features
         features.comment_density = self._comment_density(source)
-        features.docstring_ratio = (
-            self._funcs_with_docstring / max(1, self._total_functions)
+        features.docstring_ratio = self._funcs_with_docstring / max(
+            1, self._total_functions
         )
-        features.inline_comment_count = len(re.findall(r'#.*$', source, re.MULTILINE))
+        features.inline_comment_count = len(re.findall(r"#.*$", source, re.MULTILINE))
 
         # Complexity
         n_if = len([n for n in ast.walk(tree) if isinstance(n, ast.If)])
         n_bool = len([n for n in ast.walk(tree) if isinstance(n, (ast.And, ast.Or))])
         features.cyclomatic_complexity = 1 + n_if + self._total_loops + n_bool
         features.unique_keywords = len(set(self._keywords))
-        features.keyword_diversity = features.unique_keywords / max(1, len(self._keywords))
+        features.keyword_diversity = features.unique_keywords / max(
+            1, len(self._keywords)
+        )
 
         # Patterns
         features.has_try_except = self._has_try_except
-        features.exception_handling_ratio = (
-            self._total_exceptions / max(1, self._total_statements)
+        features.exception_handling_ratio = self._total_exceptions / max(
+            1, self._total_statements
         )
-        features.list_comprehension_ratio = (
-            self._comprehensions / max(1, self._total_for_loops)
+        features.list_comprehension_ratio = self._comprehensions / max(
+            1, self._total_for_loops
         )
 
         return features
@@ -268,13 +295,43 @@ class StylometryExtractor:
     def _extract_identifiers(self, source: str) -> None:
         """Extract identifier statistics from source text."""
         # Find all identifiers
-        identifiers = re.findall(r'\b[a-zA-Z_]\w*\b', source)
+        identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", source)
         python_keywords = {
-            'def', 'class', 'if', 'else', 'elif', 'for', 'while', 'return',
-            'import', 'from', 'try', 'except', 'finally', 'with', 'as',
-            'lambda', 'yield', 'raise', 'pass', 'break', 'continue',
-            'and', 'or', 'not', 'is', 'in', 'True', 'False', 'None',
-            'async', 'await', 'nonlocal', 'global', 'assert', 'del',
+            "def",
+            "class",
+            "if",
+            "else",
+            "elif",
+            "for",
+            "while",
+            "return",
+            "import",
+            "from",
+            "try",
+            "except",
+            "finally",
+            "with",
+            "as",
+            "lambda",
+            "yield",
+            "raise",
+            "pass",
+            "break",
+            "continue",
+            "and",
+            "or",
+            "not",
+            "is",
+            "in",
+            "True",
+            "False",
+            "None",
+            "async",
+            "await",
+            "nonlocal",
+            "global",
+            "assert",
+            "del",
         }
         vars_only = [i for i in identifiers if i not in python_keywords and len(i) > 0]
 
@@ -310,18 +367,45 @@ class StylometryExtractor:
         """Ratio of camelCase identifiers."""
         if not self._identifier_lengths:
             return 0.0
-        identifiers = re.findall(r'\b[a-zA-Z_]\w*\b', '')  # Placeholder
+        identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", "")  # Placeholder
         python_keywords = {
-            'def', 'class', 'if', 'else', 'elif', 'for', 'while', 'return',
-            'import', 'from', 'try', 'except', 'finally', 'with', 'as',
-            'lambda', 'yield', 'raise', 'pass', 'break', 'continue',
-            'and', 'or', 'not', 'is', 'in', 'True', 'False', 'None',
-            'async', 'await', 'nonlocal', 'global', 'assert', 'del',
+            "def",
+            "class",
+            "if",
+            "else",
+            "elif",
+            "for",
+            "while",
+            "return",
+            "import",
+            "from",
+            "try",
+            "except",
+            "finally",
+            "with",
+            "as",
+            "lambda",
+            "yield",
+            "raise",
+            "pass",
+            "break",
+            "continue",
+            "and",
+            "or",
+            "not",
+            "is",
+            "in",
+            "True",
+            "False",
+            "None",
+            "async",
+            "await",
+            "nonlocal",
+            "global",
+            "assert",
+            "del",
         }
-        camel_count = sum(
-            1 for l in self._identifier_lengths
-            if l > 0
-        )  # Placeholder
+        camel_count = sum(1 for l in self._identifier_lengths if l > 0)  # Placeholder
         return 0.0  # Computed via AST walk instead
 
     def _snake_case_ratio(self) -> float:
@@ -332,13 +416,17 @@ class StylometryExtractor:
         """Ratio of single-character variable names."""
         if not self._identifier_lengths:
             return 0.0
-        return sum(1 for l in self._identifier_lengths if l == 1) / len(self._identifier_lengths)
+        return sum(1 for l in self._identifier_lengths if l == 1) / len(
+            self._identifier_lengths
+        )
 
     def _descriptive_ratio(self) -> float:
         """Ratio of identifiers with length >= 4."""
         if not self._identifier_lengths:
             return 0.0
-        return sum(1 for l in self._identifier_lengths if l >= 4) / len(self._identifier_lengths)
+        return sum(1 for l in self._identifier_lengths if l >= 4) / len(
+            self._identifier_lengths
+        )
 
     def _comment_density(self, source: str) -> float:
         """Compute comment characters / total characters ratio."""
@@ -346,7 +434,7 @@ class StylometryExtractor:
         if total_chars == 0:
             return 0.0
 
-        comment_chars = len(re.findall(r'#.*$', source, re.MULTILINE))
+        comment_chars = len(re.findall(r"#.*$", source, re.MULTILINE))
         comment_chars += len(re.findall(r'"""[\s\S]*?"""', source)) * 3
         comment_chars += len(re.findall(r"'''[\s\S]*?'''", source)) * 3
 
@@ -361,8 +449,11 @@ class StylometryExtractor:
                 self._total_statements += len(node.body)
 
                 # Check for docstring
-                if (node.body and isinstance(node.body[0], ast.Expr) and
-                        isinstance(node.body[0].value, (ast.Constant, ast.Str))):
+                if (
+                    node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, (ast.Constant, ast.Str))
+                ):
                     self._funcs_with_docstring += 1
 
                 # Check type hints
@@ -392,11 +483,14 @@ class StylometryExtractor:
                 self._has_try_except = True
                 self._total_exceptions += 1
 
-            elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            elif isinstance(
+                node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
                 self._comprehensions += 1
 
     def _compute_nesting_depth(self, func: ast.FunctionDef) -> int:
         """Compute max nesting depth of a function."""
+
         def _depth(node: ast.AST, current: int) -> int:
             max_d = current
             for child in ast.iter_child_nodes(node):
@@ -452,15 +546,15 @@ class AIDetector:
 
         # Feature weights for AI detection (sum to 1.0)
         self.weights = {
-            'comment_density': 0.15,
-            'descriptive_var_ratio': 0.15,
-            'type_hint_ratio': 0.12,
-            'var_naming_entropy': 0.10,
-            'docstring_ratio': 0.10,
-            'exception_handling_ratio': 0.10,
-            'list_comprehension_ratio': 0.08,
-            'single_char_var_ratio': -0.10,  # Negative: fewer short vars = more AI
-            'max_nesting_depth': -0.10,     # Negative: shallow nesting = more AI
+            "comment_density": 0.15,
+            "descriptive_var_ratio": 0.15,
+            "type_hint_ratio": 0.12,
+            "var_naming_entropy": 0.10,
+            "docstring_ratio": 0.10,
+            "exception_handling_ratio": 0.10,
+            "list_comprehension_ratio": 0.08,
+            "single_char_var_ratio": -0.10,  # Negative: fewer short vars = more AI
+            "max_nesting_depth": -0.10,  # Negative: shallow nesting = more AI
         }
 
     def detect(self, source: str, doc_id: str = "") -> Dict[str, Any]:
@@ -476,7 +570,9 @@ class AIDetector:
 
         return {
             "is_ai": is_ai,
-            "confidence": round(abs(score - 0.5) * 2, 4),  # 0-1, higher = more confident
+            "confidence": round(
+                abs(score - 0.5) * 2, 4
+            ),  # 0-1, higher = more confident
             "ai_score": round(score, 4),
             "threshold": self.threshold,
             "features": self._feature_summary(features),
@@ -508,24 +604,26 @@ class AIDetector:
 
     def _normalize_feature(self, feature: str, value: float) -> float:
         """Normalize a feature value to [-1, 1] aligned with AI tendency."""
-        if feature == 'comment_density':
+        if feature == "comment_density":
             return min(1.0, value / 0.1)  # AI tends toward 5-15%
-        elif feature == 'descriptive_var_ratio':
+        elif feature == "descriptive_var_ratio":
             return value  # Higher = more AI-like
-        elif feature == 'type_hint_ratio':
+        elif feature == "type_hint_ratio":
             return value
-        elif feature == 'var_naming_entropy':
+        elif feature == "var_naming_entropy":
             return min(1.0, value / 4.0)  # AI uses more diverse chars
-        elif feature == 'docstring_ratio':
+        elif feature == "docstring_ratio":
             return value
-        elif feature == 'exception_handling_ratio':
+        elif feature == "exception_handling_ratio":
             return value
-        elif feature == 'list_comprehension_ratio':
+        elif feature == "list_comprehension_ratio":
             return min(1.0, value / 0.5)
-        elif feature == 'single_char_var_ratio':
+        elif feature == "single_char_var_ratio":
             return 1.0 - value  # Lower = more AI-like (weight is negative)
-        elif feature == 'max_nesting_depth':
-            return 1.0 - min(1.0, value / 4.0)  # Shallower = more AI (weight is negative)
+        elif feature == "max_nesting_depth":
+            return 1.0 - min(
+                1.0, value / 4.0
+            )  # Shallower = more AI (weight is negative)
         return 0.0
 
     def _feature_summary(self, features: StylometryFeatures) -> Dict[str, Any]:

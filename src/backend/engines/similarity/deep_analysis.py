@@ -19,7 +19,7 @@ import re
 class DeepCodeAnalyzer:
     """
     Advanced code analyzer that provides deep structural analysis.
-    
+
     Combines multiple techniques for accurate plagiarism detection:
     - Normalized AST comparison (ignores variable names)
     - Tree edit distance for structural similarity
@@ -27,136 +27,256 @@ class DeepCodeAnalyzer:
     - Pattern detection for common code structures
     - Control flow analysis
     """
-    
+
     def __init__(self):
         self.reserved_keywords = {
-            'python': {'def', 'class', 'if', 'else', 'elif', 'for', 'while', 'try', 
-                      'except', 'finally', 'with', 'return', 'yield', 'import', 'from',
-                      'as', 'pass', 'break', 'continue', 'raise', 'lambda', 'and', 'or',
-                      'not', 'in', 'is', 'True', 'False', 'None', 'global', 'nonlocal'},
-            'java': {'public', 'private', 'protected', 'class', 'interface', 'extends',
-                    'implements', 'if', 'else', 'for', 'while', 'do', 'switch', 'case',
-                    'break', 'continue', 'return', 'try', 'catch', 'finally', 'throw',
-                    'throws', 'new', 'this', 'super', 'import', 'package', 'static',
-                    'final', 'abstract', 'void', 'int', 'long', 'double', 'float', 'boolean',
-                    'char', 'byte', 'short', 'true', 'false', 'null'},
-            'javascript': {'function', 'const', 'let', 'var', 'if', 'else', 'for', 'while',
-                         'do', 'switch', 'case', 'break', 'continue', 'return', 'try',
-                         'catch', 'finally', 'throw', 'new', 'this', 'class', 'extends',
-                         'import', 'export', 'default', 'async', 'await', 'yield', 'true',
-                         'false', 'null', 'undefined'},
-            'default': set()
+            "python": {
+                "def",
+                "class",
+                "if",
+                "else",
+                "elif",
+                "for",
+                "while",
+                "try",
+                "except",
+                "finally",
+                "with",
+                "return",
+                "yield",
+                "import",
+                "from",
+                "as",
+                "pass",
+                "break",
+                "continue",
+                "raise",
+                "lambda",
+                "and",
+                "or",
+                "not",
+                "in",
+                "is",
+                "True",
+                "False",
+                "None",
+                "global",
+                "nonlocal",
+            },
+            "java": {
+                "public",
+                "private",
+                "protected",
+                "class",
+                "interface",
+                "extends",
+                "implements",
+                "if",
+                "else",
+                "for",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "break",
+                "continue",
+                "return",
+                "try",
+                "catch",
+                "finally",
+                "throw",
+                "throws",
+                "new",
+                "this",
+                "super",
+                "import",
+                "package",
+                "static",
+                "final",
+                "abstract",
+                "void",
+                "int",
+                "long",
+                "double",
+                "float",
+                "boolean",
+                "char",
+                "byte",
+                "short",
+                "true",
+                "false",
+                "null",
+            },
+            "javascript": {
+                "function",
+                "const",
+                "let",
+                "var",
+                "if",
+                "else",
+                "for",
+                "while",
+                "do",
+                "switch",
+                "case",
+                "break",
+                "continue",
+                "return",
+                "try",
+                "catch",
+                "finally",
+                "throw",
+                "new",
+                "this",
+                "class",
+                "extends",
+                "import",
+                "export",
+                "default",
+                "async",
+                "await",
+                "yield",
+                "true",
+                "false",
+                "null",
+                "undefined",
+            },
+            "default": set(),
         }
-    
+
     def analyze(self, parsed_code: Dict[str, Any]) -> Dict[str, Any]:
         """
         Perform comprehensive analysis on parsed code.
-        
+
         Args:
             parsed_code: Parsed code representation with tokens, ast, etc.
-            
+
         Returns:
             Dictionary with analysis results
         """
-        ast = parsed_code.get('ast')
-        tokens = parsed_code.get('tokens', [])
-        lines = parsed_code.get('lines', [])
-        
+        ast = parsed_code.get("ast")
+        tokens = parsed_code.get("tokens", [])
+        lines = parsed_code.get("lines", [])
+
         result = {
-            'ast_normalized': None,
-            'ast_statistics': {},
-            'control_flow': None,
-            'patterns': [],
-            'subtrees': [],
-            'complexity_metrics': {},
-            'structure_fingerprint': None
+            "ast_normalized": None,
+            "ast_statistics": {},
+            "control_flow": None,
+            "patterns": [],
+            "subtrees": [],
+            "complexity_metrics": {},
+            "structure_fingerprint": None,
         }
-        
+
         if ast:
             # Normalize AST (replace identifiers with placeholders)
-            result['ast_normalized'] = self._normalize_ast(ast)
-            
+            result["ast_normalized"] = self._normalize_ast(ast)
+
             # Get AST statistics
-            result['ast_statistics'] = self._get_ast_statistics(ast)
-            
+            result["ast_statistics"] = self._get_ast_statistics(ast)
+
             # Extract patterns (common code structures)
-            result['patterns'] = self._extract_patterns(ast)
-            
+            result["patterns"] = self._extract_patterns(ast)
+
             # Extract significant subtrees
-            result['subtrees'] = self._extract_subtrees(ast)
-            
+            result["subtrees"] = self._extract_subtrees(ast)
+
             # Generate structure fingerprint
-            result['structure_fingerprint'] = self._generate_fingerprint(ast)
-        
+            result["structure_fingerprint"] = self._generate_fingerprint(ast)
+
         # Calculate complexity metrics
-        result['complexity_metrics'] = self._calculate_complexity(tokens, lines)
-        
+        result["complexity_metrics"] = self._calculate_complexity(tokens, lines)
+
         return result
-    
-    def _normalize_ast(self, ast: Any, language: str = 'default') -> Any:
+
+    def _normalize_ast(self, ast: Any, language: str = "default") -> Any:
         """
         Normalize AST by replacing identifiers with placeholders.
-        
+
         This makes comparison insensitive to variable/function name changes.
-        
+
         Args:
             ast: AST dictionary
             language: Programming language for keyword detection
-            
+
         Returns:
             Normalized AST dictionary
         """
         if not isinstance(ast, dict):
             return ast
-        
+
         # Get language-specific reserved words
-        reserved = self.reserved_keywords.get(language, self.reserved_keywords['default'])
-        
+        reserved = self.reserved_keywords.get(
+            language, self.reserved_keywords["default"]
+        )
+
         result: Dict[str, Any] = {}
         for key, value in ast.items():
-            if key == '_type':
+            if key == "_type":
                 result[key] = value
-            elif key in ('name', 'id', 'var', 'func', 'func_name', 'method_name',
-                        'attribute', 'attr', 'arg', 'args', 'param', 'params',
-                        'lhs', 'rhs', 'target', 'value', 'body'):
+            elif key in (
+                "name",
+                "id",
+                "var",
+                "func",
+                "func_name",
+                "method_name",
+                "attribute",
+                "attr",
+                "arg",
+                "args",
+                "param",
+                "params",
+                "lhs",
+                "rhs",
+                "target",
+                "value",
+                "body",
+            ):
                 # Replace identifiers with placeholders
                 if isinstance(value, str) and value not in reserved:
-                    result[key] = '<ID>'
+                    result[key] = "<ID>"
                 elif isinstance(value, dict):
                     result[key] = self._normalize_ast(value, language)
                 elif isinstance(value, list):
-                    result[key] = [self._normalize_ast(v, language) if isinstance(v, dict) else v for v in value]
+                    result[key] = [
+                        self._normalize_ast(v, language) if isinstance(v, dict) else v
+                        for v in value
+                    ]
                 else:
                     result[key] = value
             elif isinstance(value, dict):
                 result[key] = self._normalize_ast(value, language)
             elif isinstance(value, list):
-                result[key] = [self._normalize_ast(v, language) if isinstance(v, dict) else v for v in value]
+                result[key] = [
+                    self._normalize_ast(v, language) if isinstance(v, dict) else v
+                    for v in value
+                ]
             else:
                 result[key] = value
-        
+
         return result
-    
+
     def _get_ast_statistics(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate statistics about the AST.
-        
+
         Args:
             ast: AST dictionary
-            
+
         Returns:
             Dictionary with AST statistics
         """
         node_types = []
         total_nodes = [0]  # Use list for mutable counter
         max_depth = [0]
-        
+
         def traverse(node, depth=0):
             max_depth[0] = max(max_depth[0], depth)
-            
+
             if isinstance(node, dict):
                 total_nodes[0] += 1
-                node_type = node.get('_type', 'Unknown')
+                node_type = node.get("_type", "Unknown")
                 if node_type:
                     node_types.append(node_type)
                 for key, value in node.items():
@@ -164,195 +284,208 @@ class DeepCodeAnalyzer:
             elif isinstance(node, list):
                 for item in node:
                     traverse(item, depth)
-        
+
         traverse(ast)
-        
+
         # Count node type frequencies
         type_counts = Counter(node_types)
-        
+
         return {
-            'total_nodes': total_nodes[0],
-            'max_depth': max_depth[0],
-            'unique_node_types': len(type_counts),
-            'node_type_distribution': dict(type_counts.most_common(10)),
-            'type_ratio': len(set(node_types)) / max(total_nodes[0], 1)
+            "total_nodes": total_nodes[0],
+            "max_depth": max_depth[0],
+            "unique_node_types": len(type_counts),
+            "node_type_distribution": dict(type_counts.most_common(10)),
+            "type_ratio": len(set(node_types)) / max(total_nodes[0], 1),
         }
-    
+
     def _extract_patterns(self, ast: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Extract common code patterns from AST.
-        
+
         Args:
             ast: AST dictionary
-            
+
         Returns:
             List of detected patterns
         """
         patterns = []
-        
+
         def traverse(node, path=None):
             if path is None:
                 path = []
-            
+
             if isinstance(node, dict):
-                node_type = node.get('_type', '')
-                
+                node_type = node.get("_type", "")
+
                 # Detect common patterns
-                if node_type == 'For':
-                    patterns.append({
-                        'type': 'for_loop',
-                        'signature': self._get_node_signature(node)
-                    })
-                elif node_type == 'While':
-                    patterns.append({
-                        'type': 'while_loop',
-                        'signature': self._get_node_signature(node)
-                    })
-                elif node_type == 'If':
-                    patterns.append({
-                        'type': 'conditional',
-                        'signature': self._get_node_signature(node)
-                    })
-                elif node_type in ('FunctionDef', 'FunctionDeclaration', 'FunctionExpression'):
-                    patterns.append({
-                        'type': 'function',
-                        'signature': self._get_node_signature(node)
-                    })
-                elif node_type in ('ClassDef', 'ClassDeclaration', 'Class'):
-                    patterns.append({
-                        'type': 'class',
-                        'signature': self._get_node_signature(node)
-                    })
-                elif node_type == 'Try':
-                    patterns.append({
-                        'type': 'exception_handling',
-                        'signature': self._get_node_signature(node)
-                    })
-                
+                if node_type == "For":
+                    patterns.append(
+                        {
+                            "type": "for_loop",
+                            "signature": self._get_node_signature(node),
+                        }
+                    )
+                elif node_type == "While":
+                    patterns.append(
+                        {
+                            "type": "while_loop",
+                            "signature": self._get_node_signature(node),
+                        }
+                    )
+                elif node_type == "If":
+                    patterns.append(
+                        {
+                            "type": "conditional",
+                            "signature": self._get_node_signature(node),
+                        }
+                    )
+                elif node_type in (
+                    "FunctionDef",
+                    "FunctionDeclaration",
+                    "FunctionExpression",
+                ):
+                    patterns.append(
+                        {
+                            "type": "function",
+                            "signature": self._get_node_signature(node),
+                        }
+                    )
+                elif node_type in ("ClassDef", "ClassDeclaration", "Class"):
+                    patterns.append(
+                        {"type": "class", "signature": self._get_node_signature(node)}
+                    )
+                elif node_type == "Try":
+                    patterns.append(
+                        {
+                            "type": "exception_handling",
+                            "signature": self._get_node_signature(node),
+                        }
+                    )
+
                 for key, value in node.items():
                     traverse(value, path + [node_type])
             elif isinstance(node, list):
                 for item in node:
                     traverse(item, path)
-        
+
         traverse(ast)
         return patterns
-    
+
     def _get_node_signature(self, node: Dict[str, Any]) -> str:
         """
         Generate a signature for a node based on its structure.
-        
+
         Args:
             node: AST node dictionary
-            
+
         Returns:
             Signature string
         """
-        node_type = node.get('_type', '')
-        
+        node_type = node.get("_type", "")
+
         # Count children by type
         children_types = []
         for key, value in node.items():
-            if key != '_type':
-                if isinstance(value, dict) and '_type' in value:
-                    children_types.append(value['_type'])
+            if key != "_type":
+                if isinstance(value, dict) and "_type" in value:
+                    children_types.append(value["_type"])
                 elif isinstance(value, list):
                     for item in value:
-                        if isinstance(item, dict) and '_type' in item:
-                            children_types.append(item['_type'])
-        
+                        if isinstance(item, dict) and "_type" in item:
+                            children_types.append(item["_type"])
+
         return f"{node_type}:{','.join(sorted(set(children_types)))}"
-    
+
     def _extract_subtrees(self, ast: Dict[str, Any], min_size: int = 3) -> List[str]:
         """
         Extract significant subtrees from AST.
-        
+
         Args:
             ast: AST dictionary
             min_size: Minimum subtree size to extract
-            
+
         Returns:
             List of subtree hashes
         """
         subtrees = []
-        
+
         def get_subtree_hash(node, depth=0):
             if not isinstance(node, dict):
                 return None
-            
+
             # Serialize the subtree
             serialized = self._serialize_subtree(node)
             if serialized:
                 return hashlib.sha256(serialized.encode()).hexdigest()[:16]
             return None
-        
+
         def traverse(node):
             if isinstance(node, dict):
                 # Check if this is a significant subtree
                 subtree_hash = get_subtree_hash(node)
                 if subtree_hash:
                     subtrees.append(subtree_hash)
-                
+
                 # Traverse children
                 for key, value in node.items():
                     traverse(value)
             elif isinstance(node, list):
                 for item in node:
                     traverse(item)
-        
+
         traverse(ast)
         return list(set(subtrees))  # Remove duplicates
-    
+
     def _serialize_subtree(self, node: Dict[str, Any]) -> Optional[str]:
         """
         Serialize a subtree to a canonical string.
-        
+
         Args:
             node: AST node dictionary
-            
+
         Returns:
             Serialized string or None
         """
         if not isinstance(node, dict):
             return None
-        
+
         parts = []
-        node_type = node.get('_type', '')
+        node_type = node.get("_type", "")
         if node_type:
             parts.append(node_type)
-        
+
         for key, value in sorted(node.items()):
-            if key == '_type':
+            if key == "_type":
                 continue
             if isinstance(value, dict):
-                sub_type = value.get('_type', '')
+                sub_type = value.get("_type", "")
                 if sub_type:
                     parts.append(sub_type)
             elif isinstance(value, list):
                 for item in value:
                     if isinstance(item, dict):
-                        sub_type = item.get('_type', '')
+                        sub_type = item.get("_type", "")
                         if sub_type:
                             parts.append(sub_type)
-        
-        return '|'.join(parts) if parts else None
-    
+
+        return "|".join(parts) if parts else None
+
     def _generate_fingerprint(self, ast: Dict[str, Any]) -> str:
         """
         Generate a structural fingerprint for the AST.
-        
+
         Args:
             ast: AST dictionary
-            
+
         Returns:
             Fingerprint string
         """
         # Count node type frequencies
         type_counts = Counter()
-        
+
         def traverse(node):
             if isinstance(node, dict):
-                node_type = node.get('_type', '')
+                node_type = node.get("_type", "")
                 if node_type:
                     type_counts[node_type] += 1
                 for key, value in node.items():
@@ -360,124 +493,126 @@ class DeepCodeAnalyzer:
             elif isinstance(node, list):
                 for item in node:
                     traverse(item)
-        
+
         traverse(ast)
-        
+
         # Create fingerprint from type distribution
         sorted_types = sorted(type_counts.items(), key=lambda x: x[0])
         fingerprint_parts = [f"{t}:{c}" for t, c in sorted_types]
-        
-        fingerprint = '|'.join(fingerprint_parts)
+
+        fingerprint = "|".join(fingerprint_parts)
         return hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
-    
-    def _calculate_complexity(self, tokens: List[str], lines: List[str]) -> Dict[str, Any]:
+
+    def _calculate_complexity(
+        self, tokens: List[str], lines: List[str]
+    ) -> Dict[str, Any]:
         """
         Calculate code complexity metrics.
-        
+
         Args:
             tokens: List of tokens
             lines: List of lines
-            
+
         Returns:
             Dictionary with complexity metrics
         """
         return {
-            'token_count': len(tokens),
-            'line_count': len(lines),
-            'blank_line_count': sum(1 for line in lines if not line.strip()),
-            'comment_ratio': self._estimate_comment_ratio(lines),
-            'unique_token_ratio': len(set(tokens)) / max(len(tokens), 1),
-            'avg_line_length': sum(len(line) for line in lines) / max(len(lines), 1)
+            "token_count": len(tokens),
+            "line_count": len(lines),
+            "blank_line_count": sum(1 for line in lines if not line.strip()),
+            "comment_ratio": self._estimate_comment_ratio(lines),
+            "unique_token_ratio": len(set(tokens)) / max(len(tokens), 1),
+            "avg_line_length": sum(len(line) for line in lines) / max(len(lines), 1),
         }
-    
+
     def _estimate_comment_ratio(self, lines: List[str]) -> float:
         """
         Estimate the ratio of comment lines.
-        
+
         Args:
             lines: List of lines
-            
+
         Returns:
             Estimated comment ratio
         """
         comment_patterns = [
-            r'^\s*#',      # Python
-            r'^\s*//',     # C/C++/Java/JavaScript
-            r'^\s*/\*',    # C block comment start
-            r'^\s*\*',     # Continuation
-            r'^\s*/\*',    # Block comment
-            r'^\s*<!--',   # HTML
-            r'^\s*--',     # SQL
+            r"^\s*#",  # Python
+            r"^\s*//",  # C/C++/Java/JavaScript
+            r"^\s*/\*",  # C block comment start
+            r"^\s*\*",  # Continuation
+            r"^\s*/\*",  # Block comment
+            r"^\s*<!--",  # HTML
+            r"^\s*--",  # SQL
         ]
-        
+
         comment_lines = 0
         in_block_comment = False
-        
+
         for line in lines:
             stripped = line.strip()
-            
+
             if in_block_comment:
                 comment_lines += 1
-                if '*/' in stripped:
+                if "*/" in stripped:
                     in_block_comment = False
                 continue
-            
+
             for pattern in comment_patterns:
                 if re.match(pattern, line):
                     comment_lines += 1
                     break
-            
-            if '/*' in stripped and '*/' not in stripped:
+
+            if "/*" in stripped and "*/" not in stripped:
                 in_block_comment = True
-        
+
         return comment_lines / max(len(lines), 1)
 
 
 class ASTTreeEditDistance:
     """
     Tree Edit Distance (TED) calculator for AST comparison.
-    
+
     Implements Zhang-Shasha algorithm for efficient tree comparison.
     """
-    
+
     def __init__(self):
         self._cache = {}
-    
+
     def calculate_distance(self, ast_a: Dict[str, Any], ast_b: Dict[str, Any]) -> float:
         """
         Calculate normalized tree edit distance between two ASTs.
-        
+
         Args:
             ast_a: First AST
             ast_b: Second AST
-            
+
         Returns:
             Normalized distance (0 = identical, 1 = completely different)
         """
         # Serialize ASTs to tree structures
         tree_a = self._ast_to_tree(ast_a)
         tree_b = self._ast_to_tree(ast_b)
-        
+
         # Calculate edit distance
         distance = self._zhang_shasha(tree_a, tree_b)
-        
+
         # Normalize by maximum possible distance
         max_nodes = max(self._count_nodes(tree_a), self._count_nodes(tree_b))
         if max_nodes == 0:
             return 0.0
-        
+
         return distance / max_nodes
-    
-    def _ast_to_tree(self, ast: Dict[str, Any]) -> 'TreeNode':
+
+    def _ast_to_tree(self, ast: Dict[str, Any]) -> "TreeNode":
         """Convert AST dict to TreeNode structure."""
         if not isinstance(ast, dict):
             return None
-        
-        node_type = ast.get('_type', 'Unknown')
+
+        node_type = ast.get("_type", "Unknown")
         node = TreeNode(node_type)
-        
+
         for key, value in ast.items():
-            if key == '_type':
+            if key == "_type":
                 continue
             if isinstance(value, dict):
                 child = self._ast_to_tree(value)
@@ -488,19 +623,19 @@ class ASTTreeEditDistance:
                     child = self._ast_to_tree(item)
                     if child:
                         node.add_child(child)
-        
+
         return node
-    
-    def _count_nodes(self, node: 'TreeNode') -> int:
+
+    def _count_nodes(self, node: "TreeNode") -> int:
         """Count total nodes in tree."""
         if node is None:
             return 0
         return 1 + sum(self._count_nodes(child) for child in node.children)
-    
-    def _zhang_shasha(self, tree_a: 'TreeNode', tree_b: 'TreeNode') -> int:
+
+    def _zhang_shasha(self, tree_a: "TreeNode", tree_b: "TreeNode") -> int:
         """
         Zhang-Shasha algorithm for tree edit distance.
-        
+
         Simplified implementation for demonstration.
         """
         if tree_a is None and tree_b is None:
@@ -509,33 +644,33 @@ class ASTTreeEditDistance:
             return self._count_nodes(tree_b)
         if tree_b is None:
             return self._count_nodes(tree_a)
-        
+
         # Build tree lists (preorder with keyroots)
         tree_a_list = self._tree_to_list(tree_a)
         tree_b_list = self._tree_to_list(tree_b)
-        
+
         # Simple tree distance using tree size difference as approximation
         # Full Zhang-Shasha is complex; this is a practical approximation
         size_a = self._count_nodes(tree_a)
         size_b = self._count_nodes(tree_b)
-        
+
         # Calculate based on structural similarity
         type_a = self._get_all_types(tree_a)
         type_b = self._get_all_types(tree_b)
-        
+
         common_types = len(type_a.intersection(type_b))
         total_types = len(type_a.union(type_b))
-        
+
         if total_types == 0:
             return 0
-        
+
         # Approximate distance
         type_distance = 1 - (common_types / total_types)
         size_distance = abs(size_a - size_b) / max(size_a, size_b, 1)
-        
+
         return int((type_distance * 0.7 + size_distance * 0.3) * max(size_a, size_b))
-    
-    def _tree_to_list(self, node: 'TreeNode') -> List['TreeNode']:
+
+    def _tree_to_list(self, node: "TreeNode") -> List["TreeNode"]:
         """Convert tree to list in preorder."""
         if node is None:
             return []
@@ -543,8 +678,8 @@ class ASTTreeEditDistance:
         for child in node.children:
             result.extend(self._tree_to_list(child))
         return result
-    
-    def _get_all_types(self, node: 'TreeNode') -> Set[str]:
+
+    def _get_all_types(self, node: "TreeNode") -> Set[str]:
         """Get all node types in tree."""
         if node is None:
             return set()
@@ -556,14 +691,14 @@ class ASTTreeEditDistance:
 
 class TreeNode:
     """Simple tree node for AST representation."""
-    
+
     def __init__(self, label: str):
         self.label = label
-        self.children: List['TreeNode'] = []
-    
-    def add_child(self, child: 'TreeNode'):
+        self.children: List["TreeNode"] = []
+
+    def add_child(self, child: "TreeNode"):
         self.children.append(child)
-    
+
     def __repr__(self):
         return f"TreeNode({self.label}, {len(self.children)} children)"
 
@@ -571,53 +706,57 @@ class TreeNode:
 class TreeKernelSimilarity:
     """
     Tree Kernel similarity for comparing ASTs.
-    
+
     Uses subtree patterns to measure structural similarity.
     """
-    
+
     def __init__(self):
         self._cache = {}
-    
-    def calculate_similarity(self, ast_a: Dict[str, Any], ast_b: Dict[str, Any]) -> float:
+
+    def calculate_similarity(
+        self, ast_a: Dict[str, Any], ast_b: Dict[str, Any]
+    ) -> float:
         """
         Calculate tree kernel similarity between two ASTs.
-        
+
         Args:
             ast_a: First AST
             ast_b: Second AST
-            
+
         Returns:
             Similarity score between 0.0 and 1.0
         """
         # Extract all subtrees up to a certain depth
         subtrees_a = self._extract_subtrees(ast_a, max_depth=4)
         subtrees_b = self._extract_subtrees(ast_b, max_depth=4)
-        
+
         if not subtrees_a and not subtrees_b:
             return 1.0
         if not subtrees_a or not subtrees_b:
             return 0.0
-        
+
         # Count subtree frequencies
         counts_a = Counter(subtrees_a)
         counts_b = Counter(subtrees_b)
-        
+
         # Calculate kernel value
-        kernel_value = sum(min(counts_a[s], counts_b[s]) for s in set(subtrees_a) & set(subtrees_b))
-        
+        kernel_value = sum(
+            min(counts_a[s], counts_b[s]) for s in set(subtrees_a) & set(subtrees_b)
+        )
+
         # Normalize
         norm_a = sum(c * c for c in counts_a.values())
         norm_b = sum(c * c for c in counts_b.values())
-        
+
         if norm_a == 0 or norm_b == 0:
             return 0.0
-        
-        return kernel_value / (norm_a ** 0.5 * norm_b ** 0.5)
-    
+
+        return kernel_value / (norm_a**0.5 * norm_b**0.5)
+
     def _extract_subtrees(self, ast: Dict[str, Any], max_depth: int = 4) -> List[str]:
         """Extract subtree patterns from AST."""
         subtrees = []
-        
+
         def traverse(node, depth=0, path=None):
             if path is None:
                 path = []
@@ -625,23 +764,23 @@ class TreeKernelSimilarity:
                 return
             if not isinstance(node, dict):
                 return
-            
-            node_type = node.get('_type', '')
+
+            node_type = node.get("_type", "")
             current_path = path + [node_type]
-            
+
             # Add this subtree pattern
-            subtrees.append('->'.join(current_path))
-            
+            subtrees.append("->".join(current_path))
+
             # Continue traversing
             for key, value in node.items():
-                if key == '_type':
+                if key == "_type":
                     continue
                 if isinstance(value, dict):
                     traverse(value, depth + 1, current_path)
                 elif isinstance(value, list):
                     for item in value:
                         traverse(item, depth + 1, current_path)
-        
+
         traverse(ast)
         return subtrees
 
@@ -649,61 +788,58 @@ class TreeKernelSimilarity:
 class ControlFlowAnalyzer:
     """
     Control Flow Graph (CFG) analyzer for code comparison.
-    
+
     Extracts control flow patterns for similarity detection.
     """
-    
+
     def analyze(self, ast: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze control flow from AST.
-        
+
         Args:
             ast: AST dictionary
-            
+
         Returns:
             Control flow analysis results
         """
         cfg = {
-            'nodes': [],
-            'edges': [],
-            'entry_point': None,
-            'exit_points': [],
-            'branching_factor': 0,
-            'loop_count': 0,
-            'conditional_count': 0
+            "nodes": [],
+            "edges": [],
+            "entry_point": None,
+            "exit_points": [],
+            "branching_factor": 0,
+            "loop_count": 0,
+            "conditional_count": 0,
         }
-        
+
         node_counter = [0]  # Use list for mutable counter
-        
+
         def traverse(node, parent_id=None):
             if not isinstance(node, dict):
                 return
-            
-            node_type = node.get('_type', '')
+
+            node_type = node.get("_type", "")
             current_id = node_counter[0]
             node_counter[0] += 1
-            
-            cfg['nodes'].append({
-                'id': current_id,
-                'type': node_type
-            })
-            
-            if cfg['entry_point'] is None:
-                cfg['entry_point'] = current_id
-            
+
+            cfg["nodes"].append({"id": current_id, "type": node_type})
+
+            if cfg["entry_point"] is None:
+                cfg["entry_point"] = current_id
+
             if parent_id is not None:
-                cfg['edges'].append((parent_id, current_id))
-            
+                cfg["edges"].append((parent_id, current_id))
+
             # Track control flow structures
-            if node_type in ('For', 'While', 'DoWhile'):
-                cfg['loop_count'] += 1
-            if node_type in ('If', 'Switch', 'Conditional'):
-                cfg['conditional_count'] += 1
-            
+            if node_type in ("For", "While", "DoWhile"):
+                cfg["loop_count"] += 1
+            if node_type in ("If", "Switch", "Conditional"):
+                cfg["conditional_count"] += 1
+
             # Process children
             children = []
             for key, value in node.items():
-                if key == '_type':
+                if key == "_type":
                     continue
                 if isinstance(value, dict):
                     child_id = traverse(value, current_id)
@@ -714,49 +850,49 @@ class ControlFlowAnalyzer:
                         child_id = traverse(item, current_id)
                         if child_id is not None:
                             children.append(child_id)
-            
+
             # Mark exit points
-            if node_type in ('Return', 'Break', 'Continue', 'Throw'):
-                cfg['exit_points'].append(current_id)
-            
+            if node_type in ("Return", "Break", "Continue", "Throw"):
+                cfg["exit_points"].append(current_id)
+
             return current_id
-        
+
         traverse(ast)
-        
+
         # Calculate branching factor
-        if cfg['nodes']:
-            cfg['branching_factor'] = len(cfg['edges']) / len(cfg['nodes'])
-        
+        if cfg["nodes"]:
+            cfg["branching_factor"] = len(cfg["edges"]) / len(cfg["nodes"])
+
         return cfg
-    
+
     def compare_cfg(self, cfg_a: Dict[str, Any], cfg_b: Dict[str, Any]) -> float:
         """
         Compare two control flow graphs.
-        
+
         Args:
             cfg_a: First CFG
             cfg_b: Second CFG
-            
+
         Returns:
             Similarity score between 0.0 and 1.0
         """
         # Compare structure metrics
         metrics_a = {
-            'loops': cfg_a['loop_count'],
-            'conditionals': cfg_a['conditional_count'],
-            'branching': cfg_a['branching_factor'],
-            'nodes': len(cfg_a['nodes']),
-            'edges': len(cfg_a['edges'])
+            "loops": cfg_a["loop_count"],
+            "conditionals": cfg_a["conditional_count"],
+            "branching": cfg_a["branching_factor"],
+            "nodes": len(cfg_a["nodes"]),
+            "edges": len(cfg_a["edges"]),
         }
-        
+
         metrics_b = {
-            'loops': cfg_b['loop_count'],
-            'conditionals': cfg_b['conditional_count'],
-            'branching': cfg_b['branching_factor'],
-            'nodes': len(cfg_b['nodes']),
-            'edges': len(cfg_b['edges'])
+            "loops": cfg_b["loop_count"],
+            "conditionals": cfg_b["conditional_count"],
+            "branching": cfg_b["branching_factor"],
+            "nodes": len(cfg_b["nodes"]),
+            "edges": len(cfg_b["edges"]),
         }
-        
+
         # Calculate similarity for each metric
         similarities = []
         for key in metrics_a:
@@ -765,170 +901,179 @@ class ControlFlowAnalyzer:
             elif metrics_a[key] == 0 or metrics_b[key] == 0:
                 similarities.append(0.0)
             else:
-                similarities.append(min(metrics_a[key], metrics_b[key]) / max(metrics_a[key], metrics_b[key]))
-        
+                similarities.append(
+                    min(metrics_a[key], metrics_b[key])
+                    / max(metrics_a[key], metrics_b[key])
+                )
+
         return sum(similarities) / len(similarities)
 
 
 class PatternCloneDetector:
     """
     Detects pattern-based code clones.
-    
+
     Identifies common programming patterns that may indicate copied code.
     """
-    
+
     # Common suspicious pattern combinations
     SUSPICIOUS_PATTERNS = [
         # Same control flow structure
-        ('For', 'For'),
-        ('While', 'While'),
-        ('For', 'While'),  # Can be converted
+        ("For", "For"),
+        ("While", "While"),
+        ("For", "While"),  # Can be converted
         # Same nested depth
         # Same pattern sequence
     ]
-    
-    def detect_clones(self, analysis_a: Dict[str, Any], analysis_b: Dict[str, Any]) -> Dict[str, Any]:
+
+    def detect_clones(
+        self, analysis_a: Dict[str, Any], analysis_b: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Detect code clones between two code analyses.
-        
+
         Args:
             analysis_a: First code analysis result
             analysis_b: Second code analysis result
-            
+
         Returns:
             Clone detection results
         """
-        patterns_a = analysis_a.get('patterns', [])
-        patterns_b = analysis_b.get('patterns', [])
-        
-        subtrees_a = set(analysis_a.get('subtrees', []))
-        subtrees_b = set(analysis_b.get('subtrees', []))
-        
+        patterns_a = analysis_a.get("patterns", [])
+        patterns_b = analysis_b.get("patterns", [])
+
+        subtrees_a = set(analysis_a.get("subtrees", []))
+        subtrees_b = set(analysis_b.get("subtrees", []))
+
         # Find common patterns
         common_subtrees = subtrees_a & subtrees_b
         common_patterns = []
-        
+
         for p_a in patterns_a:
             for p_b in patterns_b:
-                if p_a['type'] == p_b['type']:
-                    common_patterns.append({
-                        'type': p_a['type'],
-                        'signature_a': p_a['signature'],
-                        'signature_b': p_b['signature']
-                    })
-        
+                if p_a["type"] == p_b["type"]:
+                    common_patterns.append(
+                        {
+                            "type": p_a["type"],
+                            "signature_a": p_a["signature"],
+                            "signature_b": p_b["signature"],
+                        }
+                    )
+
         # Calculate clone scores
         subtree_score = len(common_subtrees) / max(len(subtrees_a | subtrees_b), 1)
         pattern_score = len(common_patterns) / max(len(patterns_a), len(patterns_b), 1)
-        
+
         # Combined score
-        clone_score = (subtree_score * 0.6 + pattern_score * 0.4)
-        
+        clone_score = subtree_score * 0.6 + pattern_score * 0.4
+
         return {
-            'clone_score': clone_score,
-            'common_subtree_count': len(common_subtrees),
-            'common_pattern_count': len(common_patterns),
-            'common_patterns': common_patterns,
-            'is_suspicious': clone_score > 0.5
+            "clone_score": clone_score,
+            "common_subtree_count": len(common_subtrees),
+            "common_pattern_count": len(common_patterns),
+            "common_patterns": common_patterns,
+            "is_suspicious": clone_score > 0.5,
         }
 
 
 # Convenience function for full analysis
-def analyze_code_deep(parsed_code: Dict[str, Any], language: str = 'default') -> Dict[str, Any]:
+def analyze_code_deep(
+    parsed_code: Dict[str, Any], language: str = "default"
+) -> Dict[str, Any]:
     """
     Perform comprehensive deep analysis on parsed code.
-    
+
     Args:
         parsed_code: Parsed code representation
         language: Programming language
-        
+
     Returns:
         Comprehensive analysis results
     """
     analyzer = DeepCodeAnalyzer()
     cfg_analyzer = ControlFlowAnalyzer()
-    
+
     # Basic deep analysis
     analysis = analyzer.analyze(parsed_code)
-    
+
     # Control flow analysis
-    ast = parsed_code.get('ast')
+    ast = parsed_code.get("ast")
     if ast:
-        analysis['control_flow'] = cfg_analyzer.analyze(ast)
-    
+        analysis["control_flow"] = cfg_analyzer.analyze(ast)
+
     return analysis
 
 
 def compare_codes_deep(
-    parsed_a: Dict[str, Any],
-    parsed_b: Dict[str, Any],
-    language: str = 'default'
+    parsed_a: Dict[str, Any], parsed_b: Dict[str, Any], language: str = "default"
 ) -> Dict[str, Any]:
     """
     Compare two code files using deep analysis techniques.
-    
+
     Args:
         parsed_a: First parsed code
         parsed_b: Second parsed code
         language: Programming language
-        
+
     Returns:
         Comparison results with detailed scores
     """
     # Perform deep analysis on both
     analysis_a = analyze_code_deep(parsed_a, language)
     analysis_b = analyze_code_deep(parsed_b, language)
-    
+
     # Calculate various similarity metrics
     ted = ASTTreeEditDistance()
     tk = TreeKernelSimilarity()
     cfg_analyzer = ControlFlowAnalyzer()
     clone_detector = PatternCloneDetector()
-    
-    ast_a = parsed_a.get('ast')
-    ast_b = parsed_b.get('ast')
-    
+
+    ast_a = parsed_a.get("ast")
+    ast_b = parsed_b.get("ast")
+
     results = {
-        'tree_edit_distance': 1.0,
-        'tree_kernel_similarity': 0.0,
-        'cfg_similarity': 0.0,
-        'clone_detection': {},
-        'normalized_ast_similarity': 0.0,
-        'combined_score': 0.0
+        "tree_edit_distance": 1.0,
+        "tree_kernel_similarity": 0.0,
+        "cfg_similarity": 0.0,
+        "clone_detection": {},
+        "normalized_ast_similarity": 0.0,
+        "combined_score": 0.0,
     }
-    
+
     if ast_a and ast_b:
         # Tree edit distance (lower is more similar)
-        results['tree_edit_distance'] = ted.calculate_distance(ast_a, ast_b)
-        
+        results["tree_edit_distance"] = ted.calculate_distance(ast_a, ast_b)
+
         # Tree kernel similarity
-        results['tree_kernel_similarity'] = tk.calculate_similarity(ast_a, ast_b)
-        
+        results["tree_kernel_similarity"] = tk.calculate_similarity(ast_a, ast_b)
+
         # Normalized AST similarity
         analyzer = DeepCodeAnalyzer()
         norm_a = analyzer._normalize_ast(ast_a, language)
         norm_b = analyzer._normalize_ast(ast_b, language)
-        results['normalized_ast_similarity'] = _dict_similarity(norm_a, norm_b)
-        
+        results["normalized_ast_similarity"] = _dict_similarity(norm_a, norm_b)
+
         # Control flow comparison
         cfg_a = cfg_analyzer.analyze(ast_a)
         cfg_b = cfg_analyzer.analyze(ast_b)
-        results['cfg_similarity'] = cfg_analyzer.compare_cfg(cfg_a, cfg_b)
-    
+        results["cfg_similarity"] = cfg_analyzer.compare_cfg(cfg_a, cfg_b)
+
     # Clone detection
-    results['clone_detection'] = clone_detector.detect_clones(analysis_a, analysis_b)
-    
+    results["clone_detection"] = clone_detector.detect_clones(analysis_a, analysis_b)
+
     # Calculate combined score
     # Weight different metrics appropriately
-    ted_similarity = 1.0 - results['tree_edit_distance']  # Convert distance to similarity
-    results['combined_score'] = (
-        ted_similarity * 0.25 +
-        results['tree_kernel_similarity'] * 0.25 +
-        results['normalized_ast_similarity'] * 0.20 +
-        results['cfg_similarity'] * 0.15 +
-        results['clone_detection']['clone_score'] * 0.15
+    ted_similarity = (
+        1.0 - results["tree_edit_distance"]
+    )  # Convert distance to similarity
+    results["combined_score"] = (
+        ted_similarity * 0.25
+        + results["tree_kernel_similarity"] * 0.25
+        + results["normalized_ast_similarity"] * 0.20
+        + results["cfg_similarity"] * 0.15
+        + results["clone_detection"]["clone_score"] * 0.15
     )
-    
+
     return results
 
 
@@ -936,38 +1081,38 @@ def _dict_similarity(dict_a: Any, dict_b: Any) -> float:
     """Calculate similarity between two dict structures."""
     if type(dict_a) != type(dict_b):
         return 0.0
-    
+
     if isinstance(dict_a, dict):
         keys_a = set(dict_a.keys())
         keys_b = set(dict_b.keys())
-        
+
         if not keys_a and not keys_b:
             return 1.0
         if not keys_a or not keys_b:
             return 0.0
-        
+
         common_keys = keys_a & keys_b
         all_keys = keys_a | keys_b
-        
+
         if not common_keys:
             return 0.0
-        
+
         # Calculate similarity for common keys
         similarities = []
         for key in common_keys:
             similarities.append(_dict_similarity(dict_a[key], dict_b[key]))
-        
+
         return sum(similarities) / len(similarities)
-    
+
     elif isinstance(dict_a, list):
         if len(dict_a) != len(dict_b):
             return 0.0
         if not dict_a:
             return 1.0
-        
+
         similarities = [_dict_similarity(a, b) for a, b in zip(dict_a, dict_b)]
         return sum(similarities) / len(similarities)
-    
+
     else:
         # Primitive comparison
         return 1.0 if dict_a == dict_b else 0.0
@@ -976,53 +1121,54 @@ def _dict_similarity(dict_a: Any, dict_b: Any) -> float:
 class DeepVerify:
     """
     Second phase heavy verification engine.
-    
+
     Implements the two-stage architecture:
     1. Fast first pass to get Top-N candidates
     2. Deep heavy verification only on those candidates
-    
+
     Designed to achieve >90% precision by applying expensive but accurate algorithms
     only to the small candidate set from the first filtering stage.
-    
+
     All thresholds are fully configurable via engine_weights.yaml
     """
-    
+
     def __init__(self):
         from src.backend.engines.weight_config import EngineWeightConfig
+
         self.config = EngineWeightConfig.get_instance()
-    
+
     def __init__(self):
         self.ted = ASTTreeEditDistance()
         self.tree_kernel = TreeKernelSimilarity()
         self.cfg_analyzer = ControlFlowAnalyzer()
         self.clone_detector = PatternCloneDetector()
         self.deep_analyzer = DeepCodeAnalyzer()
-    
+
     def verify_pair(
         self,
         parsed_a: Dict[str, Any],
         parsed_b: Dict[str, Any],
         initial_score: float,
-        language: str = 'default'
+        language: str = "default",
     ) -> Dict[str, Any]:
         """
         Perform heavy verification on a single candidate pair from first pass.
-        
+
         This function will spend up to ~1 second per pair, applying all high-accuracy
         algorithms. Only returns high confidence matches.
-        
+
         Args:
             parsed_a: First parsed code
             parsed_b: Second parsed code
             initial_score: Score from fast first pass algorithm
             language: Programming language
-            
+
         Returns:
             Verified result with confidence score and decision
         """
-        ast_a = parsed_a.get('ast')
-        ast_b = parsed_b.get('ast')
-        
+        ast_a = parsed_a.get("ast")
+        ast_b = parsed_b.get("ast")
+
         result = {
             "verified": False,
             "final_score": 0.0,
@@ -1031,156 +1177,159 @@ class DeepVerify:
             "evidence": {},
             "agreeing_engines": 0,
             "verification_steps_run": 0,
-            "rejection_reason": None
+            "rejection_reason": None,
         }
-        
+
         if not ast_a or not ast_b:
             result["rejection_reason"] = "AST_UNAVAILABLE"
-            result["final_score"] = min(initial_score, self.VERIFICATION_THRESHOLDS["false_positive_safety_cap"])
+            result["final_score"] = min(
+                initial_score, self.VERIFICATION_THRESHOLDS["false_positive_safety_cap"]
+            )
             return result
-        
+
         # Step 1: Normalized AST comparison (fastest first)
         norm_a = self.deep_analyzer._normalize_ast(ast_a, language)
         norm_b = self.deep_analyzer._normalize_ast(ast_b, language)
         ast_norm_score = _dict_similarity(norm_a, norm_b)
         result["evidence"]["ast_normalized"] = ast_norm_score
         result["verification_steps_run"] += 1
-        
+
         thresholds = self.config.deep_verify_thresholds
-        
+
         if ast_norm_score < thresholds.get("ast_normalized_min", 0.60):
             result["rejection_reason"] = "AST_NORMALIZED_FAIL"
             result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
             return result
-        
+
         result["agreeing_engines"] += 1
-        
+
         # Step 2: Tree Kernel similarity
         tree_kernel_score = self.tree_kernel.calculate_similarity(ast_a, ast_b)
         result["evidence"]["tree_kernel"] = tree_kernel_score
         result["verification_steps_run"] += 1
-        
+
         if tree_kernel_score < thresholds.get("tree_kernel_min", 0.65):
             result["rejection_reason"] = "TREE_KERNEL_FAIL"
             result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
             return result
-        
+
         result["agreeing_engines"] += 1
-        
+
         # Step 3: Control Flow Graph similarity
         cfg_a = self.cfg_analyzer.analyze(ast_a)
         cfg_b = self.cfg_analyzer.analyze(ast_b)
         cfg_score = self.cfg_analyzer.compare_cfg(cfg_a, cfg_b)
         result["evidence"]["cfg_similarity"] = cfg_score
         result["verification_steps_run"] += 1
-        
+
         if cfg_score >= thresholds.get("cfg_similarity_min", 0.55):
             result["agreeing_engines"] += 1
-        
+
         # Step 4: Tree Edit Distance
         ted_distance = self.ted.calculate_distance(ast_a, ast_b)
         ted_similarity = 1.0 - ted_distance
         result["evidence"]["tree_edit_similarity"] = ted_similarity
         result["verification_steps_run"] += 1
-        
+
         if ted_similarity > 0.5:
             result["agreeing_engines"] += 1
-        
+
         # Step 5: Clone pattern detection
         clone_result = self.clone_detector.detect_clones(
-            self.deep_analyzer.analyze(parsed_a),
-            self.deep_analyzer.analyze(parsed_b)
+            self.deep_analyzer.analyze(parsed_a), self.deep_analyzer.analyze(parsed_b)
         )
         result["evidence"]["clone_score"] = clone_result["clone_score"]
         result["verification_steps_run"] += 1
-        
+
         if clone_result["clone_score"] > 0.45:
             result["agreeing_engines"] += 1
-        
+
         thresholds = self.config.deep_verify_thresholds
         weights = self.config.weights
-        
+
         # Consensus decision - multiple engines must agree
         minimum_engines = thresholds.get("minimum_agreeing_engines", 3)
         if result["agreeing_engines"] < minimum_engines:
             result["rejection_reason"] = "INSUFFICIENT_CONSENSUS"
             result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
             return result
-        
+
         # Calculate final weighted score using global weights
         tree_kernel_weight = weights.get("tree_kernel", 0.35)
         ast_weight = weights.get("ast", 0.30)
         ted_weight = weights.get("execution_cfg", 0.15)
         cfg_weight = weights.get("cfg", 0.12)
         clone_weight = 0.08
-        
-        weight_sum = tree_kernel_weight + ast_weight + ted_weight + cfg_weight + clone_weight
-        
+
+        weight_sum = (
+            tree_kernel_weight + ast_weight + ted_weight + cfg_weight + clone_weight
+        )
+
         result["final_score"] = (
-            (tree_kernel_weight * tree_kernel_score) +
-            (ast_weight * ast_norm_score) +
-            (ted_weight * ted_similarity) +
-            (cfg_weight * cfg_score) +
-            (clone_weight * clone_result["clone_score"])
+            (tree_kernel_weight * tree_kernel_score)
+            + (ast_weight * ast_norm_score)
+            + (ted_weight * ted_similarity)
+            + (cfg_weight * cfg_score)
+            + (clone_weight * clone_result["clone_score"])
         ) / weight_sum
-        
+
         # Apply confidence floor
         confidence_floor = thresholds.get("final_confidence_floor", 0.70)
         if result["final_score"] >= confidence_floor:
             result["verified"] = True
             result["confidence"] = min(
-                (result["agreeing_engines"] / 5.0) * result["final_score"] * 1.2,
-                1.0
+                (result["agreeing_engines"] / 5.0) * result["final_score"] * 1.2, 1.0
             )
         else:
             result["rejection_reason"] = "FINAL_SCORE_BELOW_THRESHOLD"
-            result["final_score"] = min(result["final_score"], thresholds.get("false_positive_safety_cap", 0.58))
-        
+            result["final_score"] = min(
+                result["final_score"], thresholds.get("false_positive_safety_cap", 0.58)
+            )
+
         return result
-    
+
     def verify_top_candidates(
         self,
         query_submission: Dict[str, Any],
         candidates: List[Dict[str, Any]],
-        language: str = 'default',
-        top_n: int = 10
+        language: str = "default",
+        top_n: int = 10,
     ) -> List[Dict[str, Any]]:
         """
         Run deep verification on Top-N candidates from first pass retrieval.
-        
+
         This is the main entry point for the second stage of the two-pass architecture.
-        
+
         Args:
             query_submission: The query submission being compared
             candidates: List of candidate matches from first pass (must include 'score' and 'parsed')
             language: Programming language
             top_n: Only verify top N candidates (default 10)
-            
+
         Returns:
             List of verified candidates with updated scores
         """
         # Sort by initial score descending and take top N
-        sorted_candidates = sorted(candidates, key=lambda c: c["score"], reverse=True)[:top_n]
-        
+        sorted_candidates = sorted(candidates, key=lambda c: c["score"], reverse=True)[
+            :top_n
+        ]
+
         verified_results = []
         for candidate in sorted_candidates:
             verification = self.verify_pair(
-                query_submission,
-                candidate["parsed"],
-                candidate["score"],
-                language
+                query_submission, candidate["parsed"], candidate["score"], language
             )
-            
+
             candidate["deep_verification"] = verification
             candidate["final_score"] = verification["final_score"]
             candidate["verified"] = verification["verified"]
             candidate["confidence"] = verification["confidence"]
-            
+
             verified_results.append(candidate)
-        
+
         # Re-sort by final verified score
         verified_results.sort(key=lambda c: c["final_score"], reverse=True)
-        
+
         return verified_results
 
 
@@ -1189,7 +1338,7 @@ def deep_verify_pair(
     parsed_a: Dict[str, Any],
     parsed_b: Dict[str, Any],
     initial_score: float,
-    language: str = 'default'
+    language: str = "default",
 ) -> Dict[str, Any]:
     """Convenience wrapper for DeepVerify.verify_pair"""
     return DeepVerify().verify_pair(parsed_a, parsed_b, initial_score, language)

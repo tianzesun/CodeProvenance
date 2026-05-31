@@ -230,9 +230,9 @@ class BatchDetectionService:
         for i, fa in enumerate(files):
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
-                features = self.extractor.extract(ca, cb)
-                fused = self.fusion.fuse(features)
+                features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
                 logic_flow = _logic_flow_similarity(ca, cb)
+                fused = self.fusion.fuse(features, logic_flow=logic_flow)
                 final_score = _apply_structure_sensitivity_floor(
                     fused.final_score,
                     features.ast,
@@ -302,9 +302,9 @@ class BatchDetectionService:
                 continue
 
             ca, cb = submissions[fa], submissions[fb]
-            features = self.extractor.extract(ca, cb)
-            fused = self.fusion.fuse(features)
+            features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
             logic_flow = _logic_flow_similarity(ca, cb)
+            fused = self.fusion.fuse(features, logic_flow=logic_flow)
             raw_score = _apply_structure_sensitivity_floor(
                 fused.final_score,
                 features.ast,

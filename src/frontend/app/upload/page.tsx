@@ -514,8 +514,11 @@ export default function UploadPage() {
                     <Loader2 size={16} className="animate-spin" />
                     Analyzing {zipFile ? 'submissions from archive' : `${files.length} submissions`}...
                   </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
-                    <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner">
+                    <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    <span className="text-xs font-medium text-blue-700">{Math.round(progress * 100)}%</span>
                   </div>
                 </div>
                 <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">

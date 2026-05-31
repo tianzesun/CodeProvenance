@@ -1,4 +1,5 @@
 """Plugin loader decorator for registration."""
+
 from engines.registry.plugin_registry import PluginRegistry
 
 

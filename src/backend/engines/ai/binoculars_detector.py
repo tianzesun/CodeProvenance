@@ -53,7 +53,9 @@ class BinocularsDetector:
 
             self._bino = Binoculars()
             self._available = True
-            logger.info("BinocularsDetector loaded successfully (zero-shot AI detector)")
+            logger.info(
+                "BinocularsDetector loaded successfully (zero-shot AI detector)"
+            )
         except Exception as exc:
             logger.warning(
                 "BinocularsDetector could not be loaded: %s. "

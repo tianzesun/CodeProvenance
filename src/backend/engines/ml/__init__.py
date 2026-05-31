@@ -1,4 +1,5 @@
 """ML-based code similarity detection."""
+
 from benchmark.ml.tfidf_detector import (
     TFIDFSimilarityDetector,
     CodeTokenizer,
@@ -8,9 +9,9 @@ from benchmark.ml.tfidf_detector import (
 )
 
 __all__ = [
-    'TFIDFSimilarityDetector',
-    'CodeTokenizer',
-    'TFIDFVector',
-    'detect_similarity',
-    'CodeFeatures',
+    "TFIDFSimilarityDetector",
+    "CodeTokenizer",
+    "TFIDFVector",
+    "detect_similarity",
+    "CodeFeatures",
 ]

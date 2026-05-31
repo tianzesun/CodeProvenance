@@ -1,4 +1,5 @@
 """Plugin base contract for all execution modules."""
+
 from abc import ABC, abstractmethod
 
 

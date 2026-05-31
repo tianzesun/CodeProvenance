@@ -171,6 +171,73 @@
     </div>
 </div>
 
+<h2>1. Executive Summary for Deans</h2>
+<div class="recommendation-box">
+    <h4>Final Classification</h4>
+    <p><strong>{{ final_verdict }}</strong></p>
+    <p style="margin-top: 6px; font-size: 9pt;">{{ verdict_label }}</p>
+</div>
+
+{% if policy_references %}
+<h3>Policy References</h3>
+<ul style="margin-left: 20px; font-size: 9.5pt;">
+    {% for ref in policy_references %}
+    <li>{{ ref }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if precedent_comparison %}
+<h3>Precedent Comparison</h3>
+<p style="font-size: 9pt; color: #666; margin-bottom: 8px;">This case compares to similar historical cases at the institution:</p>
+<table class="data">
+    <thead><tr><th>Case</th><th>Similarity</th><th>Outcome</th></tr></thead>
+    <tbody>
+    {% for case in precedent_comparison %}
+        <tr>
+            <td>{{ case.case_id }}</td>
+            <td>{{ "%.0f"|format(case.similarity * 100) }}%</td>
+            <td>{{ case.outcome }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if student_context %}
+<h3>Student Context</h3>
+<table class="data">
+    <tr><th>Metric</th><th>Value</th></tr>
+    {% if student_context.year %}<tr><td>Year</td><td>{{ student_context.year }}</td></tr>{% endif %}
+    {% if student_context.program %}<tr><td>Program</td><td>{{ student_context.program }}</td></tr>{% endif %}
+    {% if student_context.previous_gpa %}<tr><td>Previous GPA</td><td>{{ student_context.previous_gpa }}</td></tr>{% endif %}
+</table>
+{% endif %}
+
+{% if timeline %}
+<h3>Timeline of Analysis</h3>
+<table class="data">
+    <thead><tr><th>Step</th><th>Timestamp</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for event in timeline %}
+        <tr>
+            <td>{{ event.step }}</td>
+            <td>{{ event.timestamp }}</td>
+            <td>{{ event.status }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if confidence_interval %}
+<h3>Statistical Confidence</h3>
+<p style="font-size: 9pt;">
+    Confidence Interval: [{{ "%.3f"|format(confidence_interval.lower) }}, {{ "%.3f"|format(confidence_interval.upper) }}]
+    (95% confidence, {{ confidence_interval.bootstrap_samples }} bootstrap samples)
+</p>
+{% endif %}
+
 <h2>1. Executive Summary</h2>
 <p><strong>Final Classification:</strong> <span class="verdict-badge verdict-{{ final_verdict|lower }}">{{ final_verdict }}</span></p>
 <p class="explanation">{{ verdict_label }}</p>

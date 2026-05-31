@@ -1,4 +1,5 @@
 """Optuna powered hyperparameter tuning for fusion engine weights and thresholds."""
+
 from __future__ import annotations
 
 import time
@@ -11,7 +12,11 @@ import optuna
 from optuna.samplers import TPESampler, CmaEsSampler
 from optuna.pruners import MedianPruner
 
-from src.backend.engines.scoring.fusion_engine import FusionEngine, load_engine_config, save_engine_config
+from src.backend.engines.scoring.fusion_engine import (
+    FusionEngine,
+    load_engine_config,
+    save_engine_config,
+)
 from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
 from src.backend.evaluation.metrics import calculate_accuracy_metrics
 
@@ -22,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TuningResult:
     """Result from hyperparameter tuning run."""
+
     best_params: Dict[str, float]
     best_score: float
     n_trials: int
@@ -46,10 +52,7 @@ class EngineTuner:
         weights = {}
         for engine in engine_names:
             weights[engine] = trial.suggest_float(
-                name=engine,
-                low=0.005,
-                high=1.0,
-                step=0.001
+                name=engine, low=0.005, high=1.0, step=0.001
             )
 
         # Normalize weights
@@ -62,14 +65,13 @@ class EngineTuner:
 
         for pair in self.dataset.test_pairs:
             score = engine.fuse(pair.features)
-            results.append({
-                "score": score.final_score,
-                "ground_truth": pair.is_plagiarized
-            })
+            results.append(
+                {"score": score.final_score, "ground_truth": pair.is_plagiarized}
+            )
 
         metrics = calculate_accuracy_metrics(results)
         # Optimize for PAN PlagDet score (primary evaluation metric)
-        return metrics.plagdet if hasattr(metrics, 'plagdet') else metrics.f1
+        return metrics.plagdet if hasattr(metrics, "plagdet") else metrics.f1
 
     def objective_full(self, trial: optuna.Trial) -> float:
         """Full objective function tuning weights AND thresholds."""
@@ -77,23 +79,33 @@ class EngineTuner:
         engine_names = list(self.config["weights"].keys())
         weights = {}
         for engine in engine_names:
-            weights[engine] = trial.suggest_float(f"weight_{engine}", 0.005, 1.0, step=0.001)
+            weights[engine] = trial.suggest_float(
+                f"weight_{engine}", 0.005, 1.0, step=0.001
+            )
 
         # Normalize weights
         total = sum(weights.values())
         normalized_weights = {k: v / total for k, v in weights.items()}
 
         # Tune decision threshold
-        decision_threshold = trial.suggest_float("decision_threshold", 0.2, 0.9, step=0.01)
+        decision_threshold = trial.suggest_float(
+            "decision_threshold", 0.2, 0.9, step=0.01
+        )
 
         # Tune baseline correction values
         baselines = {}
         for engine in self.config["baseline_correction"]["baselines"].keys():
-            baselines[engine] = trial.suggest_float(f"baseline_{engine}", 0.0, 0.5, step=0.01)
+            baselines[engine] = trial.suggest_float(
+                f"baseline_{engine}", 0.0, 0.5, step=0.01
+            )
 
         # Tune arbitration parameters
-        prior_precision = trial.suggest_float("prior_precision_multiplier", 5.0, 50.0, step=0.5)
-        minimum_agreement = trial.suggest_float("minimum_agreement", 0.0, 0.6, step=0.05)
+        prior_precision = trial.suggest_float(
+            "prior_precision_multiplier", 5.0, 50.0, step=0.5
+        )
+        minimum_agreement = trial.suggest_float(
+            "minimum_agreement", 0.0, 0.6, step=0.05
+        )
 
         # Evaluate
         config = self.config.copy()
@@ -108,19 +120,15 @@ class EngineTuner:
 
         for pair in self.dataset.test_pairs:
             score = engine.fuse(pair.features)
-            results.append({
-                "score": score.final_score,
-                "ground_truth": pair.is_plagiarized
-            })
+            results.append(
+                {"score": score.final_score, "ground_truth": pair.is_plagiarized}
+            )
 
         metrics = calculate_accuracy_metrics(results)
         return metrics.f1
 
     def tune_weights(
-        self,
-        n_trials: int = 150,
-        sampler: str = "tpe",
-        show_progress: bool = True
+        self, n_trials: int = 150, sampler: str = "tpe", show_progress: bool = True
     ) -> TuningResult:
         """Run Bayesian optimization for engine weights only.
 
@@ -136,21 +144,21 @@ class EngineTuner:
 
         samplers = {
             "tpe": TPESampler(seed=42, multivariate=True),
-            "cmaes": CmaEsSampler(seed=42)
+            "cmaes": CmaEsSampler(seed=42),
         }
 
         study = optuna.create_study(
             direction="maximize",
             sampler=samplers.get(sampler, samplers["tpe"]),
-            pruner=MedianPruner(n_startup_trials=20)
+            pruner=MedianPruner(n_startup_trials=20),
         )
 
-        logger.info(f"Starting weight optimization with {n_trials} trials using {sampler} sampler")
+        logger.info(
+            f"Starting weight optimization with {n_trials} trials using {sampler} sampler"
+        )
 
         study.optimize(
-            self.objective_weights,
-            n_trials=n_trials,
-            show_progress_bar=show_progress
+            self.objective_weights, n_trials=n_trials, show_progress_bar=show_progress
         )
 
         # Normalize best weights
@@ -170,7 +178,9 @@ class EngineTuner:
         save_engine_config(self.config)
         FusionEngine.update_config(self.config)
 
-        logger.info(f"Tuning completed in {duration}ms, best F1: {study.best_value:.4f}")
+        logger.info(
+            f"Tuning completed in {duration}ms, best F1: {study.best_value:.4f}"
+        )
 
         return TuningResult(
             best_params=normalized_best,
@@ -180,15 +190,19 @@ class EngineTuner:
             method=f"optuna_{sampler}",
             study_summary={
                 "trials_completed": len(study.trials),
-                "trials_pruned": len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]),
-                "best_trial_number": study.best_trial.number
-            }
+                "trials_pruned": len(
+                    [
+                        t
+                        for t in study.trials
+                        if t.state == optuna.trial.TrialState.PRUNED
+                    ]
+                ),
+                "best_trial_number": study.best_trial.number,
+            },
         )
 
     def tune_full_configuration(
-        self,
-        n_trials: int = 300,
-        show_progress: bool = True
+        self, n_trials: int = 300, show_progress: bool = True
     ) -> TuningResult:
         """Run full hyperparameter optimization including weights, thresholds, and baselines.
 
@@ -204,20 +218,20 @@ class EngineTuner:
         study = optuna.create_study(
             direction="maximize",
             sampler=TPESampler(seed=42, multivariate=True, group=True),
-            pruner=MedianPruner(n_startup_trials=50)
+            pruner=MedianPruner(n_startup_trials=50),
         )
 
         logger.info(f"Starting full configuration optimization with {n_trials} trials")
 
         study.optimize(
-            self.objective_full,
-            n_trials=n_trials,
-            show_progress_bar=show_progress
+            self.objective_full, n_trials=n_trials, show_progress_bar=show_progress
         )
 
         duration = int((time.time() - start_time) * 1000)
 
-        logger.info(f"Full tuning completed in {duration}ms, best F1: {study.best_value:.4f}")
+        logger.info(
+            f"Full tuning completed in {duration}ms, best F1: {study.best_value:.4f}"
+        )
 
         return TuningResult(
             best_params=study.best_params,
@@ -227,9 +241,15 @@ class EngineTuner:
             method="optuna_full",
             study_summary={
                 "trials_completed": len(study.trials),
-                "trials_pruned": len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]),
-                "best_trial_number": study.best_trial.number
-            }
+                "trials_pruned": len(
+                    [
+                        t
+                        for t in study.trials
+                        if t.state == optuna.trial.TrialState.PRUNED
+                    ]
+                ),
+                "best_trial_number": study.best_trial.number,
+            },
         )
 
     @staticmethod

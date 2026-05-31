@@ -6,6 +6,7 @@ Usage:
     similarity = CodeBERTSimilarity(device='cuda')
     score = similarity.compare({'raw': code_a}, {'raw': code_b})
 """
+
 import logging
 from typing import Any, Dict
 
@@ -19,7 +20,9 @@ class CodeBERTSimilarity:
     only encoded once regardless of how many pairs it participates in.
     """
 
-    def __init__(self, model_name: str = "microsoft/codebert-base", device: str = "auto") -> None:
+    def __init__(
+        self, model_name: str = "microsoft/codebert-base", device: str = "auto"
+    ) -> None:
         self.model_name = model_name
         if device == "auto":
             device = "cuda" if self._has_gpu() else "cpu"
@@ -29,6 +32,7 @@ class CodeBERTSimilarity:
 
         # Per-instance embedding cache
         from src.backend.engines.cache import EmbeddingCache
+
         self._embedding_cache = EmbeddingCache(maxsize=4096)
 
     @staticmethod
@@ -36,6 +40,7 @@ class CodeBERTSimilarity:
         """Check whether a CUDA-capable GPU is available."""
         try:
             import torch
+
             return torch.cuda.is_available()
         except ImportError as exc:
             logger.debug("PyTorch not installed; GPU check failed: %s", exc)
@@ -50,6 +55,7 @@ class CodeBERTSimilarity:
             return
         try:
             from transformers import AutoTokenizer, AutoModel
+
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
             self._model.eval()
@@ -57,7 +63,9 @@ class CodeBERTSimilarity:
             logger.error("transformers library not installed: %s", exc)
             raise
         except Exception as exc:
-            logger.error("Failed to load model %s on %s: %s", self.model_name, self.device, exc)
+            logger.error(
+                "Failed to load model %s on %s: %s", self.model_name, self.device, exc
+            )
             raise
 
     def _encode(self, code: str) -> list[float]:
@@ -68,7 +76,10 @@ class CodeBERTSimilarity:
         """Actual encoding — called by the cache on misses."""
         self._load_model()
         import torch
-        inputs = self._tokenizer(code, return_tensors="pt", truncation=True, max_length=512).to(self.device)
+
+        inputs = self._tokenizer(
+            code, return_tensors="pt", truncation=True, max_length=512
+        ).to(self.device)
         with torch.no_grad():
             outputs = self._model(**inputs)
         return outputs.last_hidden_state.mean(dim=1).squeeze().tolist()

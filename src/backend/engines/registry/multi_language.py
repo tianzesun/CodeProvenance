@@ -4,35 +4,40 @@ from src.backend.engines.similarity.base_similarity import BaseSimilarityAlgorit
 
 logger = logging.getLogger(__name__)
 
+
 class MultiLanguageRegistry:
     """
     Multi-Language Support Registry.
     Registers and maintains support for 20+ programming languages.
     Provides language-specific normalizers and similarity engines.
     """
-    
+
     def __init__(self):
         # Maps language extensions/names to their configurations
         self.language_configs: Dict[str, Dict[str, Any]] = {}
         # Pre-populate with standard languages
         self._bootstrap_languages()
 
-    def register_language(self, 
-                          name: str, 
-                          extensions: List[str], 
-                          normalizer_cls: Optional[Type] = None,
-                          ast_parser: Optional[Any] = None):
+    def register_language(
+        self,
+        name: str,
+        extensions: List[str],
+        normalizer_cls: Optional[Type] = None,
+        ast_parser: Optional[Any] = None,
+    ):
         """Register a new programming language and its support tools."""
         self.language_configs[name.lower()] = {
             "name": name,
             "extensions": extensions,
             "normalizer": normalizer_cls,
-            "parser": ast_parser
+            "parser": ast_parser,
         }
         for ext in extensions:
             self.language_configs[ext.lower()] = self.language_configs[name.lower()]
-            
-        logger.info(f"Registered language: {name} (extensions: {', '.join(extensions)})")
+
+        logger.info(
+            f"Registered language: {name} (extensions: {', '.join(extensions)})"
+        )
 
     def _bootstrap_languages(self):
         """Populate registry with core supported languages."""
@@ -43,7 +48,7 @@ class MultiLanguageRegistry:
         self.register_language("JavaScript", [".js", ".mjs"])
         self.register_language("TypeScript", [".ts", ".tsx"])
         self.register_language("C#", [".cs"])
-        
+
         # Expanding to 20+
         self.register_language("Go", [".go"])
         self.register_language("Ruby", [".rb"])
@@ -67,7 +72,7 @@ class MultiLanguageRegistry:
         """Determine language from filename extension."""
         ext = f".{filename.split('.')[-1].lower()}"
         return self.language_configs.get(ext)
-        
+
     def get_supported_languages(self) -> List[str]:
         """Returns a unique list of supported language names."""
         return sorted(list(set(cfg["name"] for cfg in self.language_configs.values())))

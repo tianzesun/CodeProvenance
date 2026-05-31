@@ -1,4 +1,5 @@
 """Base engine class for all similarity detection engines."""
+
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
@@ -18,7 +19,9 @@ class BaseEngine(ABC):
         self.weight = weight
 
     @abstractmethod
-    def compare(self, code_a: str, code_b: str, language: str = 'auto', **kwargs) -> EngineResult:
+    def compare(
+        self, code_a: str, code_b: str, language: str = "auto", **kwargs
+    ) -> EngineResult:
         pass
 
     def get_name(self) -> str:
@@ -34,4 +37,4 @@ class BaseEngine(ABC):
         return True
 
     def get_config(self) -> Dict[str, Any]:
-        return {'name': self.name, 'weight': self.weight}
+        return {"name": self.name, "weight": self.weight}
