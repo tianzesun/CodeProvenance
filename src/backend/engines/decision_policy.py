@@ -38,7 +38,7 @@ This system converges to:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Any, Dict
 
 from src.backend.engines.evidence_aggregator import EvidenceVector
 
@@ -134,7 +134,25 @@ class DecisionPolicy:
                 triggered_layer="structural_style",
             )
 
-        # Rule 6: Semantic Only - Requires review (never auto-TRUE)
+        # Rule 6: AST-only structural — AST is supporting-only, never decisive alone
+        # If structural is high but no other evidence dimension corroborates,
+        # the high score may be driven solely by AST structural patterns
+        # (e.g. similar control flow in boilerplate code). Downgrade to REVIEW.
+        if (
+            evidence.structural >= 0.70
+            and evidence.lexical < 0.40
+            and evidence.semantic < 0.40
+            and evidence.style < 0.40
+        ):
+            return Decision(
+                verdict="REVIEW",
+                confidence=0.55,
+                evidence=evidence.to_dict(),
+                reason="ast_only_structural_no_corroboration",
+                triggered_layer="ast",
+            )
+
+        # Rule 7: Semantic Only - Requires review (never auto-TRUE)
         if evidence.semantic >= 0.85 and evidence.structural < 0.50:
             return Decision(
                 verdict="REVIEW",
@@ -144,7 +162,7 @@ class DecisionPolicy:
                 triggered_layer="semantic",
             )
 
-        # Rule 7: Borderline Signals
+        # Rule 8: Borderline Signals
         if (
             evidence.structural >= 0.30
             or evidence.lexical >= 0.30
@@ -158,7 +176,7 @@ class DecisionPolicy:
                 triggered_layer="borderline",
             )
 
-        # Rule 8: Clean - No evidence
+        # Rule 9: Clean - No evidence
         return Decision(
             verdict="CLEAN",
             confidence=0.95,

@@ -9,8 +9,10 @@ from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from src.backend.config.settings import settings
+from src.backend.engines.file_type_classifier import FileType
+from src.backend.engines.ast_multi_layer import compute_ast_layer_scores
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,30 @@ class FeatureVector:
     common_solution_score: float = 0.0
     student_style_shift: float = 0.0
 
+    # File type classification (added for file-type aware detection)
+    file_type: FileType = FileType.CODE
+    file_type_confidence: float = 0.0
+    file_type_domain: Optional[str] = None
+
+    # Function matching evidence
+    function_match_count: int = 0
+    function_match_rate: float = 0.0
+    variable_rename_count: int = 0
+    parameter_rename_count: int = 0
+
+    # Control flow evidence
+    control_flow_similarity: float = 0.0
+    control_flow_depth_match: int = 0  # 0-1 scale
+
+    # Structural divergence (evidence for rule engine)
+    structural_divergence: float = 0.0
+
+    # Coverage of matching code segments
+    coverage: float = 0.0  # Fraction of lines matched by CodeHighlighter (0.0-1.0)
+
+    # Evidence fields for rule-based decisions
+    ast_evidence: Dict[str, Any] = field(default_factory=dict)
+
     def as_dict(self) -> Dict[str, float]:
         """Convert FeatureVector to a dictionary."""
         return {
@@ -71,6 +97,7 @@ class FeatureVector:
             "rare_pattern_score": self.rare_pattern_score,
             "common_solution_score": self.common_solution_score,
             "student_style_shift": self.student_style_shift,
+            "structural_divergence": self.structural_divergence,
         }
 
 
@@ -104,6 +131,37 @@ class FeatureExtractor:
         self._winnowing_engine = None
         self._graph_engine = None
         self._sklearn_vectorizer = None
+        self._file_type_classifier = None
+        self._function_matcher = None
+        self._control_flow_visualizer = None
+
+    def _get_file_type_classifier(self):
+        """Get or create the file type classifier."""
+        if self._file_type_classifier is None:
+            from src.backend.engines.file_type_classifier import (
+                get_file_type_classifier,
+            )
+
+            self._file_type_classifier = get_file_type_classifier()
+        return self._file_type_classifier
+
+    def _get_function_matcher(self):
+        """Get or create the function matcher."""
+        if self._function_matcher is None:
+            from src.backend.engines.function_matching import FunctionMatcher
+
+            self._function_matcher = FunctionMatcher()
+        return self._function_matcher
+
+    def _get_control_flow_visualizer(self):
+        """Get or create the control flow visualizer."""
+        if self._control_flow_visualizer is None:
+            from src.backend.engines.control_flow_visualization import (
+                ControlFlowVisualizer,
+            )
+
+            self._control_flow_visualizer = ControlFlowVisualizer()
+        return self._control_flow_visualizer
 
     def _resolve_embedding_base_url(self) -> Optional[str]:
         if settings.EMBEDDING_SERVER_URL:
@@ -117,16 +175,56 @@ class FeatureExtractor:
 
     # ── Public API ──────────────────────────────────────────────
 
-    def extract(self, code_a: str, code_b: str) -> FeatureVector:
+    def extract(
+        self,
+        code_a: str,
+        code_b: str,
+        filename_a: Optional[str] = None,
+        filename_b: Optional[str] = None,
+    ) -> FeatureVector:
         """Run all enabled engines and collect scores.
 
         Args:
             code_a: Source code of the first file.
             code_b: Source code of the second file.
+            filename_a: Optional filename for file type classification.
+            filename_b: Optional filename for file type classification.
 
         Returns:
             A FeatureVector with a score from each engine.
         """
+        # Classify file types
+        file_type = FileType.CODE
+        file_type_confidence = 0.0
+        file_type_domain = None
+
+        if filename_a and filename_b:
+            classifier = self._get_file_type_classifier()
+            # Use the more conservative classification (lower confidence)
+            class_a = classifier.classify(filename_a, code_a)
+            class_b = classifier.classify(filename_b, code_b)
+
+            # If either is CONFIG, treat as CONFIG
+            if (
+                class_a.file_type == FileType.CONFIG
+                or class_b.file_type == FileType.CONFIG
+            ):
+                file_type = FileType.CONFIG
+                file_type_domain = class_a.domain or class_b.domain
+            elif (
+                class_a.file_type == FileType.DATA or class_b.file_type == FileType.DATA
+            ):
+                file_type = FileType.DATA
+            elif (
+                class_a.file_type == FileType.SCRIPT
+                or class_b.file_type == FileType.SCRIPT
+            ):
+                file_type = FileType.SCRIPT
+            else:
+                file_type = FileType.CODE
+
+            file_type_confidence = min(class_a.confidence, class_b.confidence)
+
         ast = self._run_ast(code_a, code_b)
         fingerprint = self._run_fingerprint(code_a, code_b)
         embedding = self._run_embedding(code_a, code_b)
@@ -138,6 +236,35 @@ class FeatureExtractor:
         graph = max(graph or 0.0, ast_cfg_pdg["similarity"])
         static_rules = self._run_static_rules(code_a, code_b)
         sklearn_cosine = self._run_sklearn(code_a, code_b)
+
+        # Multi-layer AST analysis (new evidence-based approach)
+        file_type_str = str(file_type) if isinstance(file_type, FileType) else file_type
+
+        # Use evidence-based AST analysis
+        ast_result = compute_ast_layer_scores(code_a, code_b, file_type_str)
+        evidence = ast_result.get("evidence", {})
+
+        # Get AST score from evidence (NOT a direct similarity score)
+        ast = ast_result.get("final_score", 0.0)
+
+        # Check for config file - apply special handling
+        if file_type == FileType.CONFIG or file_type_str == "CONFIG":
+            # For config files, AST evidence is supplementary
+            # The rule engine makes the final decision
+            pass
+
+        # Function matching analysis
+        function_matcher = self._get_function_matcher()
+        func_report = function_matcher.match_functions(code_a, code_b)
+
+        # Control flow analysis
+        cf_visualizer = self._get_control_flow_visualizer()
+        cf_tree_a = cf_visualizer.analyze(code_a)
+        cf_tree_b = cf_visualizer.analyze(code_b)
+        cf_comparison = cf_visualizer.compare_structures(cf_tree_a, cf_tree_b)
+
+        # Coverage computation via CodeHighlighter
+        coverage = self._compute_code_coverage(code_a, code_b)
 
         return FeatureVector(
             ast=ast if ast is not None else 0.0,
@@ -151,6 +278,25 @@ class FeatureExtractor:
             sklearn_cosine=sklearn_cosine if sklearn_cosine is not None else 0.0,
             cfg_similarity=max(graph or 0.0, ast_cfg_pdg["cfg_sim"]),
             dfg_similarity=ast_cfg_pdg["pdg_sim"],
+            file_type=file_type,
+            file_type_confidence=file_type_confidence,
+            file_type_domain=file_type_domain,
+            function_match_count=func_report.match_count,
+            function_match_rate=func_report.match_rate,
+            variable_rename_count=func_report.variable_rename_count,
+            parameter_rename_count=func_report.parameter_rename_count,
+            control_flow_similarity=cf_comparison.get("similarity", 0.0),
+            control_flow_depth_match=min(
+                1.0,
+                cf_comparison.get("depth_a", 0)
+                / max(1, cf_comparison.get("depth_b", 1)),
+            ),
+            # Add divergence score for evidence-based decisions
+            structural_divergence=evidence.get("divergence_score", 0.0),
+            # Add AST evidence for rule engine
+            ast_evidence=evidence,
+            # Code matching coverage
+            coverage=coverage,
         )
 
     def to_features(self, fv: FeatureVector) -> List[float]:
@@ -457,6 +603,35 @@ class FeatureExtractor:
 
         return features
 
+    def _compute_code_coverage(self, code_a: str, code_b: str) -> float:
+        """Compute fraction of lines covered by matching code segments.
+
+        Uses the CodeHighlighter to find matching segments and returns the
+        maximum of the two files' matched-line fractions.  A high coverage
+        indicates a large proportion of the code participates in matched
+        segments, which is a strong plagiarism signal.
+
+        Returns:
+            A float in [0.0, 1.0].
+        """
+        try:
+            from src.backend.engines.similarity.code_matching import CodeHighlighter
+
+            highlighter = CodeHighlighter()
+            result = highlighter.find_matching_segments(code_a, code_b)
+
+            lines_a = max(len(code_a.splitlines()), 1)
+            lines_b = max(len(code_b.splitlines()), 1)
+
+            coverage_a = result.total_matched_lines_a / lines_a
+            coverage_b = result.total_matched_lines_b / lines_b
+
+            # Return the max coverage (either file could be the plagiarised one)
+            return max(coverage_a, coverage_b)
+        except Exception as exc:
+            logger.debug("CodeHighlighter coverage computation failed: %s", exc)
+            return 0.0
+
     def _counter_cosine(self, left: Counter[str], right: Counter[str]) -> float:
         """Return cosine similarity for sparse counter features."""
         keys = set(left) | set(right)
@@ -466,3 +641,4 @@ class FeatureExtractor:
         if left_norm == 0.0 or right_norm == 0.0:
             return 0.0
         return max(0.0, min(1.0, numerator / (left_norm * right_norm)))
+

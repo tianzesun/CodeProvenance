@@ -1,16 +1,16 @@
-"""Fusion Engine - Evidence Hierarchy Engine integration.
+"""Fusion Engine - Policy-only Decision Layer.
 
-This module now delegates to the Evidence Hierarchy Engine (EHE) for
-hierarchical decision making that eliminates score pollution and
-ensures deterministic verdicts.
+This module implements the final decision layer using the new architecture:
+1. Feature Extractors (separate engines)
+2. Evidence Aggregator (consolidates to 4 dimensions)
+3. Rule Engine (policy-only, no scoring)
+4. Verdict
 
-Key improvements:
-1. Identity evidence hard-stops the pipeline
-2. Structural evidence dominates semantic evidence
-3. No weighted averaging across evidence types
-4. Full audit trail in every decision
-5. Hard gating layer to veto false positives
-6. Conflict-based downgrade to REVIEW
+Output format:
+    VERDICT: CLEAN | REVIEW | PROBABLE | TRUE
+    CONFIDENCE: rule-based (not fused score)
+    EVIDENCE: per-dimension signals
+    REASON: triggered rule
 """
 
 from __future__ import annotations
@@ -31,7 +31,12 @@ from src.backend.engines.scoring.fusion_policy import (
     fusion_presets_payload,
 )
 from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
-from src.backend.engines.detection.ehe import EvidenceHierarchyEngine, Verdict as EHEVerdict
+from src.backend.engines.evidence_aggregator import (
+    aggregate,
+    aggregate_from_scores,
+    EvidenceVector,
+)
+from src.backend.engines.decision_policy import DecisionPolicy, Decision
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -39,9 +44,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class FusedScore:
-    """Result of fused multi-engine similarity scoring."""
+    """Result of policy-only decision making."""
 
-    final_score: float
+    final_score: float  # Rule-based confidence
     confidence: float = 0.8
     uncertainty: float = 0.0
     agreement_index: float = 1.0
@@ -103,7 +108,9 @@ def save_engine_config(config: Dict) -> None:
     if "weights" in config:
         total = sum(config["weights"].values())
         if total > 0 and abs(total - 1.0) > 0.001:
-            config["weights"] = {k: round(v / total, 4) for k, v in config["weights"].items()}
+            config["weights"] = {
+                k: round(v / total, 4) for k, v in config["weights"].items()
+            }
 
     for section in ["weights", "baseline_correction"]:
         if section in config:
@@ -164,6 +171,7 @@ def _with_policy_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     config.setdefault("fusion_presets", fusion_presets_payload())
     config.setdefault("weight_governance", default_weight_governance_policy())
     config.setdefault("assignment_modes", assignment_modes_payload())
+    config.setdefault("advanced", {"hot_reload": True})
     return config
 
 
@@ -173,97 +181,67 @@ LANGUAGE_BASELINE: Dict[str, float] = _get_default_config()["baseline_correction
 ]
 
 
-def hard_gate(evidence: Dict[str, float]) -> Optional[str]:
+def hard_gate(
+    evidence: Dict[str, float],
+    coverage: float = 0.0,
+) -> Optional[str]:
     """
     Hard gating layer to veto false positives.
-    
-    This is the FIRST check before any scoring. It prevents weak signals
-    from accumulating into false plagiarism accusations.
-    
+
     Rules:
     1. If max signal < 0.50: CLEAN (insufficient evidence)
-    2. If no structural signals (ast, logic_flow, ngram, winnowing) above 0.50: CLEAN
-    3. If weak signals dominate (all signals < 0.5): CLEAN
-    
+    2. If no structural signals above 0.50: CLEAN
+    3. If weak signals dominate: CLEAN
+    4. If high similarity but low coverage: CLEAN (few matching lines)
+    5. If low coverage with low identical_line_ratio: CLEAN
+
     Args:
         evidence: Dictionary of engine names to scores
-        
+        coverage: Fraction of code covered by matching segments (0.0-1.0).
+                  Computed by CodeHighlighter based on line-level matches.
+
     Returns:
-        "CLEAN" if vetoed, None if should proceed to EHE
+        "CLEAN" if vetoed, None if should proceed
     """
     if not evidence:
         return "CLEAN"
-    
+
     max_signal = max(evidence.values())
-    
-    # Rule 1: Completely clean - no signal strong enough to warrant review
+
+    # Rule 1: Completely clean - no signal strong enough
     if max_signal < 0.50:
         return "CLEAN"
-    
-    # Rule 2: No structural evidence - semantic similarity alone is not plagiarism
-    # Check multiple structural signal keys
-    ast_score = evidence.get("ast", 0.0)
-    flow_score = evidence.get("logic_flow", 0.0)
-    ngram_score = evidence.get("ngram", 0.0)
-    winnowing_score = evidence.get("winnowing", 0.0)
-    token_score = evidence.get("token", 0.0)
-    fingerprint_score = evidence.get("fingerprint", 0.0)
-    
-    # Any structural signal above 0.5
-    structural_max = max(ast_score, flow_score, ngram_score, winnowing_score, token_score, fingerprint_score)
-    
+
+    # Rule 2: No structural evidence
+    structural_signals = [
+        "ast",
+        "logic_flow",
+        "ngram",
+        "winnowing",
+        "token",
+        "fingerprint",
+    ]
+    structural_max = max(evidence.get(s, 0.0) for s in structural_signals)
+
     if structural_max < 0.50:
         return "CLEAN"
-    
-    # Rule 3: Weak signal accumulation veto
-    # Multiple weak signals should NOT be treated as strong evidence
-    weak_signals = [v for v in evidence.values() if v < 0.5]
-    strong_signals = [v for v in evidence.values() if v >= 0.5]
-    
-    # If majority of signals are weak and no strong signals exist
-    if len(weak_signals) > len(strong_signals) and len(strong_signals) == 0:
+
+    # Rule 3: Coverage gate — if coverage is too low, veto
+    # A high similarity score on a tiny matched region is a false positive signal
+    if coverage < 0.15:
         return "CLEAN"
-    
-    return None  # Proceed to EHE
 
+    # Rule 4: Disproportionate signal-to-coverage ratio
+    # If max_signal is high (>0.80) but coverage is still modest (<0.40),
+    # the high score comes from small isolated matches, not widespread copying
+    if max_signal >= 0.80 and coverage < 0.40:
+        return "CLEAN"
 
-def check_conflict(evidence: Dict[str, float]) -> bool:
-    """
-    Check if evidence shows high variance/conflict indicating unreliable signals.
-    
-    High variance in evidence suggests the signals are inconsistent and
-    should be treated as unreliable rather than indicative of plagiarism.
-    
-    Args:
-        evidence: Dictionary of engine names to scores
-        
-    Returns:
-        True if evidence is conflicted (should downgrade to REVIEW)
-    """
-    if len(evidence) < 3:
-        return False
-    
-    values = list(evidence.values())
-    mean_val = sum(values) / len(values)
-    
-    # Calculate variance
-    variance = sum((v - mean_val) ** 2 for v in values) / len(values)
-    
-    # High variance threshold (signals are inconsistent)
-    return variance > 0.05
+    return None
 
 
 class FusionEngine:
-    """Multi-engine fusion scoring authority with EHE integration.
-
-    This engine now uses the Evidence Hierarchy Engine (EHE) for
-    hierarchical decision making that:
-    - Eliminates score pollution (100% → 82%)
-    - Establishes evidence priority (Identity > Structural > Statistical > Semantic)
-    - Guarantees consistent, explainable, auditable decisions
-    - Hard gates false positives before processing
-    - Downgrades conflicted evidence to REVIEW
-    """
+    """Policy-only fusion engine with evidence aggregation."""
 
     def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
         self._config = load_engine_config()
@@ -285,7 +263,6 @@ class FusionEngine:
             engine_prior_precisions={k: v * multiplier for k, v in self.weights.items()}
         )
         self._ranker = EvidenceFusionRanker()
-        self._ehe = EvidenceHierarchyEngine()
 
     @staticmethod
     def _normalize_weight_names(weights: Dict[str, float]) -> Dict[str, float]:
@@ -298,7 +275,7 @@ class FusionEngine:
 
     def reload_config(self) -> None:
         """Reload configuration from disk if modified."""
-        if self._config["advanced"].get("hot_reload", True):
+        if self._config.get("advanced", {}).get("hot_reload", True):
             mtime = os.path.getmtime(CONFIG_PATH)
             if mtime > self._last_load_time:
                 self.__init__()
@@ -380,22 +357,29 @@ class FusionEngine:
         self,
         features: "FeatureVector",
         weight_multipliers: Optional[Dict[str, float]] = None,
+        logic_flow: float = 0.0,
     ) -> FusedScore:
-        """Combine engine outputs using Evidence Hierarchy Engine.
+        """Make deterministic decision using policy rules.
 
-        This method delegates to EHE for hierarchical decision making.
+        This method uses the DecisionPolicy for verdict decisions.
+        NO score fusion or averaging is performed for the final decision.
 
         Args:
             features: A FeatureVector containing scores from each engine.
             weight_multipliers: Optional per-engine multipliers (deprecated).
+            logic_flow: Optional pre-computed logic flow similarity score.
 
         Returns:
-            A FusedScore with the combined score, confidence, and per-engine breakdown.
+            A FusedScore with verdict, confidence, and evidence breakdown.
         """
         raw_scores = features.as_dict()
+        raw_scores["logic_flow"] = logic_flow
+
+        # Extract coverage from FeatureVector (computed by CodeHighlighter)
+        coverage = getattr(features, "coverage", 0.0)
 
         # HARD GATE LAYER: Veto false positives before any processing
-        veto = hard_gate(raw_scores)
+        veto = hard_gate(raw_scores, coverage=coverage)
         if veto == "CLEAN":
             return FusedScore(
                 final_score=0.0,
@@ -407,7 +391,7 @@ class FusionEngine:
                 review_priority=0.0,
                 professor_summary="Hard gate veto: Insufficient evidence for plagiarism.",
                 evidence_reasons=["No structural evidence", "Low signal strength"],
-                evidence_guardrails=["max_signal < 0.60 or no structural evidence"],
+                evidence_guardrails=["max_signal < 0.50 or no structural evidence"],
                 evidence_quality=self._calculate_evidence_quality(raw_scores, {}),
                 relevant_engines=list(raw_scores.keys()),
                 verdict="CLEAN",
@@ -432,94 +416,110 @@ class FusionEngine:
                 verdict="TRUE",
             )
 
-        # Apply baseline correction
+        # FILE-TYPE DEPENDENT WEIGHTING
+        # Apply weights based on file type classification
+        file_type = getattr(features, "file_type", None)
+        file_type_domain = getattr(features, "file_type_domain", None)
+
+        from src.backend.engines.file_type_weights import (
+            apply_weights,
+            should_veto_embedding,
+            FileType,
+        )
+
+        # Apply file-type dependent weights to raw scores
+        weighted_scores = apply_weights(raw_scores, file_type)
+
+        # Check if embedding should be vetoed for this file type
+        if should_veto_embedding(file_type, file_type_domain):
+            weighted_scores["embedding"] = 0.0
+
+        # AGGREGATE: Consolidate to evidence vector (NO scoring)
+        # Use weighted scores for evidence aggregation
+        evidence = aggregate_from_scores(weighted_scores, logic_flow, coverage=coverage)
+
+        # Apply baseline correction for display purposes only
         corrected_scores = {}
-        for name, score in raw_scores.items():
+        for name, score in weighted_scores.items():
             baseline = self.baselines.get(name, LANGUAGE_BASELINE.get(name, 0.0))
             corrected = max(0.0, score - baseline) / max(0.01, 1.0 - baseline)
             corrected_scores[name] = round(corrected, 4)
 
         relevant_scores = {k: v for k, v in corrected_scores.items() if v > 0.0}
 
-        # CONFLICT CHECK: Downgrade if evidence is inconsistent
-        conflicted = check_conflict(raw_scores)
+        # DECIDE: Policy-only decision (NO averaging)
+        decision = DecisionPolicy.decide(evidence)
 
-        # Use EHE for decision (hierarchical, not weighted)
-        ehe_decision = self._ehe.decide(code_a="", code_b="", engine_scores=raw_scores)
+        # FILE-TYPE ADJUSTMENT: Downgrade high similarity for CONFIG files
+        # driven by embedding or key overlap
+        if file_type == FileType.CONFIG:
+            embedding_weight = weighted_scores.get("embedding", 0)
+            # If embedding was the main signal, downgrade the result
+            max_signal = max(weighted_scores.values()) if weighted_scores else 0
+            if embedding_weight > 0.7 * max_signal:
+                # Embedding was dominant for CONFIG - downgrade
+                new_confidence = min(decision.confidence, 0.4)
+                new_verdict = (
+                    "REVIEW"
+                    if decision.verdict in ("TRUE", "PROBABLE")
+                    else decision.verdict
+                )
+                decision = Decision(
+                    verdict=new_verdict,
+                    confidence=new_confidence,
+                    evidence=decision.evidence,
+                    reason="Config similarity driven by embedding/key overlap - downgraded",
+                    triggered_layer=decision.triggered_layer,
+                )
 
-        verdict_map = {
-            EHEVerdict.TRUE: "TRUE",
-            EHEVerdict.PROBABLE: "PROBABLE",
-            EHEVerdict.REVIEW: "REVIEW",
-            EHEVerdict.CLEAN: "CLEAN",
-        }
+        # TSX/JSX ADJUSTMENT: Separate component-tree from boilerplate similarity
+        # This prevents React pages with similar boilerplate from producing false positives
+        tsx_result = None
+        if file_type == FileType.CODE and features.file_type_domain in (
+            "react",
+            "next",
+            "vue",
+            "nuxt",
+        ):
+            from src.backend.engines.tsx_analyzer import analyze_tsx_similarity
 
-        evidence_quality = self._calculate_evidence_quality(raw_scores, relevant_scores)
-
-        # Ensure confidence is a valid number
-        confidence = ehe_decision.confidence
-        if confidence is None or not isinstance(confidence, (int, float)) or confidence != confidence:  # NaN check
-            confidence = 0.5
-        
-        # CONFLICT DOWNGRADE: If evidence conflicted, downgrade to REVIEW
-        if conflicted and ehe_decision.verdict != EHEVerdict.CLEAN:
-            final_verdict = "REVIEW"
-            confidence = min(confidence, 0.5)  # Cap confidence for conflicted evidence
-        else:
-            final_verdict = verdict_map.get(ehe_decision.verdict, "INCONCLUSIVE")
+            tsx_result = analyze_tsx_similarity(
+                features._raw_code_a if hasattr(features, "_raw_code_a") else "",
+                features._raw_code_b if hasattr(features, "_raw_code_b") else "",
+            )
+            if (
+                tsx_result.get("has_jsx")
+                and tsx_result.get("boilerplate_similarity", 0) > 0.5
+            ):
+                # Heavy boilerplate - apply discount
+                discount = tsx_result.get("discount_factor", 1.0)
+                new_confidence = decision.confidence * discount
+                if new_confidence < decision.confidence:
+                    decision = Decision(
+                        verdict=decision.verdict,
+                        confidence=new_confidence,
+                        evidence=decision.evidence,
+                        reason=f"TSX boilerplate discount applied ({discount:.0%})",
+                        triggered_layer=decision.triggered_layer,
+                    )
 
         return FusedScore(
-            final_score=confidence,
-            confidence=confidence,
-            uncertainty=1.0 - confidence,
-            agreement_index=confidence,
+            final_score=decision.confidence,
+            confidence=decision.confidence,
+            uncertainty=1.0 - decision.confidence,
+            agreement_index=decision.confidence,
             components=raw_scores,
             contributions={},
-            review_priority=1.0 if ehe_decision.verdict == EHEVerdict.TRUE else 0.0,
-            professor_summary=f"EHE Decision: {ehe_decision.verdict}",
-            evidence_reasons=ehe_decision.decision_path,
-            evidence_guardrails=[] if not conflicted else ["Evidence conflict detected"],
-            evidence_quality=evidence_quality,
+            review_priority=1.0 if decision.verdict == "TRUE" else 0.0,
+            professor_summary=f"Policy Decision: {decision.verdict}",
+            evidence_reasons=[decision.reason],
+            evidence_guardrails=[],
+            evidence_quality=self._calculate_evidence_quality(
+                raw_scores, relevant_scores
+            ),
             relevant_engines=list(relevant_scores.keys()),
-            verdict=final_verdict,
+            verdict=decision.verdict,
         )
-
-    def run_three_layer_pipeline(
-        self,
-        code_a: str,
-        code_b: str,
-        engine_scores: Dict[str, float],
-        engine_details: Optional[Dict[str, Any]] = None,
-        domain: str = "code",
-    ) -> Dict[str, Any]:
-        """Run the three-layer detection pipeline using EHE."""
-        from src.backend.engines.detection.layer1_deterministic import Layer1Deterministic
-        from src.backend.engines.detection.layer2_statistical import Layer2Statistical
-        from src.backend.engines.detection.layer3_semantic import Layer3Semantic
-        from src.backend.engines.detection.layer4_explainability import Layer4Explainability
-        from src.backend.engines.detection.detection_policy import DetectionPolicy
-
-        l1 = Layer1Deterministic()
-        l2 = Layer2Statistical()
-        l3 = Layer3Semantic()
-        l4 = Layer4Explainability()
-        policy = DetectionPolicy(domain=domain)
-
-        l1_result = l1.evaluate(code_a, code_b, engine_scores, engine_details)
-        l2_result = l2.evaluate(code_a, code_b, engine_scores, engine_details)
-        l3_result = l3.evaluate(code_a, code_b, engine_scores, engine_details)
-        l4_result = l4.evaluate(code_a, code_b, engine_scores, engine_details)
-
-        report = policy.evaluate(
-            l1_result, l2_result, l3_result,
-            course_type=domain,
-            explanation_report=l4_result,
-        )
-
-        # Use EHE confidence as the score (rule-based, not averaged)
-        report.additive_score = report.layer1_value  # Use strongest layer value
-
-        return report.to_legacy_dict()
 
     def get_weights(self) -> Dict[str, float]:
         """Return the current normalized engine weights."""
