@@ -282,11 +282,11 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                  {bootstrapped ? 'Secure sign in for your workspace' : 'Initialize your workspace'}
+                  {bootstrapped ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
                   {bootstrapped
-                    ? 'Access reports, similarity reviews, policies, and administrative controls from one secure dashboard.'
+                    ? 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'
                     : 'Create the first administrator account and configure the workspace for your institution.'}
                 </p>
               </div>
@@ -323,20 +323,20 @@ export default function LoginPage() {
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
                 <LockKeyhole size={20} aria-hidden="true" />
               </div>
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+<h2 className="text-2xl font-semibold tracking-tight text-slate-900">
                 {showForgotPassword
                   ? resetEmailSent
                     ? 'Check your email'
                     : 'Reset password'
                   : bootstrapped
-                    ? 'Sign in'
-                    : 'Create administrator account'}
+                    ? 'Professor Sign-In'
+                    : 'Create Administrator Account'}
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 {showForgotPassword
                   ? resetEmailSent
                     ? 'If the account exists, password reset instructions have been sent.'
-                    : 'Enter your email address and we’ll send reset instructions.'
+                    : 'Enter your email address and we will send reset instructions.'
                   : bootstrapped
                     ? ''
                     : 'Set up the first administrator account for this workspace.'}
@@ -414,14 +414,17 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  <button
-                    type="submit"
-                    disabled={loading || submitting}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                    {submitting ? 'Sending reset link...' : 'Send reset link'}
-                  </button>
+<button
+                  type="submit"
+                  disabled={loading || submitting}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting
+                    ? 'Processing...'
+                    : bootstrapped
+                      ? 'Sign In'
+                      : 'Create Administrator Account'}
+                </button>
 
                   <button
                     type="button"

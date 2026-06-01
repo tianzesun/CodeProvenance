@@ -61,19 +61,19 @@ const SIGNAL_LABELS = {
   vocabulary_richness: 'Vocabulary Diversity',
   whitespace_rhythm: 'Whitespace Rhythm',
   docstring_density: 'Docstring Density',
-  binoculars: 'Binoculars (Zero-shot)',
+  binoculars: 'Binoculars Detection',
 };
 
 const SIGNAL_DESCRIPTIONS = {
-  perplexity: 'LLMs produce lower-entropy token streams. High score = AI-like predictability.',
-  burstiness: 'Human code has irregular complexity bursts. Low burstiness = AI-like uniformity.',
-  stylometry: 'Comment formality, generic naming, type-hint saturation.',
-  pattern_library: '40+ regex fingerprints matching GPT-4 / Claude / Copilot patterns.',
-  structural_entropy: 'LLMs produce ASTs with very uniform node-type distributions.',
-  vocabulary_richness: 'Type-Token Ratio. LLMs reuse a smaller vocabulary of "safe" tokens.',
-  whitespace_rhythm: 'LLMs produce very regular blank-line spacing between functions.',
-  docstring_density: 'LLMs add docstrings to almost every function, including trivial ones.',
-  binoculars: 'State-of-the-art zero-shot detector (ICML 2024). Very low false-positive rate.',
+  perplexity: 'Token Entropy: measures unpredictability/diversity of token usage; unusual patterns may indicate assistance.',
+  burstiness: 'Code Burstiness: measures variation in code structure; lower uniformity may suggest assistance.',
+  stylometry: 'Style Profile: compares code style consistency; consistent patterns may indicate assistance.',
+  pattern_library: 'LLM Fingerprints: detects recurring patterns that may indicate assistance.',
+  structural_entropy: 'AST Uniformity: measures structural repetition; more repetition may suggest assistance.',
+  vocabulary_richness: 'Vocabulary Diversity: lower diversity may signal repetitive assistance.',
+  whitespace_rhythm: 'Whitespace Rhythm: formatting regularity; highly regular patterns may indicate assistance.',
+  docstring_density: 'Docstring Density: measures documentation presence. Not an assistance signal alone, but helps in combination.',
+  binoculars: 'Binoculars Detection: divergence-based detector; low values may indicate assistance.',
 };
 
 function SignalBar({ name, value, label }) {
@@ -83,7 +83,7 @@ function SignalBar({ name, value, label }) {
   const desc = SIGNAL_DESCRIPTIONS[name] || '';
 
   return (
-    <div className="group">
+    <div className="group relative">
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1.5 text-slate-600 font-medium">
           {label || SIGNAL_LABELS[name] || name}
@@ -93,13 +93,9 @@ function SignalBar({ name, value, label }) {
               onMouseEnter={() => setShowTip(true)}
               onMouseLeave={() => setShowTip(false)}
               className="relative text-slate-300 hover:text-slate-500"
+              aria-label={`Learn more about ${label || SIGNAL_LABELS[name] || name}`}
             >
               <Info size={11} />
-              {showTip && (
-                <div className="absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-xl">
-                  {desc}
-                </div>
-              )}
             </button>
           )}
         </div>
@@ -111,6 +107,12 @@ function SignalBar({ name, value, label }) {
           style={{ width: `${pct}%` }}
         />
       </div>
+      {showTip && desc && (
+        <div className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-xl">
+          <div className="font-semibold text-slate-700 mb-1">{label || SIGNAL_LABELS[name] || name}</div>
+          <div>{desc}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -184,7 +186,7 @@ function SubmissionCard({ entry }) {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">AI Probability</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Assistance Probability</div>
               <div className={`text-2xl font-black ${tone.text}`}>{formatPercent(prob)}</div>
             </div>
             <div className="text-right">
@@ -217,7 +219,9 @@ function SubmissionCard({ entry }) {
         )}
 
         {entry.error && (
-          <div className="mt-2 text-xs text-red-600">{entry.error}</div>
+          <div className="mt-2 text-xs text-red-600">
+            {typeof entry.error === 'string' ? entry.error : 'An error occurred'}
+          </div>
         )}
       </div>
 
@@ -228,7 +232,7 @@ function SubmissionCard({ entry }) {
           {Object.keys(metrics).length > 0 && (
             <div>
               <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
-                Code Characteristics
+                Code Analysis Metrics
               </div>
               <div className="grid gap-2 sm:grid-cols-2 text-sm">
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
@@ -236,7 +240,7 @@ function SubmissionCard({ entry }) {
                   <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.total_lines}</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Functions</div>
+                  <div className="text-xs text-slate-500">Function Definitions</div>
                   <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.functions}</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
@@ -244,7 +248,7 @@ function SubmissionCard({ entry }) {
                   <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.type_hints}</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Docstring Ratio</div>
+                  <div className="text-xs text-slate-500">Documentation Ratio</div>
                   <div className="mt-1 text-lg font-semibold text-slate-900">{Math.round((metrics.docstring_ratio || 0) * 100)}%</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
@@ -252,7 +256,7 @@ function SubmissionCard({ entry }) {
                   <div className="mt-1 text-lg font-semibold text-slate-900">{Math.round((metrics.comment_ratio || 0) * 100)}%</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Avg Line Length</div>
+                  <div className="text-xs text-slate-500">Average Line Length</div>
                   <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.average_line_length} chars</div>
                 </div>
               </div>
@@ -298,7 +302,7 @@ function SubmissionCard({ entry }) {
           {Object.keys(signals).length > 0 && (
             <div>
               <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
-                Signal Breakdown
+                Detection Signal Analysis
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {Object.entries(signals).map(([key, val]) => (
@@ -325,55 +329,6 @@ function SubmissionCard({ entry }) {
         </div>
       )}
     </div>
-  );
-}
-
-function SignalSummaryTable({ signalSummary }) {
-  if (!signalSummary || Object.keys(signalSummary).length === 0) return null;
-  return (
-    <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <div className="text-sm font-semibold text-slate-900">Signal Summary</div>
-        <div className="mt-1 text-xs text-slate-500">Batch averages and peaks across all submissions</div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-widest text-slate-400">Signal</th>
-              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-widest text-slate-400">Batch Average</th>
-              <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-widest text-slate-400">Peak</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {Object.entries(signalSummary).map(([key, data]) => {
-              const avg = Number(typeof data === 'object' ? data.average : data) || 0;
-              const peak = Number(typeof data === 'object' ? data.peak : data) || 0;
-              const tone = riskTone(avg);
-              const pct = Math.round(avg * 100);
-              return (
-                <tr key={key} className="hover:bg-slate-50">
-                  <td className="px-5 py-3 font-medium text-slate-700">
-                    {SIGNAL_LABELS[key] || key.replace(/_/g, ' ')}
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-2 w-32 overflow-hidden rounded-full bg-slate-100">
-                        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className={`text-xs font-bold ${tone.text}`}>{pct}%</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 text-right text-xs font-bold text-slate-700">
-                    {Math.round(peak * 100)}%
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
   );
 }
 
@@ -443,20 +398,20 @@ export default function AIDetectorReportPage() {
                 className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-600"
               >
                 <ArrowLeft size={15} />
-                AI Detector
+                Academic Integrity Assessment
               </Link>
               <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
                     <Bot size={13} />
-                    AI Detector Report
+                    AI-Generated Code Analysis Report
                   </div>
                   <h1 className="font-display mt-4 text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                    {job.assignment_name || 'AI Generated Code Review'}
+                    {job.assignment_name || 'AI-Generated Code Analysis Report'}
                   </h1>
                   <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
                     {job.course_name || 'Course'} &middot; {getCreatedAt(job.created_at)} &middot;{' '}
-                    {job.file_count || submissions.length} file
+                    {job.file_count || submissions.length} submission
                     {(job.file_count || submissions.length) === 1 ? '' : 's'}
                   </p>
                 </div>
@@ -466,7 +421,7 @@ export default function AIDetectorReportPage() {
                     className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Download size={16} />
-                    Download PDF
+                    Download PDF Report
                   </a>
                   <button
                     type="button"
@@ -474,7 +429,7 @@ export default function AIDetectorReportPage() {
                     className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Printer size={16} />
-                    Print
+                    Print Report
                   </button>
                   <div
                     className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold ${overallTone.border} ${overallTone.bg} ${overallTone.text}`}
@@ -487,29 +442,76 @@ export default function AIDetectorReportPage() {
             </div>
           </section>
 
-          {/* Metric chips */}
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Files Analysed" value={ai.total_files || 0} />
-            <MetricCard label="Flagged" value={ai.flagged_count || 0} highlight={ai.flagged_count > 0} />
-            <MetricCard label="Highest AI Probability" value={formatPercent(ai.highest_score)} />
-            <MetricCard label="Batch Average" value={formatPercent(ai.average_score)} />
+          {/* Key Findings and Distribution - side by side */}
+          <section className="grid gap-4 lg:grid-cols-2">
+            {/* Key Findings Section */}
+            {submissions.length > 0 && (
+              <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <div className="text-sm font-semibold text-slate-900">Key Findings</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Summary of assistance indicators across submissions
+                  </div>
+                </div>
+                <div className="p-5">
+                  <div className="grid gap-4 sm:grid-cols-3 text-sm">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
+                        Highest Probability
+                      </div>
+                      <div className={`mt-1 text-lg font-bold ${riskTone(submissions.reduce((max, s) => 
+                        (s.ai_probability || 0) > (max.ai_probability || 0) ? s : max, 
+                        { ai_probability: 0 }).ai_probability || 0) >= 0.7 ? 'text-red-700' : 
+                        submissions.reduce((max, s) => 
+                        (s.ai_probability || 0) > (max.ai_probability || 0) ? s : max, 
+                        { ai_probability: 0 }).ai_probability || 0 >= 0.4 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                        {formatPercent(submissions.reduce((max, s) => 
+                          (s.ai_probability || 0) > (max.ai_probability || 0) ? s : max, 
+                          { ai_probability: 0 }).ai_probability || 0)}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
+                        Most Indicative Signal
+                      </div>
+                      <div className="font-medium text-slate-900">
+                        {ai.highest_signal || 'Pattern Analysis'}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {(ai.highest_signal_value * 100 || 0).toFixed(1)}% confidence
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
+                        Recommended Action
+                      </div>
+                      <div className="font-medium text-slate-900">
+                        {highestScore >= 0.7 ? 'Schedule Review' : 
+                         highestScore >= 0.4 ? 'Monitor' : 'No Action'}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {highestScore >= 0.7 ? 'High assistance probability' : 
+                         highestScore >= 0.4 ? 'Review recommended' : 'Within normal range'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Distribution Bar */}
+            {ai.distribution && (
+              <DistributionBarSection distribution={ai.distribution} total={ai.total_files || submissions.length} />
+            )}
           </section>
-
-          {/* Distribution bar */}
-          {ai.distribution && (
-            <DistributionBar distribution={ai.distribution} total={ai.total_files || submissions.length} />
-          )}
-
-          {/* Signal summary table */}
-          <SignalSummaryTable signalSummary={ai.signal_summary} />
 
           {/* Submission evidence */}
           <section>
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
-                <div className="text-sm font-semibold text-slate-900">Submission Evidence</div>
+                <div className="text-sm font-semibold text-slate-900">Submission Analysis</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Click a card to expand signal breakdown and annotated code. AI results are review signals — not standalone misconduct findings.
+                  Detailed evidence for each submission. AI detection scores serve as review signals — not standalone misconduct determinations.
                 </div>
               </div>
             </div>
@@ -519,41 +521,18 @@ export default function AIDetectorReportPage() {
               ))}
               {submissions.length === 0 && (
                 <div className="rounded-2xl border border-slate-200 bg-white px-5 py-8 text-sm text-slate-500">
-                  No AI evidence was stored for this report.
+                  No AI detection evidence was stored for this assessment.
                 </div>
               )}
             </div>
           </section>
-
-          {/* Methodology note */}
-          <section className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm text-blue-700">
-            <div className="font-semibold mb-1">About the Detection Engine</div>
-            <p className="text-xs leading-6 text-blue-600">
-              IntegrityDesk fuses 8 independent signals: token entropy, code burstiness, stylometry profile,
-              LLM fingerprint library (40+ patterns), AST structural entropy, vocabulary richness,
-              whitespace rhythm, and docstring density. Scores are calibrated via sigmoid fusion.
-              A score above 70% warrants review; it is not proof of misconduct.
-            </p>
-          </section>
-
         </div>
       </div>
     </DashboardLayout>
   );
 }
 
-function MetricCard({ label, value, highlight = false }) {
-  return (
-    <div className={`rounded-2xl p-5 shadow-sm ring-1 ${highlight ? 'bg-red-50 ring-red-200' : 'bg-white ring-slate-200'}`}>
-      <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className={`mt-2 text-2xl font-black ${highlight ? 'text-red-700' : 'text-slate-950'}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function DistributionBar({ distribution, total }) {
+function DistributionBarSection({ distribution, total }) {
   const low = Number(distribution.low) || 0;
   const medium = Number(distribution.medium) || 0;
   const high = Number(distribution.high) || 0;
@@ -561,7 +540,7 @@ function DistributionBar({ distribution, total }) {
 
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-      <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Risk Distribution</div>
+      <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Assistance Probability Distribution</div>
       <div className="flex h-4 overflow-hidden rounded-full">
         {high > 0 && (
           <div className="bg-red-500 transition-all" style={{ width: `${(high / t) * 100}%` }} title={`High: ${high}`} />
@@ -574,9 +553,9 @@ function DistributionBar({ distribution, total }) {
         )}
       </div>
       <div className="mt-3 flex gap-5 text-xs text-slate-500">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />{high} High Risk</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />{medium} Needs Review</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />{low} Low Risk</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />{high} High</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />{medium} Medium</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />{low} Low</span>
       </div>
     </section>
   );
