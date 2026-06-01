@@ -11517,8 +11517,9 @@ async def download_ai_originality_pdf(job_id: str, request: Request):
     try:
         import weasyprint
 
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-        response = Response(content=pdf, media_type="application/pdf")
+        # WeasyPrint 60+ returns bytes directly from write_pdf()
+        pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+        response = Response(content=pdf_bytes, media_type="application/pdf")
     except Exception as exc:
         logger.warning("AI originality PDF fallback for %s: %s", job_id, exc)
         response = Response(
