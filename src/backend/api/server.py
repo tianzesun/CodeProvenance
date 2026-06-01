@@ -3858,6 +3858,172 @@ def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, 
     return job_dict
 
 
+def _extract_ai_evidence_patterns(code: str, language: str) -> Dict[str, Any]:
+    """Extract AI-specific code patterns that indicate AI generation.
+
+    Returns evidence patterns found in the code.
+    """
+    import re
+
+    patterns_found = {
+        "docstring_patterns": [],
+        "comment_patterns": [],
+        "type_hint_patterns": [],
+        "exception_handling": [],
+        "logging_statements": [],
+        "import_patterns": [],
+    }
+
+    lines = code.splitlines()
+
+    # Docstring patterns (AI often adds docstrings to every function)
+    docstring_pattern = r'^\s*("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\')'
+    for i, line in enumerate(lines):
+        if re.search(docstring_pattern, line):
+            patterns_found["docstring_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+
+    # Comment patterns (AI uses formal, generic comments)
+    comment_patterns = [
+        r"#\s*(Let's|Let us|We can|We will|We need to)",
+        r"#\s*(Here we|Here is|Here's|This function|This method|This class)",
+        r"#\s*(Initialize|Create|Define|Set up|Configure)",
+    ]
+    for i, line in enumerate(lines):
+        for pattern in comment_patterns:
+            if re.search(pattern, line):
+                patterns_found["comment_patterns"].append(
+                    {"line": i + 1, "text": line.strip()[:80]}
+                )
+                break
+
+    # Type hints (AI heavily uses type hints)
+    type_hint_pattern = r":\s*(Optional|Union|Dict|List|Tuple|Set|Any)\[|->.*:"
+    for i, line in enumerate(lines):
+        if re.search(type_hint_pattern, line):
+            patterns_found["type_hint_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+
+    # Exception handling (AI uses explicit exception handling)
+    exception_pattern = r"raise\s+(ValueError|TypeError|Exception|RuntimeError|KeyError)\s*\("
+    for i, line in enumerate(lines):
+        if re.search(exception_pattern, line):
+            patterns_found["exception_handling"].append({"line": i + 1, "text": line.strip()[:80]})
+
+    # Logging statements
+    logging_pattern = r"logging\.(debug|info|warning|error|critical)\s*\("
+    for i, line in enumerate(lines):
+        if re.search(logging_pattern, line):
+            patterns_found["logging_statements"].append({"line": i + 1, "text": line.strip()[:80]})
+
+    # Import patterns (AI uses many standard imports)
+    import_pattern = r"^import\s+|^from\s+\S+\s+import"
+    for i, line in enumerate(lines):
+        if re.search(import_pattern, line):
+            patterns_found["import_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+
+    # Filter out empty patterns
+    return {k: v for k, v in patterns_found.items() if v}
+
+
+def _generate_signal_interpretations(signals: Dict[str, float]) -> Dict[str, str]:
+    """Generate human-readable interpretations of signal scores.
+
+    Returns dictionary mapping signal names to interpretations.
+    """
+    interpretations = {}
+
+    signal_descriptions = {
+        "perplexity": (
+            "Token entropy - measures code predictability. "
+            "Low entropy (high score) suggests AI generation."
+        ),
+        "burstiness": (
+            "Code complexity variation - human code has irregular bursts. "
+            "Low burstiness (high score) suggests AI uniformity."
+        ),
+        "stylometry": (
+            "Code style profile - examines comments, naming, type hints. "
+            "Formal style (high score) suggests AI generation."
+        ),
+        "pattern_library": (
+            "LLM fingerprints - detects 40+ patterns from GPT-4, Claude, Copilot. "
+            "High score indicates AI-specific patterns."
+        ),
+        "structural_entropy": (
+            "AST uniformity - LLMs produce very uniform syntax trees. "
+            "High score suggests AI generation."
+        ),
+        "vocabulary_richness": (
+            "Token diversity - LLMs reuse a smaller vocabulary. "
+            "Low richness (high score) suggests AI generation."
+        ),
+        "whitespace_rhythm": (
+            "Blank-line spacing - LLMs produce very regular spacing. "
+            "High score suggests AI generation."
+        ),
+        "docstring_density": (
+            "Documentation prevalence - LLMs add docstrings to almost every function. "
+            "High score suggests AI generation."
+        ),
+        "binoculars": (
+            "Binoculars detector - state-of-the-art zero-shot detector (ICML 2024). "
+            "Very low false-positive rate."
+        ),
+    }
+
+    for signal_name, score in signals.items():
+        description = signal_descriptions.get(signal_name, "Signal analysis")
+        if score >= 0.7:
+            interpretation = f"🔴 STRONG: {description} Score: {score:.1%}"
+        elif score >= 0.5:
+            interpretation = f"🟡 MODERATE: {description} Score: {score:.1%}"
+        elif score >= 0.3:
+            interpretation = f"🟢 WEAK: {description} Score: {score:.1%}"
+        else:
+            interpretation = f"⚪ MINIMAL: {description} Score: {score:.1%}"
+
+        interpretations[signal_name] = interpretation
+
+    return interpretations
+
+
+def _compute_code_metrics(code: str) -> Dict[str, Any]:
+    """Compute basic code metrics for evidence display.
+
+    Returns dictionary with code statistics.
+    """
+    lines = code.splitlines()
+    non_empty_lines = [l for l in lines if l.strip()]
+    comment_lines = [l for l in lines if l.strip().startswith("#")]
+    docstring_lines = len([l for l in lines if '"""' in l or "'''" in l])
+
+    # Count functions and classes
+    import re
+
+    functions = len(re.findall(r"^\s*def\s+\w+", code, re.MULTILINE))
+    classes = len(re.findall(r"^\s*class\s+\w+", code, re.MULTILINE))
+
+    # Count type hints
+    type_hints = len(re.findall(r":\s*(Optional|Union|Dict|List|Tuple|Set|Any)\[|->", code))
+
+    # Average line length
+    avg_line_length = (
+        sum(len(l) for l in non_empty_lines) / len(non_empty_lines) if non_empty_lines else 0
+    )
+
+    return {
+        "total_lines": len(lines),
+        "non_empty_lines": len(non_empty_lines),
+        "comment_lines": len(comment_lines),
+        "docstring_lines": docstring_lines,
+        "functions": functions,
+        "classes": classes,
+        "type_hints": type_hints,
+        "average_line_length": round(avg_line_length, 1),
+        "comment_ratio": round(len(comment_lines) / max(1, len(non_empty_lines)), 2),
+        "docstring_ratio": round(docstring_lines / max(1, functions + classes), 2),
+    }
+
+
 def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     """Run AI detection on all submissions and aggregate results.
 
@@ -3900,6 +4066,12 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
             for i, ln in enumerate(code_lines)
         ]
 
+        # Extract evidence patterns from code
+        evidence_patterns = _extract_ai_evidence_patterns(code, language)
+
+        # Generate signal interpretations
+        signal_interpretations = _generate_signal_interpretations(signals)
+
         entries.append(
             {
                 "name": name,
@@ -3909,11 +4081,14 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
                 "status": _ai_status_label(ai_probability),
                 "signals": signals,
                 "signal_labels": signal_labels,
+                "signal_interpretations": signal_interpretations,
                 "indicators": [str(indicator) for indicator in (result.get("indicators") or [])][
                     :6
                 ],
                 "flagged_lines": flagged_lines[:30],
                 "annotated_snippet": annotated_snippet,
+                "evidence_patterns": evidence_patterns,
+                "code_metrics": _compute_code_metrics(code),
                 "error": str(result.get("error") or ""),
             }
         )

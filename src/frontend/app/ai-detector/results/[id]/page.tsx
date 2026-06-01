@@ -162,6 +162,8 @@ function SubmissionCard({ entry }) {
   const indicators = entry.indicators || [];
   const snippet = entry.annotated_snippet || [];
   const hasSnippet = snippet.length > 0;
+  const metrics = entry.code_metrics || {};
+  const patterns = entry.evidence_patterns || {};
 
   return (
     <div className={`rounded-2xl border ${tone.border} overflow-hidden`}>
@@ -222,6 +224,76 @@ function SubmissionCard({ entry }) {
       {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-slate-100 bg-white px-5 py-5 space-y-6">
+          {/* Code Metrics */}
+          {Object.keys(metrics).length > 0 && (
+            <div>
+              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+                Code Characteristics
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 text-sm">
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Total Lines</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.total_lines}</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Functions</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.functions}</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Type Hints</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.type_hints}</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Docstring Ratio</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{Math.round((metrics.docstring_ratio || 0) * 100)}%</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Comment Ratio</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{Math.round((metrics.comment_ratio || 0) * 100)}%</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Avg Line Length</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">{metrics.average_line_length} chars</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Evidence Patterns */}
+          {Object.keys(patterns).length > 0 && (
+            <div>
+              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+                AI-Specific Patterns Detected
+              </div>
+              <div className="space-y-2">
+                {Object.entries(patterns).map(([patternType, patternList]) => (
+                  <div key={patternType} className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-amber-900 capitalize">
+                        {patternType.replace(/_/g, ' ')}
+                      </div>
+                      <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">
+                        {Array.isArray(patternList) ? patternList.length : 0}
+                      </span>
+                    </div>
+                    {Array.isArray(patternList) && patternList.length > 0 && (
+                      <div className="mt-2 space-y-1 text-xs text-amber-800">
+                        {patternList.slice(0, 3).map((p, idx) => (
+                          <div key={idx} className="font-mono text-[11px]">
+                            Line {p.line}: <span className="text-amber-700">{p.text}</span>
+                          </div>
+                        ))}
+                        {Array.isArray(patternList) && patternList.length > 3 && (
+                          <div className="text-amber-700">+{patternList.length - 3} more</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Signal breakdown */}
           {Object.keys(signals).length > 0 && (
             <div>
@@ -245,7 +317,7 @@ function SubmissionCard({ entry }) {
           {hasSnippet && (
             <div>
               <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
-                Annotated Code
+                Annotated Code (First 60 Lines)
               </div>
               <CodeSnippet lines={snippet} />
             </div>
