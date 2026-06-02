@@ -7,14 +7,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/apiClient';
+import { ButtonLink, PageHeader, ActionButton, Card } from '@/components/saas/SaaSPrimitives';
 import {
   AlertTriangle,
   CheckCircle2,
-  Download,
   Filter,
   Search,
   ShieldCheck,
-  XCircle,
   X,
   TreePine,
   GitBranch,
@@ -546,140 +545,128 @@ export default function ResultsPage() {
     );
   }
 
-  return (
+return (
     <DashboardLayout>
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <div className="max-w-none space-y-4">
-          {/* Results Header — Summary first, then Sort, then Filters */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            {/* Assignment context (from DB wiring) */}
-            <div className="mb-3 flex items-start justify-between">
-              <div>
-                <div className="text-xl font-semibold text-slate-950">
-                  {getAssignmentTitle(job)}
-                </div>
-                {job?.course_name && (
-                  <div className="text-sm text-slate-500">{job.course_name}</div>
-                )}
-              </div>
-              <div className="text-right text-xs text-slate-500">
-                {job?.created_at ? new Date(job.created_at).toLocaleString() : ''}
-              </div>
-            </div>
+      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
 
-             {/* 1. Summary chips (understand the result set first) */}
-             <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                 {job?.file_count || Object.keys(submissions).length || 0} submissions
-               </div>
-               <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                 {results.length} pair{results.length === 1 ? '' : 's'}
-               </div>
-               <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
-                 {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
-               </div>
-               <div className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
-                 {tableData.length} shown
-               </div>
-             </div>
+        {/* ── Header ──────────────────────────────────────────────────────────── */}
+        <PageHeader
+          eyebrow="Review workspace"
+          title={getAssignmentTitle(job)}
+          description={job?.course_name ? `${job.course_name} · ${job?.created_at ? new Date(job.created_at).toLocaleString() : ''}` : ''}
+          eyebrowStyle="badge"
+        />
 
-            {/* 2. Sort + 3. Filters + 4. Reset — grouped cleanly */}
-            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-              {/* Sort (most important action after seeing summary) */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Sort by</span>
-                <select
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
-                >
-                  <option value="unreviewed">Unreviewed first</option>
-                  <option value="similarity">Highest similarity</option>
-                  <option value="evidence">Most evidence</option>
-                  <option value="verdict">By verdict priority</option>
-                </select>
-              </div>
+        {/* ── Summary chips ────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            {job?.file_count || Object.keys(submissions).length || 0} submissions
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            {results.length} pair{results.length === 1 ? '' : 's'}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+            {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+            {tableData.length} shown
+          </span>
+        </div>
 
-              {/* Min similarity filter */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Min similarity</span>
-                <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={minSimilarity}
-                    onChange={(e) => setMinSimilarity(Number(e.target.value))}
-                    className="w-24 accent-blue-600"
-                  />
-                  <span className="w-10 text-right font-mono text-xs font-medium">{Math.round(minSimilarity * 100)}%</span>
-                </div>
-              </div>
+        {/* ── Filters bar ──────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Sort (most important action after seeing summary) */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Sort by</span>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+            >
+              <option value="unreviewed">Unreviewed first</option>
+              <option value="similarity">Highest similarity</option>
+              <option value="evidence">Most evidence</option>
+              <option value="verdict">By verdict priority</option>
+            </select>
+          </div>
 
-              {/* Status filter */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Status</span>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
-                >
-                  <option value="all">All statuses</option>
-                  <option value="unreviewed">Unreviewed</option>
-                  <option value="needs_review">Needs review</option>
-                  <option value="dismissed">Dismissed</option>
-                </select>
-              </div>
-
-              {/* Search (secondary) */}
-              <div className="relative flex-1 min-w-[180px] max-w-xs">
-                <Search size={13} className="absolute left-3 top-2 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search files..."
-                  className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none"
-                />
-              </div>
-
-              {/* Reset — last and secondary */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchTerm('');
-                  setMinSimilarity(0.5);
-                  setStatusFilter('all');
-                  setSortMode('unreviewed');
-                }}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
-              >
-                <Filter size={12} /> Reset filters
-              </button>
+          {/* Min similarity filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Min similarity</span>
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 dark:border-slate-800 dark:bg-slate-900">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={minSimilarity}
+                onChange={(e) => setMinSimilarity(Number(e.target.value))}
+                className="w-24 accent-blue-600"
+              />
+              <span className="w-10 text-right font-mono text-xs font-medium">{Math.round(minSimilarity * 100)}%</span>
             </div>
           </div>
 
-          {/* === Ranked Suspicious Pairs Table (hidden when viewing a pair in full-screen detail) === */}
-         {!drawerOpen && (
-           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-950">Suspicious Pairs — Ranked</div>
-              </div>
-              <div className="text-xs text-slate-500">
+          {/* Status filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+            >
+              <option value="all">All statuses</option>
+              <option value="unreviewed">Unreviewed</option>
+              <option value="needs_review">Needs review</option>
+              <option value="dismissed">Dismissed</option>
+            </select>
+          </div>
+
+          {/* Search (secondary) */}
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search size={13} className="absolute left-3 top-2 text-slate-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search files..."
+              className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+            />
+          </div>
+
+          {/* Reset — last and secondary */}
+          <button
+            type="button"
+            onClick={() => {
+              setSearchTerm('');
+              setMinSimilarity(0.5);
+              setStatusFilter('all');
+              setSortMode('unreviewed');
+            }}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900"
+          >
+<Filter size={12} /> Reset filters
+          </button>
+        </div>
+
+        {/* ── Ranked Suspicious Pairs Table ──────────────────────────────────── */}
+        {!drawerOpen && (
+          <Card className="overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+              <h2 className="text-sm font-semibold text-slate-950 dark:text-white">Suspicious Pairs — Ranked</h2>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
                 {tableData.length} pairs shown
               </div>
             </div>
 
             {tableData.length === 0 ? (
-              <div className="p-8 text-center text-sm text-slate-500">
+              <div className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 No pairs match the current filters. Try lowering the similarity threshold or clearing the search.
               </div>
             ) : (
               <div className="max-h-[520px] overflow-auto">
                 <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
-                  <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-900/50 dark:text-slate-400">
                     <tr>
                       <th className="w-12 px-4 py-3">#</th>
                       <th className="w-[26%] px-4 py-3">Submission A</th>
@@ -688,26 +675,26 @@ export default function ResultsPage() {
                       <th className="w-28 px-4 py-3">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {tableData.map((row) => {
                       const isActive = pairKey(row) === pairKey(activeResult);
                       const status = row._status || 'unreviewed';
                       const statusTone =
                         status === 'dismissed'
-                          ? 'bg-slate-100 text-slate-600'
+                          ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                           : status === 'needs_review' || status === 'confirmed'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-blue-100 text-blue-700';
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
 
                       return (
                         <tr
                           key={row._key}
                           onClick={() => openDrawerFor(row)}
-                          className={`cursor-pointer transition hover:bg-slate-50 ${isActive ? 'bg-blue-50/60' : ''}`}
+                          className={`cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/50 ${isActive ? 'bg-blue-50/60 dark:bg-blue-900/20' : ''}`}
                         >
-                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{row._denseRank}</td>
-                          <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_a}>{row.file_a}</td>
-                          <td className="truncate px-4 py-3 font-medium text-slate-950" title={row.file_b}>{row.file_b}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{row._denseRank}</td>
+                          <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_a}>{row.file_a}</td>
+                          <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_b}>{row.file_b}</td>
                           <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
                           </td>
@@ -723,168 +710,161 @@ export default function ResultsPage() {
                 </table>
               </div>
             )}
-           </div>
-           )}
+          </Card>
+        )}
 
-           {/* === Full-screen Pair Detail View (side-by-side comparison) === */}
-           {drawerOpen && activeResult ? (
-             <div className="space-y-4">
-{/* Detail Header - full width */}
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pair Detail Inspector</div>
-                       <div className="mt-1 text-xl font-semibold text-slate-950">
-                         {activeResult.file_a} vs {activeResult.file_b}
-                       </div>
-                       <div className="mt-1 flex items-center gap-2">
-                         <VerdictBadge verdict={activeResult.verdict} />
-                         <span className="text-sm text-slate-500">{confidenceDisplay}% confidence</span>
-                       </div>
-                    </div>
-
-                   <div className="flex flex-wrap gap-2">
-                     <button
-                       type="button"
-                       onClick={() => updateActivePairStatus('needs_review')}
-                       disabled={saving}
-                       className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                     >
-                       <ShieldCheck size={15} />
-                       Mark for Review
-                     </button>
-                     <button
-                       type="button"
-                       onClick={() => updateActivePairStatus('dismissed')}
-                       disabled={saving}
-                       className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
-                     >
-                       <XCircle size={15} />
-                       Dismiss
-                     </button>
-                     <a
-                       href={`/report/${id}/committee`}
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                     >
-                       Open Full Report
-                     </a>
-                     <button
-                       onClick={closeDrawer}
-                       className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                     >
-                       ← Back to all pairs
-                     </button>
-                   </div>
-                 </div>
-
-                  {/* Evidence Tree */}
-                  <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-                    <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950">
-                      <TreePine size={16} className="text-blue-600" />
-                      Evidence Tree
-                    </div>
-                    <EvidenceTreeNode node={evidenceTree} />
+        {/* ── Full-screen Pair Detail View ────────────────────────────────────── */}
+        {drawerOpen && activeResult ? (
+          <div className="space-y-4">
+            <Card>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Pair Detail Inspector</div>
+                  <div className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">
+                    {activeResult.file_a} vs {activeResult.file_b}
                   </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <VerdictBadge verdict={activeResult.verdict} />
+                    <span className="text-sm text-slate-500 dark:text-slate-400">{confidenceDisplay}% confidence</span>
+                  </div>
+                </div>
 
-                  {/* Evidence Blocks - matching code blocks between submissions */}
-                  {activeResult?.matching_blocks && activeResult.matching_blocks.length > 0 && (
-                    <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-                      <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950">
-                        <GitBranch size={16} className="text-purple-600" />
-                        Evidence Blocks
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton
+                    variant="primary"
+                    icon={ShieldCheck}
+                    onClick={() => updateActivePairStatus('needs_review')}
+                    disabled={saving}
+                  >
+                    Mark for Review
+                  </ActionButton>
+                  <ActionButton
+                    variant="secondary"
+                    icon={X}
+                    onClick={() => updateActivePairStatus('dismissed')}
+                    disabled={saving}
+                  >
+                    Dismiss
+                  </ActionButton>
+                  <a
+                    href={`/report/${id}/committee`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
+                  >
+                    Open Full Report
+                  </a>
+                  <button
+                    onClick={closeDrawer}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+                  >
+                    ← Back to all pairs
+                  </button>
+                </div>
+              </div>
+            </Card>
+
+            {/* Evidence Tree */}
+            <Card>
+              <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950 dark:text-white">
+                <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
+                Evidence Tree
+              </div>
+              <EvidenceTreeNode node={evidenceTree} />
+            </Card>
+
+            {/* Evidence Blocks - matching code blocks between submissions */}
+            {activeResult?.matching_blocks && activeResult.matching_blocks.length > 0 && (
+              <Card>
+                <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950 dark:text-white">
+                  <GitBranch size={16} className="text-purple-600 dark:text-purple-400" />
+                  Evidence Blocks
+                </div>
+                <div className="space-y-3">
+                  {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
+                    <div key={idx} className="rounded-lg border border-purple-100 bg-purple-50 p-3 dark:border-purple-800/30 dark:bg-purple-900/20">
+                      <div className="flex items-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-400 mb-2">
+                        <span>Block {idx + 1}</span>
+                        <span className="rounded bg-purple-100 px-2 py-0.5 dark:bg-purple-800/30 dark:text-purple-300">
+                          {Math.round((block.similarity || 0.75) * 100)}% match
+                        </span>
                       </div>
-                      <div className="space-y-3">
-                        {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
-                          <div key={idx} className="rounded-lg border border-purple-100 bg-purple-50 p-3">
-                            <div className="flex items-center gap-2 text-xs font-medium text-purple-700 mb-2">
-                              <span>Block {idx + 1}</span>
-                              <span className="px-2 py-0.5 bg-purple-100 rounded">
-                                {Math.round((block.similarity || 0.75) * 100)}% match
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-1 gap-2 text-xs">
-                              <div>
-                                <span className="text-slate-500">File A lines:</span>
-                                <span className="ml-1 font-mono text-slate-700">{block.lines_a || 'N/A'}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-500">File B lines:</span>
-                                <span className="ml-1 font-mono text-slate-700">{block.lines_b || 'N/A'}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        {activeResult.matching_blocks.length > 5 && (
-                          <div className="text-xs text-slate-500">
-                            +{activeResult.matching_blocks.length - 5} more blocks
-                          </div>
-                        )}
+                      <div className="grid grid-cols-1 gap-2 text-xs">
+                        <div>
+                          <span className="text-slate-500 dark:text-slate-400">File A lines:</span>
+                          <span className="ml-1 font-mono text-slate-700 dark:text-slate-300">{block.lines_a || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 dark:text-slate-400">File B lines:</span>
+                          <span className="ml-1 font-mono text-slate-700 dark:text-slate-300">{block.lines_b || 'N/A'}</span>
+                        </div>
                       </div>
+                    </div>
+                  ))}
+                  {activeResult.matching_blocks.length > 5 && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      +{activeResult.matching_blocks.length - 5} more blocks
                     </div>
                   )}
-
-                  {/* Evidence chips (simplified view) */}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {evidenceTypes.map((item) => (
-                      <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-
-                 </div>
-
-{/* Side-by-side code comparison - full screen width */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <CodePanel
-                    title={activeResult?.file_a || 'Student A'}
-                    code={leftCode}
-                    highlights={leftHighlights}
-                    panelRef={leftRef}
-                    onScroll={() => syncScroll(leftRef, rightRef)}
-                  />
-                  <CodePanel
-                    title={activeResult?.file_b || 'Student B'}
-                    code={rightCode}
-                    highlights={rightHighlights}
-                    panelRef={rightRef}
-                    onScroll={() => syncScroll(rightRef, leftRef)}
-                  />
                 </div>
+              </Card>
+            )}
 
-                {/* Similarity Legend */}
-                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-red-500/30 border border-red-400/50"></span>
-                    High similarity (75%+)
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-amber-500/25 border border-amber-400/40"></span>
-                    Moderate similarity (50-74%)
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-emerald-500/20 border border-emerald-400/30"></span>
-                    Low similarity (30-49%)
-                  </span>
-                </div>
+            {/* Evidence chips (simplified view) */}
+            <div className="flex flex-wrap gap-2">
+              {evidenceTypes.map((item) => (
+                <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
+                  {item}
+                </span>
+              ))}
+            </div>
 
-               {job?.review_notes && (
-                 <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
-                   <div className="font-semibold text-slate-950 mb-1">Review Note</div>
-                   <div className="text-slate-600">{job.review_notes}</div>
-                 </div>
-               )}
+            {/* Side-by-side code comparison */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <CodePanel
+                title={activeResult?.file_a || 'Student A'}
+                code={leftCode}
+                highlights={leftHighlights}
+                panelRef={leftRef}
+                onScroll={() => syncScroll(leftRef, rightRef)}
+              />
+              <CodePanel
+                title={activeResult?.file_b || 'Student B'}
+                code={rightCode}
+                highlights={rightHighlights}
+                panelRef={rightRef}
+                onScroll={() => syncScroll(rightRef, leftRef)}
+              />
+            </div>
 
-               <div className="text-center text-[11px] text-slate-500">
-                 Changes update the pair status immediately. Use "Back to all pairs" to return to the ranked list.
-               </div>
-             </div>
-           ) : (
-             /* Ranked table is shown above when not in detail view */
-             null
-           )}
+            {/* Similarity Legend */}
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-3 rounded-sm bg-red-500/30 border border-red-400/50"></span>
+                High similarity (75%+)
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-3 rounded-sm bg-amber-500/25 border border-amber-400/40"></span>
+                Moderate similarity (50-74%)
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-3 rounded-sm bg-emerald-500/20 border border-emerald-400/30"></span>
+                Low similarity (30-49%)
+              </span>
+            </div>
+
+            {job?.review_notes && (
+              <Card>
+                <div className="font-semibold text-slate-950 dark:text-white mb-1">Review Note</div>
+                <div className="text-sm text-slate-600 dark:text-slate-400">{job.review_notes}</div>
+              </Card>
+            )}
+
+            <div className="text-center text-[11px] text-slate-500 dark:text-slate-400">
+              Changes update the pair status immediately. Use "Back to all pairs" to return to the ranked list.
+            </div>
+          </div>
+        ) : null}
         </div>
       </div>
     </DashboardLayout>
@@ -912,11 +892,11 @@ const CheckRow = ({ title, detail }) => (
 
 function EvidenceTreeNode({ node, depth = 0 }) {
   const statusColors = {
-    strong: 'text-red-600 bg-red-50 border-red-100',
-    moderate: 'text-amber-600 bg-amber-50 border-amber-200',
-    weak: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+    strong: 'text-red-600 bg-red-50 border-red-100 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800/30',
+    moderate: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-900/20 dark:border-amber-800/30',
+    weak: 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/20 dark:border-emerald-800/30',
   };
-  const statusColor = statusColors[node.status] || 'text-slate-600 bg-slate-50';
+  const statusColor = statusColors[node.status] || 'text-slate-600 bg-slate-50 dark:text-slate-400 dark:bg-slate-900/50 dark:border-slate-800/50';
   
   return (
     <div className={`relative ${depth > 0 ? 'ml-4 pl-4 before:absolute before:left-2 before:top-0 before:bottom-0 before:border-slate-200' : ''}`}>
@@ -929,16 +909,16 @@ function EvidenceTreeNode({ node, depth = 0 }) {
             <BookOpen size={14} className="shrink-0" />
           )}
           <div className="flex-1">
-            <div className="font-semibold text-sm">{node.name}</div>
-            {node.description && (
-              <div className="text-xs text-slate-500 mt-1">{node.description}</div>
-            )}
-            {node.score !== undefined && (
-              <div className="flex items-center gap-2 mt-1 text-xs">
-                <span className="font-medium">{node.score}%</span>
-                <span className="text-slate-400">similarity</span>
-              </div>
-            )}
+<div className="font-semibold text-sm dark:text-white">{node.name}</div>
+             {node.description && (
+               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{node.description}</div>
+             )}
+             {node.score !== undefined && (
+               <div className="flex items-center gap-2 mt-1 text-xs">
+                 <span className="font-medium dark:text-white">{node.score}%</span>
+                 <span className="text-slate-400 dark:text-slate-500">similarity</span>
+               </div>
+             )}
           </div>
         </div>
       </div>
