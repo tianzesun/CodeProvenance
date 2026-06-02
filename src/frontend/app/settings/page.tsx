@@ -1,11 +1,40 @@
-// @ts-nocheck
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { AlertTriangle, Cpu, Database, Save, Shield, Zap, Bot, GitMerge, Target, Eye, ExternalLink, Activity, ChevronDown, FolderTree, Brain, Workflow, Server, RefreshCw, CheckCircle, XCircle, FileCog, Loader2 } from 'lucide-react';
+import { ButtonLink, PageHeader } from '@/components/saas/SaaSPrimitives';
+import {
+  AlertTriangle,
+  Bot,
+  ChevronDown,
+  Cpu,
+  Database,
+  ExternalLink,
+  FileCog,
+  FolderTree,
+  GitMerge,
+  Landmark,
+  Loader2,
+  RefreshCw,
+  Save,
+  Shield,
+  Target,
+  Zap,
+  Brain,
+  Workflow,
+  Server,
+  Activity,
+  Eye,
+  XCircle,
+  CheckCircle,
+  FileText,
+  BarChart3,
+  Users,
+} from 'lucide-react';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
 
 const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
@@ -27,22 +56,22 @@ const MAIN_TABS = [
 
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
-  const [settings, setSettings] = useState(null);
-  const [activeTab, setActiveTab] = useState('detection');
-  const [webhookUrl, setWebhookUrl] = useState('');
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const [settings, setSettings] = useState<any | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('detection');
+  const [webhookUrl, setWebhookUrl] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showEngineWeights, setShowEngineWeights] = useState(false);
   const [showPerformanceAdvanced, setShowPerformanceAdvanced] = useState(false);
-  const [validationResult, setValidationResult] = useState(null);
-  const [validationLoading, setValidationLoading] = useState(false);
-  const [calibrating, setCalibrating] = useState(false);
-  const [showCalibrateConfirm, setShowCalibrateConfirm] = useState(false);
-  const [engineConfig, setEngineConfig] = useState(null);
-  const [configLoading, setConfigLoading] = useState(false);
+  const [validationResult, setValidationResult] = useState<any | null>(null);
+  const [validationLoading, setValidationLoading] = useState<boolean>(false);
+  const [calibrating, setCalibrating] = useState<boolean>(false);
+  const [showCalibrateConfirm, setShowCalibrateConfirm] = useState<boolean>(false);
+  const [engineConfig, setEngineConfig] = useState<any | null>(null);
+  const [configLoading, setConfigLoading] = useState<boolean>(false);
 
-  const [accordions, setAccordions] = useState({
+  const [accordions, setAccordions] = useState<Record<string, boolean>>({
     systemLimits: true,
     publicSources: true,
     legacyTools: false,
@@ -59,7 +88,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (authLoading || !user) return;
-    axios.get('/api/settings')
+    apiClient.get('/api/settings')
       .then((res) => {
         setSettings(res.data);
         setWebhookUrl(res.data.webhook_url || '');
@@ -71,16 +100,19 @@ export default function SettingsPage() {
   const catalog = settings?.professor_profile_catalog || {};
   const applied = settings?.applied_professor_profile || {};
   const engineWeightTotal = useMemo(
-    () => Object.values(settings?.engine_weights || {}).reduce((sum, weight) => sum + Number(weight || 0), 0),
+    () => {
+      const weights = settings?.engine_weights || {};
+      return Object.values(weights).reduce((sum: number, weight: unknown) => sum + Number(weight || 0), 0);
+    },
     [settings?.engine_weights],
   );
 
-  const updateSetting = (key, value) => {
-    setSettings((current) => ({ ...current, [key]: value }));
+  const updateSetting = (key: string, value: unknown) => {
+    setSettings((current: any) => ({ ...current, [key]: value }));
   };
 
-  const updateProfile = (key, value) => {
-    setSettings((current) => ({
+  const updateProfile = (key: string, value: unknown) => {
+    setSettings((current: any) => ({
       ...current,
       professor_profile: {
         ...(current?.professor_profile || DEFAULT_PROFILE),
@@ -92,9 +124,9 @@ export default function SettingsPage() {
   const validateConfig = async () => {
     setValidationLoading(true);
     try {
-      const res = await axios.get('/api/settings/validation');
+      const res = await apiClient.get('/api/settings/validation');
       setValidationResult(res.data);
-    } catch (err) {
+    } catch (err: any) {
       setValidationResult({ issues: ['Failed to validate configuration: ' + (err?.response?.data?.detail || err.message)] });
     } finally {
       setValidationLoading(false);
@@ -104,7 +136,7 @@ export default function SettingsPage() {
   const loadEngineConfig = async () => {
     setConfigLoading(true);
     try {
-      const res = await axios.get('/api/settings/engine-config');
+      const res = await apiClient.get('/api/settings/engine-config');
       setEngineConfig(res.data);
     } catch {
       setEngineConfig(null);
@@ -116,14 +148,14 @@ export default function SettingsPage() {
   const triggerCalibration = async () => {
     setCalibrating(true);
     try {
-      const res = await axios.post('/api/settings/calibrate');
+      const res = await apiClient.post('/api/settings/calibrate');
       setSuccess('Calibration completed: ' + (res.data?.message || 'OK'));
       setTimeout(() => setSuccess(null), 5000);
       // Refresh settings & engine config after calibration
-      const fresh = await axios.get('/api/settings');
+      const fresh = await apiClient.get('/api/settings');
       setSettings(fresh.data);
       loadEngineConfig();
-    } catch (err) {
+    } catch (err: any) {
       setError(err?.response?.data?.detail || 'Calibration failed');
     } finally {
       setCalibrating(false);
@@ -162,12 +194,12 @@ export default function SettingsPage() {
         audit_retention_days: settings.audit_retention_days,
         debug_mode: settings.debug_mode,
       };
-      await axios.patch('/api/settings', payload);
-      const fresh = await axios.get('/api/settings');
+      await apiClient.patch('/api/settings', payload);
+      const fresh = await apiClient.get('/api/settings');
       setSettings(fresh.data);
       setSuccess('Settings saved. Recommended profile applied.');
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
+    } catch (err: any) {
       setError(err?.response?.data?.detail || 'Failed to save settings');
     } finally {
       setSaving(false);
@@ -186,15 +218,11 @@ export default function SettingsPage() {
     <DashboardLayout requiredRole="admin">
       <div className="max-w-none space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         {/* Header */}
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="text-sm font-medium text-slate-500">Settings</div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Professor-friendly detection settings</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically.
-              </p>
-            </div>
+        <PageHeader
+          eyebrow="Settings"
+          title="Professor-friendly detection settings"
+          description="Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically."
+          action={
             <button
               type="button"
               onClick={saveSettings}
@@ -204,8 +232,9 @@ export default function SettingsPage() {
               <Save size={16} />
               {saving ? 'Saving...' : 'Save Settings'}
             </button>
-          </div>
-        </section>
+          }
+          eyebrowStyle="badge"
+        />
 
         {/* Notifications */}
         {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
@@ -515,9 +544,9 @@ export default function SettingsPage() {
                 />
                 <div className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
                   <span className="font-semibold">Current threshold: </span>
-                  {profile.sensitivity === 'conservative' && '&ge;84% similarity - best for formal investigations'}
-                  {profile.sensitivity === 'balanced' && '&ge;75% similarity - recommended default'}
-                  {profile.sensitivity === 'strict' && '&ge;64% similarity - shows more cases for early triage'}
+                  {profile.sensitivity === 'conservative' && '\u226584% similarity - best for formal investigations'}
+                  {profile.sensitivity === 'balanced' && '\u226575% similarity - recommended default'}
+                  {profile.sensitivity === 'strict' && '\u226564% similarity - shows more cases for early triage'}
                 </div>
               </SettingsGroup>
 
@@ -635,7 +664,7 @@ export default function SettingsPage() {
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             {Object.entries(applied.weights || {}).map(([key, value]) => (
                               <span key={key} className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                                {key}: {((value) * 100).toFixed(0)}%
+                                {key}: {((value as number) * 100).toFixed(0)}%
                               </span>
                             ))}
                           </div>
@@ -646,7 +675,7 @@ export default function SettingsPage() {
 
                   {applied.warnings?.length > 0 && (
                     <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-                      {applied.warnings.map((warning) => <div key={warning}>{warning}</div>)}
+                      {applied.warnings.map((warning: string) => <div key={warning}>{warning}</div>)}
                     </section>
                   )}
                 </div>
@@ -671,11 +700,11 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">Sensitivity</span>
-                        <span className="font-semibold text-slate-900">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="font-semibold text-slate-900">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">AI Rewrite Detection</span>
-                        <span className="font-semibold text-slate-900">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="font-semibold text-slate-900">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">Starter Code</span>
@@ -832,10 +861,10 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                {validationResult && (
+{validationResult.issues && (
                   <div className="mt-4 space-y-2">
-                    {validationResult.issues?.length > 0 ? (
-                      validationResult.issues.map((issue, i) => (
+                    {validationResult.issues.length > 0 ? (
+                      validationResult.issues.map((issue: string, i: number) => (
                         <div key={i} className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                           <XCircle size={16} className="mt-0.5 shrink-0" />
                           <span>{issue}</span>
@@ -938,7 +967,7 @@ export default function SettingsPage() {
   );
 }
 
-function Accordion({ title, description, isOpen, onToggle, children }) {
+function Accordion({ title, description, isOpen, onToggle, children }: { title: string; description?: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <button
@@ -966,7 +995,7 @@ function Accordion({ title, description, isOpen, onToggle, children }) {
   );
 }
 
-function SettingsGroup({ title, description, children, icon: Icon }) {
+function SettingsGroup({ title, description, children, icon: Icon }: { title: string; description: string; children: React.ReactNode; icon?: React.ElementType }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start gap-3">
@@ -981,7 +1010,7 @@ function SettingsGroup({ title, description, children, icon: Icon }) {
   );
 }
 
-function OptionGrid({ options, value, onChange }) {
+function OptionGrid({ options, value, onChange }: { options: { id: string; label: string; description: string }[]; value: string; onChange: (id: string) => void }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {options.map((option) => (
@@ -1000,7 +1029,7 @@ function OptionGrid({ options, value, onChange }) {
   );
 }
 
-function SegmentedOptions({ options, value, onChange }) {
+function SegmentedOptions({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) {
   return (
     <div className="flex flex-wrap gap-2">
       {options.map((option) => (
@@ -1018,7 +1047,7 @@ function SegmentedOptions({ options, value, onChange }) {
   );
 }
 
-function AdvancedSlider({ label, value, onChange }) {
+function AdvancedSlider({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   return (
     <div className="rounded-xl border border-slate-200 p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -1030,7 +1059,7 @@ function AdvancedSlider({ label, value, onChange }) {
   );
 }
 
-function TextInput({ label, value, onChange, type = 'text', placeholder = '' }) {
+function TextInput({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; placeholder?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
@@ -1045,7 +1074,7 @@ function TextInput({ label, value, onChange, type = 'text', placeholder = '' }) 
   );
 }
 
-function TextAreaInput({ label, value, onChange, placeholder = '' }) {
+function TextAreaInput({ label, value, onChange, placeholder = '' }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
@@ -1060,7 +1089,7 @@ function TextAreaInput({ label, value, onChange, placeholder = '' }) {
   );
 }
 
-function SelectInput({ label, value, options, onChange }) {
+function SelectInput({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (value: string) => void }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
@@ -1075,7 +1104,7 @@ function SelectInput({ label, value, options, onChange }) {
   );
 }
 
-function Notice({ children, tone, icon: Icon }) {
+function Notice({ children, tone, icon: Icon }: { children: React.ReactNode; tone: 'red' | 'green'; icon: React.ElementType }) {
   const className = tone === 'red'
     ? 'border-red-200 bg-red-50 text-red-700'
     : 'border-emerald-200 bg-emerald-50 text-emerald-700';
