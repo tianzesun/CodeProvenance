@@ -15,6 +15,7 @@ export default function CoursesPage() {
           title="Course workspaces built for teaching teams."
           description="Each course keeps assignments, flagged cases, prior-term memory, and reports in one clean place."
           action={<ButtonLink href="/upload?mode=zip" icon={FileUp}>Upload New Assignment</ButtonLink>}
+          eyebrowStyle="badge"
         />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
