@@ -5,6 +5,62 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 
+interface PageHeaderProps {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
+interface CardProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+interface CardHeaderProps {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
+interface StatCardProps {
+  label: string;
+  value: string;
+  detail?: string;
+  icon?: React.ElementType;
+  tone?: 'slate' | 'blue' | 'red' | 'green' | 'amber';
+}
+
+interface ButtonLinkProps {
+  href: string;
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary';
+  icon?: React.ElementType;
+}
+
+interface ActionButtonProps {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary';
+  icon?: React.ElementType;
+  onClick?: () => void;
+}
+
+interface RiskBadgeProps {
+  value: number | string;
+  label?: string;
+}
+
+interface StatusBadgeProps {
+  status: string;
+}
+
+interface EmptyStateProps {
+  title: string;
+  description: string;
+  href?: string;
+  action?: string;
+}
+
 export const fadeUp = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
@@ -15,17 +71,21 @@ export function PageShell({ children }) {
   return <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>;
 }
 
-export function PageHeader({ eyebrow, title, description, action }) {
+export function PageHeader({ eyebrow, title, description, action }: PageHeaderProps) {
   return (
     <motion.section
       {...fadeUp}
-      className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm"
+      className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
     >
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-3xl">
-          {eyebrow && <div className="text-sm font-medium text-slate-500">{eyebrow}</div>}
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
-          {description && <p className="mt-3 text-sm leading-6 text-slate-600">{description}</p>}
+          {eyebrow && <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{eyebrow}</div>}
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">{title}</h1>
+          {description && (
+            <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {description}
+            </p>
+          )}
         </div>
         {action}
       </div>
@@ -33,44 +93,51 @@ export function PageHeader({ eyebrow, title, description, action }) {
   );
 }
 
-export function Card({ children, className = '' }) {
+export function Card({ children, className = '' }: CardProps) {
   return (
     <motion.section
       {...fadeUp}
-      className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}
+      className={`rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 ${className}`}
     >
       {children}
     </motion.section>
   );
 }
 
-export function CardHeader({ title, description, action }) {
+export function CardHeader({ title, description, action }: CardHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between dark:border-slate-800">
       <div>
-        <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-        {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+        <h2 className="text-lg font-semibold text-slate-950 dark:text-white">{title}</h2>
+        {description && (
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+        )}
       </div>
       {action}
     </div>
   );
 }
 
-export function StatCard({ label, value, detail, icon: Icon, tone = 'slate' }) {
+export function StatCard({ label, value, detail, icon: Icon, tone = 'slate' }: StatCardProps) {
   const tones = {
-    blue: 'bg-blue-50 text-blue-700',
-    red: 'bg-red-50 text-red-700',
-    green: 'bg-emerald-50 text-emerald-700',
-    slate: 'bg-slate-50 text-slate-700',
+    blue: 'bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400',
+    red: 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400',
+    green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400',
+    amber: 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300',
+    slate: 'bg-slate-50 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400',
   };
 
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-sm font-medium text-slate-500">{label}</div>
-          <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{value}</div>
-          {detail && <div className="mt-2 text-sm text-slate-500">{detail}</div>}
+          <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</div>
+          <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+            {value}
+          </div>
+          {detail && (
+            <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">{detail}</div>
+          )}
         </div>
         {Icon && (
           <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${tones[tone]}`}>
