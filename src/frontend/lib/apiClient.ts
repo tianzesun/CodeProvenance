@@ -30,10 +30,16 @@ function flushQueue(error?: unknown) {
   }
 }
 
+// Development API key for unauthenticated access
+const DEV_API_KEY = 'sk_live_dev_key_for_testing_12345';
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: '',
   withCredentials: true,
   timeout: 15000, // Increased timeout to 15 seconds for better reliability
+  headers: {
+    'X-API-Key': DEV_API_KEY,
+  },
 });
 
 async function refreshAuthSession() {

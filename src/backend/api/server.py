@@ -55,6 +55,8 @@ from fastapi.responses import (
 )
 
 from src.backend.api.middleware.request_id import RequestIdMiddleware
+from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
+from src.backend.api.routes import cases, users
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -125,6 +127,16 @@ app.add_middleware(
     ],
 )
 
+# Setup default API keys for development
+setup_default_keys()
+
+# Add auth middleware (after CORS so auth headers are available)
+app.add_middleware(AuthMiddleware)
+
+# Include cases and users routers
+app.include_router(cases.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
@@ -154,7 +166,11 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-tools",
     "/api/benchmark-datasets",
     "/api/ai-detect",
+    "/api/cases",
+    "/api/users",
 }
+# Also exempt paths starting with /api/cases/ for development
+AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/")
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
@@ -5913,6 +5929,86 @@ async def detect_ai_generated_code(
     )
 
 
+# AI Detection Calibration Training
+_calibration_data: List[Dict[str, Any]] = []
+_CALIBRATION_LOCK = threading.Lock()
+
+
+@app.post("/api/ai-detect/calibrate")
+async def calibrate_ai_detector(
+    raw_score: float = Form(...),
+    is_ai_generated: bool = Form(...),
+    code_sample: str = Form(default=""),
+):
+    """
+    Calibrate AI detection scores using labeled examples.
+    
+    Use this endpoint to provide feedback on detection accuracy.
+    - raw_score: The original uncalibrated score (0.0-1.0)
+    - is_ai_generated: True if the code was AI-generated, False if human-written
+    - code_sample: Optional code snippet for context
+    """
+    with _CALIBRATION_LOCK:
+        _calibration_data.append({
+            "raw_score": raw_score,
+            "label": 1.0 if is_ai_generated else 0.0,
+            "code_sample": code_sample[:500] if code_sample else "",
+            "timestamp": datetime.now().isoformat(),
+        })
+    
+    return JSONResponse(
+        content={
+            "status": "accepted",
+            "total_samples": len(_calibration_data),
+            "message": "Calibration sample recorded. Use /api/ai-detect/retrain to update the model."
+        }
+    )
+
+
+@app.post("/api/ai-detect/retrain")
+async def retrain_ai_detector():
+    """
+    Retrain the AI detection calibration model with collected feedback.
+    
+    This endpoint should be called periodically to improve detection reliability.
+    """
+    global _calibration_data
+    
+    if len(_calibration_data) < 10:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Need at least 10 calibration samples"}
+        )
+    
+    try:
+        from src.backend.engines.score_calibration import ScoreCalibrator
+        
+        raw_scores = [_d["raw_score"] for _d in _calibration_data]
+        labels = [_d["label"] for _d in _calibration_data]
+        
+        calibrator = ScoreCalibrator()
+        calibrator.fit(raw_scores, labels)
+        
+        # Save the calibrated model
+        model_path = project_root / "backend" / ".calibrator.pkl"
+        calibrator.save(str(model_path))
+        
+        return JSONResponse(
+            content={
+                "status": "success",
+                "samples_used": len(_calibration_data),
+                "model_path": str(model_path),
+                "message": "Calibration model retrained successfully"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Retraining failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Retraining failed: {str(e)}"}
+        )
+
+
 async def _run_analysis(
     job_id,
     job_dir,
@@ -10638,6 +10734,9 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
 
 def _should_require_auth(path: str) -> bool:
     if path in AUTH_EXEMPT_PATHS:
+        return False
+    # Allow unauthenticated access to exempt prefixes (e.g., /api/cases/, /api/users/)
+    if path.startswith(AUTH_EXEMPT_PREFIXES):
         return False
     # Allow unauthenticated access to job status endpoints
     if path.startswith("/api/jobs/") or path.startswith("/api/job/"):

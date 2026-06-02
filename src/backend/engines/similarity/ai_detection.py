@@ -137,9 +137,37 @@ class AIDetectionEngine:
         "docstring_density": 0.06,
     }
 
-    def __init__(self) -> None:
-        """Initialise the detection engine."""
+    def __init__(self, calibrator_path: Optional[str] = None) -> None:
+        """Initialise the detection engine.
+        
+        Args:
+            calibrator_path: Optional path to a calibrated model pickle file.
+                           If provided and exists, the calibrated scores will be used.
+        """
         self.stylometry_extractor = StylometryExtractor()
+        self.calibrator = None
+        self._calibrator_path = calibrator_path
+        self._load_calibrator()
+
+    def _load_calibrator(self) -> None:
+        """Load calibrator from disk if available."""
+        calibrator_path = self._calibrator_path
+        if not calibrator_path:
+            # Try default location
+            from pathlib import Path
+            default_path = Path(__file__).parent.parent.parent.parent / "backend" / ".calibrator.pkl"
+            if default_path.exists():
+                calibrator_path = str(default_path)
+        
+        if calibrator_path:
+            try:
+                from src.backend.engines.score_calibration import ScoreCalibrator
+                import pickle
+                with open(calibrator_path, "rb") as f:
+                    data = pickle.load(f)
+                    self.calibrator = data.get("calibrator")
+            except Exception as e:
+                logger.warning(f"Could not load calibrator: {e}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -429,7 +457,7 @@ class AIDetectionEngine:
     # ------------------------------------------------------------------
 
     def _fuse(self, signals: Dict[str, float]) -> float:
-        """Weighted average fusion with sigmoid calibration."""
+        """Weighted average fusion with optional calibration."""
         total_score = 0.0
         total_weight = 0.0
         for name, weight in self._WEIGHTS.items():
@@ -440,9 +468,18 @@ class AIDetectionEngine:
             return 0.0
         raw = total_score / total_weight
 
-        # Sigmoid stretch so output is more spread out
+        # Apply sigmoid calibration (default behavior)
         k = 6.0
-        return 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
+        calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
+
+        # Override with learned calibration if available
+        if self.calibrator is not None:
+            try:
+                calibrated = float(self.calibrator.predict([raw])[0])
+            except Exception:
+                pass  # Fall back to sigmoid calibration
+
+        return calibrated
 
     def _confidence(self, signals: Dict[str, float], ai_prob: float) -> float:
         """Confidence = agreement among signals + distance from decision boundary."""

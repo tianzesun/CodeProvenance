@@ -205,8 +205,34 @@ class CaseService:
             .order_by(desc(CaseComment.created_at))
         ).scalars().all()
         
+        # Serialize case and comments to avoid SQLAlchemy state issues
+        case_dict = {}
+        for key, value in case.__dict__.items():
+            if key.startswith('__') or key == '_sa_instance_state':
+                continue
+            if isinstance(value, uuid.UUID):
+                case_dict[key] = str(value)
+            elif isinstance(value, datetime):
+                case_dict[key] = value.isoformat()
+            else:
+                case_dict[key] = value
+        
+        comments_list = []
+        for c in comments:
+            comment_dict = {}
+            for key, value in c.__dict__.items():
+                if key.startswith('__') or key == '_sa_instance_state':
+                    continue
+                if isinstance(value, uuid.UUID):
+                    comment_dict[key] = str(value)
+                elif isinstance(value, datetime):
+                    comment_dict[key] = value.isoformat()
+                else:
+                    comment_dict[key] = value
+            comments_list.append(comment_dict)
+        
         return {
-            "case": case.__dict__,
-            "result_ids": result_ids,
-            "comments": [c.__dict__ for c in comments],
+            "case": case_dict,
+            "result_ids": [str(rid) for rid in result_ids],
+            "comments": comments_list,
         }

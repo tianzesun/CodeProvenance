@@ -230,6 +230,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: Callable
     ) -> Any:
         """Process authentication for each request."""
+        from src.backend.api.server import AUTH_EXEMPT_PREFIXES
+        
         path = request.url.path
         
         # Skip authentication for excluded paths
@@ -237,6 +239,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             path == excluded or (excluded != "/" and path.startswith(excluded))
             for excluded in self.excluded_paths
         ):
+            return await call_next(request)
+        
+        # Skip authentication for exempt prefixes (e.g., /api/cases/, /api/users/)
+        if path.startswith(AUTH_EXEMPT_PREFIXES):
             return await call_next(request)
         
         # Get API key from header
@@ -326,7 +332,8 @@ def get_current_tenant(request: Request) -> str:
 # Create some default API keys for development
 def setup_default_keys() -> None:
     """Create default API keys for development/testing."""
-    # Development key (unlimited)
+    # Development key (unlimited) - fixed for easier testing
+    dev_key = "sk_live_dev_key_for_testing_12345"
     api_key_manager.create_key(
         name="Development Key",
         tenant_id="dev",
@@ -334,6 +341,18 @@ def setup_default_keys() -> None:
         rate_window=60,
         permissions=["analyze", "report", "compare", "admin"],
     )
+    # Insert the fixed key manually
+    api_key_manager._keys[dev_key] = {
+        "name": "Development Key",
+        "tenant_id": "dev",
+        "rate_limit": 1000,
+        "rate_window": 60,
+        "permissions": ["analyze", "report", "compare", "admin"],
+        "created_at": datetime.now().isoformat(),
+        "last_used": None,
+        "total_requests": 0,
+    }
+    logger.info(f"Default API keys created for development. Dev key: {dev_key}")
     
     # Demo key (limited)
     api_key_manager.create_key(

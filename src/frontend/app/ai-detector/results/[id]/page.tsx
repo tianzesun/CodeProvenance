@@ -220,7 +220,7 @@ function SubmissionCard({ entry }) {
 
         {entry.error && (
           <div className="mt-2 text-xs text-red-600">
-            {typeof entry.error === 'string' ? entry.error : 'An error occurred'}
+            {typeof entry.error === 'string' ? entry.error : (entry.error?.message || 'An error occurred')}
           </div>
         )}
       </div>
@@ -410,9 +410,7 @@ export default function AIDetectorReportPage() {
                     {job.assignment_name || 'AI-Generated Code Analysis Report'}
                   </h1>
                   <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
-                    {job.course_name || 'Course'} &middot; {getCreatedAt(job.created_at)} &middot;{' '}
-                    {job.file_count || submissions.length} submission
-                    {(job.file_count || submissions.length) === 1 ? '' : 's'}
+                    {job.course_name || 'Course'} &middot; {getCreatedAt(job.created_at)}
                   </p>
                 </div>
                 <div className="no-print flex flex-wrap items-center gap-3">
@@ -469,6 +467,11 @@ export default function AIDetectorReportPage() {
                           (s.ai_probability || 0) > (max.ai_probability || 0) ? s : max, 
                           { ai_probability: 0 }).ai_probability || 0)}
                       </div>
+                      {ai.calibration_confidence !== undefined && (
+                        <div className="mt-1 text-xs text-slate-500">
+                          Calibration confidence: {Math.round((ai.calibration_confidence || 0) * 100)}%
+                        </div>
+                      )}
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">

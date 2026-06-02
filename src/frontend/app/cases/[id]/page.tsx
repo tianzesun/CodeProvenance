@@ -6,10 +6,9 @@ import {
   ActionButton,
   Card,
   CardHeader,
-  
   RiskBadge,
 } from '@/components/saas/SaaSPrimitives';
-import { assignmentCases, studentACode, studentBCode } from '@/lib/mockIntegrityData';
+import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,30 +21,70 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useRef } from 'react';
 
-const flaggedReasons = [
-  'Same unusual recursive decomposition',
-  'Identical edge-case handling',
-  'Renamed variables but same structure',
-  'Matching helper function logic',
-  'Similarity exceeds course baseline',
-];
+type CaseData = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  risk_score?: number;
+  confidence?: number;
+  investigator?: { id: string; name: string } | null;
+  assignment?: { title: string; course_name: string };
+  result_ids?: string[];
+  comments?: { id: string; user_id: string; body: string; created_at: string }[];
+};
 
-const contextNotes = [
-  'Starter template overlap excluded.',
-  'Instructor-provided tests and LMS packaging files ignored.',
-  'Common course solution patterns discounted before ranking.',
-];
+type User = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
 
 export default function CompareCasePage() {
   const { id } = useParams();
-  const currentCase = assignmentCases.find((item) => item.id === id) || assignmentCases[0];
-  const [studentA, studentB] = currentCase.students.split(' vs ');
+  const [caseData, setCaseData] = useState<CaseData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  
+  const [studentA, studentB] = ['Student A', 'Student B'];
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const syncing = useRef(false);
+
+  useEffect(() => {
+    const fetchCase = async () => {
+      try {
+        const response = await apiClient.get(`/api/cases/${id}`);
+        setCaseData(response.data);
+      } catch (err: any) {
+        console.error('Failed to fetch case:', err);
+        setError(err?.message || 'Failed to load case details.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const fetchUsers = async () => {
+      try {
+        const response = await apiClient.get('/api/users');
+        setUsers(response.data || []);
+      } catch (err) {
+        console.error('Failed to fetch users:', err);
+      }
+    };
+
+    if (id) {
+      fetchCase();
+      fetchUsers();
+    }
+  }, [id]);
 
   const syncScroll = (source, target) => {
     if (syncing.current || !source.current || !target.current) return;
@@ -56,6 +95,40 @@ export default function CompareCasePage() {
     });
   };
 
+  const getAssignmentDisplay = () => {
+    if (!caseData) return { course: 'Course', title: '' };
+    const assignment = caseData.assignment;
+    if (assignment) {
+      return { 
+        course: assignment.course_name || 'Course', 
+        title: assignment.title || caseData.title 
+      };
+    }
+    return { course: 'Course', title: caseData.title };
+  };
+  
+  const assignmentDisplay = getAssignmentDisplay();
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-slate-500">Loading case details...</div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-red-500">{error}</div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -63,16 +136,24 @@ export default function CompareCasePage() {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm font-medium text-slate-500">
-                Assignment: {currentCase.course} {currentCase.assignment}
+                Assignment: {assignmentDisplay.course} {assignmentDisplay.title}
               </div>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
                 Instructor Review Case
               </h1>
+              <div className="mt-4 flex items-center gap-4 text-sm">
+                <div className="text-slate-600">
+                  <span className="font-medium text-slate-500">Status:</span> {caseData?.status || 'OPEN'}
+                </div>
+                <div className="text-slate-600">
+                  <span className="font-medium text-slate-500">Assignee:</span> {caseData?.investigator?.name || 'Unassigned'}
+                </div>
+              </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
                 <HeaderMetric value="412" label="submissions analyzed" />
                 <HeaderMetric value="9" label="cases may need instructor review" />
                 <HeaderMetric value="2m 14s" label="analysis completed" />
-                <HeaderMetric value={currentCase.rank} label="queue priority" />
+                <HeaderMetric value={caseData?.priority || 'MEDIUM'} label="queue priority" />
               </div>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
@@ -94,12 +175,12 @@ export default function CompareCasePage() {
                   for manual review, not treated as a misconduct conclusion.
                 </p>
               </div>
-              <RiskBadge value={currentCase.risk} label="High Risk" />
+              <RiskBadge value={caseData?.risk_score || 50} label="High Risk" />
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
               <RiskMetric label="Overall Risk" value="High" tone="red" />
-              <RiskMetric label="Confidence" value={currentCase.confidence} tone="slate" />
+              <RiskMetric label="Confidence" value={`${Math.round(caseData?.confidence || 0)}%`} tone="slate" />
               <RiskMetric label="Review Time" value="~2 min" tone="blue" />
             </div>
           </Card>
@@ -114,7 +195,7 @@ export default function CompareCasePage() {
               assignment patterns were excluded.
             </p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              {currentCase.reason}
+              Similar code structure detected between student submissions.
             </div>
           </Card>
         </section>
@@ -125,7 +206,13 @@ export default function CompareCasePage() {
             description="Plain-language evidence for instructor review."
           />
           <div className="grid gap-3 p-5 md:grid-cols-2">
-            {flaggedReasons.map((reason) => (
+            {[
+              'Same unusual recursive decomposition',
+              'Identical edge-case handling',
+              'Renamed variables but same structure',
+              'Matching helper function logic',
+              'Similarity exceeds course baseline',
+            ].map((reason) => (
               <div key={reason} className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <SearchCheck size={18} className="mt-0.5 shrink-0 text-blue-600" />
                 <div className="text-sm font-medium text-slate-800">{reason}</div>
@@ -142,13 +229,39 @@ export default function CompareCasePage() {
           <div className="grid gap-4 p-5 xl:grid-cols-2">
             <CodePanel
               title={studentA || 'Student A'}
-              code={studentACode}
+              code={`def tree_score(node):
+    if node is None:
+        return 0
+
+    left_total = tree_score(node.left)
+    right_total = tree_score(node.right)
+
+    if node.value < 0:
+        return max(left_total, right_total)
+
+    if left_total > right_total:
+        return left_total + node.value
+
+    return right_total + node.value`}
               panelRef={leftRef}
               onScroll={() => syncScroll(leftRef, rightRef)}
             />
             <CodePanel
               title={studentB || 'Student B'}
-              code={studentBCode}
+              code={`def calculate_tree(current):
+    if current is None:
+        return 0
+
+    first_branch = calculate_tree(current.left)
+    second_branch = calculate_tree(current.right)
+
+    if current.value < 0:
+        return max(first_branch, second_branch)
+
+    if first_branch > second_branch:
+        return first_branch + current.value
+
+    return second_branch + current.value`}
               panelRef={rightRef}
               onScroll={() => syncScroll(rightRef, leftRef)}
             />
@@ -175,7 +288,11 @@ export default function CompareCasePage() {
           <Card>
             <CardHeader title="Context Notes" description="False-positive controls applied before ranking." />
             <div className="space-y-3 p-5">
-              {contextNotes.map((note) => (
+              {[
+                'Starter template overlap excluded.',
+                'Instructor-provided tests and LMS packaging files ignored.',
+                'Common course solution patterns discounted before ranking.',
+              ].map((note) => (
                 <EvidenceRow key={note} icon={FileText} title={note} detail="Applied automatically." />
               ))}
             </div>
@@ -183,27 +300,145 @@ export default function CompareCasePage() {
 
           <Card>
             <CardHeader title="Decision Actions" description="Keep the review outcome simple and auditable." />
-            <div className="space-y-3 p-5">
-              <ActionButton icon={CheckCircle2}>Mark for Review</ActionButton>
-              <ActionButton variant="secondary" icon={AlertTriangle}>Needs More Evidence</ActionButton>
-              <ActionButton variant="secondary" icon={XCircle}>Dismiss</ActionButton>
-              <ActionButton variant="secondary" icon={Download}>Export PDF</ActionButton>
+            <div className="space-y-4 p-5">
+              {/* Assign Reviewer */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Assign Reviewer</label>
+                <div className="flex gap-2">
+                  <select
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+                    value={caseData?.investigator?.id || ''}
+                    onChange={async (e) => {
+                      const reviewerId = e.target.value;
+                      if (reviewerId) {
+                        try {
+                          await apiClient.post(`/api/cases/${id}/assign`, { reviewer_id: reviewerId });
+                          window.location.reload();
+                        } catch (err) {
+                          console.error('Failed to assign reviewer:', err);
+                        }
+                      }
+                    }}
+                  >
+                    <option value="">Select reviewer...</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name || user.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid gap-2 md:grid-cols-2">
+                <ActionButton 
+                  icon={CheckCircle2} 
+                  onClick={async () => {
+                    try {
+                      await apiClient.patch(`/api/cases/${id}`, { status: 'UNDER_REVIEW' });
+                      window.location.reload();
+                    } catch (err) {
+                      console.error('Failed to update case status:', err);
+                    }
+                  }}
+                >
+                  Mark for Review
+                </ActionButton>
+                <ActionButton variant="secondary" icon={AlertTriangle} onClick={async () => {
+                  try {
+                    await apiClient.patch(`/api/cases/${id}`, { status: 'ESCALATED' });
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Failed to escalate case:', err);
+                  }
+                }}>
+                  Needs More Evidence
+                </ActionButton>
+                <ActionButton variant="secondary" icon={XCircle} onClick={async () => {
+                  try {
+                    await apiClient.patch(`/api/cases/${id}`, { status: 'CLOSED' });
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Failed to close case:', err);
+                  }
+                }}>
+                  Dismiss
+                </ActionButton>
+                <ActionButton variant="secondary" icon={Download} onClick={async () => {
+                  try {
+                    const response = await apiClient.get(`/api/cases/${id}/export`);
+                    const data = response.data;
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `case-${id}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    console.error('Failed to export case:', err);
+                  }
+                }}>
+                  Export JSON
+                </ActionButton>
+              </div>
             </div>
           </Card>
         </section>
 
         <Card>
           <CardHeader title="Notes" description="Reviewer notes are kept with the case audit trail." />
-          <div className="p-5">
+          <div className="p-5 space-y-4">
+            {/* Existing Comments */}
+            <div className="space-y-3 max-h-60 overflow-y-auto">
+              {caseData?.comments && caseData.comments.length > 0 ? (
+                caseData.comments.map((comment) => (
+                  <div key={comment.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                    <div className="font-medium text-slate-700 mb-1">Instructor</div>
+                    <div className="text-slate-600">{comment.body}</div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {new Date(comment.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500 italic">No notes yet. Add your first note below.</div>
+              )}
+            </div>
+            
+            {/* Add Note Form */}
             <label className="block">
               <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <MessageSquare size={16} />
-                Instructor note
+                Add Instructor Note
               </span>
               <textarea
-                className="min-h-36 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
-                defaultValue="TA should verify whether this pair worked in the same tutorial section."
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Enter your notes for this case..."
+                rows={4}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
               />
+              <button
+                type="button"
+                disabled={isSavingNote || !noteText.trim()}
+                onClick={async () => {
+                  setIsSavingNote(true);
+                  try {
+                    await apiClient.post(`/api/cases/${id}/comments`, { body: noteText });
+                    setNoteText('');
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Failed to save note:', err);
+                  } finally {
+                    setIsSavingNote(false);
+                  }
+                }}
+                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSavingNote ? 'Saving...' : 'Save Note'}
+              </button>
             </label>
           </div>
         </Card>

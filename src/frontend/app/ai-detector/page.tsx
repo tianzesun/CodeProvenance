@@ -68,7 +68,7 @@ export default function AIDetectorPage() {
     const fd = new FormData();
     files.forEach((file) => fd.append('files', file));
     fd.append('course_name', courseName || 'Academic Integrity Review');
-    fd.append('assignment_name', assignmentName || 'Code Similarity Assessment');
+    fd.append('assignment_name', assignmentName || 'AI-Generated Code Analysis Report');
 
     try {
       const res = await axios.post(`${API}/api/ai-detect`, fd, {
@@ -233,8 +233,8 @@ export default function AIDetectorPage() {
                     className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
                   >
                     <div>
-                      <div className="font-medium text-slate-900">{job.assignment_name || 'Code Similarity Assessment'}</div>
-                      <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'} · {job.file_count || 0} submission{job.file_count === 1 ? '' : 's'}</div>
+                      <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                      <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'}</div>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(job.summary?.highest_ai_probability || 0)}`}>
