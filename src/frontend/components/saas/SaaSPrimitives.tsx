@@ -10,6 +10,7 @@ interface PageHeaderProps {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  eyebrowStyle?: 'default' | 'badge';
 }
 
 interface CardProps {
@@ -71,7 +72,7 @@ export function PageShell({ children }) {
   return <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>;
 }
 
-export function PageHeader({ eyebrow, title, description, action }: PageHeaderProps) {
+export function PageHeader({ eyebrow, title, description, action, eyebrowStyle = 'default' }: PageHeaderProps) {
   return (
     <motion.section
       {...fadeUp}
@@ -79,7 +80,13 @@ export function PageHeader({ eyebrow, title, description, action }: PageHeaderPr
     >
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-3xl">
-          {eyebrow && <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{eyebrow}</div>}
+          {eyebrow && eyebrowStyle === 'badge' ? (
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
+              {eyebrow}
+            </div>
+          ) : eyebrow ? (
+            <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{eyebrow}</div>
+          ) : null}
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">{title}</h1>
           {description && (
             <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">

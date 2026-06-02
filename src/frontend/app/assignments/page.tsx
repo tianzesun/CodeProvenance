@@ -31,15 +31,13 @@ export default function AssignmentsPage() {
     <DashboardLayout>
       <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
 
-        {/* Page Header with Dark Mode Text Color Correction */}
-        <div className="dark:[&_h1]:text-white dark:[&_h2]:text-white dark:[&_p]:text-slate-400">
-          <PageHeader
-            eyebrow="Assignment Results"
-            title="Review programming assignment risk in one professional table."
-            description="The summary tells the teaching team where to spend time before opening individual compare cases."
-            action={<ButtonLink href="/upload?mode=zip" icon={FileUp}>Upload New Assignment</ButtonLink>}
-          />
-        </div>
+        <PageHeader
+          eyebrow="Assignment Results"
+          title="Review programming assignment risk in one professional table."
+          description="The summary tells the teaching team where to spend time before opening individual compare cases."
+          action={<ButtonLink href="/upload?mode=zip" icon={FileUp}>Upload New Assignment</ButtonLink>}
+          eyebrowStyle="badge"
+        />
 
         {/* Stats Grid */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -51,30 +49,28 @@ export default function AssignmentsPage() {
 
         {/* Table Card */}
         <Card>
-          <div className="dark:[&_h3]:text-white dark:[&_p]:text-slate-400">
-            <CardHeader
-              title="Cases ranked by review priority"
-              description="Filters keep the assignment table focused and quick to scan."
-              action={
-                <div className="flex flex-wrap gap-2">
-                  {filters.map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => setActiveFilter(filter)}
-                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${activeFilter === filter
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-850 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                        }`}
-                    >
-                      <Filter size={14} />
-                      {filter}
-                    </button>
-                  ))}
-                </div>
-              }
-            />
-          </div>
+          <CardHeader
+            title="Cases ranked by review priority"
+            description="Filters keep the assignment table focused and quick to scan."
+            action={
+              <div className="flex flex-wrap gap-2">
+                {filters.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setActiveFilter(filter)}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${activeFilter === filter
+                      ? 'bg-blue-600 text-white'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-850 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                      }`}
+                  >
+                    <Filter size={14} />
+                    {filter}
+                  </button>
+                ))}
+              </div>
+            }
+          />
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[920px]">
