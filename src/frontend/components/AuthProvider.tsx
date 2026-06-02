@@ -182,7 +182,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // If we have stored user data, try to verify it's still valid
       if (hasStoredUser && user) {
         try {
-          const meRes = await apiClient.get('/api/auth/me');
+          // Use API key based endpoint
+          const meRes = await apiClient.get('/api/auth/me-api-key');
           const currentUser = meRes.data?.user ?? null;
 
           // Update user data if it changed
@@ -195,9 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearSession();
         }
       } else {
-        // No stored user, try to get current user
-        const meRes = await apiClient.get('/api/auth/me');
-        const nextUser = meRes.data?.user ?? null;
+        // No stored user, try to get current user via API key endpoint
+        const meRes = await apiClient.get('/api/auth/me-api-key');
+        const nextUser = meRes.data ?? null;
 
         setUser(nextUser);
         setStatus(nextUser ? 'authenticated' : 'anonymous');

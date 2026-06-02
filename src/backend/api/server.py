@@ -56,7 +56,7 @@ from fastapi.responses import (
 
 from src.backend.api.middleware.request_id import RequestIdMiddleware
 from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
-from src.backend.api.routes import cases, users
+from src.backend.api.routes import cases, users, auth, settings as settings_router
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -134,8 +134,10 @@ setup_default_keys()
 app.add_middleware(AuthMiddleware)
 
 # Include cases and users routers
+app.include_router(auth.router)  # Auth routes don't need prefix, they have /api in paths
 app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(settings_router.router, prefix="/api")
 
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,6 +157,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/status",
     "/api/auth/login",
     "/api/auth/bootstrap-admin",
+    "/api/auth/me-api-key",
     "/api/upload",
     "/api/upload-zip",
     "/api/upload-settings",
@@ -168,9 +171,10 @@ AUTH_EXEMPT_PATHS = {
     "/api/ai-detect",
     "/api/cases",
     "/api/users",
+    "/api/settings",
 }
 # Also exempt paths starting with /api/cases/ for development
-AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/")
+AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings/")
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 

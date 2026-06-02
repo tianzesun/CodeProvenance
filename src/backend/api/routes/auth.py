@@ -7,16 +7,24 @@ import string
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.backend.config.database import get_db
 from src.backend.config.settings import settings
 from src.backend.models.database import User
-from src.backend.application.services.auth_service import verify_password, get_password_hash
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return pwd_context.verify(password, password_hash)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
 
 from src.backend.infrastructure.email_service import EmailService
 
@@ -24,17 +32,17 @@ router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class BootstrapAdminRequest(BaseModel):
-    email: EmailStr
+    email: str
     full_name: str
     password: str
     tenant_name: str
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 class ResetPasswordRequest(BaseModel):
     token: str
@@ -168,11 +176,42 @@ async def logout(current_user: dict = Depends(get_current_user)):
     return {"message": "Logged out successfully", "user": current_user["email"]}
 
 @router.get("/me")
-async def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_me(request: Request, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get current user information."""
     user = db.query(User).filter(User.email == current_user["email"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
+    }
+
+@router.get("/me-api-key")
+async def get_me_by_api_key(request: Request, db: Session = Depends(get_db)):
+    """Get current user information by API key (for dev mode)."""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="API key authentication required")
+    
+    # Get user by tenant_id (first user in the tenant for dev mode)
+    from src.backend.models.database import User
+    user = db.query(User).filter(User.tenant_id == tenant_id).first()
+    
+    if not user:
+        # Return a default dev user if none exists
+        return {
+            "id": "dev-user-1",
+            "email": "admin@dev.local",
+            "full_name": "Development Admin",
+            "role": "admin",
+            "tenant_id": tenant_id,
+            "last_login_at": None
+        }
 
     return {
         "id": user.id,

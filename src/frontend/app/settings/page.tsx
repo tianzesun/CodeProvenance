@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -861,7 +862,7 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-{validationResult.issues && (
+                {validationResult && validationResult.issues && (
                   <div className="mt-4 space-y-2">
                     {validationResult.issues.length > 0 ? (
                       validationResult.issues.map((issue: string, i: number) => (
