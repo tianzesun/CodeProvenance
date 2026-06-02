@@ -251,6 +251,7 @@ export default function CasesQueuePage() {
           title="Academic integrity review queue"
           description="Assign, review, dismiss, and export cases — without digging through raw tool output."
           action={null}
+          eyebrowStyle="badge"
         />
 
         {/* ── Queue card ──────────────────────────────────────────────────────── */}
