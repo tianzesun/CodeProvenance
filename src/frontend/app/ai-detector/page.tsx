@@ -2,7 +2,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-const API = '';
 
 function formatSize(bytes) {
   return bytes < 1024 * 1024
@@ -48,7 +47,7 @@ export default function AIDetectorPage() {
 
   const loadHistory = async () => {
     try {
-      const res = await axios.get(`${API}/api/jobs`);
+      const res = await apiClient.get('/api/jobs');
       setHistory((res.data?.jobs || []).filter((job) => job.job_type === 'ai_detector').slice(0, 6));
     } catch {
       setHistory([]);
@@ -71,7 +70,7 @@ export default function AIDetectorPage() {
     fd.append('assignment_name', assignmentName || 'AI-Generated Code Analysis Report');
 
     try {
-      const res = await axios.post(`${API}/api/ai-detect`, fd, {
+      const res = await apiClient.post('/api/ai-detect', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const jobId = res.data?.job_id;

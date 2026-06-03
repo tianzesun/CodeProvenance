@@ -270,7 +270,7 @@ export default function UploadPage() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const s = await axios.get(`${API}/api/jobs/${jobId}`);
+        const s = await apiClient.get(`/api/jobs/${jobId}`);
         if (s.data.status === 'completed') { clearInterval(pollRef.current!); router.push(`/results/${jobId}`); }
         else if (s.data.status === 'failed') { clearInterval(pollRef.current!); setUploading(false); setError(s.data.error || 'Analysis failed'); }
       } catch (e) { clearInterval(pollRef.current!); setUploading(false); setError(getApiErrorMessage(e, 'Could not load status.')); }
@@ -316,7 +316,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     let active = true;
-    axios.get(`${API}/api/upload-settings`).then((res) => {
+    apiClient.get('/api/upload-settings').then((res) => {
       if (!active) return;
       const t = Number(res.data?.default_threshold);
       setThreshold(Number.isFinite(t) ? t : 0.5);
@@ -394,7 +394,7 @@ export default function UploadPage() {
     const timer = window.setTimeout(async () => {
       setModeSuggesting(true);
       try {
-        const res = await axios.post(`${API}/api/assignment-modes/suggest`, {
+        const res = await apiClient.post('/api/assignment-modes/suggest', {
           course_name: courseName, assignment_name: assignmentName, filenames: files.map((f) => f.name),
         });
         setModeSuggestion(res.data);
@@ -436,7 +436,7 @@ export default function UploadPage() {
     fd.append('source_scan_enabled', String(sourceScanEnabled));
     try {
       const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
-      const res = await axios.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await apiClient.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const jobId = res.data?.job_id;
       if (!jobId) { setUploading(false); setError('Upload completed but no job ID returned.'); return; }
       if (res.data?.status === 'completed') { router.push(`/results/${jobId}`); return; }

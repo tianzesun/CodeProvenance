@@ -3,9 +3,8 @@
 import { FormEvent, useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { apiClient } from '@/lib/apiClient';
 import { AlertTriangle, CheckCircle, Eye, EyeOff, Loader2, LockKeyhole } from 'lucide-react';
-
-import axios from 'axios';
 
 function getErrorMessage(error: unknown): string {
   if (
@@ -85,8 +84,7 @@ function ResetPasswordContent() {
     setSubmitting(true);
 
     try {
-      const API = ''; // Will use environment variable
-      await axios.post(`${API}/api/auth/reset-password`, {
+      await apiClient.post('/api/auth/reset-password', {
         token,
         new_password: password,
       });

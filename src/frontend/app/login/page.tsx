@@ -13,7 +13,7 @@ import {
   Loader2,
   ArrowLeft,
 } from 'lucide-react';
-import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/components/AuthProvider';
 
 function getErrorMessage(error: unknown): string {
@@ -247,7 +247,7 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await axios.post('/api/auth/forgot-password', { email: trimmedEmail });
+      await apiClient.post('/api/auth/forgot-password', { email: trimmedEmail });
       setResetEmailSent(true);
     } catch {
       setResetEmailSent(true);

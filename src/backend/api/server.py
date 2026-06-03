@@ -160,7 +160,6 @@ AUTH_EXEMPT_PATHS = {
     "/api/auth/me-api-key",
     "/api/upload",
     "/api/upload-zip",
-    "/api/upload-settings",
     "/api/benchmark",
     "/api/benchmark/stream",
     "/api/benchmark/start",
@@ -171,10 +170,9 @@ AUTH_EXEMPT_PATHS = {
     "/api/ai-detect",
     "/api/cases",
     "/api/users",
-    "/api/settings",
 }
 # Also exempt paths starting with /api/cases/ for development
-AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings/")
+AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/")
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
@@ -13662,7 +13660,7 @@ async def root():
 
 @app.get("/api/settings")
 async def get_settings(request: Request):
-    current_user = _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=False)
     return JSONResponse(content=_build_settings_payload(current_user.get("tenant_id")))
 
 

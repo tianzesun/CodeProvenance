@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -208,7 +208,7 @@ export default function Home() {
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/api/jobs`);
+      const res = await apiClient.get('/api/jobs');
       setJobs(res.data.jobs || []);
     } catch {
       setJobs([]);
