@@ -150,7 +150,7 @@ AUTH_EXEMPT_PATHS = {
     "/api/cases",
     "/api/users",
 }
-AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings/", "/api/job/", "/api/jobs/")
+AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings", "/api/job/", "/api/jobs/")
 
 # Setup default API keys for development
 setup_default_keys()
@@ -10755,6 +10755,10 @@ def _should_require_auth(path: str) -> bool:
         return False
     # Allow unauthenticated access to exempt prefixes (e.g., /api/cases/, /api/users/)
     if path.startswith(AUTH_EXEMPT_PREFIXES):
+        # /api/settings is in AUTH_EXEMPT_PREFIXES for API-key bypass,
+        # but still requires JWT session auth for the dashboard.
+        if path == "/api/settings" or path.startswith("/api/settings/"):
+            return True
         return False
     # Allow unauthenticated access to job status endpoints
     if path.startswith("/api/jobs/") or path.startswith("/api/job/"):
