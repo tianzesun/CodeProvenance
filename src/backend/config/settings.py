@@ -1,8 +1,9 @@
 """Application Settings - Centralized configuration management."""
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,17 +41,6 @@ ENGINE_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
         "static_rules": 0.08,
     },
 }
-
-DEFAULT_DETECTION_MODES = [
-    "token",
-    "winnowing",
-    "gst",
-    "ast",
-    "ngram",
-    "graph",
-    "embedding",
-    "static_rules",
-]
 
 
 class AppSettings(BaseSettings):
@@ -95,6 +85,29 @@ class AppSettings(BaseSettings):
     # AI Detection
     GPTZERO_API_KEY: Optional[str] = None
     GRAMMARLY_API_KEY: Optional[str] = None
+
+    # Detection Pipeline (three-layer decision tree)
+    DETECTION_DOMAIN_PRESETS: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "code": "General code plagiarism detection (balanced)",
+            "cs_code": "CS programming assignments (AST-weighted)",
+            "essay": "Essay/report similarity (semantic-weighted)",
+            "math": "Mathematics proofs (structure-weighted)",
+        }
+    )
+    DEFAULT_DETECTION_DOMAIN: str = "code"
+    DEFAULT_DETECTION_MODES: List[str] = Field(
+        default_factory=lambda: [
+            "token",
+            "winnowing",
+            "gst",
+            "ast",
+            "ngram",
+            "graph",
+            "embedding",
+            "static_rules",
+        ]
+    )
 
     # Engine Weights
     ENGINE_WEIGHTS: Dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()

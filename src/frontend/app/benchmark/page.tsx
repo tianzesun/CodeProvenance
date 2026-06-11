@@ -1457,7 +1457,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   }
 
   const { tool_scores, pair_results } = results;
-  const itemsPerPage = 50;
+  const itemsPerPage = 20;
   const totalPairs = (pair_results || []).length;
   const totalPages = Math.max(1, Math.ceil(totalPairs / itemsPerPage));
   const pageStart = (currentPage - 1) * itemsPerPage;

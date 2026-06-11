@@ -1038,6 +1038,18 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
             ),
         }
 
+    if dataset_id in {"codesearchnet", "codexglue_defect"}:
+        runnable = _has_loadable_huggingface_dataset(dataset_root)
+        return {
+            "runnable": runnable,
+            "status": "ready" if runnable else "incomplete_huggingface_dataset",
+            "reason": (
+                f"{dataset_id} HuggingFace dataset is loadable."
+                if runnable
+                else f"{dataset_id} HuggingFace dataset is incomplete."
+            ),
+        }
+
     if dataset_id == "IR-Plag-Dataset":
         # Check for case-* directories with required subdirs
         case_dirs = [d for d in dataset_root.iterdir() if d.is_dir() and d.name.startswith("case-")]

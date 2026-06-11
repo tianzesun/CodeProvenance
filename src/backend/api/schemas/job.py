@@ -7,16 +7,20 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
-from src.backend.config.settings import DEFAULT_DETECTION_MODES
+from src.backend.config.settings import settings
 
 
 class JobBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    assignment_id: Optional[str] = Field(None, description="Link to normalized Assignment (Course/Assignment structure)")
+    assignment_id: Optional[str] = Field(
+        None, description="Link to normalized Assignment (Course/Assignment structure)"
+    )
     threshold: float = Field(0.7, ge=0.0, le=1.0)
     webhook_url: Optional[str] = None
     idempotency_key: Optional[str] = Field(None, max_length=255)
-    detection_modes: List[str] = Field(default_factory=lambda: list(DEFAULT_DETECTION_MODES))
+    detection_modes: List[str] = Field(
+        default_factory=lambda: list(settings.DEFAULT_DETECTION_MODES)
+    )
     language_filters: Optional[List[str]] = None
     exclude_patterns: List[str] = Field(["__pycache__", "*.class", "node_modules"])
     template_files: List[Dict[str, Any]] = Field(default_factory=list)
