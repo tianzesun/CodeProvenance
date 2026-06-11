@@ -127,28 +127,7 @@ app.add_middleware(
     ],
 )
 
-# Setup default API keys for development
-setup_default_keys()
-
-# Add auth middleware (after CORS so auth headers are available)
-app.add_middleware(AuthMiddleware)
-
-# Include cases and users routers
-app.include_router(auth.router)  # Auth routes don't need prefix, they have /api in paths
-app.include_router(cases.router, prefix="/api")
-app.include_router(users.router, prefix="/api")
-app.include_router(settings_router.router, prefix="/api")
-
-REPORTS_DIR = project_root / "reports"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
-BENCHMARK_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-UPLOADS_DIR = project_root / "uploads"
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-TOOLS_DIR = project_root.parent / "tools"
-ENV_SETTINGS_PATH = project_root / "backend" / ".env.local"
-AUTH_COOKIE_NAME = "integritydesk_session"
-AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
+# Auth exempt paths - must be defined before middleware setup
 AUTH_EXEMPT_PATHS = {
     "/",
     "/docs",
@@ -171,8 +150,30 @@ AUTH_EXEMPT_PATHS = {
     "/api/cases",
     "/api/users",
 }
-# Also exempt paths starting with /api/cases/ for development
-AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/")
+AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings/", "/api/job/", "/api/jobs/")
+
+# Setup default API keys for development
+setup_default_keys()
+
+# Add auth middleware (after CORS so auth headers are available)
+app.add_middleware(AuthMiddleware, excluded_paths=list(AUTH_EXEMPT_PATHS))
+
+# Include cases and users routers
+app.include_router(auth.router, prefix="/api/auth")
+app.include_router(cases.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(settings_router.router, prefix="/api")
+
+REPORTS_DIR = project_root / "reports"
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
+BENCHMARK_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR = project_root / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+TOOLS_DIR = project_root.parent / "tools"
+ENV_SETTINGS_PATH = project_root / "backend" / ".env.local"
+AUTH_COOKIE_NAME = "integritydesk_session"
+AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
@@ -6731,6 +6732,9 @@ async def compute_real_fpr_on_clean_corpus(
             "recommendations": recommendations,
             "overall_assessment": overall_risk,
             "suggested_actions": suggested_actions,
+            # Key decision values captured at the time of the run
+            "recommended_threshold": balanced["threshold"] if balanced else fpr_table[-1]["threshold"],
+            "fpr_at_recommended_threshold": (balanced["fpr"] if balanced else fpr_table[-1]["fpr"]) / 100.0,
         }
     )
 

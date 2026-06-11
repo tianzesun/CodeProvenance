@@ -2,7 +2,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import axios from 'axios';
+import { apiClient } from '@/lib/apiClient';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -21,8 +21,6 @@ import {
   Info,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-
-const API = '';
 
 function formatPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
@@ -340,8 +338,8 @@ export default function AIDetectorReportPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    axios
-      .get(`${API}/api/job/${id}`)
+    apiClient
+      .get(`/api/job/${id}`)
       .then((res) => {
         if (res.data?.job_type && res.data.job_type !== 'ai_detector' && !res.data?.ai_detection) {
           router.replace(`/results/${id}`);
@@ -352,6 +350,7 @@ export default function AIDetectorReportPage() {
       })
       .catch((err) => {
         setError(err?.response?.data?.detail || 'Failed to load AI Detector report.');
+        setJob(null);
       })
       .finally(() => setLoading(false));
   }, [id, router]);
@@ -361,7 +360,7 @@ export default function AIDetectorReportPage() {
   const highestScore = Number(ai.highest_score) || 0;
   const overallTone = riskTone(highestScore);
 
-  if (loading || !job) {
+  if (loading) {
     return (
       <DashboardLayout requireAuth={false}>
         <div className="flex min-h-[60vh] items-center justify-center gap-3 text-slate-500">
@@ -415,7 +414,7 @@ export default function AIDetectorReportPage() {
                 </div>
                 <div className="no-print flex flex-wrap items-center gap-3">
                   <a
-                    href={`${API}/report/${id}/ai-originality-pdf`}
+                    href={`/api/report/${id}/ai-originality-pdf`}
                     className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Download size={16} />
