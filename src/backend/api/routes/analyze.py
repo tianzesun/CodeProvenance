@@ -7,17 +7,19 @@ retrieving results, and managing webhook notifications.
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import Job, Submission, SimilarityResult
 from src.backend.utils.database import JobService, SubmissionService, SimilarityResultService
 from src.backend.api.schemas import job as job_schema
 from src.backend.api.middleware.rate_limit import RateLimiter
+from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
@@ -77,8 +79,8 @@ async def analyze_submissions(
     """
     start_time = time.time()
     
-    # Extract tenant ID from API key
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    # Extract tenant ID from authenticated API key
+    tenant_id = get_current_tenant(request)
     
     # Rate limit check
     rate_limiter.check_rate_limit(tenant_id, request)
@@ -169,7 +171,7 @@ async def get_job_status(
     - `error_message`: Error details (if failed)
     - `results`: List of similarity results (if completed)
     """
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = get_current_tenant(request)
     set_tenant_context(db, tenant_id)
     
     job = JobService.get_job_by_id(db, str(job_id), tenant_id)
@@ -233,7 +235,7 @@ async def get_job_results(
     - `limit`: Maximum results to return (default: 1000)
     - `offset`: Pagination offset (default: 0)
     """
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = get_current_tenant(request)
     set_tenant_context(db, tenant_id)
     
     job = JobService.get_job_by_id(db, str(job_id), tenant_id)
@@ -301,7 +303,7 @@ async def get_job_report(
     - `format`: Report format
     - `generated_at`: Report generation timestamp
     """
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = get_current_tenant(request)
     set_tenant_context(db, tenant_id)
     
     job = JobService.get_job_by_id(db, str(job_id), tenant_id)
@@ -324,7 +326,7 @@ async def get_job_report(
         "job_id": str(job.id),
         "report_url": report_url,
         "format": format,
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "ready"
     }
 
@@ -340,18 +342,28 @@ async def get_api_usage(
     Returns usage metrics including jobs created, files analyzed,
     API calls made, and rate limit information.
     """
-    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    tenant_id = get_current_tenant(request)
     set_tenant_context(db, tenant_id)
-    
-    # Get usage metrics (placeholder)
+
+    # Count real usage metrics from database
+    from sqlalchemy import func
+    from src.backend.models.database import Job, SimilarityResult
+
+    job_count = db.scalar(
+        select(func.count()).select_from(Job).where(Job.tenant_id == tenant_id)
+    ) or 0
+    result_count = db.scalar(
+        select(func.count()).select_from(SimilarityResult).where(SimilarityResult.tenant_id == tenant_id)
+    ) or 0
+
     return {
         "tenant_id": tenant_id,
-        "jobs_created": 0,
-        "files_analyzed": 0,
-        "api_calls": 0,
+        "jobs_created": int(job_count),
+        "files_analyzed": int(result_count),
+        "api_calls": int(job_count) + int(result_count),
         "rate_limit": {
             "requests_per_minute": 60,
             "requests_remaining": 60,
-            "reset_at": datetime.now().isoformat()
+            "reset_at": datetime.now(timezone.utc).isoformat()
         }
     }

@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -87,7 +87,7 @@ export default function AIDetectorPage() {
   };
 
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-8">
           <section className="theme-card-strong rounded-[30px] overflow-hidden">

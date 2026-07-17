@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -2496,7 +2496,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
 
   return (
-    <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined} requireAuth={false}>
+    <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
         <div className="space-y-6">
 

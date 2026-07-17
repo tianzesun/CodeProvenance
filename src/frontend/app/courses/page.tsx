@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -33,8 +32,8 @@ export default function CoursesPage() {
 
               <div className="mt-6 grid grid-cols-3 gap-3">
                 <MiniMetric icon={Users} label="Students" value={course.students} />
-                <MiniMetric label="Assignments" value={course.assignments} />
-                <MiniMetric label="Flagged" value={course.flagged} danger />
+                <MiniMetric label="Assignments" value={course.assignments} icon={null} />
+                <MiniMetric label="Flagged" value={course.flagged} icon={null} danger />
               </div>
 
               <div className="mt-6 flex items-center justify-between border-t border-slate-200 pt-4">
@@ -52,7 +51,7 @@ export default function CoursesPage() {
   );
 }
 
-function MiniMetric({ label, value, icon: Icon, danger = false }) {
+function MiniMetric({ label, value, icon: Icon, danger = false }: { label: string; value: number; icon: React.ComponentType<{ size: number }> | null; danger?: boolean }) {
   return (
     <div className="rounded-xl bg-slate-50 px-3 py-3">
       <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">

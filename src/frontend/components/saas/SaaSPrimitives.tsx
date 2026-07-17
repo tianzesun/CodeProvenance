@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import Link from 'next/link';
@@ -68,14 +67,14 @@ export const fadeUp = {
   transition: { duration: 0.35, ease: 'easeOut' },
 };
 
-export function PageShell({ children }) {
+export function PageShell({ children }: { children: React.ReactNode }) {
   return <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>;
 }
 
 export function PageHeader({ eyebrow, title, description, action, eyebrowStyle = 'default' }: PageHeaderProps) {
   return (
     <motion.section
-      {...fadeUp}
+      {...(fadeUp as any)}
       className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
     >
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -103,7 +102,7 @@ export function PageHeader({ eyebrow, title, description, action, eyebrowStyle =
 export function Card({ children, className = '' }: CardProps) {
   return (
     <motion.section
-      {...fadeUp}
+      {...(fadeUp as any)}
       className={`rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 ${className}`}
     >
       {children}
@@ -156,7 +155,7 @@ export function StatCard({ label, value, detail, icon: Icon, tone = 'slate' }: S
   );
 }
 
-export function ButtonLink({ href, children, variant = 'primary', icon: Icon }) {
+export function ButtonLink({ href, children, variant = 'primary', icon: Icon }: { href: string; children: React.ReactNode; variant?: string; icon?: React.ComponentType<{ size: number }> }) {
   const className = variant === 'primary'
     ? 'bg-blue-600 text-white hover:bg-blue-700'
     : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
@@ -172,7 +171,7 @@ export function ButtonLink({ href, children, variant = 'primary', icon: Icon }) 
   );
 }
 
-export function ActionButton({ children, variant = 'primary', icon: Icon, onClick }) {
+export function ActionButton({ children, variant = 'primary', icon: Icon, onClick }: { children: React.ReactNode; variant?: string; icon?: React.ComponentType<{ size: number }>; onClick?: () => void }) {
   const className = variant === 'primary'
     ? 'bg-blue-600 text-white hover:bg-blue-700'
     : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
@@ -189,7 +188,7 @@ export function ActionButton({ children, variant = 'primary', icon: Icon, onClic
   );
 }
 
-export function RiskBadge({ value, label }) {
+export function RiskBadge({ value, label }: RiskBadgeProps) {
   const score = Number(value) || 0;
   const tone = score >= 90
     ? 'bg-red-50 text-red-700 ring-red-100'
@@ -204,7 +203,7 @@ export function RiskBadge({ value, label }) {
   );
 }
 
-export function StatusBadge({ status }) {
+export function StatusBadge({ status }: StatusBadgeProps) {
   const normalized = String(status || '').toLowerCase();
   const tone = normalized.includes('review')
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
@@ -217,7 +216,7 @@ export function StatusBadge({ status }) {
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${tone}`}>{status}</span>;
 }
 
-export function EmptyState({ title, description, href, action }) {
+export function EmptyState({ title, description, href, action }: EmptyStateProps) {
   return (
     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center">
       <div className="text-base font-semibold text-slate-950">{title}</div>

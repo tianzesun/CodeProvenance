@@ -1,36 +1,36 @@
 """
 Usage metering endpoints for IntegrityDesk API.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import UsageMetric, Tenant
 from src.backend.utils.database import UsageMetricService, TenantService
 from src.backend.api.schemas import usage as usage_schema
+from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
 
 @router.get("/", response_model=usage_schema.UsageResponse)
 async def get_current_usage(
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Get current period usage for the authenticated tenant.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    # For now, we'll use a placeholder - this should come from authentication
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
     
     # Get current period (YYYY-MM)
-    current_period = datetime.utcnow().strftime("%Y-%m")
+    current_period = datetime.now(timezone.utc).strftime("%Y-%m")
     
     # Get or create usage metric for current period
     usage = UsageMetricService.get_or_create_usage_metric(
@@ -44,14 +44,14 @@ async def get_current_usage(
 
 @router.get("/history", response_model=List[usage_schema.UsageResponse])
 async def get_usage_history(
+    request: Request,
     months: int = 12,
     db: Session = Depends(get_db)
 ):
     """
     Get usage history for the last N months.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
@@ -66,19 +66,19 @@ async def get_usage_history(
 
 @router.get("/summary", response_model=usage_schema.UsageSummary)
 async def get_usage_summary(
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Get usage summary with limits and remaining quota.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
     
     # Get current period
-    current_period = datetime.utcnow().strftime("%Y-%m")
+    current_period = datetime.now(timezone.utc).strftime("%Y-%m")
     
     # Get usage for current period
     usage = UsageMetricService.get_or_create_usage_metric(
@@ -141,20 +141,19 @@ async def get_usage_summary(
 
 @router.post("/reset", status_code=status.HTTP_200_OK)
 async def reset_usage(
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Reset usage metrics for current period (admin only).
     """
-    # In a real implementation, we would extract tenant_id from API key
-    # and check for admin permissions
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
     
     # Get current period
-    current_period = datetime.utcnow().strftime("%Y-%m")
+    current_period = datetime.now(timezone.utc).strftime("%Y-%m")
     
     # Delete existing usage metric for current period
     db.query(UsageMetric).filter(

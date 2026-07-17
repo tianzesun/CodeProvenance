@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -362,7 +362,7 @@ export default function AIDetectorReportPage() {
 
   if (loading) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="flex min-h-[60vh] items-center justify-center gap-3 text-slate-500">
           <Loader2 size={18} className="animate-spin" />
           Loading AI Detector report...
@@ -373,7 +373,7 @@ export default function AIDetectorReportPage() {
 
   if (error) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -385,7 +385,7 @@ export default function AIDetectorReportPage() {
   }
 
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-6">
 

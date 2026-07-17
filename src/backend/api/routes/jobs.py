@@ -2,7 +2,7 @@
 Job management endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
@@ -11,11 +11,13 @@ from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import Job, Submission
 from src.backend.utils.database import JobService, SubmissionService, AuditLogService
 from src.backend.api.schemas import job as job_schema
+from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
 @router.post("/", response_model=job_schema.JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
+    request: Request,
     job_data: job_schema.JobCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
@@ -23,9 +25,7 @@ async def create_job(
     """
     Create a new similarity analysis job.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    # For now, we'll use a placeholder - this should come from authentication
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
@@ -72,14 +72,14 @@ async def create_job(
 
 @router.get("/{job_id}", response_model=job_schema.JobResponse)
 async def get_job(
+    request: Request,
     job_id: uuid.UUID,
     db: Session = Depends(get_db)
 ):
     """
     Get a job by ID.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
@@ -95,6 +95,7 @@ async def get_job(
 
 @router.get("/", response_model=List[job_schema.JobResponse])
 async def list_jobs(
+    request: Request,
     skip: int = 0,
     limit: int = 100,
     status: Optional[str] = None,
@@ -103,8 +104,7 @@ async def list_jobs(
     """
     List jobs for the current tenant.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
@@ -114,14 +114,14 @@ async def list_jobs(
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(
+    request: Request,
     job_id: uuid.UUID,
     db: Session = Depends(get_db)
 ):
     """
     Delete a job.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))
@@ -152,6 +152,7 @@ async def delete_job(
 
 @router.post("/{job_id}/submit", response_model=job_schema.SubmissionResponse)
 async def submit_files(
+    request: Request,
     job_id: uuid.UUID,
     submission_data: job_schema.SubmissionCreate,
     db: Session = Depends(get_db)
@@ -159,8 +160,7 @@ async def submit_files(
     """
     Submit files for a job.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))

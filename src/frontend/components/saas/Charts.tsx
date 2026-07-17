@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import {
@@ -21,7 +20,7 @@ const tooltipStyle = {
   boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
 };
 
-export function SuspiciousTrendChart({ data }) {
+export function SuspiciousTrendChart({ data }: { data: unknown[] }) {
   return (
     <div className="h-72">
       <ResponsiveContainer width="100%" height="100%">
@@ -44,7 +43,7 @@ export function SuspiciousTrendChart({ data }) {
   );
 }
 
-export function CourseCasesChart({ data }) {
+export function CourseCasesChart({ data }: { data: unknown[] }) {
   return (
     <div className="h-72">
       <ResponsiveContainer width="100%" height="100%">
@@ -60,7 +59,7 @@ export function CourseCasesChart({ data }) {
   );
 }
 
-export function SemesterRiskChart({ data }) {
+export function SemesterRiskChart({ data }: { data: unknown[] }) {
   return (
     <div className="h-72">
       <ResponsiveContainer width="100%" height="100%">
@@ -77,7 +76,7 @@ export function SemesterRiskChart({ data }) {
   );
 }
 
-export function CompactBarChart({ data, dataKey = 'value', nameKey = 'label' }) {
+export function CompactBarChart({ data, dataKey = 'value', nameKey = 'label' }: { data: unknown[]; dataKey?: string; nameKey?: string }) {
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">

@@ -2,7 +2,7 @@
 Similarity results endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
@@ -11,11 +11,13 @@ from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import SimilarityResult
 from src.backend.utils.database import SimilarityResultService
 from src.backend.api.schemas import result as result_schema
+from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
 @router.get("/{job_id}", response_model=List[result_schema.ResultResponse])
 async def get_job_results(
+    request: Request,
     job_id: uuid.UUID,
     threshold: Optional[float] = None,
     limit: int = 1000,
@@ -25,8 +27,7 @@ async def get_job_results(
     """
     Get similarity results for a job.
     """
-    # In a real implementation, we would extract tenant_id from API key
-    tenant_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    tenant_id = get_current_tenant(request)
     
     # Set tenant context for RLS
     set_tenant_context(db, str(tenant_id))

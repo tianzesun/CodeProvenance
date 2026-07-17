@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import { Brain, AlertTriangle, CheckCircle2, TrendingUp, FileCode, Sparkles } from 'lucide-react';

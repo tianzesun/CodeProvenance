@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
+import SkeletonLoader from '@/components/SkeletonLoader';
 import { SunMedium, MoonStar } from 'lucide-react';
 
 interface DashboardLayoutProps {
@@ -60,10 +61,8 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   // Show loading only if auth is required
   if (requireAuth && (loading || !bootstrapped || !user || (requiredRole === 'admin' && user.role !== 'admin'))) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="rounded-3xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-500 shadow-sm">
-          Loading workspace...
-        </div>
+      <div className="theme-shell min-h-screen bg-[var(--background)]">
+        <SkeletonLoader variant="page" />
       </div>
     );
   }

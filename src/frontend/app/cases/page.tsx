@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';

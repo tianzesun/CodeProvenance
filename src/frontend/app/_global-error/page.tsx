@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 export default function GlobalError({
   error,
   reset,
@@ -7,7 +9,6 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  // Don't use useEffect or any hooks that might access context
   console.error('Global error:', error);
 
   return (
@@ -16,98 +17,57 @@ export default function GlobalError({
         <title>Something went wrong - IntegrityDesk</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '100vh',
-          padding: '2rem',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          backgroundColor: '#f8f9fa',
-          color: '#212529'
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            padding: '2rem',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-            maxWidth: '500px',
-            textAlign: 'center'
-          }}>
-            <h1 style={{
-              fontSize: '1.5rem',
-              fontWeight: 'bold',
-              marginBottom: '1rem',
-              color: '#dc3545'
-            }}>
+      <body className="bg-[var(--background)] text-[var(--text-primary)]">
+        <div className="flex min-h-screen flex-col items-center justify-center px-8 py-12">
+          <div className="theme-card w-full max-w-lg rounded-[30px] p-8 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-red-500/10 text-red-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+
+            <h1 className="font-display mt-5 text-2xl font-semibold text-[var(--text-primary)]">
               Something went wrong
             </h1>
 
-            <p style={{
-              marginBottom: '1.5rem',
-              color: '#6c757d',
-              lineHeight: '1.5'
-            }}>
+            <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
               An unexpected error occurred. This has been logged and will be investigated.
             </p>
 
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+            <div className="mt-6 flex items-center justify-center gap-3">
               <button
+                type="button"
                 onClick={reset}
-                style={{
-                  backgroundColor: '#007bff',
-                  color: 'white',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                  fontWeight: '500'
-                }}
+                className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold"
               >
-                Try again
+                Try Again
               </button>
 
-              <button
-                onClick={() => window.location.href = '/'}
-                style={{
-                  backgroundColor: '#6c757d',
-                  color: 'white',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                  fontWeight: '500'
-                }}
+              <Link
+                href="/"
+                className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold"
               >
-                Go home
-              </button>
+                Go to Dashboard
+              </Link>
             </div>
 
-            <details style={{
-              marginTop: '1.5rem',
-              textAlign: 'left',
-              border: '1px solid #dee2e6',
-              borderRadius: '4px',
-              padding: '1rem'
-            }}>
-              <summary style={{
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                marginBottom: '0.5rem'
-              }}>
+            <details className="mt-8 text-left">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
                 Error details
               </summary>
-              <pre style={{
-                fontSize: '0.75rem',
-                color: '#6c757d',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}>
+              <pre className="theme-card-muted mt-3 max-h-48 overflow-auto rounded-2xl p-4 text-xs leading-5 text-[var(--text-muted)]">
                 {error.message}
                 {error.stack && `\n\n${error.stack}`}
               </pre>

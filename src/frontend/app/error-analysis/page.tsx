@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -221,7 +221,7 @@ export default function ErrorAnalysisPage() {
 
   if (loading) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="p-4 flex flex-col items-center justify-center min-h-[60vh] gap-4">
           <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-violet-600 animate-spin" />
           <p className="text-sm text-slate-500 font-medium">Loading error analysis…</p>
@@ -232,7 +232,7 @@ export default function ErrorAnalysisPage() {
 
   if (error) {
     return (
-      <DashboardLayout requireAuth={false}>
+      <DashboardLayout>
         <div className="p-4 flex flex-col items-center justify-center min-h-[60vh] gap-4">
           <AlertTriangle size={32} className="text-amber-500" />
           <p className="text-slate-700 font-medium">{error}</p>
@@ -251,7 +251,7 @@ export default function ErrorAnalysisPage() {
   const noData = summary.totalPairs === 0;
 
   return (
-    <DashboardLayout requireAuth={false}>
+    <DashboardLayout>
       <div className="p-4">
         <div className="space-y-6">
 
