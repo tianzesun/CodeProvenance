@@ -24,8 +24,22 @@ class WebhookWorker:
         self.task: Optional[asyncio.Task] = None
         
         # Load configuration from environment
+        secret_key = os.getenv('WEBHOOK_SECRET_KEY')
+        if not secret_key:
+            from src.backend.config.settings import settings
+            if not settings.DEBUG_MODE:
+                raise RuntimeError(
+                    "WEBHOOK_SECRET_KEY environment variable is required in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+                )
+            logger.warning(
+                "WEBHOOK_SECRET_KEY not set. Webhook signatures will not be verified. "
+                "Set this in production for security."
+            )
+            secret_key = ""
+
         self.config = WebhookDeliveryConfig(
-            secret_key=os.getenv('WEBHOOK_SECRET_KEY', 'your-webhook-secret-key-change-in-production'),
+            secret_key=secret_key,
             max_retries=int(os.getenv('WEBHOOK_MAX_RETRIES', '3')),
             retry_delay_base=int(os.getenv('WEBHOOK_RETRY_DELAY_BASE', '60')),
             timeout=int(os.getenv('WEBHOOK_TIMEOUT', '30'))

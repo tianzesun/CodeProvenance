@@ -329,11 +329,18 @@ def get_current_tenant(request: Request) -> str:
     return tenant_id
 
 
-# Create some default API keys for development
 def setup_default_keys() -> None:
-    """Create default API keys for development/testing."""
-    # Development key (unlimited) - fixed for easier testing
-    dev_key = "sk_live_dev_key_for_testing_12345"
+    """Create default API keys for development/testing.
+
+    Only creates keys when DEBUG_MODE is enabled. Never creates
+    hardcoded keys that could be used in production.
+    """
+    from src.backend.config.settings import settings
+
+    if not settings.DEBUG_MODE:
+        logger.info("Skipping default API key creation (DEBUG_MODE is off)")
+        return
+
     api_key_manager.create_key(
         name="Development Key",
         tenant_id="dev",
@@ -341,20 +348,7 @@ def setup_default_keys() -> None:
         rate_window=60,
         permissions=["analyze", "report", "compare", "admin"],
     )
-    # Insert the fixed key manually
-    api_key_manager._keys[dev_key] = {
-        "name": "Development Key",
-        "tenant_id": "dev",
-        "rate_limit": 1000,
-        "rate_window": 60,
-        "permissions": ["analyze", "report", "compare", "admin"],
-        "created_at": datetime.now().isoformat(),
-        "last_used": None,
-        "total_requests": 0,
-    }
-    logger.info(f"Default API keys created for development. Dev key: {dev_key}")
-    
-    # Demo key (limited)
+
     api_key_manager.create_key(
         name="Demo Key",
         tenant_id="demo",
@@ -362,5 +356,8 @@ def setup_default_keys() -> None:
         rate_window=60,
         permissions=["analyze", "report", "compare"],
     )
-    
-    logger.info("Default API keys created for development")
+
+    logger.warning(
+        "Default API keys created for development only. "
+        "These keys should NOT be used in production."
+    )

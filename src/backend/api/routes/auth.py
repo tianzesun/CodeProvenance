@@ -3,7 +3,7 @@ Authentication routes for IntegrityDesk.
 """
 
 import secrets
-import string
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -16,20 +16,19 @@ from sqlalchemy.orm import Session
 from src.backend.config.database import get_db
 from src.backend.config.settings import settings
 from src.backend.models.database import User
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-
-def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
-
+from src.backend.infrastructure.security import (
+    hash_password,
+    verify_password,
+    validate_password_strength,
+)
 from src.backend.infrastructure.email_service import EmailService
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+
+# Rate limiting for forgot-password: email -> last request timestamp
+_forgot_password_rate_limit: dict[str, float] = {}
+ForgotPassword_COOLDOWN_SECONDS = 300  # 5 minutes
 
 class LoginRequest(BaseModel):
     email: str
@@ -136,6 +135,15 @@ async def get_me_by_api_key(request: Request, db: Session = Depends(get_db)):
 @router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Request password reset."""
+    # Rate limit: max 1 request per email per cooldown period
+    now = time.time()
+    last_request = _forgot_password_rate_limit.get(request.email)
+    if last_request and (now - last_request) < ForgotPassword_COOLDOWN_SECONDS:
+        # Always return success to avoid email enumeration
+        return {"message": "If an account with this email exists, a password reset link has been sent."}
+
+    _forgot_password_rate_limit[request.email] = now
+
     user = db.query(User).filter(User.email == request.email).first()
 
     # Always return success for security (don't reveal if email exists)
@@ -172,15 +180,11 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
             detail="Invalid or expired reset token"
         )
 
-    # Validate new password
-    if len(request.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters long"
-        )
+    # Validate new password strength (same rules as all other paths)
+    validate_password_strength(request.new_password)
 
     # Update password
-    user.password_hash = get_password_hash(request.new_password)
+    user.password_hash = hash_password(request.new_password)
     user.reset_token = None
     user.reset_token_expires = None
     db.commit()

@@ -66,7 +66,7 @@ class AppSettings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
 
     # Auth
-    AUTH_JWT_SECRET: Optional[str] = None
+    AUTH_JWT_SECRET: str
     AUTH_TOKEN_EXPIRE_MINUTES: int = 480
     FRONTEND_URL: str = "http://localhost:3000"
 

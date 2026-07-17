@@ -58,8 +58,12 @@ from src.backend.api.middleware.request_id import RequestIdMiddleware
 from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
 from src.backend.api.routes import cases, users, auth, settings as settings_router
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
+from src.backend.infrastructure.security import (
+    hash_password as _hash_password,
+    verify_password as _verify_password,
+    validate_password_strength as _validate_password_strength,
+)
 from sqlalchemy import func, select, or_
 from sqlalchemy.orm import joinedload
 
@@ -175,7 +179,6 @@ ENV_SETTINGS_PATH = project_root / "backend" / ".env.local"
 AUTH_COOKIE_NAME = "integritydesk_session"
 AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
 AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # In-memory progress tracking for benchmark jobs
 import threading
@@ -4471,8 +4474,6 @@ async def bootstrap_admin(request: Request):
     user_data = await run_in_threadpool(
         _bootstrap_admin_sync, email, full_name, password, tenant_name
     )
-    _ensure_auth_secret()
-    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
     _ensure_auth_secret()
     return JSONResponse(content={"user": user_data, "message": "Admin account created"})
 
@@ -10786,39 +10787,7 @@ def _normalize_email(value: str) -> str:
 
 
 def _validate_password_input(password: str) -> None:
-    # Skip strict validation in debug mode for easier testing
-    if settings.DEBUG_MODE:
-        return
-
-    if len(password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters long")
-    if not any(c.isupper() for c in password):
-        raise HTTPException(
-            status_code=400,
-            detail="Password must contain at least one uppercase letter",
-        )
-    if not any(c.islower() for c in password):
-        raise HTTPException(
-            status_code=400,
-            detail="Password must contain at least one lowercase letter",
-        )
-    if not any(c.isdigit() for c in password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one number")
-    # Common weak passwords
-    weak_passwords = ["password", "12345678", "qwerty", "admin", "letmein"]
-    if password.lower() in weak_passwords:
-        raise HTTPException(
-            status_code=400,
-            detail="Password is too common. Please choose a stronger password",
-        )
-
-
-def _hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def _verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
+    _validate_password_strength(password)
 
 
 def _create_access_token(user: User) -> str:
