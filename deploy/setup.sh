@@ -45,6 +45,8 @@ DATABASE_URL="${DATABASE_URL:-}"
 REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
 APP_DIR="${APP_DIR:-$REPO_DIR}"
 RUN_USER="${RUN_USER:-${SUDO_USER:-$(whoami)}}"
+WEB_SERVER="${WEB_SERVER:-apache}"
+SKIP_VENV="${SKIP_VENV:-0}"
 
 # Normalize APP_DIR to an absolute path
 APP_DIR="$(realpath -m "$APP_DIR")"
@@ -62,6 +64,7 @@ esac
 log "Configuration:"
 log "  APP_DIR=$APP_DIR  RUN_USER=$RUN_USER  DOMAIN=$APP_DOMAIN"
 log "  backend=$BACKEND_PORT  dashboard=$DASHBOARD_PORT  embedding=$EMBEDDING_PORT"
+log "  web_server=$WEB_SERVER  skip_venv=$SKIP_VENV"
 
 # -----------------------------------------------------------------------------
 # Run-as user
@@ -78,9 +81,14 @@ fi
 # -----------------------------------------------------------------------------
 # Python venv + dependencies
 # -----------------------------------------------------------------------------
-log "Creating virtualenv..."
-python3 -m venv "$APP_DIR/venv"
-"$APP_DIR/venv/bin/pip" install --upgrade pip
+if [ "$SKIP_VENV" = "1" ]; then
+    [ -x "$APP_DIR/venv/bin/python" ] || die "SKIP_VENV=1 but no venv found at $APP_DIR/venv"
+    log "Skipping venv creation (SKIP_VENV=1), using existing venv at $APP_DIR/venv"
+else
+    log "Creating virtualenv..."
+    python3 -m venv "$APP_DIR/venv"
+    "$APP_DIR/venv/bin/pip" install --upgrade pip
+fi
 log "Installing Python dependencies (this may take a few minutes)..."
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
@@ -179,32 +187,59 @@ fi
 systemctl daemon-reload
 
 # -----------------------------------------------------------------------------
-# nginx + TLS
+# Web server + TLS (apache or nginx)
 # -----------------------------------------------------------------------------
-log "Configuring nginx..."
-sed \
-    -e "s|@APP_DOMAIN@|$APP_DOMAIN|g" \
-    -e "s|@DASHBOARD_PORT@|$DASHBOARD_PORT|g" \
-    -e "s|@BACKEND_PORT@|$BACKEND_PORT|g" \
-    "$SCRIPT_DIR/nginx/integritydesk.conf" \
-    > "/etc/nginx/sites-available/integritydesk"
+if [ "$WEB_SERVER" = "apache" ]; then
+    log "Configuring Apache..."
+    sed \
+        -e "s|@APP_DOMAIN@|$APP_DOMAIN|g" \
+        -e "s|@DASHBOARD_PORT@|$DASHBOARD_PORT|g" \
+        -e "s|@BACKEND_PORT@|$BACKEND_PORT|g" \
+        "$SCRIPT_DIR/apache/integritydesk.conf" \
+        > "/etc/apache2/sites-available/integritydesk.conf"
 
-if [ -f "/etc/nginx/sites-enabled/default" ]; then
-    rm -f /etc/nginx/sites-enabled/default
-fi
-ln -sf /etc/nginx/sites-available/integritydesk /etc/nginx/sites-enabled/integritydesk
+    a2ensite integritydesk >/dev/null 2>&1 || true
+    a2dissite 000-default >/dev/null 2>&1 || true
+    a2enmod proxy proxy_http proxy_wstunnel rewrite headers ssl >/dev/null 2>&1 || true
 
-nginx -t || die "nginx config test failed"
-systemctl enable nginx
-systemctl reload nginx
+    apache2ctl configtest || die "Apache config test failed"
+    systemctl enable apache2
+    systemctl reload apache2
 
-if [ -n "$CERTBOT_EMAIL" ]; then
-    log "Requesting Let's Encrypt certificate for $APP_DOMAIN..."
-    certbot --nginx -d "$APP_DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" \
-        || warn "certbot failed. The site will run on HTTP only; re-run: sudo certbot --nginx -d $APP_DOMAIN"
-    systemctl reload nginx
+    if [ -n "$CERTBOT_EMAIL" ]; then
+        log "Requesting Let's Encrypt certificate for $APP_DOMAIN..."
+        certbot --apache -d "$APP_DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" \
+            || warn "certbot failed. The site will run on HTTP only; re-run: sudo certbot --apache -d $APP_DOMAIN"
+        systemctl reload apache2
+    else
+        warn "CERTBOT_EMAIL not set - serving HTTP only. Run certbot manually to enable TLS."
+    fi
 else
-    warn "CERTBOT_EMAIL not set - serving HTTP only. Run certbot manually to enable TLS."
+    log "Configuring nginx..."
+    sed \
+        -e "s|@APP_DOMAIN@|$APP_DOMAIN|g" \
+        -e "s|@DASHBOARD_PORT@|$DASHBOARD_PORT|g" \
+        -e "s|@BACKEND_PORT@|$BACKEND_PORT|g" \
+        "$SCRIPT_DIR/nginx/integritydesk.conf" \
+        > "/etc/nginx/sites-available/integritydesk"
+
+    if [ -f "/etc/nginx/sites-enabled/default" ]; then
+        rm -f /etc/nginx/sites-enabled/default
+    fi
+    ln -sf /etc/nginx/sites-available/integritydesk /etc/nginx/sites-enabled/integritydesk
+
+    nginx -t || die "nginx config test failed"
+    systemctl enable nginx
+    systemctl reload nginx
+
+    if [ -n "$CERTBOT_EMAIL" ]; then
+        log "Requesting Let's Encrypt certificate for $APP_DOMAIN..."
+        certbot --nginx -d "$APP_DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" \
+            || warn "certbot failed. The site will run on HTTP only; re-run: sudo certbot --nginx -d $APP_DOMAIN"
+        systemctl reload nginx
+    else
+        warn "CERTBOT_EMAIL not set - serving HTTP only. Run certbot manually to enable TLS."
+    fi
 fi
 
 # -----------------------------------------------------------------------------

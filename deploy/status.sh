@@ -34,5 +34,5 @@ echo ""
 echo "Recent failures (if any):"
 journalctl -u integritydesk-backend --since "10 min ago" --no-pager -p err | tail -5 || true
 echo ""
-echo "nginx: $(systemctl is-active nginx)"
+echo "web server: $(systemctl is-active apache2 2>/dev/null || systemctl is-active nginx 2>/dev/null || echo 'unknown')"
 echo "redis: $(systemctl is-active redis-server)"

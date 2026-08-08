@@ -29,7 +29,7 @@ apt-get install -y --no-install-recommends \
     libffi-dev libjpeg-dev libopenjp2-7 \
     libcairo2 libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 \
     shared-mime-info \
-    nginx certbot python3-certbot-nginx \
+    apache2 apache2-utils certbot python3-certbot-apache \
     redis-server \
     lsof \
     || die "Base package install failed"
@@ -49,6 +49,9 @@ npm --version
 log "Enabling and starting redis-server..."
 systemctl enable redis-server
 systemctl start redis-server
+
+log "Enabling Apache proxy modules..."
+a2enmod proxy proxy_http proxy_wstunnel rewrite headers ssl >/dev/null 2>&1 || true
 
 log ""
 log "Bootstrap complete. Next step:"
