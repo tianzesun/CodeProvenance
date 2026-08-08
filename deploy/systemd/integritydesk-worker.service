@@ -1,0 +1,18 @@
+[Unit]
+Description=IntegrityDesk Webhook Worker
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/src/backend/.env.local
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@APP_DIR@/venv/bin/python -m src.backend.workers.webhook_worker
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

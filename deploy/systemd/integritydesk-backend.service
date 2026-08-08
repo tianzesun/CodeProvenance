@@ -1,0 +1,20 @@
+[Unit]
+Description=IntegrityDesk Backend API (FastAPI/uvicorn)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/src/backend/.env.local
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@APP_DIR@/venv/bin/python -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port @BACKEND_PORT@
+Restart=always
+RestartSec=5
+# Prevent timeouts on model warmups / heavy analysis
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=IntegrityDesk Embedding Server (sentence-transformers)
+After=network.target integritydesk-backend.service
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@APP_DIR@/venv/bin/python -m uvicorn src.backend.services.embedding_server:app --host 127.0.0.1 --port @EMBEDDING_PORT@
+Restart=always
+RestartSec=5
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
