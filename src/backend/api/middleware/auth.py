@@ -26,8 +26,11 @@ from typing import Any, Callable, Dict, Optional
 
 from fastapi import HTTPException, Request, status
 from fastapi.security import APIKeyHeader
+from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+from src.backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +228,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth",
         ]
         self.exclude_paths = self.excluded_paths
+
+    def _has_valid_session_cookie(self, request: Request) -> bool:
+        """Return True if the request carries a valid dashboard session cookie.
+
+        The cookie is a JWT signed with AUTH_JWT_SECRET, the same token issued by
+        ``_issue_auth_cookie`` in ``src.backend.api.server``. Only requests with a
+        cryptographically valid, unexpired token bypass the API key requirement.
+        """
+        from src.backend.api.server import AUTH_COOKIE_NAME
+
+        if not settings.AUTH_JWT_SECRET:
+            return False
+
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+        if not token:
+            return False
+
+        try:
+            payload = jwt.decode(token, settings.AUTH_JWT_SECRET, algorithms=["HS256"])
+        except JWTError:
+            return False
+
+        return bool(payload.get("sub"))
     
     async def dispatch(
         self, request: Request, call_next: Callable
@@ -244,7 +270,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Skip authentication for exempt prefixes (e.g., /api/cases/, /api/users/)
         if path.startswith(AUTH_EXEMPT_PREFIXES):
             return await call_next(request)
-        
+
+        # Dashboard sessions (HttpOnly cookie JWT) take precedence over API keys.
+        # The dashboard uses cookie-based auth (see dashboard_auth_middleware), so a
+        # request with a valid session cookie must not be rejected for missing an
+        # API key header. API keys remain required for programmatic access.
+        if self._has_valid_session_cookie(request):
+            return await call_next(request)
+
         # Get API key from header
         api_key = request.headers.get("X-API-Key")
         

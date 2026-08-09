@@ -30,16 +30,14 @@ function flushQueue(error?: unknown) {
   }
 }
 
-// Development API key for unauthenticated access
-const DEV_API_KEY = 'sk_live_dev_key_for_testing_12345';
+// The dashboard authenticates with an HttpOnly session cookie. It no longer
+// sends the hardcoded development API key, which did not match any backend key
+// and caused protected endpoints to reject otherwise valid sessions.
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: '',
   withCredentials: true,
   timeout: 15000, // Increased timeout to 15 seconds for better reliability
-  headers: {
-    'X-API-Key': DEV_API_KEY,
-  },
 });
 
 async function refreshAuthSession() {

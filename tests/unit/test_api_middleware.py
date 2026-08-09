@@ -8,25 +8,105 @@ Tests the authentication and rate limiting middleware including:
 - Request processing
 """
 
-import pytest
+import asyncio
 import hashlib
+import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime, timedelta
+
+import pytest
 from fastapi import HTTPException, Request
+from jose import jwt as jose_jwt
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from src.backend.api.middleware.auth import AuthMiddleware
 from src.backend.api.middleware.rate_limit import RateLimitMiddleware, RateLimiter
+from src.backend.config.settings import settings
+
+AUTH_COOKIE_NAME = "integritydesk_session"
+TEST_JWT_SECRET = "unit-test-secret-not-used-in-production"
+
+
+def _build_session_token(sub: str = "user-123") -> str:
+    """Build a signed session JWT matching the backend cookie format."""
+    now = datetime.now(timezone.utc)
+    return jose_jwt.encode(
+        {"sub": sub, "exp": now + timedelta(minutes=30), "iat": now},
+        TEST_JWT_SECRET,
+        algorithm="HS256",
+    )
+
+
+def _make_request(cookie_value: str = "", path: str = "/api/jobs") -> Request:
+    headers = []
+    if cookie_value:
+        headers.append((b"cookie", f"{AUTH_COOKIE_NAME}={cookie_value}".encode()))
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": path,
+        "headers": headers,
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 80),
+        "state": {},
+    }
+    return Request(scope)
 
 
 class TestAuthMiddleware:
     """Test the authentication middleware."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.app = MagicMock()
         self.middleware = AuthMiddleware(self.app)
-    
+
+    async def _run_dispatch(self, request: Request):
+        """Run the middleware dispatch against a passthrough next handler."""
+
+        async def fake_next(req):
+            return JSONResponse({"ok": True})
+
+        return await self.middleware.dispatch(request, fake_next)
+
+    def test_valid_session_cookie_detected(self, monkeypatch):
+        """A cryptographically valid session cookie bypasses the API key check."""
+        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        request = _make_request(cookie_value=_build_session_token())
+
+        assert self.middleware._has_valid_session_cookie(request) is True
+
+    def test_invalid_session_cookie_detected(self, monkeypatch):
+        """Garbage or tampered cookies never bypass the API key check."""
+        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        tampered = _build_session_token()[:-4] + "aaaa"
+        assert self.middleware._has_valid_session_cookie(_make_request(cookie_value=tampered)) is False
+        assert self.middleware._has_valid_session_cookie(_make_request(cookie_value="not-a-jwt")) is False
+        assert self.middleware._has_valid_session_cookie(_make_request()) is False
+
+    def test_dispatch_allows_valid_session_without_api_key(self, monkeypatch):
+        """Dashboard requests with a valid session cookie must not require an API key."""
+        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        request = _make_request(cookie_value=_build_session_token())
+
+        response = asyncio.run(self._run_dispatch(request))
+
+        assert response.status_code == 200
+        assert response.body == b'{"ok":true}'
+
+    def test_dispatch_rejects_missing_api_key_without_session(self, monkeypatch):
+        """Requests without a session cookie still require a valid API key."""
+        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        request = _make_request()
+
+        response = asyncio.run(self._run_dispatch(request))
+
+        assert response.status_code == 401
+        assert "API key" in json.loads(response.body)["message"]
+
     def test_exclude_paths(self):
         """Test that excluded paths are not authenticated."""
         exclude_paths = [

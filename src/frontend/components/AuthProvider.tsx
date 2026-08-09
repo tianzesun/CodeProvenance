@@ -197,7 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         // No stored user, try to get current user
         const meRes = await apiClient.get('/api/auth/me');
-        const nextUser = meRes.data ?? null;
+        const nextUser = meRes.data?.user ?? null;
 
         setUser(nextUser);
         setStatus(nextUser ? 'authenticated' : 'anonymous');

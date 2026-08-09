@@ -4475,7 +4475,13 @@ async def bootstrap_admin(request: Request):
         _bootstrap_admin_sync, email, full_name, password, tenant_name
     )
     _ensure_auth_secret()
-    return JSONResponse(content={"user": user_data, "message": "Admin account created"})
+    response = JSONResponse(content={"user": user_data, "message": "Admin account created"})
+    # Issue a session cookie so the newly created admin can use the dashboard
+    # immediately without logging in again.
+    user = await run_in_threadpool(_get_user_for_cookie, email)
+    if user is not None:
+        _issue_auth_cookie(response, user)
+    return response
 
 
 def _bootstrap_admin_sync(email, full_name, password, tenant_name):
@@ -11015,13 +11021,13 @@ def _issue_auth_cookie(response: Response, user: User) -> None:
         max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.AUTH_COOKIE_SECURE,
         path="/",
     )
 
 
 def _clear_auth_cookie(response: Response) -> None:
-    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/", secure=settings.AUTH_COOKIE_SECURE)
 
 
 def _generate_tenant_name(full_name: str, email: str) -> str:

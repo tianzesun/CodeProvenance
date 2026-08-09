@@ -68,6 +68,7 @@ class AppSettings(BaseSettings):
     # Auth
     AUTH_JWT_SECRET: str
     AUTH_TOKEN_EXPIRE_MINUTES: int = 480
+    AUTH_COOKIE_SECURE: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
     # External plagiarism services
