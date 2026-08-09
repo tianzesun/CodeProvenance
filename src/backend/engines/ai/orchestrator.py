@@ -19,6 +19,7 @@ adding a TextOrchestrator or a "domain" parameter.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, Optional
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
@@ -85,13 +86,19 @@ class AIDetectionOrchestrator:
         if bino_result.get("available"):
             signals["binoculars"] = bino_result["ai_probability"]
 
-        # Re-fuse using the orchestrator's weights (which favor Binoculars)
-        fused_probability = self._weighted_fuse(signals)
+        # Re-fuse using the orchestrator's weights (which favor Binoculars).
+        # Without Binoculars the full grid is too noisy for code (perplexity is
+        # ~0 for code, whitespace/vocabulary barely separate), so use the
+        # heuristic-only path tuned for the signal ensemble.
+        if bino_result.get("available"):
+            fused_probability = self._weighted_fuse(signals)
+        else:
+            fused_probability = self._heuristic_fuse(signals)
 
         # Combine confidence
         legacy_conf = legacy_result.get("confidence", 0.5)
         bino_conf = (
-            bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.3
+            bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.5
         )
         combined_confidence = max(0.4, (0.6 * bino_conf + 0.4 * legacy_conf))
 
@@ -141,8 +148,23 @@ class AIDetectionOrchestrator:
         raw = total / weight_sum
 
         # Mild calibration (same style as legacy)
-        import math
-
         k = 5.5
         calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
         return calibrated
+
+    def _heuristic_fuse(self, signals: Dict[str, float]) -> float:
+        """Fuse the heuristic signals when Binoculars is unavailable.
+
+        Uses only the signals that meaningfully separate AI from human code:
+        fingerprint patterns, docstring over-documentation, stylometry, and
+        burstiness. The Binoculars-heavy weight grid dilutes these into noise
+        when the 0.40 binoculars weight is missing, so it is bypassed here.
+        """
+        pattern = signals.get("pattern_library", 0.0)
+        docstring = signals.get("docstring_density", 0.0)
+        stylometry = signals.get("stylometry", 0.0)
+        burstiness = signals.get("burstiness", 0.0)
+
+        raw = 0.40 * pattern + 0.25 * docstring + 0.20 * stylometry + 0.15 * burstiness
+        k = 5.5
+        return 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))

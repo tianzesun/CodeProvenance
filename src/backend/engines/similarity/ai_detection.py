@@ -41,22 +41,23 @@ _LLM_COMMENT_PATTERNS: List[re.Pattern] = [
     re.compile(
         r"#\s*(Here we|Here is|Here's|This function|This method|This class)\b", re.I
     ),
-    re.compile(r"#\s*(Note:|Note that|NOTE:|TODO:|FIXME:|Step \d+:)", re.I),
+    re.compile(r"#\s*(Note:|Note that|TODO:|FIXME:|Step \d+:)", re.I),
     re.compile(
         r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b", re.I
     ),
     re.compile(r"#\s*[A-Z][a-z]+(?: [a-z]+){2,}\s*$", re.M),
     re.compile(r"#\s*-{3,}"),
+    # Only match templated LLM docstrings (Google/Sphinx/NumPy style). This avoids
+    # flagging plain one-line human docstrings that merely contain a common verb.
     re.compile(
-        r'"""[\s\S]{0,40}(?:Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)',
+        r'"""[\s\S]{0,200}(?:Args:|Raises:|Yields:|Example:|Note:|:param:|:return:)',
         re.I,
     ),
 ]
 
 _LLM_NAMING_PATTERNS: List[re.Pattern] = [
-    re.compile(
-        r"\b(result|output|data|value|temp|final|new|processed|formatted|cleaned)\b"
-    ),
+    # Bare generic words (result/data/value/...) are ubiquitous in human code;
+    # matched via density only (see _signal_pattern_library), not as hard hits.
     re.compile(
         r"\b(process_|handle_|compute_|calculate_|generate_|validate_|parse_)\w+"
     ),
@@ -139,7 +140,7 @@ class AIDetectionEngine:
 
     def __init__(self, calibrator_path: Optional[str] = None) -> None:
         """Initialise the detection engine.
-        
+
         Args:
             calibrator_path: Optional path to a calibrated model pickle file.
                            If provided and exists, the calibrated scores will be used.
@@ -155,14 +156,20 @@ class AIDetectionEngine:
         if not calibrator_path:
             # Try default location
             from pathlib import Path
-            default_path = Path(__file__).parent.parent.parent.parent / "backend" / ".calibrator.pkl"
+
+            default_path = (
+                Path(__file__).parent.parent.parent.parent
+                / "backend"
+                / ".calibrator.pkl"
+            )
             if default_path.exists():
                 calibrator_path = str(default_path)
-        
+
         if calibrator_path:
             try:
                 from src.backend.engines.score_calibration import ScoreCalibrator
                 import pickle
+
                 with open(calibrator_path, "rb") as f:
                     data = pickle.load(f)
                     self.calibrator = data.get("calibrator")
@@ -342,13 +349,22 @@ class AIDetectionEngine:
     def _signal_pattern_library(self, code: str) -> float:
         """Pattern library signal.
 
-        Counts matches against 40+ LLM-specific regex fingerprints.
+        Counts matches against LLM-specific regex fingerprints.
         Normalised by code length so longer files don't score higher.
+        High-precision comment/structural fingerprints are weighted more than
+        generic naming matches (which are common in human code).
         """
         total_lines = max(1, len(code.splitlines()))
-        match_count = sum(len(pattern.findall(code)) for pattern in _ALL_LLM_PATTERNS)
-        density = match_count / total_lines
-        return max(0.0, min(1.0, density * 5.0))
+        strong_matches = sum(
+            len(pattern.findall(code))
+            for pattern in (_LLM_COMMENT_PATTERNS + _LLM_STRUCTURAL_PATTERNS)
+        )
+        weak_matches = min(
+            8,
+            sum(len(pattern.findall(code)) for pattern in _LLM_NAMING_PATTERNS),
+        )
+        density = (2.0 * strong_matches + 0.5 * weak_matches) / total_lines
+        return max(0.0, min(1.0, density * 2.5))
 
     def _signal_structural_entropy(self, code: str, language: str) -> float:
         """AST structural entropy signal (Python only).
