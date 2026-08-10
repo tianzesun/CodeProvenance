@@ -3470,6 +3470,8 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         "language": str(entry.get("language") or "python"),
         "ai_probability": round(_coerce_float(entry.get("ai_probability")), 3),
         "confidence": round(_coerce_float(entry.get("confidence")), 3),
+        "method": str(entry.get("method") or "heuristic"),
+        "model": str(entry.get("model") or ""),
         "status": str(entry.get("status") or "Low Risk"),
         "signals": signals,
         "signal_labels": signal_labels,
@@ -3509,6 +3511,7 @@ def _normalize_ai_detection(ai_detection: Any) -> Dict[str, Any]:
         "threshold": round(
             _coerce_float(ai_detection.get("threshold"), AI_MEDIUM_RISK_THRESHOLD), 3
         ),
+        "method": str(ai_detection.get("method") or "heuristic"),
         "status_message": str(ai_detection.get("status_message") or ""),
         "flagged_count": int(ai_detection.get("flagged_count") or 0),
         "total_files": int(ai_detection.get("total_files") or len(submissions)),
@@ -4112,6 +4115,8 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
                 "language": language,
                 "ai_probability": ai_probability,
                 "confidence": confidence,
+                "method": str(result.get("method") or "heuristic"),
+                "model": str(result.get("model") or ""),
                 "status": _ai_status_label(ai_probability),
                 "signals": signals,
                 "signal_labels": signal_labels,
@@ -4128,6 +4133,9 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
         )
 
     entries.sort(key=lambda entry: (-entry["ai_probability"], entry["name"]))
+
+    detection_methods = {entry["method"] for entry in entries if entry["method"]}
+    using_binoculars = "binoculars" in detection_methods
 
     distribution = {"low": 0, "medium": 0, "high": 0}
     for entry in entries:
@@ -4146,7 +4154,14 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     return {
         "enabled": True,
         "threshold": AI_MEDIUM_RISK_THRESHOLD,
-        "status_message": "Per-submission AI scoring is available for this assignment.",
+        "method": "binoculars" if using_binoculars else "heuristic",
+        "status_message": (
+            "Per-submission AI scoring is available for this assignment."
+            if using_binoculars
+            else "Heuristic AI-likelihood estimate — statistical fingerprint "
+            "analysis only, not a trained model. Use as a screening signal, "
+            "not as proof of AI authorship."
+        ),
         "flagged_count": sum(
             1 for entry in entries if entry["ai_probability"] >= AI_MEDIUM_RISK_THRESHOLD
         ),

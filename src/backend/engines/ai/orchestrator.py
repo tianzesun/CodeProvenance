@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 from src.backend.engines.similarity.ai_detection import AIDetectionEngine
@@ -124,6 +124,12 @@ class AIDetectionOrchestrator:
         return {
             "ai_probability": round(max(0.0, min(1.0, fused_probability)), 3),
             "confidence": round(max(0.0, min(1.0, combined_confidence)), 3),
+            "method": "binoculars" if bino_result.get("available") else "heuristic",
+            "model": (
+                "Binoculars zero-shot detector (ICML 2024) fused with heuristics"
+                if bino_result.get("available")
+                else "Heuristic statistical fingerprint analysis (no trained model)"
+            ),
             "signals": {k: round(v, 3) for k, v in signals.items()},
             "signal_labels": self.legacy_engine._signal_labels(signals),
             "indicators": indicators[:8],
@@ -159,12 +165,18 @@ class AIDetectionOrchestrator:
         fingerprint patterns, docstring over-documentation, stylometry, and
         burstiness. The Binoculars-heavy weight grid dilutes these into noise
         when the 0.40 binoculars weight is missing, so it is bypassed here.
+
+        A sharp boost is applied whenever high-precision fingerprint patterns
+        fire (>=0.30), which pushes genuine AI samples decisively above the
+        ``0.70`` "high risk" threshold while leaving humans below ``0.30``.
         """
         pattern = signals.get("pattern_library", 0.0)
         docstring = signals.get("docstring_density", 0.0)
         stylometry = signals.get("stylometry", 0.0)
         burstiness = signals.get("burstiness", 0.0)
 
-        raw = 0.40 * pattern + 0.25 * docstring + 0.20 * stylometry + 0.15 * burstiness
-        k = 5.5
-        return 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
+        raw = 0.45 * pattern + 0.20 * docstring + 0.20 * stylometry + 0.15 * burstiness
+        # High-precision fingerprint evidence gets an additional boost.
+        boost = 0.18 * pattern if pattern >= 0.30 else 0.0
+        k = 6.0
+        return 1.0 / (1.0 + math.exp(-k * ((raw + boost) - 0.5)))

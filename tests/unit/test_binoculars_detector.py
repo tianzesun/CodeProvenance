@@ -1,7 +1,6 @@
 """Tests for BinocularsDetector (zero-shot AI code detector)."""
 
 from unittest.mock import patch, MagicMock
-import pytest
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 
@@ -24,7 +23,10 @@ class TestBinocularsDetector:
         detector._bino = mock_bino
         detector._available = True
 
-        long_code = "def hello_world():\n    print('This is a longer example for testing')\n    return 42\n" * 3
+        long_code = (
+            "def hello_world():\n    print('This is a longer example for testing')\n    return 42\n"
+            * 3
+        )
         result = detector.analyze(long_code, language="python")
 
         assert result["available"] is True
@@ -41,16 +43,23 @@ class TestBinocularsDetector:
         detector._bino = mock_bino
         detector._available = True
 
-        long_code = "def process_data(items):\n    result = []\n    for item in items:\n        result.append(item * 2)\n    return result\n" * 3
+        long_code = (
+            "def process_data(items):\n    result = []\n    for item in items:\n        result.append(item * 2)\n    return result\n"
+            * 3
+        )
         result = detector.analyze(long_code, language="python")
 
         assert result["available"] is True
         assert result["ai_probability"] < 0.2
 
-    @patch("src.backend.engines.ai.binoculars_detector.Binoculars", side_effect=ImportError)
-    def test_graceful_degradation_when_package_missing(self, _mock):
+    @patch("sys.modules", new={"binoculars": None})
+    def test_graceful_degradation_when_package_missing(self):
         detector = BinocularsDetector()
-        result = detector.analyze("def foo(): return 42", language="python")
+        result = detector.analyze(
+            "def foo():\n    print('This is a longer example for testing')\n    return 42\n"
+            * 3,
+            language="python",
+        )
 
         assert result["available"] is False
         assert result["ai_probability"] == 0.5
@@ -58,5 +67,5 @@ class TestBinocularsDetector:
     def test_is_available_returns_false_when_not_loaded(self):
         detector = BinocularsDetector()
         # Force failure path
-        with patch("src.backend.engines.ai.binoculars_detector.Binoculars", side_effect=Exception("boom")):
+        with patch("sys.modules", {"binoculars": None}):
             assert detector.is_available() is False

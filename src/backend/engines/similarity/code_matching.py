@@ -55,6 +55,19 @@ class CodeHighlighter:
         self.token_threshold = token_threshold
         self._token_cache: Dict[str, List[str]] = {}
 
+    def _normalize_identifiers(self, line: str) -> str:
+        """Normalize identifiers, literals and strings in a single line.
+
+        Used for clone matching so renamed identifiers still register as
+        matching blocks (Type-2 clone detection). Mirrors the normalization
+        applied in ``_tokenize`` with ``normalize=True`` but per-line so the
+        resulting block can be diffed and highlighted line-by-line.
+        """
+        line = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", "IDENT", line)
+        line = re.sub(r"\b\d+\.?\d*\b", "LITERAL", line)
+        line = re.sub(r'["\'].*?["\']', "STRING", line)
+        return line
+
     def _tokenize(self, code: str, normalize: bool = False) -> List[str]:
         """Tokenize code with optional normalization for clone detection."""
         cache_key = f"{hash(code)}:{normalize}"
@@ -106,7 +119,16 @@ class CodeHighlighter:
         lines_a = [line.rstrip() for line in code_a.splitlines()]
         lines_b = [line.rstrip() for line in code_b.splitlines()]
 
-        matcher = difflib.SequenceMatcher(None, lines_a, lines_b, autojunk=False)
+        # Match on identifier/literal-normalized lines so Type-2 (renamed)
+        # clones register as matching blocks. Without this, difflib finds no
+        # blocks for renamed code and coverage collapses to 0.0, which the
+        # fusion hard-gate interprets as "no structural evidence" and vetoes.
+        normalized_a = [self._normalize_identifiers(line) for line in lines_a]
+        normalized_b = [self._normalize_identifiers(line) for line in lines_b]
+
+        matcher = difflib.SequenceMatcher(
+            None, normalized_a, normalized_b, autojunk=False
+        )
         matching_blocks = matcher.get_matching_blocks()
 
         segments: List[CodeSegment] = []

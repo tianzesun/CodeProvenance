@@ -1,8 +1,21 @@
 import numpy as np
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _engine_analyze(code: str) -> Dict[str, Any]:
+    """Lazily delegate to the heuristic AIDetectionEngine.
+
+    The CodeBERT fine-tuned detector was never checked in and the zero-shot
+    centroids were never trained, so both learned layers delegate to the
+    shipped heuristic engine (the single source of truth for AI scoring)
+    instead of fabricating constant scores that would corrupt fusion results.
+    """
+    from src.backend.engines.similarity.ai_detection import AIDetectionEngine
+
+    return AIDetectionEngine().analyze(code)
 
 
 class ZeroShotAIDetector:
@@ -57,19 +70,12 @@ class ZeroShotAIDetector:
         """
         Compare input code embedding to AI vs Human centroids.
         Returns AI probability.
+
+        The CodeBERT model and the human/AI centroids are not trained in this
+        environment, so this returns the heuristic engine score rather than a
+        fabricated constant.
         """
-        if not self._load_model():
-            return 0.5
-
-        emb = self.get_embedding(code)
-
-        # Heuristic implementation of zero-shot contrast
-        # In a real system, these centroids are loaded from a JSON file
-        # generated during the benchmark phase.
-        ai_score = self._detect_ai_patterns(code)
-
-        # Combine embedding distance with structural entropy
-        return min(1.0, max(0.0, ai_score))
+        return _engine_analyze(code).get("ai_probability", 0.0)
 
     def _detect_ai_patterns(self, code: str) -> float:
         """
@@ -94,7 +100,9 @@ class ZeroShotAIDetector:
             score += 0.1
 
         # 4. Perfect Indentation
-        if all(len(l) - len(l.lstrip()) % 4 == 0 for l in lines if l.strip()):
+        if all(
+            len(line) - len(line.lstrip()) % 4 == 0 for line in lines if line.strip()
+        ):
             score += 0.2
 
         return score + 0.4  # Baseline for modern LLMs
@@ -128,45 +136,39 @@ class CodeBERTDetector:
 
 class AIDetectionLayer:
     """
-    The 'Kill-Feature': High-Accuracy ChatGPT Detection Layer.
-    Fuses CodeBERT Zero-Shot classification with Stylometric Contrast.
+    High-Accuracy AI Detection Layer.
+
+    Fuses the heuristic signal engine for a calibrated AI probability. The
+    CodeBERT zero-shot/fine-tuned layers are not trained in this environment,
+    so they delegate to the heuristic engine rather than returning constant
+    scores that would falsely inflate downstream risk.
     """
 
     def __init__(self):
-        from src.backend.engines.features.stylometry import StylometryExtractor
+        from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
-        self.stylometry = StylometryExtractor()
-        self.zero_shot = ZeroShotAIDetector()
-        self.codebert_ft = CodeBERTDetector()  # From previous turn
+        self._orchestrator = AIDetectionOrchestrator()
 
     def analyze(self, code: str) -> Dict[str, Any]:
         """Deep forensic analysis for AI presence."""
-        pred_ft = self.codebert_ft.predict(code)
-        prob_zs = self.zero_shot.predict_zero_shot(code)
+        result = self._orchestrator.analyze(code)
+        ai_prob = result.get("ai_probability", 0.0)
+        confidence = result.get("confidence", 0.0)
 
-        # Weighted Fusion (Priority to Fine-tuned CodeBERT)
-        final_ai_prob = (pred_ft["ai_prob"] * 0.7) + (prob_zs * 0.3)
-        confidence = max(
-            float(pred_ft.get("confidence", 0.0)), 0.6 if prob_zs > 0.5 else 0.4
-        )
-        if final_ai_prob >= 0.7:
+        if ai_prob >= 0.7:
             decision = "likely_ai"
-        elif final_ai_prob >= 0.4:
+        elif ai_prob >= 0.4:
             decision = "review"
         else:
             decision = "likely_human"
 
         return {
-            "ai_probability": round(final_ai_prob, 4),
-            "is_ai_generated": final_ai_prob > 0.85,
-            "confidence": round(min(confidence, 1.0), 4),
+            "ai_probability": round(ai_prob, 4),
+            "is_ai_generated": ai_prob > 0.85,
+            "confidence": round(confidence, 4),
             "decision": decision,
-            "methodology": "CodeBERT-Base + Zero-Shot Stylometric Contrast",
-            "indicators": pred_ft.get("indicators", []),
-            "signals": pred_ft.get("signals", {}),
-            "forensic_markers": {
-                "structural_consistency": "High (AI Pattern)",
-                "naming_convention": "Standardized (AI Pattern)",
-                "logic_density": "Optimal (AI Pattern)",
-            },
+            "methodology": "Heuristic signal ensemble",
+            "indicators": result.get("indicators", []),
+            "signals": result.get("signals", {}),
+            "forensic_markers": result.get("signal_labels", {}),
         }

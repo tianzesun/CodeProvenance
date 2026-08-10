@@ -45,7 +45,7 @@ _LLM_COMMENT_PATTERNS: List[re.Pattern] = [
     re.compile(
         r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b", re.I
     ),
-    re.compile(r"#\s*[A-Z][a-z]+(?: [a-z]+){2,}\s*$", re.M),
+    re.compile(r"#\s*[A-Z][a-zA-Z'-]*(?: [a-zA-Z'-]+){2,}\s*$", re.M),
     re.compile(r"#\s*-{3,}"),
     # Only match templated LLM docstrings (Google/Sphinx/NumPy style). This avoids
     # flagging plain one-line human docstrings that merely contain a common verb.
@@ -167,7 +167,6 @@ class AIDetectionEngine:
 
         if calibrator_path:
             try:
-                from src.backend.engines.score_calibration import ScoreCalibrator
                 import pickle
 
                 with open(calibrator_path, "rb") as f:
