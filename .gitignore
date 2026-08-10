@@ -119,6 +119,9 @@ test_results/
 .unixcoder_cache/
 .embedding_cache/
 
+# Trained AI-detection classifiers (regenerable via train_classifier.py)
+src/backend/engines/ai/models/
+
 ###############
 # IDE & Editor Caches
 ###############

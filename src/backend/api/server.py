@@ -1623,7 +1623,28 @@ def _ai_status_label(score: float) -> str:
         return "High Risk"
     if score >= AI_MEDIUM_RISK_THRESHOLD:
         return "Needs Review"
+    if score >= _ai_refactor_threshold():
+        # Heavily edited / paraphrased AI code may sit below the medium cutoff
+        # but above the refactor floor — call it out rather than calling it low.
+        return "Possibly Refactored AI Code"
     return "Low Risk"
+
+
+_ai_refactor_cache: Dict[str, float] = {}
+
+
+def _ai_refactor_threshold() -> float:
+    """Read the refactor-selection threshold from the ensemble config."""
+    if "value" not in _ai_refactor_cache:
+        try:
+            from src.backend.engines.ai.ensemble import AIEnsembleConfig
+
+            _ai_refactor_cache["value"] = AIEnsembleConfig().threshold(
+                "refactor_selection", 0.35
+            )
+        except Exception:
+            _ai_refactor_cache["value"] = AI_MEDIUM_RISK_THRESHOLD
+    return _ai_refactor_cache["value"]
 
 
 def _pair_key(file_a: str, file_b: str) -> str:

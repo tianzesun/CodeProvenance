@@ -11,11 +11,9 @@ import { useState } from 'react';
 
 export function AIDetectionScore({ probability, confidence, indicators = [] }) {
   const getRiskLevel = (prob) => {
-    if (prob >= 0.8) return { level: 'Very High', color: 'red', tone: 'critical' };
-    if (prob >= 0.6) return { level: 'High', color: 'orange', tone: 'warning' };
-    if (prob >= 0.4) return { level: 'Medium', color: 'yellow', tone: 'caution' };
-    if (prob >= 0.2) return { level: 'Low', color: 'blue', tone: 'low' };
-    return { level: 'Very Low', color: 'green', tone: 'safe' };
+    if (prob >= 0.7) return { level: 'High', color: 'red', tone: 'critical' };
+    if (prob >= 0.4) return { level: 'Medium', color: 'orange', tone: 'warning' };
+    return { level: 'Low', color: 'blue', tone: 'low' };
   };
 
   const risk = getRiskLevel(probability);
@@ -91,9 +89,9 @@ export function AIDetectionSummary({ results }) {
     );
   }
 
-  const flaggedCount = results.filter((r) => r.ai_probability >= 0.6).length;
+  const flaggedCount = results.filter((r) => r.ai_probability >= 0.4).length;
   const avgProbability = results.reduce((sum, r) => sum + r.ai_probability, 0) / results.length;
-  const highRiskCount = results.filter((r) => r.ai_probability >= 0.8).length;
+  const highRiskCount = results.filter((r) => r.ai_probability >= 0.7).length;
 
   return (
     <div className="space-y-4">
@@ -131,7 +129,7 @@ export function AIDetectionSummary({ results }) {
           <div className="flex items-center gap-2 text-red-600">
             <AlertTriangle size={16} />
             <span className="text-sm font-semibold">
-              {highRiskCount} file{highRiskCount === 1 ? '' : 's'} with very high AI probability (≥80%)
+              {highRiskCount} file{highRiskCount === 1 ? '' : 's'} with high AI probability (≥70%)
             </span>
           </div>
         </div>
@@ -151,16 +149,14 @@ export function AIDetectionSummary({ results }) {
 
 function AIDetectionResultRow({ result }) {
   const getTone = (prob) => {
-    if (prob >= 0.8) return 'border-red-500/20 bg-red-500/[0.08]';
-    if (prob >= 0.6) return 'border-orange-500/20 bg-orange-500/[0.08]';
-    if (prob >= 0.4) return 'border-yellow-500/20 bg-yellow-500/[0.08]';
+    if (prob >= 0.7) return 'border-red-500/20 bg-red-500/[0.08]';
+    if (prob >= 0.4) return 'border-orange-500/20 bg-orange-500/[0.08]';
     return 'border-[color:var(--border)] bg-[var(--surface)]';
   };
 
   const getColor = (prob) => {
-    if (prob >= 0.8) return 'text-red-600';
-    if (prob >= 0.6) return 'text-orange-600';
-    if (prob >= 0.4) return 'text-yellow-600';
+    if (prob >= 0.7) return 'text-red-600';
+    if (prob >= 0.4) return 'text-orange-600';
     return 'text-[var(--text-secondary)]';
   };
 
@@ -203,10 +199,8 @@ function AIDetectionResultRow({ result }) {
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--border)]">
         <div
           className={`h-full rounded-full transition-all ${
-            result.ai_probability >= 0.8
+            result.ai_probability >= 0.7
               ? 'bg-red-500'
-              : result.ai_probability >= 0.6
-              ? 'bg-orange-500'
               : result.ai_probability >= 0.4
               ? 'bg-yellow-500'
               : 'bg-emerald-500'
