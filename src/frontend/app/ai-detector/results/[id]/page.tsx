@@ -152,6 +152,47 @@ function CodeSnippet({ lines }) {
   );
 }
 
+function FlaggedRegions({ regions }) {
+  if (!regions || regions.length === 0) return null;
+
+  const reasonLabels = {
+    low_perplexity: 'Low Perplexity',
+    high_uniformity: 'High Uniformity',
+  };
+
+  return (
+    <div>
+      <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+        Flagged Regions ({regions.length})
+      </div>
+      <div className="space-y-2">
+        {regions.map((region, idx) => (
+          <div key={idx} className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-indigo-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">
+                  Lines {region.start_line}–{region.end_line}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  region.severity === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {region.severity}
+                </span>
+                <span className="text-xs font-semibold capitalize text-indigo-800">
+                  {reasonLabels[region.reason] || region.reason.replace(/_/g, ' ')}
+                </span>
+              </div>
+            </div>
+            {region.detail && (
+              <div className="mt-1.5 text-xs text-indigo-700/80">{region.detail}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SubmissionCard({ entry }) {
   const [expanded, setExpanded] = useState(false);
   const prob = Number(entry.ai_probability) || 0;
@@ -314,6 +355,9 @@ function SubmissionCard({ entry }) {
               </div>
             </div>
           )}
+
+          {/* Flagged regions (low perplexity / uniform code) */}
+          <FlaggedRegions regions={entry.flagged_regions} />
 
           {/* Code snippet */}
           {hasSnippet && (

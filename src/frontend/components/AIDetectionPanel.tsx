@@ -1,7 +1,8 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
-import { Brain, AlertTriangle, CheckCircle2, TrendingUp, FileCode, Sparkles } from 'lucide-react';
+import { Brain, AlertTriangle, CheckCircle2, TrendingUp, FileCode, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState } from 'react';
 
 /**
  * AI Detection Panel Component
@@ -163,6 +164,9 @@ function AIDetectionResultRow({ result }) {
     return 'text-[var(--text-secondary)]';
   };
 
+  const regions = result.flagged_regions || [];
+  const [showRegions, setShowRegions] = useState(false);
+
   return (
     <div className={`theme-card rounded-[22px] px-4 py-4 ${getTone(result.ai_probability)}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -210,6 +214,35 @@ function AIDetectionResultRow({ result }) {
           style={{ width: `${result.ai_probability * 100}%` }}
         />
       </div>
+
+      {regions.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowRegions((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          >
+            {showRegions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            <AlertTriangle size={13} />
+            {regions.length} flagged region{regions.length === 1 ? '' : 's'} (low perplexity)
+          </button>
+          {showRegions && (
+            <div className="mt-2 space-y-1.5">
+              {regions.map((region, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-full border border-current px-3 py-1 text-xs opacity-80"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <span className="font-semibold">Lines {region.start_line}–{region.end_line}</span>
+                  {' — '}
+                  {region.detail || 'Low perplexity suggests predictable or AI-generated code.'}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
