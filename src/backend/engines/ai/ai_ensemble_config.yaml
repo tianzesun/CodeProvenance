@@ -1,0 +1,44 @@
+# AI-generated code detection module configuration.
+#
+# Controls the ensemble scorer weights, the severity thresholds, and the
+# classification switch. Weights follow the same pattern as engine_weights.yaml
+# used for the similarity engines — all values are hot-loadable.
+#
+# Weights sum to 1.0 within each scoring mode.
+ensemble:
+  # Scoring modes: 'heuristic' (no trained model available) or 'ml'
+  # (trained classifier present). The scorer auto-selects.
+  heuristic:
+    ast: 0.20
+    stylometry: 0.25
+    perplexity: 0.25
+    burstiness: 0.15
+    pattern_library: 0.15
+  ml:
+    classifier: 0.45
+    ast: 0.15
+    stylometry: 0.15
+    perplexity: 0.15
+    burstiness: 0.10
+
+thresholds:
+  # ai_probability cutoffs, aligned with _ai_bucket in server.py
+  medium_risk: 0.40
+  high_risk: 0.70
+  # Below this probability, results are labelled "possibly refactored AI code"
+  # rather than a hard binary, to handle heavily edited/paraphrased AI code.
+  refactor_selection: 0.35
+
+classification:
+  # Set enabled=true once a trained classifier is saved under
+  # src/backend/engines/ai/models/ to use the ML mode automatically.
+  enabled: false
+  # Fallback model dir override (optional)
+  model_dir: null
+
+perplexity:
+  window_lines: 25
+  overlap_lines: 5
+  # Set to a locally cached HF code LM name (e.g. microsoft/codebert-base) to
+  # prefer transformer-based perplexity; leave empty for the statistical model.
+  huggingface_model: ""
