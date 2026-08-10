@@ -128,21 +128,35 @@ def _tokenize(code: str) -> List[str]:
     return _TOKEN_RE.findall(code)
 
 
-def _windowed_chunks(code: str, window: int = 25, overlap: int = 5) -> List[str]:
+def _windowed_chunks(
+    code: str, window: int = 25, overlap: int = 5
+) -> List[Dict[str, Any]]:
     """Split code into windowed line chunks with overlap.
 
     Mirrors Turnitin's overlapping sentence windows so burstiness can be
-    measured across the span of the file.
+    measured across the span of the file. Returns a list of chunk dicts with
+    ``lines`` (the chunk text), ``start_line`` and ``end_line`` (1-based line
+    numbers within the original source) so downstream consumers can map a
+    chunk back to the exact lines it covers.
     """
     lines = code.splitlines()
     if not lines:
         return []
-    chunks: List[str] = []
+    chunks: List[Dict[str, Any]] = []
     step = max(1, window - overlap)
     for start in range(0, len(lines), step):
-        chunk = "\n".join(lines[start : start + window])
-        if chunk.strip():
-            chunks.append(chunk)
+        chunk_lines = lines[start : start + window]
+        if not chunk_lines:
+            continue
+        chunk_text = "\n".join(chunk_lines)
+        if chunk_text.strip():
+            chunks.append(
+                {
+                    "lines": chunk_text,
+                    "start_line": start + 1,
+                    "end_line": start + len(chunk_lines),
+                }
+            )
     return chunks
 
 
@@ -256,16 +270,17 @@ class PerplexityScorer:
         chunk_scores: List[float] = []
         for chunk in chunks:
             if self._transformer_available:
-                perplexity, avg_log_prob = self._transformer_perplexity(chunk)
+                perplexity, avg_log_prob = self._transformer_perplexity(chunk["lines"])
             else:
-                perplexity, avg_log_prob = self._statistical_perplexity(chunk)
+                perplexity, avg_log_prob = self._statistical_perplexity(chunk["lines"])
             if perplexity is None:
                 continue
             per_chunk.append(
                 {
                     "perplexity": round(perplexity, 3),
                     "avg_log_prob": round(avg_log_prob, 4),
-                    "chunk_lines": len(chunk.splitlines()),
+                    "start_line": chunk["start_line"],
+                    "end_line": chunk["end_line"],
                 }
             )
             chunk_scores.append(perplexity)

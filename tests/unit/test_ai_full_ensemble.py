@@ -108,7 +108,9 @@ class TestPerplexityScorer:
         lines = [f"line {i}" for i in range(30)]
         chunks = _windowed_chunks("\n".join(lines), window=25, overlap=5)
         assert len(chunks) >= 1
-        assert chunks[0].count("\n") + 1 <= 25
+        assert chunks[0]["lines"].count("\n") + 1 <= 25
+        assert chunks[0]["start_line"] == 1
+        assert chunks[1]["start_line"] == chunks[0]["end_line"] + 1 - 5
 
     def test_burstiness_and_perplexity_are_bounded(self) -> None:
         scorer = PerplexityScorer()
@@ -156,6 +158,25 @@ class TestAIEnsembleScorer:
         scorer = AIEnsembleScorer()
         result = scorer.score("x", "python")
         assert result["ai_probability"] == 0.0
+
+    def test_flagged_region_lines_survive_blank_gaps(self) -> None:
+        scorer = AIEnsembleScorer()
+        # Repetitive predictable code (low perplexity) above a large blank gap.
+        code = (
+            "print(\"constant\")\n" * 40
+            + "\n" * 60
+            + "print(\"constant\")\n" * 40
+        )
+        result = scorer.score(code, "python")
+        regions = result["flagged_regions"]
+        assert regions
+        assert all(r["end_line"] >= r["start_line"] for r in regions)
+        # No region may point past the real line count; the tail chunk maps to
+        # the 60 blank lines that start at line 41.
+        tail = [r for r in regions if r["start_line"] >= 60]
+        assert tail, regions
+        for region in tail:
+            assert region["start_line"] >= 41
 
 
 class TestConfig:

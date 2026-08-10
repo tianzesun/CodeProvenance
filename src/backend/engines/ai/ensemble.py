@@ -357,15 +357,18 @@ class AIEnsembleScorer:
         """Identify regions worth flagging (low perplexity / high uniformity).
 
         Returns a list of ``{start_line, end_line, reason, severity}`` dicts.
+        Line numbers come from the chunk metadata produced by the perplexity
+        scorer, so they stay correct even when blank chunks are skipped or the
+        window/overlap settings are changed.
         """
         flagged = []
-        for i, chunk in enumerate(perp_result.get("per_chunk", [])):
+        for chunk in perp_result.get("per_chunk", []):
             perplexity = chunk.get("perplexity", 0.0)
             if perplexity < 2.0:
                 flagged.append(
                     {
-                        "start_line": i * (25 - 5) + 1,
-                        "end_line": i * (25 - 5) + chunk.get("chunk_lines", 25),
+                        "start_line": int(chunk.get("start_line", 1)),
+                        "end_line": int(chunk.get("end_line", 1)),
                         "reason": "low_perplexity",
                         "severity": "high",
                         "detail": f"Perplexity {perplexity:.2f} suggests very predictable code",

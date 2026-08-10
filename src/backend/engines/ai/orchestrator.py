@@ -86,10 +86,13 @@ class AIDetectionOrchestrator:
             return {
                 "ai_probability": 0.0,
                 "confidence": 0.0,
+                "method": "heuristic",
+                "model": "Heuristic statistical fingerprint analysis (no trained model)",
                 "signals": {},
                 "signal_labels": {},
                 "indicators": ["Code too short for reliable detection"],
                 "flagged_lines": [],
+                "flagged_regions": [],
                 "language": language,
                 "layers": {},
             }
