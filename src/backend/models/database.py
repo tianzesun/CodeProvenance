@@ -137,6 +137,7 @@ class Job(Base):
     assignment = relationship("Assignment", back_populates="jobs")
     submissions = relationship("Submission", back_populates="job", lazy="dynamic")
     similarity_results = relationship("SimilarityResult", back_populates="job", lazy="dynamic")
+    ai_detection_results = relationship("AIDetectionResult", back_populates="job", lazy="dynamic")
         # New relationships
     reports = relationship("Report", back_populates="job")
     behavioral_sessions = relationship("BehavioralSession", back_populates="job")
@@ -201,6 +202,38 @@ class SimilarityResult(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), onupdate=text('now()'))
     
     job = relationship("Job", back_populates="similarity_results")
+
+
+class AIDetectionResult(Base):
+    """AI-generated code detection result model."""
+    __tablename__ = "ai_detection_results"
+
+    __table_args__ = (
+        Index("idx_ai_detection_results_job", "job_id"),
+        Index("idx_ai_detection_results_job_probability", "job_id", "ai_probability"),
+        Index("idx_ai_detection_results_ai_probability", "ai_probability"),
+        Index("idx_ai_detection_results_language", "language"),
+        Index("idx_ai_detection_results_created_at", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    submission_name = Column(String(500), nullable=False)
+    language = Column(String(50), nullable=True)
+    ai_probability = Column(Numeric(5, 4), nullable=True)
+    confidence = Column(Numeric(3, 2), nullable=True)
+    method = Column(String(50), nullable=True)
+    model_name = Column(String(500), nullable=True)
+    status = Column(String(50), nullable=True)
+    indicators = Column(JSONB, nullable=True)
+    signals = Column(JSONB, nullable=True)
+    signal_labels = Column(JSONB, nullable=True)
+    flagged_lines = Column(JSONB, nullable=True)
+    flagged_regions = Column(JSONB, nullable=True)
+    classifier_details = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
+
+    job = relationship("Job", back_populates="ai_detection_results")
 
 
 class WebhookEvent(Base):

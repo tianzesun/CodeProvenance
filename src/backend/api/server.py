@@ -89,6 +89,7 @@ from src.backend.models.database import (
     Job,
     Submission,
     SimilarityResult,
+    AIDetectionResult,
     WebhookEvent,
     UsageMetric,
     AuditLog,
@@ -3477,6 +3478,8 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         "signal_labels": signal_labels,
         "indicators": indicators[:6],
         "flagged_lines": flagged_lines[:30],
+        "flagged_regions": (entry.get("flagged_regions") or [])[:10],
+        "classifier": entry.get("classifier"),
         "annotated_snippet": annotated_snippet,
         "error": str(entry.get("error") or ""),
     }
@@ -3664,6 +3667,49 @@ def _persist_job(job_id: str) -> None:
     metadata_path = _job_metadata_path(job_id)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
+
+
+def _persist_ai_detection_results(job_id: str, ai_detection: Dict[str, Any]) -> None:
+    """Best-effort persistence of AI detection results to the database.
+
+    Writes one ``AIDetectionResult`` row per submission. Any failure is logged
+    and swallowed so a DB issue never fails the analysis job itself.
+    """
+    if not ai_detection or not job_id:
+        return
+    try:
+        with SessionLocal() as db:
+            existing = (
+                db.query(AIDetectionResult)
+                .filter(AIDetectionResult.job_id == job_id)
+                .first()
+            )
+            if existing:
+                return
+            for entry in ai_detection.get("submissions", []):
+                if not isinstance(entry, dict) or not entry.get("name"):
+                    continue
+                db.add(
+                    AIDetectionResult(
+                        job_id=job_id,
+                        submission_name=str(entry.get("name") or "")[:500],
+                        language=str(entry.get("language") or "python"),
+                        ai_probability=_coerce_float(entry.get("ai_probability")),
+                        confidence=_coerce_float(entry.get("confidence")),
+                        method=str(entry.get("method") or "heuristic"),
+                        model_name=str(entry.get("model") or "")[:500],
+                        status=str(entry.get("status") or ""),
+                        indicators=entry.get("indicators") or [],
+                        signals=entry.get("signals") or {},
+                        signal_labels=entry.get("signal_labels") or {},
+                        flagged_lines=entry.get("flagged_lines") or [],
+                        flagged_regions=entry.get("flagged_regions") or [],
+                        classifier_details=entry.get("classifier"),
+                    )
+                )
+            db.commit()
+    except Exception:
+        logger.warning("Failed to persist AI detection results for job %s", job_id)
 
 
 def _update_job_status_in_db(job_id: str, status: str, error_message: str | None = None) -> None:
@@ -4125,6 +4171,8 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
                     :6
                 ],
                 "flagged_lines": flagged_lines[:30],
+                "flagged_regions": (result.get("flagged_regions") or [])[:10],
+                "classifier": result.get("classifier"),
                 "annotated_snippet": annotated_snippet,
                 "evidence_patterns": evidence_patterns,
                 "code_metrics": _compute_code_metrics(code),
@@ -5961,6 +6009,7 @@ async def detect_ai_generated_code(
         "submissions": {k: v[:4096] for k, v in submissions.items()},
     }
     _persist_job(job_id)
+    _persist_ai_detection_results(job_id, ai_detection)
     return JSONResponse(
         content={"job_id": job_id, "status": "completed", "ai_detection": ai_detection}
     )
