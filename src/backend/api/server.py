@@ -13918,6 +13918,79 @@ async def update_settings(request: Request):
     return JSONResponse(content=response)
 
 
+@app.post("/api/settings/ai-provider/test")
+async def test_ai_provider_connection(request: Request) -> Dict[str, Any]:
+    """Test an AI provider connection using the configured (or supplied) key.
+
+    This makes a real minimal model call so the settings page can report an
+    honest connection status instead of inferring it from a stored key.
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.integrations.llm_provider import test_provider_connection
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid test payload")
+    provider = str(payload.get("provider") or "openai").strip().lower()
+    if provider not in ("openai", "anthropic"):
+        raise HTTPException(status_code=400, detail="Provider must be openai or anthropic")
+    api_key_override = payload.get("api_key")
+    api_key_override = str(api_key_override).strip() if api_key_override else None
+
+    try:
+        result = await test_provider_connection(provider, api_key_override)
+    except Exception as exc:
+        logger.exception("AI provider test failed unexpectedly")
+        result = {
+            "ok": False,
+            "message": f"Test failed: {exc}",
+            "provider": provider,
+        }
+    if not result.get("ok"):
+        result["message"] = f"Connection failed: {result.get('message', 'unknown error')}"
+    return result
+
+
+@app.post("/api/analyze/evidence-summary")
+async def analyze_evidence_summary(request: Request) -> Dict[str, Any]:
+    """Generate a neutral evidence-based summary for a submission pair.
+
+    Uses the configured OpenAI/Anthropic key when available and falls back to
+    a heuristic feature summary otherwise.
+    """
+    _require_current_user(request)
+    from src.backend.integrations.llm_provider import summarize_pair_evidence
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid summary payload")
+    code_a = str(payload.get("code_a") or "")
+    code_b = str(payload.get("code_b") or "")
+    if not code_a or not code_b:
+        raise HTTPException(status_code=400, detail="code_a and code_b are required")
+    features = payload.get("features")
+    if not isinstance(features, dict):
+        features = {}
+    features = {str(k): float(v) if v is not None else 0.0 for k, v in features.items()}
+    provider = str(payload.get("provider") or "openai").strip().lower()
+
+    try:
+        result = await summarize_pair_evidence(
+            code_a,
+            code_b,
+            features,
+            provider=provider,
+            api_key_override=payload.get("api_key"),
+            file_a=str(payload.get("file_a") or "file_a"),
+            file_b=str(payload.get("file_b") or "file_b"),
+            task=str(payload.get("task") or "evidence"),
+        )
+    except Exception as exc:
+        logger.exception("Evidence summary generation failed unexpectedly")
+        return {"summary": "Evidence summary unavailable.", "provider": "error", "source": "error", "fallback_reason": str(exc)}
+    return result
+
+
 # === SETTINGS API ENDPOINTS ===
 
 

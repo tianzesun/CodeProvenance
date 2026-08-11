@@ -44,7 +44,14 @@ const DEFAULT_PROFILE = {
   previous_term_matching: 'same_course_only',
   ai_rewrite_detection: 'balanced',
   result_volume: 'top_25',
-  external_source_scan: true,
+};
+
+// Sensitivity preset → default similarity cutoff (%) for new jobs.
+// Higher = stricter cutoff = fewer flags; lower = flags more pairs.
+const SENSITIVITY_THRESHOLDS: Record<string, number> = {
+  conservative: 0.84,
+  balanced: 0.75,
+  strict: 0.64,
 };
 
 // 4 main categories - each shows all sections on one page
@@ -78,7 +85,6 @@ export default function SettingsPage() {
     legacyTools: false,
     webhooks: true,
     auditLogging: true,
-    detectionThreshold: false,
     embeddingAdvanced: false,
     configValidation: false,
     starterCodeHandling: false,
@@ -120,6 +126,39 @@ export default function SettingsPage() {
         [key]: value,
       },
     }));
+  };
+
+  // Changing the sensitivity preset also updates the default cutoff so the
+  // threshold slider and the applied-profile summary stay in sync.
+  const updateSensitivity = (value: string) => {
+    updateProfile('sensitivity', value);
+    const preset = SENSITIVITY_THRESHOLDS[value];
+    if (preset !== undefined) updateSetting('default_threshold', preset);
+  };
+
+  // Live provider connection test so the Connected badge reflects a verified
+  // API call rather than merely the presence of a stored key.
+  const [providerTest, setProviderTest] = useState<Record<string, { testing: boolean; message: string; ok: boolean }>>({});
+  const testProvider = async (provider: 'openai' | 'anthropic') => {
+    setProviderTest((current) => ({ ...current, [provider]: { testing: true, message: 'Testing connection\u2026', ok: false } }));
+    try {
+      const key = provider === 'openai' ? settings?.openai_api_key : settings?.anthropic_api_key;
+      const res = await apiClient.post('/api/settings/ai-provider/test', {
+        provider,
+        api_key: key || undefined,
+      });
+      const body = res.data || {};
+      setProviderTest((current) => ({
+        ...current,
+        [provider]: { testing: false, message: body.message || (body.ok ? 'Connected' : 'Failed'), ok: Boolean(body.ok) },
+      }));
+    } catch (err) {
+      const apiError = (err as { response?: { data?: { detail?: string; message?: string } } })?.response?.data;
+      setProviderTest((current) => ({
+        ...current,
+        [provider]: { testing: false, message: apiError?.detail || apiError?.message || 'Connection failed', ok: false },
+      }));
+    }
   };
 
   const validateConfig = async () => {
@@ -302,7 +341,7 @@ export default function SettingsPage() {
                   <div className="flex-1">
                     <h2 className="text-lg font-semibold text-slate-950">Default Similarity Threshold</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600">
-                      Sets the minimum score for flagging a pair as suspicious. Lower thresholds catch more but increase false positives.
+                      Sets the minimum score for flagging a pair as suspicious. The Sensitivity preset (Review &amp; Workflow) sets this automatically; use the slider to fine-tune. Higher cutoff = fewer flags; lower = catches more but increases false positives.
                     </p>
                   </div>
                 </div>
@@ -324,7 +363,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="flex gap-2">
                     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(settings.default_threshold ?? 0.82) >= 0.8 ? 'bg-red-100 text-red-700' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {(settings.default_threshold ?? 0.82) >= 0.8 ? 'Conservative' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'Balanced' : 'Lenient'}
+                      {(settings.default_threshold ?? 0.82) >= 0.8 ? 'Conservative' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'Balanced' : 'Strict'}
                     </span>
                     <span className="text-xs text-slate-500 leading-6">This is the default for new jobs. Can be overridden per-job.</span>
                   </div>
@@ -423,6 +462,20 @@ export default function SettingsPage() {
                         <TextInput label="Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
                         <TextInput label="Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
                       </div>
+                      <button
+                        type="button"
+                        disabled={providerTest['openai']?.testing}
+                        onClick={() => testProvider('openai')}
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {providerTest['openai']?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        {providerTest['openai']?.testing ? 'Testing\u2026' : 'Test Connection'}
+                      </button>
+                      {providerTest['openai']?.message && (
+                        <div className={`text-xs ${providerTest['openai'].ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {providerTest['openai'].message}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {/* Anthropic Card */}
@@ -439,6 +492,20 @@ export default function SettingsPage() {
                     <div className="mt-3 space-y-3">
                       <TextInput label="API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
                       <TextInput label="Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
+                      <button
+                        type="button"
+                        disabled={providerTest['anthropic']?.testing}
+                        onClick={() => testProvider('anthropic')}
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {providerTest['anthropic']?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        {providerTest['anthropic']?.testing ? 'Testing\u2026' : 'Test Connection'}
+                      </button>
+                      {providerTest['anthropic']?.message && (
+                        <div className={`text-xs ${providerTest['anthropic'].ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {providerTest['anthropic'].message}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -541,13 +608,14 @@ export default function SettingsPage() {
                 <SegmentedOptions
                   options={catalog.sensitivities || catalog.review_modes || []}
                   value={profile.sensitivity}
-                  onChange={(value) => updateProfile('sensitivity', value)}
+                  onChange={updateSensitivity}
                 />
                 <div className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
-                  <span className="font-semibold">Current threshold: </span>
+                  <span className="font-semibold">Preset cutoff: </span>
                   {profile.sensitivity === 'conservative' && '\u226584% similarity - best for formal investigations'}
                   {profile.sensitivity === 'balanced' && '\u226575% similarity - recommended default'}
                   {profile.sensitivity === 'strict' && '\u226564% similarity - shows more cases for early triage'}
+                  <span className="block mt-1">This sets the default cutoff for new jobs. Fine-tune the exact value with the threshold slider.</span>
                 </div>
               </SettingsGroup>
 
@@ -622,18 +690,18 @@ export default function SettingsPage() {
                 />
               </Accordion>
 
-              {/* External Source Scan checkbox */}
+              {/* External Source Scan checkbox - same setting as Public Source Scanning */}
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
-                    checked={Boolean(profile.external_source_scan)}
-                    onChange={(event) => updateProfile('external_source_scan', event.target.checked)}
+                    checked={Boolean(settings.source_scan_enabled)}
+                    onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
                     className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600"
                   />
                   <span>
                     <span className="block text-sm font-semibold text-slate-950">Enable external / public source scan</span>
-                    <span className="mt-1 block text-sm leading-6 text-slate-500">Scan configured GitHub repos and websites (from AI & Evidence section) when running checks.</span>
+                    <span className="mt-1 block text-sm leading-6 text-slate-500">Scan configured GitHub repos and websites (from AI &amp; Evidence section) when running checks. Syncs with the Public Source Scanning toggle.</span>
                   </span>
                 </label>
               </div>
@@ -721,8 +789,8 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">External Scan</span>
-                        <span className={`font-semibold ${profile.external_source_scan ? 'text-emerald-600' : 'text-slate-400'}`}>
-                          {profile.external_source_scan ? 'Enabled' : 'Disabled'}
+                        <span className={`font-semibold ${settings.source_scan_enabled ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {settings.source_scan_enabled ? 'Enabled' : 'Disabled'}
                         </span>
                       </div>
                     </div>
@@ -776,37 +844,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </section>
-
-              {/* Detection Threshold */}
-              <Accordion
-                title="Detection Threshold"
-                description="Set the default similarity threshold for flagging submissions. Lower values catch more but may increase false positives."
-                isOpen={accordions.detectionThreshold}
-                onToggle={() => setAccordions(prev => ({ ...prev, detectionThreshold: !prev.detectionThreshold }))}
-              >
-                <div className="space-y-4">
-                  <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
-                    This threshold is used as the default for new jobs. You can override it per-job from the upload page.
-                  </div>
-                  <label className="block">
-                    <span className="text-sm font-medium text-slate-700">Default Similarity Threshold</span>
-                    <div className="mt-2 flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.0"
-                        step="0.01"
-                        value={settings.default_threshold ?? 0.82}
-                        onChange={(event) => updateSetting('default_threshold', Number(event.target.value))}
-                        className="flex-1 accent-blue-600"
-                      />
-                      <span className="min-w-[4rem] text-right text-sm font-semibold text-blue-600">
-                        {((settings.default_threshold ?? 0.82) * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  </label>
-                </div>
-              </Accordion>
 
               {/* Webhooks */}
               <Accordion
