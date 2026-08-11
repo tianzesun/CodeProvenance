@@ -207,7 +207,7 @@ class BatchDetectionService:
                 try:
                     content = f.read_text(encoding="utf-8")
                     if self.starter_remover:
-                        content = self.starter_remover.remove(content).clean_source
+                        content = self.starter_remover.remove(content).filtered_source
                     submissions[f.name] = content
                 except UnicodeDecodeError as exc:
                     logger.warning("Skipping file %s: encoding error: %s", f.name, exc)
@@ -230,6 +230,10 @@ class BatchDetectionService:
         for i, fa in enumerate(files):
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
+                starter_remover = getattr(self, "starter_remover", None)
+                if starter_remover:
+                    ca = starter_remover.remove(ca).filtered_source
+                    cb = starter_remover.remove(cb).filtered_source
                 features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
                 logic_flow = _logic_flow_similarity(ca, cb)
                 fused = self.fusion.fuse(features, logic_flow=logic_flow)
@@ -302,6 +306,10 @@ class BatchDetectionService:
                 continue
 
             ca, cb = submissions[fa], submissions[fb]
+            starter_remover = getattr(self, "starter_remover", None)
+            if starter_remover:
+                ca = starter_remover.remove(ca).filtered_source
+                cb = starter_remover.remove(cb).filtered_source
             features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
             logic_flow = _logic_flow_similarity(ca, cb)
             fused = self.fusion.fuse(features, logic_flow=logic_flow)

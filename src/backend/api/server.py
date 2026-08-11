@@ -2183,6 +2183,12 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
     for ext in ALLOWED_EXTENSIONS:
         for f in directory.rglob(f"*{ext}"):
             try:
+                # Reserved "starter" subdirectory holds instructor-provided
+                # templates; those files must never be read back as student
+                # submissions (they would inflate pair results).
+                rel_parts = f.relative_to(directory).parts
+                if "starter" in rel_parts:
+                    continue
                 content = f.read_text(encoding="utf-8", errors="ignore")
                 if len(content.strip()) > 10:
                     submissions[_normalize_submission_name(f, directory)] = content
