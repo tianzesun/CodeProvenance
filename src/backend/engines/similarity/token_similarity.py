@@ -179,20 +179,20 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         evidence = []
         if final_score > 0.8:  # Only create evidence for high similarity
             # Find the longest matching substring in the original code
-            matcher = SequenceMatcher(None, code_a, code_b)
-            match = matcher.find_longest_match(0, len(code_a), 0, len(code_b))
+            matcher = SequenceMatcher(None, raw_a, raw_b)
+            match = matcher.find_longest_match(0, len(raw_a), 0, len(raw_b))
             if match.size > 10:  # Only if match is substantial
-                a_snippet = code_a[match.a : match.a + match.size]
-                b_snippet = code_b[match.b : match.b + match.size]
+                a_snippet = raw_a[match.a : match.a + match.size]
+                b_snippet = raw_b[match.b : match.b + match.size]
                 evidence.append(
                     EvidenceBlock(
                         engine=self.name,
                         score=final_score,
                         confidence=0.8,
-                        a_start_line=code_a[: match.a].count("\n") + 1,
-                        a_end_line=code_a[: match.a + match.size].count("\n") + 1,
-                        b_start_line=code_b[: match.b].count("\n") + 1,
-                        b_end_line=code_b[: match.b + match.size].count("\n") + 1,
+                        a_start_line=raw_a[: match.a].count("\n") + 1,
+                        a_end_line=raw_a[: match.a + match.size].count("\n") + 1,
+                        b_start_line=raw_b[: match.b].count("\n") + 1,
+                        b_end_line=raw_b[: match.b + match.size].count("\n") + 1,
                         a_snippet=a_snippet,
                         b_snippet=b_snippet,
                         transformation_notes=["Exact substring match"],

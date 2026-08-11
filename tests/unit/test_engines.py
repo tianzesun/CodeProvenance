@@ -6,6 +6,7 @@ Tests:
 - Embedding/UniXcoder fallback behavior
 - EngineCache (EmbeddingCache and TokenCache)
 """
+
 from __future__ import annotations
 
 import pytest
@@ -14,11 +15,22 @@ from typing import Any, Dict
 from src.backend.engines.similarity.ast_similarity import ASTSimilarity
 from src.backend.engines.similarity.token_similarity import TokenSimilarity
 from src.backend.engines.similarity.ngram_similarity import NgramSimilarity
-from src.backend.engines.similarity.winnowing_similarity import EnhancedWinnowingSimilarity
-from src.backend.engines.cache import EmbeddingCache, TokenCache, _sha256, get_embedding_cache, get_token_cache, invalidate_all_caches
+from src.backend.engines.similarity.winnowing_similarity import (
+    EnhancedWinnowingSimilarity,
+)
+from src.backend.engines.cache import (
+    EmbeddingCache,
+    TokenCache,
+    _sha256,
+    get_embedding_cache,
+    get_token_cache,
+    invalidate_all_caches,
+)
 
 
-def _make_parsed(tokens: list[str] | None = None, raw: str | None = None) -> Dict[str, Any]:
+def _make_parsed(
+    tokens: list[str] | None = None, raw: str | None = None
+) -> Dict[str, Any]:
     """Helper to create a minimal parsed representation."""
     result: Dict[str, Any] = {}
     if tokens is not None:
@@ -29,6 +41,7 @@ def _make_parsed(tokens: list[str] | None = None, raw: str | None = None) -> Dic
 
 
 # ─── TokenSimilarity ─────────────────────────────────────────────────────
+
 
 class TestTokenSimilarity:
     """Tests for the TokenSimilarity engine."""
@@ -70,6 +83,35 @@ class TestTokenSimilarity:
         score = self.engine.compare(parsed_a, parsed_b)
         assert score > 0.5  # Very similar structure
 
+    def test_renamed_clone_high_similarity_does_not_crash(self) -> None:
+        """A near-duplicate pair (score > 0.8) must not raise NameError.
+
+        Regression test: the evidence-block builder referenced undefined
+        ``code_a``/``code_b`` instead of the parsed ``raw`` sources, which
+        crashed any comparison that scored above 0.8 (the exact case that
+        matters for renamed-clone detection).
+        """
+        parsed_a = _make_parsed(
+            raw=(
+                "def compute_average(scores):\n"
+                "    total = 0\n"
+                "    for score in scores:\n"
+                "        total += score\n"
+                "    return total / len(scores)\n"
+            )
+        )
+        parsed_b = _make_parsed(
+            raw=(
+                "def calc_mean(grades):\n"
+                "    s = 0\n"
+                "    for g in grades:\n"
+                "        s += g\n"
+                "    return s / len(grades)\n"
+            )
+        )
+        finding = self.engine.compare(parsed_a, parsed_b)
+        assert 0.8 < float(finding.score) <= 1.0
+
     def test_caching_reduces_re_tokenize(self) -> None:
         """Same raw code should hit cache on second call."""
         raw = "def test(): return 42"
@@ -99,6 +141,7 @@ class TestTokenSimilarity:
 
 
 # ─── NgramSimilarity ───────────────────────────────────────────────────
+
 
 class TestNgramSimilarity:
     """Tests for the NgramSimilarity engine."""
@@ -155,6 +198,7 @@ class TestOptionalDependencyFallbacks:
 
 # ─── Cache Module ──────────────────────────────────────────────────────
 
+
 class TestSha256:
     """Tests for the _sha256 helper."""
 
@@ -205,6 +249,7 @@ class TestEmbeddingCache:
 
     def test_eviction(self) -> None:
         """Overflow evicts oldest entry."""
+
         def compute(code: str) -> list[float]:
             return [float(ord(code[0]))]
 
@@ -218,6 +263,7 @@ class TestEmbeddingCache:
 
     def test_hit_rate(self) -> None:
         """hit_rate = hits / (hits + misses)."""
+
         def compute(code: str) -> list[float]:
             return [0.0]
 
@@ -227,6 +273,7 @@ class TestEmbeddingCache:
 
     def test_clear(self) -> None:
         """clear() resets all counters and cache."""
+
         def compute(code: str) -> list[float]:
             return [0.0]
 
@@ -245,11 +292,16 @@ class TestTokenCache:
     def test_compute_and_reuse(self) -> None:
         """Same code reuses cached tokens."""
         calls = [0]
-        result = self.cache.get_or_compute("code here", lambda c: (calls.__setitem__(0, calls[0] + 1), ["tok1", "tok2"]))
+        result = self.cache.get_or_compute(
+            "code here",
+            lambda c: (calls.__setitem__(0, calls[0] + 1), ["tok1", "tok2"]),
+        )
         assert len(result) == 2
         assert calls[0] == 1
 
-        result2 = self.cache.get_or_compute("code here", lambda c: (calls.__setitem__(0, calls[0] + 1), []))
+        result2 = self.cache.get_or_compute(
+            "code here", lambda c: (calls.__setitem__(0, calls[0] + 1), [])
+        )
         assert result2 == result
         assert calls[0] == 1
 
