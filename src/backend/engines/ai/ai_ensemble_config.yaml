@@ -30,8 +30,14 @@ thresholds:
   refactor_selection: 0.35
 
 classification:
-  # Set enabled=true once a trained classifier is saved under
-  # src/backend/engines/ai/models/ to use the ML mode automatically.
+  # Trained on AIGCodeSet (2,795 AI + 4,541 human Python samples) and saved
+  # under src/backend/engines/ai/models/. Grouped-holdout AUC ~0.66 vs ~0.52
+  # for the heuristic on unseen problems — a real but modest improvement.
+  #
+  # Disabled by default: on short, terse student code (the project's main
+  # input) the classifier raises false positives vs the tuned heuristics
+  # (see tests/unit/test_ai_detector_orchestrator_precision.py). Enable only
+  # after validating on your own student-code distribution.
   enabled: false
   # Fallback model dir override (optional)
   model_dir: null

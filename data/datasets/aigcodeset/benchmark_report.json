@@ -1,0 +1,77 @@
+{
+  "n_samples": 7336,
+  "n_ai": 2795,
+  "grouped_holdout": {
+    "train_size": 5850,
+    "test_size": 1486,
+    "metrics": {
+      "accuracy": 0.681,
+      "precision": 0.7627,
+      "recall": 0.2381,
+      "f1": 0.3629,
+      "auc": 0.6641
+    },
+    "metrics_at_040": {
+      "accuracy": 0.646,
+      "precision": 0.5465,
+      "recall": 0.425,
+      "f1": 0.4782,
+      "auc": 0.6641
+    },
+    "metrics_at_070": {
+      "accuracy": 0.6662,
+      "precision": 0.8737,
+      "recall": 0.1464,
+      "f1": 0.2508,
+      "auc": 0.6641
+    }
+  },
+  "cross_llm": {
+    "GEMINI": {
+      "ai_samples": 191,
+      "metrics": {
+        "accuracy": 0.8108,
+        "precision": 0.3538,
+        "recall": 0.1204,
+        "f1": 0.1797,
+        "auc": 0.597
+      }
+    },
+    "LLAMA": {
+      "ai_samples": 187,
+      "metrics": {
+        "accuracy": 0.8409,
+        "precision": 0.5579,
+        "recall": 0.2834,
+        "f1": 0.3759,
+        "auc": 0.6763
+      }
+    },
+    "CODESTRAL": {
+      "ai_samples": 189,
+      "metrics": {
+        "accuracy": 0.8448,
+        "precision": 0.5842,
+        "recall": 0.3122,
+        "f1": 0.4069,
+        "auc": 0.7198
+      }
+    }
+  },
+  "heuristic_comparison": {
+    "heuristic_only": {
+      "accuracy": 0.4717,
+      "precision": 0.4016,
+      "recall": 0.7848,
+      "f1": 0.5313,
+      "auc": 0.5241
+    },
+    "ml_classifier": {
+      "accuracy": 0.681,
+      "precision": 0.7627,
+      "recall": 0.2381,
+      "f1": 0.3629,
+      "auc": 0.6641
+    }
+  }
+}
