@@ -24,6 +24,38 @@ logger = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*|\d+\.\d+|\d+|<=|>=|==|!=|[()\[\]{},.;:+\-*\/%=<>!]"
 )
+
+_MODEL_BITS_REF = {
+    "statistical": 2.2,
+    "huggingface": 8.0,
+}
+
+
+def _bits_per_token(model: str, perplexity: float) -> float:
+    """Convert a perplexity value to per-token surprise bits."""
+    if perplexity <= 1.0:
+        return 0.0
+    return math.log2(perplexity)
+
+
+def _perplexity_to_score(perplexity: float, model: str) -> float:
+    """Map a perplexity value to an AI-likelihood score in [0,1].
+
+    Uses a logistic curve on per-token surprise bits, centered on a reference
+    calibrated per model. Low perplexity => low bits => high AI-likelihood.
+    The linear ``(10 - x) / 10`` map used previously is only valid for the
+    statistical model (perplexity ~2-3); a causal code LM (e.g. CodeGPT) has a
+    different scale (perplexity ~10-2000 for realistic code), so bits and a
+    per-model reference keep the signal meaningful for both.
+    """
+    if perplexity <= 0.0:
+        return 0.5
+    bits = _bits_per_token(model, perplexity)
+    ref = _MODEL_BITS_REF.get(model, 2.2)
+    score = 1.0 / (1.0 + math.exp(3.0 * (bits - ref)))
+    return max(0.0, min(1.0, score))
+
+
 _BLANK_RE = re.compile(r"^\s*$")
 _COMMENT_RE = re.compile(r"^\s*(#|//|/\*|\*|--)")
 
@@ -206,12 +238,17 @@ class PerplexityScorer:
         try:
             # Intentionally import inside the method so missing deps don't break
             # launches. Never triggers a network download.
-            from transformers import AutoModelForMaskedLM, AutoTokenizer
+            from transformers import AutoModelForCausalLM, AutoTokenizer
 
             self._tokenizer = AutoTokenizer.from_pretrained(
                 model_name, local_files_only=True
             )
-            self._huggingface = AutoModelForMaskedLM.from_pretrained(
+            # A causal (autoregressive) code LM: next-token log-likelihoods are
+            # cheap to compute and well-calibrated. Encoder-only checkpoints
+            # (e.g. microsoft/codebert-base) advertise `RobertaModel` and carry
+            # no LM head, so loading them as MaskedLM yields a random head and
+            # meaningless perplexity; CausalLM load fails fast on those instead.
+            self._huggingface = AutoModelForCausalLM.from_pretrained(
                 model_name, local_files_only=True
             )
             self._huggingface.eval()
@@ -226,15 +263,15 @@ class PerplexityScorer:
 
     def _load_from_local_cache(self) -> None:
         """Try common local cache names for a code LM (no network)."""
-        candidates = ["microsoft/codebert-base", "microsoft/codebert-base-mlm"]
+        candidates = ["microsoft/CodeGPT-small-py", "microsoft/codegen-350M-mono"]
         for candidate in candidates:
             try:
-                from transformers import AutoModelForMaskedLM, AutoTokenizer
+                from transformers import AutoModelForCausalLM, AutoTokenizer
 
                 self._tokenizer = AutoTokenizer.from_pretrained(
                     candidate, local_files_only=True
                 )
-                self._huggingface = AutoModelForMaskedLM.from_pretrained(
+                self._huggingface = AutoModelForCausalLM.from_pretrained(
                     candidate, local_files_only=True
                 )
                 self._huggingface.eval()
@@ -307,11 +344,13 @@ class PerplexityScorer:
             per_chunk
         )
 
-        # Map perplexity to [0,1] AI-likelihood (low perplexity => high likeness).
-        # Human code remains sparse/random => higher perplexity.
-        perplexity_score = max(0.0, min(1.0, (10.0 - avg_perplexity) / 10.0))
-
         model_used = "huggingface" if self._transformer_available else "statistical"
+
+        # Map perplexity to [0,1] AI-likelihood (low perplexity => high likeness).
+        # Human code remains sparse/random => higher perplexity. The mapping is
+        # log-scaled and model-aware (see _perplexity_to_score).
+        perplexity_score = _perplexity_to_score(avg_perplexity, model_used)
+
         return {
             "perplexity": round(avg_perplexity, 3),
             "burstiness": round(burstiness, 3),
@@ -378,9 +417,11 @@ class PerplexityScorer:
     ) -> Tuple[Optional[float], Optional[float]]:
         """Return (perplexity, avg_log_prob) using a HuggingFace code LM.
 
-        Computes pseudo log-likelihood by masking each token and averaging the
-        model's log-probability of the true token. Never downloads; requires a
-        locally cached model.
+        Uses a causal (autoregressive) code LM: one forward pass yields
+        next-token log-likelihoods for every position, so the whole window is
+        scored in a single call (no per-token masking loop). Requires a locally
+        cached causal code LM (e.g. microsoft/CodeGPT-small-py); encoder-only
+        checkpoints like microsoft/codebert-base are rejected at load time.
         """
         import torch
 
@@ -388,27 +429,20 @@ class PerplexityScorer:
             inputs = self._tokenizer(
                 code, return_tensors="pt", truncation=True, max_length=256
             )
-            input_ids = inputs["input_ids"].squeeze(0)
+            input_ids = inputs["input_ids"]
             if input_ids.numel() < 2:
                 return None, None
 
-            total_log_prob = 0.0
-            count = 0
             with torch.no_grad():
-                for position in range(1, input_ids.numel() - 1):
-                    masked = input_ids.clone()
-                    masked[position] = self._tokenizer.mask_token_id
-                    logits = self._huggingface(
-                        input_ids=masked.unsqueeze(0),
-                        attention_mask=inputs["attention_mask"],
-                    ).logits
-                    true_id = input_ids[position].item()
-                    log_probs = torch.log_softmax(logits[0, position], dim=-1)
-                    total_log_prob += log_probs[true_id].item()
-                    count += 1
-            if count == 0:
-                return None, None
-            avg_log_prob = total_log_prob / count
+                logits = self._huggingface(
+                    input_ids=input_ids, attention_mask=inputs["attention_mask"]
+                ).logits
+            # Shift so logits[t] predicts token t+1 (causal next-token LM).
+            shift_logits = logits[0, :-1].contiguous()
+            shift_labels = input_ids[0, 1:]
+            log_probs = torch.log_softmax(shift_logits, dim=-1)
+            per_token = log_probs.gather(1, shift_labels.unsqueeze(1)).squeeze(1)
+            avg_log_prob = per_token.sum().item() / shift_labels.numel()
             return 2.0 ** (-avg_log_prob), avg_log_prob
         except Exception as exc:  # pragma: no cover
             logger.info("Transformer perplexity failed, falling back: %s", exc)

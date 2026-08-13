@@ -65,14 +65,50 @@
   `test_ai_detector_orchestrator_precision.py`). Because of this, the ML
   classifier is **disabled by default** (`ai_ensemble_config.yaml`).
 - **The transformer perplexity path is not usable here**: the locally cached
-  `microsoft/codebert-base` is tokenizer-only (no weights), and no LLM API key
-  is configured, so statistical bigram perplexity is the only option. A real
-  code LM would be the single highest-value next step.
+  `microsoft/codebert-base` is encoder-only (`RobertaModel`, no LM head), so
+  `AutoModelForMaskedLM` silently builds a *random* head and its perplexity is
+  noise. A real causal code LM is required — see the code-LM evaluation below.
 - **Takeaway:** the pipeline (data → features → train → grouped-eval) now
   exists, is reproducible, and produces honest numbers. Becoming competitive
   requires (a) a code-LM perplexity signal, (b) a labelled dataset matching the
   actual student-code distribution, and (c) an external holdout — all now
   instrumented and one dataset/re-run away.
+
+## Code-LM signal evaluation (2026-08-13)
+
+**Motivation.** The statistical bigram perplexity replaces the code-LM signal
+the field uses. The locally cached `microsoft/codebert-base` (and
+`microsoft/unixcoder-base`) are encoder-only checkpoints with **no LM head**, so
+loading them as a masked LM gives perplexity from a randomly-initialised head —
+verified `lm_head.*` keys are absent from `pytorch_model.bin`. `PerplexityScorer`
+now loads a **causal** code LM instead (`AutoModelForCausalLM`), which both has a
+trained head and scores a whole window in one forward pass (no per-token masking
+loop).
+
+**Model.** `microsoft/CodeGPT-small-py` (124M GPT-2, ~500MB, downloaded to the
+HF cache; CPU-only this environment). A causal next-token perplexity is
+computed per 25-line window.
+
+**Controlled comparison.** Same stratified 500-sample subset (190 AI / 309
+human), same grouped-fold methodology, only the perplexity source changes. Full
+metrics in `benchmark_report.statistical.json` and
+`benchmark_report.codelm.json`.
+
+| Perplexity source | Accuracy | Precision | Recall | F1 | AUC |
+|-------------------|---------:|----------:|-------:|----:|----:|
+| Statistical bigram (baseline) | 0.616 | 0.412 | 0.200 | 0.269 | 0.545 |
+| Causal code-LM (CodeGPT-small-py) | 0.657 | 0.524 | 0.314 | 0.393 | 0.630 |
+
+Raw signal separation (same 40-code probe): AI mean ppl **133** vs human **323**.
+
+**Honest reading.** The code-LM signal is a real, measurable improvement
+(+0.085 AUC on grouped holdout) and now runs on CPU at ~1s/sample — a full
+7,336-sample feature build is feasible in hours, not the ~143 CPU-hours the
+masked-LM approach implied. It does **not** close the gap to Turnitin-class
+accuracy, improves recall mostly at the 0.40 threshold, and the ML classifier
+remains **disabled by default** pending the short-code false-positive regression
+being resolved. The remaining bottleneck is no longer compute — it is having a
+causal code LM (or larger model) enabled in a production deployment.
 
 ## Reproduce
 

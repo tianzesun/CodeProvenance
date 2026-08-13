@@ -116,8 +116,12 @@ statistical model, set either:
 - `perplexity.huggingface_model` in `ai_ensemble_config.yaml`, or
 - the `AICODE_TRANSFORMER_MODEL` environment variable
 
-to a locally cached name (e.g. `microsoft/codebert-base`). Without these, the
-scorer uses the statistical bigram model and never touches the network.
+to a locally cached name (e.g. `microsoft/CodeGPT-small-py`). A **causal** code
+LM is required: encoder-only checkpoints such as `microsoft/codebert-base` have
+no LM head, so loading them as a masked LM silently creates a random head and
+meaningless perplexity. `PerplexityScorer` loads the model with
+`AutoModelForCausalLM`, which fails fast on headless checkpoints. Without these,
+the scorer uses the statistical bigram model and never touches the network.
 
 ## Persistence
 

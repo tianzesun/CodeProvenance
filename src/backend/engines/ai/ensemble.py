@@ -18,7 +18,7 @@ import yaml
 
 from src.backend.engines.ai.ast_features import TreeSitterASTExtractor
 from src.backend.engines.ai.classifier import AICodeClassifier, assemble_features
-from src.backend.engines.ai.perplexity import PerplexityScorer
+from src.backend.engines.ai.perplexity import PerplexityScorer, _perplexity_to_score
 
 logger = logging.getLogger(__name__)
 
@@ -226,8 +226,12 @@ class AIEnsembleScorer:
 
         # 3. Perplexity / burstiness
         perp_result = self._perplexity_scorer.score(code)
-        # Map a perplexity value to an AI-likeness score in [0,1].
-        perplexity_score = max(0.0, min(1.0, (10.0 - perp_result["perplexity"]) / 10.0))
+        # Map a perplexity value to an AI-likeness score in [0,1]. The mapping
+        # is log-scaled, so it stays meaningful for both the statistical model
+        # (perplexity ~2-3) and a HuggingFace code LM (perplexity in thousands).
+        perplexity_score = _perplexity_to_score(
+            perp_result["perplexity"], perp_result["model"]
+        )
         signals = {
             "ast": _mean_signals(ast_signals),
             "stylometry": _mean_signals(stylometry_signals),
@@ -362,9 +366,10 @@ class AIEnsembleScorer:
         window/overlap settings are changed.
         """
         flagged = []
+        model = perp_result.get("model", "statistical")
         for chunk in perp_result.get("per_chunk", []):
             perplexity = chunk.get("perplexity", 0.0)
-            if perplexity < 2.0:
+            if _perplexity_to_score(perplexity, model) >= 0.7:
                 flagged.append(
                     {
                         "start_line": int(chunk.get("start_line", 1)),

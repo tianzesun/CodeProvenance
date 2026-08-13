@@ -24,14 +24,21 @@ existing server thresholds (medium risk 0.40 / high risk 0.70).
 Usage::
 
     python -m src.backend.engines.ai.benchmark_classifier
+    python -m src.backend.engines.ai.benchmark_classifier --limit 600 --out report.code_lm.json
+
+Perplexity comes from :class:`PerplexityScorer`, which uses the statistical
+model unless the ``AICODE_TRANSFORMER_MODEL`` env var names a locally cached
+causal code LM; set that var to compare code-LM features directly.
 
 Output: ``data/datasets/aigcodeset/benchmark_report.json`` and a printed table.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import random
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -94,7 +101,9 @@ def build_feature_rows(codes: List[str]) -> List[Dict[str, float]]:
     return rows
 
 
-def _metrics(y_true: List[int], y_prob: List[float], threshold: float) -> Dict[str, Any]:
+def _metrics(
+    y_true: List[int], y_prob: List[float], threshold: float
+) -> Dict[str, Any]:
     """Precision/recall/F1/accuracy/AUC at a given probability threshold."""
     from sklearn.metrics import (
         accuracy_score,
@@ -153,7 +162,9 @@ def _train_grouped(
     return classifier, test_probs, test_labels, test_idx
 
 
-def _threshold_metrics(test_labels: List[int], test_probs: List[float]) -> Dict[str, Any]:
+def _threshold_metrics(
+    test_labels: List[int], test_probs: List[float]
+) -> Dict[str, Any]:
     """Metrics at the canonical 0.5 plus server thresholds 0.40 and 0.70."""
     return {
         "metrics": _metrics(test_labels, test_probs, 0.5),
@@ -167,7 +178,37 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     codes, labels, problems, llms = load_dataset()
     n_ai = sum(labels)
-    logger.info("Loaded %d samples (%d AI, %d human)", len(codes), n_ai, len(labels) - n_ai)
+    logger.info(
+        "Loaded %d samples (%d AI, %d human)", len(codes), n_ai, len(labels) - n_ai
+    )
+
+    # Optional subset for controlled comparisons (e.g. statistical vs code-LM
+    # features). Always stratified by label so proportions stay representative.
+    parser = argparse.ArgumentParser(description="Benchmark the AI-code classifier.")
+    parser.add_argument("--limit", type=int, default=0, help="stratifed subset size")
+    parser.add_argument("--out", type=str, default="", help="report path override")
+    args = parser.parse_args()
+    if args.limit:
+        idx = list(range(len(codes)))
+        random.Random(1).shuffle(idx)
+        taken: List[int] = []
+        for i in idx:
+            if len(taken) >= args.limit:
+                break
+            chosen_in_class = sum(1 for j in taken if labels[j] == labels[i])
+            total_in_class = sum(1 for label in labels if label == labels[i])
+            if chosen_in_class < max(1, int(args.limit * total_in_class / len(codes))):
+                taken.append(i)
+        codes, labels, problems, llms = (
+            [codes[i] for i in taken],
+            [labels[i] for i in taken],
+            [problems[i] for i in taken],
+            [llms[i] for i in taken],
+        )
+        n_ai = sum(labels)
+        logger.info(
+            "Subset: %d samples (%d AI, %d human)", len(codes), n_ai, len(labels) - n_ai
+        )
 
     rows = build_feature_rows(codes)
     logger.info("Computed features for %d samples", len(rows))
@@ -212,8 +253,9 @@ def main() -> None:
         "ml_classifier": _metrics(test_labels, test_probs, 0.5),
     }
 
-    REPORT_PATH.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    logger.info("Report written to %s", REPORT_PATH)
+    report_path = Path(args.out) if args.out else REPORT_PATH
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    logger.info("Report written to %s", report_path)
 
     def _fmt(m: Dict[str, Any]) -> str:
         auc = m.get("auc")

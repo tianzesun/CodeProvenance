@@ -45,6 +45,8 @@ classification:
 perplexity:
   window_lines: 25
   overlap_lines: 5
-  # Set to a locally cached HF code LM name (e.g. microsoft/codebert-base) to
-  # prefer transformer-based perplexity; leave empty for the statistical model.
+  # Optional: name of a locally cached, CAUSAL code LM (e.g.
+  # microsoft/CodeGPT-small-py) to prefer transformer-based perplexity. Must
+  # have a trained LM head; encoder-only models like microsoft/codebert-base
+  # yield meaningless perplexity. Leave empty for the statistical model.
   huggingface_model: ""
