@@ -267,7 +267,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
         
-        # Skip authentication for exempt prefixes (e.g., /api/cases/, /api/users/)
+        # Skip authentication for exempt prefixes (API-key bypass paths)
         if path.startswith(AUTH_EXEMPT_PREFIXES):
             return await call_next(request)
 

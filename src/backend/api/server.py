@@ -152,10 +152,8 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-tools",
     "/api/benchmark-datasets",
     "/api/ai-detect",
-    "/api/cases",
-    "/api/users",
 }
-AUTH_EXEMPT_PREFIXES = ("/api/cases/", "/api/users/", "/api/settings", "/api/job/", "/api/jobs/")
+AUTH_EXEMPT_PREFIXES = ("/api/settings", "/api/job/", "/api/jobs/")
 
 # Setup default API keys for development
 setup_default_keys()
@@ -10851,7 +10849,7 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
 def _should_require_auth(path: str) -> bool:
     if path in AUTH_EXEMPT_PATHS:
         return False
-    # Allow unauthenticated access to exempt prefixes (e.g., /api/cases/, /api/users/)
+    # Allow unauthenticated access to exempt prefixes for API-key bypass
     if path.startswith(AUTH_EXEMPT_PREFIXES):
         # /api/settings is in AUTH_EXEMPT_PREFIXES for API-key bypass,
         # but still requires JWT session auth for the dashboard.
