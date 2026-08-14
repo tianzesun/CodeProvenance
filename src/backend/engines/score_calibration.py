@@ -30,6 +30,7 @@ class ScoreCalibrator:
     def __init__(self, model_path: Optional[str] = None):
         self.calibrator = None
         self.is_fitted = False
+        self.sample_count = 0
 
         if not SKLEARN_AVAILABLE:
             # Fallback to identity function when scikit-learn is not available
@@ -63,6 +64,7 @@ class ScoreCalibrator:
 
         self.calibrator.fit(X, y)  # type: ignore
         self.is_fitted = True
+        self.sample_count = int(len(raw_scores)) if raw_scores else 0
 
     def calibrate(self, score: float) -> float:
         """Convert raw score to calibrated plagiarism probability."""
@@ -97,7 +99,14 @@ class ScoreCalibrator:
     def save(self, path: str) -> None:
         """Save calibrator model to disk."""
         with open(path, "wb") as f:
-            pickle.dump({"calibrator": self.calibrator, "is_fitted": self.is_fitted}, f)
+            pickle.dump(
+                {
+                    "calibrator": self.calibrator,
+                    "is_fitted": self.is_fitted,
+                    "sample_count": self.sample_count,
+                },
+                f,
+            )
 
     def load(self, path: str) -> None:
         """Load calibrator model from disk."""
@@ -105,6 +114,7 @@ class ScoreCalibrator:
             data = pickle.load(f)
             self.calibrator = data["calibrator"]
             self.is_fitted = data["is_fitted"]
+            self.sample_count = int(data.get("sample_count", 0))
 
 
 class CalibratedScoringPipeline:

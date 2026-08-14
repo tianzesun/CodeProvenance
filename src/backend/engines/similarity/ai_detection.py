@@ -147,6 +147,7 @@ class AIDetectionEngine:
         """
         self.stylometry_extractor = StylometryExtractor()
         self.calibrator = None
+        self.calibrator_samples = 0
         self._calibrator_path = calibrator_path
         self._load_calibrator()
 
@@ -172,6 +173,7 @@ class AIDetectionEngine:
                 with open(calibrator_path, "rb") as f:
                     data = pickle.load(f)
                     self.calibrator = data.get("calibrator")
+                    self.calibrator_samples = int(data.get("sample_count", 0))
             except Exception as e:
                 logger.warning(f"Could not load calibrator: {e}")
 

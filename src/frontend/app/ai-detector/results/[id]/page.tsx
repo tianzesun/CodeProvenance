@@ -60,6 +60,7 @@ const SIGNAL_LABELS = {
   whitespace_rhythm: 'Whitespace Rhythm',
   docstring_density: 'Docstring Density',
   binoculars: 'Binoculars Detection',
+  ast: 'AST Structure',
 };
 
 const SIGNAL_DESCRIPTIONS = {
@@ -72,6 +73,7 @@ const SIGNAL_DESCRIPTIONS = {
   whitespace_rhythm: 'Whitespace Rhythm: formatting regularity; highly regular patterns may indicate assistance.',
   docstring_density: 'Docstring Density: measures documentation presence. Not an assistance signal alone, but helps in combination.',
   binoculars: 'Binoculars Detection: divergence-based detector; low values may indicate assistance.',
+  ast: 'AST Structure: measures uniformity of the abstract syntax tree; very regular structure may indicate assistance.',
 };
 
 function SignalBar({ name, value, label }) {
@@ -510,7 +512,7 @@ export default function AIDetectorReportPage() {
                           (s.ai_probability || 0) > (max.ai_probability || 0) ? s : max, 
                           { ai_probability: 0 }).ai_probability || 0)}
                       </div>
-                      {ai.calibration_confidence !== undefined && (
+                      {ai.calibration_confidence != null && ai.calibration_confidence !== undefined && (
                         <div className="mt-1 text-xs text-slate-500">
                           Calibration confidence: {Math.round((ai.calibration_confidence || 0) * 100)}%
                         </div>
@@ -523,9 +525,11 @@ export default function AIDetectorReportPage() {
                       <div className="font-medium text-slate-900">
                         {ai.highest_signal || 'Pattern Analysis'}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {(ai.highest_signal_value * 100 || 0).toFixed(1)}% confidence
-                      </div>
+                      {ai.highest_signal_value > 0 && (
+                        <div className="mt-1 text-xs text-slate-500">
+                          {(ai.highest_signal_value * 100).toFixed(1)}% confidence
+                        </div>
+                      )}
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">

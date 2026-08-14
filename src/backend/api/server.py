@@ -479,7 +479,9 @@ def _language_file_extension(language: str) -> str:
     }.get(language, f".{language}")
 
 
-def _normalize_demo_filename(filename: str, language: str, plagiarized: bool = False) -> str:
+def _normalize_demo_filename(
+    filename: str, language: str, plagiarized: bool = False
+) -> str:
     path = PathLib(filename)
     suffix = path.suffix.lower()
     normalized_suffix = {
@@ -671,7 +673,11 @@ def _infer_dataset_language(
 
     default_language = _dataset_default_language(dataset_id)
     features = dataset_info.get("features") or {}
-    if isinstance(features, dict) and "language" in features and default_language == "mixed":
+    if (
+        isinstance(features, dict)
+        and "language" in features
+        and default_language == "mixed"
+    ):
         return "mixed"
 
     return default_language
@@ -825,7 +831,9 @@ def _count_conplag_labels(dataset_root: PathLib) -> tuple[int, int, int]:
 def _count_code_similarity_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
     """Estimate balanced pair counts for CodeSimilarityDataset."""
     grouped = _code_similarity_snippet_groups(dataset_root)
-    positive_pairs = sum(max(0, len(files) * (len(files) - 1) // 2) for files in grouped.values())
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in grouped.values()
+    )
     group_sizes = [len(files) for files in grouped.values()]
     negative_pairs = 0
     for left_index, left_size in enumerate(group_sizes):
@@ -840,7 +848,9 @@ def _count_code_similarity_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
 def _count_bigclonebench_reduced_pairs(dataset_root: PathLib) -> tuple[int, int, int]:
     """Estimate balanced pair counts from BigCloneBench reduced functionality folders."""
     groups = _bigclonebench_reduced_groups(dataset_root)
-    positive_pairs = sum(max(0, len(files) * (len(files) - 1) // 2) for files in groups.values())
+    positive_pairs = sum(
+        max(0, len(files) * (len(files) - 1) // 2) for files in groups.values()
+    )
     group_sizes = [len(files) for files in groups.values()]
     negative_pairs = 0
     for left_index, left_size in enumerate(group_sizes):
@@ -874,7 +884,9 @@ def _has_loadable_huggingface_dataset(dataset_root: PathLib) -> bool:
     return (hf_path / "state.json").exists() and any(hf_path.glob("*.arrow"))
 
 
-def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -> Dict[str, Any]:
+def _build_benchmark_dataset_readiness(
+    dataset_id: str, dataset_root: PathLib
+) -> Dict[str, Any]:
     """Describe whether a dataset should be visible as runnable in the dashboard."""
     if dataset_id.startswith("demo_"):
         original_dir = dataset_root / "original"
@@ -971,7 +983,9 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
     if dataset_id == "xiangtan":
         pairs_csv = dataset_root / "pairs.csv"
         source_dir = dataset_root / "source"
-        positive_pairs = max(0, sum(1 for _ in pairs_csv.open()) - 1) if pairs_csv.exists() else 0
+        positive_pairs = (
+            max(0, sum(1 for _ in pairs_csv.open()) - 1) if pairs_csv.exists() else 0
+        )
         source_files = list(source_dir.rglob("*.java")) if source_dir.exists() else []
         negative_pairs = min(positive_pairs, max(0, len(source_files) - 1))
         runnable = positive_pairs > 0 and negative_pairs > 0
@@ -1055,7 +1069,11 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
 
     if dataset_id == "IR-Plag-Dataset":
         # Check for case-* directories with required subdirs
-        case_dirs = [d for d in dataset_root.iterdir() if d.is_dir() and d.name.startswith("case-")]
+        case_dirs = [
+            d
+            for d in dataset_root.iterdir()
+            if d.is_dir() and d.name.startswith("case-")
+        ]
         if not case_dirs:
             return {
                 "runnable": False,
@@ -1068,7 +1086,9 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
             plagiarized_dir = case_dir / "plagiarized"
             non_plagiarized_dir = case_dir / "non-plagiarized"
             if not (
-                original_dir.exists() and plagiarized_dir.exists() and non_plagiarized_dir.exists()
+                original_dir.exists()
+                and plagiarized_dir.exists()
+                and non_plagiarized_dir.exists()
             ):
                 return {
                     "runnable": False,
@@ -1079,7 +1099,9 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
             original_files = list(original_dir.glob("*.java"))
             plagiarized_files = sum(1 for _ in plagiarized_dir.rglob("*.java"))
             non_plagiarized_files = sum(1 for _ in non_plagiarized_dir.rglob("*.java"))
-            total_pairs += len(original_files) * (plagiarized_files + non_plagiarized_files)
+            total_pairs += len(original_files) * (
+                plagiarized_files + non_plagiarized_files
+            )
         runnable = total_pairs > 0
         return {
             "runnable": runnable,
@@ -1097,7 +1119,9 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
     if dataset_id == "conplag":
         total, positives, negatives = _count_conplag_labels(dataset_root)
         version_dir = dataset_root / "versions" / "version_1"
-        runnable = total > 0 and positives > 0 and negatives > 0 and version_dir.exists()
+        runnable = (
+            total > 0 and positives > 0 and negatives > 0 and version_dir.exists()
+        )
         return {
             "runnable": runnable,
             "status": "ready" if runnable else "missing_conplag_files",
@@ -1135,7 +1159,9 @@ def _build_benchmark_dataset_readiness(dataset_id: str, dataset_root: PathLib) -
                 reader = csv.DictReader(f)
                 total = sum(1 for row in reader)
             positives = sum(
-                1 for row in csv.DictReader(open(labels_csv, "r")) if row.get("verdict") == "1"
+                1
+                for row in csv.DictReader(open(labels_csv, "r"))
+                if row.get("verdict") == "1"
             )
             negatives = total - positives
         except Exception:
@@ -1180,8 +1206,12 @@ def _build_benchmark_quality_certificate(
         if _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) >= 2
     ]
     negative_pairs = [pair for pair in raw_pairs if pair not in positive_pairs]
-    clone_types = Counter(str(pair.get("clone_type", "unknown")) for pair in positive_pairs)
-    transformations = Counter(str(pair.get("obfuscation", "unspecified")) for pair in raw_pairs)
+    clone_types = Counter(
+        str(pair.get("clone_type", "unknown")) for pair in positive_pairs
+    )
+    transformations = Counter(
+        str(pair.get("obfuscation", "unspecified")) for pair in raw_pairs
+    )
     case_categories = Counter(_pair_case_category(pair) for pair in raw_pairs)
     split_counts = Counter(_pair_split(pair) for pair in raw_pairs)
     pair_ids = [str(pair.get("id", "")).strip() for pair in raw_pairs]
@@ -1312,7 +1342,9 @@ def _build_benchmark_quality_certificate(
             "id": "case_category_coverage",
             "label": "Four case categories",
             "passed": required_case_categories.issubset(set(case_categories)),
-            "value": ", ".join(f"{key}: {value}" for key, value in sorted(case_categories.items())),
+            "value": ", ".join(
+                f"{key}: {value}" for key, value in sorted(case_categories.items())
+            ),
             "target": "true positives, true negatives, hard negatives, and edge cases",
         },
         {
@@ -1321,7 +1353,9 @@ def _build_benchmark_quality_certificate(
             "passed": required_splits.issubset(set(split_counts))
             and not duplicate_pair_ids
             and bool(split_protocol),
-            "value": ", ".join(f"{key}: {value}" for key, value in sorted(split_counts.items())),
+            "value": ", ".join(
+                f"{key}: {value}" for key, value in sorted(split_counts.items())
+            ),
             "target": "Non-overlapping train, validation, and locked test sets",
         },
         {
@@ -1351,7 +1385,9 @@ def _build_benchmark_quality_certificate(
             "id": "inter_rater_agreement",
             "label": "Cohen's Kappa",
             "passed": has_trustworthy_kappa,
-            "value": ("pending" if cohens_kappa is None else round(float(cohens_kappa), 3)),
+            "value": (
+                "pending" if cohens_kappa is None else round(float(cohens_kappa), 3)
+            ),
             "target": f"Kappa >= {minimum_kappa:.1f} before final claims",
         },
         {
@@ -1416,12 +1452,14 @@ def _audit_benchmark_pairs(raw_pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
     case_categories = Counter(_pair_case_category(pair) for pair in raw_pairs)
     split_counts = Counter(_pair_split(pair) for pair in raw_pairs)
     labels = [
-        _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type")) for pair in raw_pairs
+        _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
+        for pair in raw_pairs
     ]
     positives = sum(1 for label in labels if label >= 2)
     negatives = len(labels) - positives
     missing_case_categories = sorted(
-        {"true_positive", "true_negative", "hard_negative", "edge_case"} - set(case_categories)
+        {"true_positive", "true_negative", "hard_negative", "edge_case"}
+        - set(case_categories)
     )
     missing_splits = sorted({"train", "validation", "test"} - set(split_counts))
 
@@ -1446,7 +1484,8 @@ def _benchmark_split_guard(split: str, purpose: str) -> Dict[str, Any]:
     normalized_purpose = str(purpose or "").strip().lower()
     allowed = not (
         normalized_split == "test"
-        and normalized_purpose in {"tune", "tuning", "train", "optimize", "optimization"}
+        and normalized_purpose
+        in {"tune", "tuning", "train", "optimize", "optimization"}
     )
     return {
         "allowed": allowed,
@@ -1573,7 +1612,8 @@ def _extract_code_entries_from_row(
         return [
             {
                 "filename": (
-                    f"{dataset_id}_{index:04d}" f"{_language_file_extension(inferred_language)}"
+                    f"{dataset_id}_{index:04d}"
+                    f"{_language_file_extension(inferred_language)}"
                 ),
                 "code": code,
             }
@@ -1793,7 +1833,9 @@ def _find_dolos_cli() -> Optional[PathLib]:
 
 def _is_dolos_plagiarism_cli(candidate: PathLib) -> bool:
     """Return true when a dolos binary is the code-similarity CLI."""
-    command = ["node", str(candidate)] if candidate.suffix == ".js" else [str(candidate)]
+    command = (
+        ["node", str(candidate)] if candidate.suffix == ".js" else [str(candidate)]
+    )
     try:
         result = subprocess.run(
             [*command, "--help"],
@@ -1883,10 +1925,16 @@ def _unavailable_tool_reason(tool_id: str) -> str:
             missing.append("MOSS_USER_ID")
         return f"Needs {', '.join(missing)}" if missing else "Not ready"
     if tool_id == "jplag":
-        return "Needs a JPlag jar in tools/external/JPlag" if not _find_jplag_jar() else "Not ready"
+        return (
+            "Needs a JPlag jar in tools/external/JPlag"
+            if not _find_jplag_jar()
+            else "Not ready"
+        )
     if tool_id == "dolos":
         return (
-            "Needs Dolos npm dependencies and CLI build" if not _find_dolos_cli() else "Not ready"
+            "Needs Dolos npm dependencies and CLI build"
+            if not _find_dolos_cli()
+            else "Not ready"
         )
 
     if tool_id == "nicad":
@@ -1904,7 +1952,9 @@ def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any
     return {
         "id": tool_id,
         "name": metadata.get("name", tool_id.replace("-", " ").title()),
-        "desc": metadata.get("desc", "Tool discovered from the local tools/ inventory."),
+        "desc": metadata.get(
+            "desc", "Tool discovered from the local tools/ inventory."
+        ),
         "color": metadata.get("color", "#64748b"),
         "gradient": metadata.get("gradient", "from-slate-500 to-slate-600"),
         "bgLight": metadata.get("bgLight", "bg-slate-50"),
@@ -1924,14 +1974,19 @@ def _is_real_benchmark_tool_available(tool_id: str) -> bool:
     if tool_id == "integritydesk":
         return True
     if tool_id == "moss":
-        return bool(_get_setting_secret("moss_user_id")) and _find_moss_script() is not None
+        return (
+            bool(_get_setting_secret("moss_user_id"))
+            and _find_moss_script() is not None
+        )
 
     if tool_id == "dolos":
         return _find_dolos_cli() is not None
     if tool_id == "jplag":
         return _find_jplag_jar() is not None
     if tool_id == "nicad":
-        return _find_nicad_executable() is not None and _find_txl_executable() is not None
+        return (
+            _find_nicad_executable() is not None and _find_txl_executable() is not None
+        )
     if tool_id == "pmd":
         return _find_pmd_executable() is not None
     if tool_id == "sherlock":
@@ -2017,7 +2072,9 @@ def _build_all_submission_pairs(submissions: Dict[str, str]) -> List[tuple]:
     ]
 
 
-def _external_tool_pair_lookup(tool_id: str, tool_data: Dict[str, Any]) -> Dict[str, float]:
+def _external_tool_pair_lookup(
+    tool_id: str, tool_data: Dict[str, Any]
+) -> Dict[str, float]:
     """Map external tool pair output to pair-keyed similarity scores."""
     lookup: Dict[str, float] = {}
     for pair in tool_data.get("pairs", []):
@@ -2041,7 +2098,9 @@ def _build_external_comparison_results(
     When multiple tools are selected, the first successful tool provides the primary
     score, while others are included as additional features for comparison.
     """
-    successful_tools = [tool_id for tool_id, data in tool_results.items() if "pairs" in data]
+    successful_tools = [
+        tool_id for tool_id, data in tool_results.items() if "pairs" in data
+    ]
     if not successful_tools:
         return []
 
@@ -2058,7 +2117,9 @@ def _build_external_comparison_results(
 
     for file_a, file_b in pairs:
         pair_key = _pair_key(file_a, file_b)
-        features = {tool_id: lookup.get(pair_key, 0.0) for tool_id, lookup in lookups.items()}
+        features = {
+            tool_id: lookup.get(pair_key, 0.0) for tool_id, lookup in lookups.items()
+        }
 
         # Use primary tool's score directly (no averaging/aggregation)
         score = features.get(primary_tool, 0.0)
@@ -2070,7 +2131,9 @@ def _build_external_comparison_results(
                 score=score,
                 risk_level=_risk_level(score),
                 features=features,
-                contributions={primary_tool: score},  # Only primary tool contributes to score
+                contributions={
+                    primary_tool: score
+                },  # Only primary tool contributes to score
             )
         )
 
@@ -2150,7 +2213,9 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
                     for part in member_path.parts
                     if part not in {"", ".", ".."} and not PathLib(part).is_absolute()
                 ]
-                relative_path = PathLib(*safe_parts) if safe_parts else PathLib(member_path.name)
+                relative_path = (
+                    PathLib(*safe_parts) if safe_parts else PathLib(member_path.name)
+                )
                 target = _unique_child_path(target_dir, relative_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src, open(target, "wb") as dst:
@@ -2195,7 +2260,9 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
     return submissions
 
 
-async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib) -> Dict[str, str]:
+async def _store_benchmark_uploads(
+    files: List[UploadFile], target_dir: PathLib
+) -> Dict[str, str]:
     """Store uploaded benchmark inputs, accepting either source files or zip archives."""
     for upload in files:
         if not upload.filename:
@@ -2219,7 +2286,9 @@ async def _store_benchmark_uploads(files: List[UploadFile], target_dir: PathLib)
 DEFAULT_BENCHMARK_DATA_DIR = project_root.parent / "data" / "datasets"
 BENCHMARK_DATA_DIR = DEFAULT_BENCHMARK_DATA_DIR
 BENCHMARK_ARCHIVE_DATA_DIR = project_root.parent / "archive" / "unused_datasets"
-BUILTIN_PAIR_DATASET_DIR = project_root / "backend" / "benchmark" / "datasets" / "fixtures"
+BUILTIN_PAIR_DATASET_DIR = (
+    project_root / "backend" / "benchmark" / "datasets" / "fixtures"
+)
 BUILTIN_PAIR_DATASET_IDS = {"clough_stevenson_style"}
 PAIR_BENCHMARK_MAX_PAIRS = 400
 
@@ -2319,13 +2388,17 @@ def _build_pair_sampling_audit(
     def counts_for(pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
         positive = sum(1 for pair in pairs if _pair_label_value(pair) >= 2)
         negative = len(pairs) - positive
-        categories = Counter(str(pair.get("case_category") or "unspecified") for pair in pairs)
+        categories = Counter(
+            str(pair.get("case_category") or "unspecified") for pair in pairs
+        )
         splits = Counter(str(pair.get("split") or "unspecified") for pair in pairs)
         return {
             "total_pairs": len(pairs),
             "positive_pairs": positive,
             "negative_pairs": negative,
-            "class_balance_ratio": round(min(positive, negative) / max(positive, negative, 1), 4),
+            "class_balance_ratio": round(
+                min(positive, negative) / max(positive, negative, 1), 4
+            ),
             "case_categories": dict(sorted(categories.items())),
             "splits": dict(sorted(splits.items())),
         }
@@ -2335,7 +2408,9 @@ def _build_pair_sampling_audit(
     warnings: List[str] = []
     blockers: List[str] = []
     if selected_counts["positive_pairs"] == 0 or selected_counts["negative_pairs"] == 0:
-        blockers.append("Selected benchmark sample lacks both positive and negative pairs.")
+        blockers.append(
+            "Selected benchmark sample lacks both positive and negative pairs."
+        )
     if selected_counts["class_balance_ratio"] < 0.5:
         warnings.append("Selected benchmark sample is class-imbalanced.")
     if original_counts["class_balance_ratio"] < 0.5:
@@ -2356,7 +2431,9 @@ def _build_pair_sampling_audit(
     return {
         "dataset": dataset_id or "custom",
         "sampling_policy": (
-            "deterministic_balanced_shuffle" if balanced else "deterministic_shuffle_unbalanced"
+            "deterministic_balanced_shuffle"
+            if balanced
+            else "deterministic_shuffle_unbalanced"
         ),
         "random_seed_source": "sha256(dataset,file_a,file_b,label,case_category)",
         "original": original_counts,
@@ -2376,8 +2453,12 @@ def _select_reliable_explicit_pairs(
 
     positives = [pair for pair in explicit_pairs if _pair_label_value(pair) >= 2]
     negatives = [pair for pair in explicit_pairs if _pair_label_value(pair) < 2]
-    positives = sorted(positives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair))
-    negatives = sorted(negatives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair))
+    positives = sorted(
+        positives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
+    negatives = sorted(
+        negatives, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+    )
 
     if positives and negatives:
         per_class = min(
@@ -2388,13 +2469,17 @@ def _select_reliable_explicit_pairs(
         selected = positives[:per_class] + negatives[:per_class]
         balanced = True
     else:
-        selected = sorted(explicit_pairs, key=lambda pair: _stable_pair_sort_key(dataset_id, pair))[
-            :PAIR_BENCHMARK_MAX_PAIRS
-        ]
+        selected = sorted(
+            explicit_pairs, key=lambda pair: _stable_pair_sort_key(dataset_id, pair)
+        )[:PAIR_BENCHMARK_MAX_PAIRS]
         balanced = False
 
-    selected = sorted(selected, key=lambda pair: _stable_pair_sort_key(f"{dataset_id}:eval", pair))
-    audit = _build_pair_sampling_audit(dataset_id, explicit_pairs, selected, balanced=balanced)
+    selected = sorted(
+        selected, key=lambda pair: _stable_pair_sort_key(f"{dataset_id}:eval", pair)
+    )
+    audit = _build_pair_sampling_audit(
+        dataset_id, explicit_pairs, selected, balanced=balanced
+    )
     return selected, audit
 
 
@@ -2481,7 +2566,9 @@ def _load_synthetic_pair_dataset(
             {
                 "file_a": file_a,
                 "file_b": file_b,
-                "label": _label_to_clone_grade(item.get("label", 0), item.get("clone_type")),
+                "label": _label_to_clone_grade(
+                    item.get("label", 0), item.get("clone_type")
+                ),
                 "case_category": _pair_case_category(item),
                 "split": _pair_split(item),
             }
@@ -2715,7 +2802,9 @@ def _load_ir_plag_pair_dataset(
         non_plagiarized_dir = case_dir / "non-plagiarized"
 
         if not (
-            original_dir.exists() and plagiarized_dir.exists() and non_plagiarized_dir.exists()
+            original_dir.exists()
+            and plagiarized_dir.exists()
+            and non_plagiarized_dir.exists()
         ):
             continue
 
@@ -2769,11 +2858,11 @@ def _load_ir_plag_pair_dataset(
             for non_plag_file in non_plag_files:
                 if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
                     return submissions, explicit_pairs
-                non_plag_code = non_plag_file.read_text(encoding="utf-8", errors="ignore")
-
-                pair_id = (
-                    f"ir_plag_{case_dir.name}_nonplag_{non_plag_dir.name}_{non_plag_file.stem}"
+                non_plag_code = non_plag_file.read_text(
+                    encoding="utf-8", errors="ignore"
                 )
+
+                pair_id = f"ir_plag_{case_dir.name}_nonplag_{non_plag_dir.name}_{non_plag_file.stem}"
                 file_b = _write_pair_submission(
                     submissions,
                     target_dir,
@@ -2801,7 +2890,9 @@ def _bigclonebench_reduced_groups(
         return {}
 
     groups: Dict[str, List[PathLib]] = {}
-    for function_dir in sorted(path for path in reduced_root.iterdir() if path.is_dir()):
+    for function_dir in sorted(
+        path for path in reduced_root.iterdir() if path.is_dir()
+    ):
         files: List[PathLib] = []
         for subdir_name in ("sample", "selected", "default"):
             subdir = function_dir / subdir_name
@@ -2878,7 +2969,9 @@ def _load_bigclonebench_reduced_pair_dataset(
                 for source_b in right_files[:3]:
                     if negative_count >= max_each:
                         break
-                    pair_id = f"bcb_neg_{negative_count:05d}_{left_function}_{right_function}"
+                    pair_id = (
+                        f"bcb_neg_{negative_count:05d}_{left_function}_{right_function}"
+                    )
                     file_a = _write_pair_submission(
                         submissions,
                         target_dir,
@@ -3035,7 +3128,9 @@ def _load_xiangtan_pair_dataset(
         for source_b in unique_originals[left_index + 1 :]:
             if negative_count >= target_negative_count:
                 break
-            if source_a.stem.replace("_original", "") == source_b.stem.replace("_original", ""):
+            if source_a.stem.replace("_original", "") == source_b.stem.replace(
+                "_original", ""
+            ):
                 continue
             if behavior_signatures.get(source_a) == behavior_signatures.get(source_b):
                 continue
@@ -3069,7 +3164,9 @@ def _load_xiangtan_pair_dataset(
 
 def _java_behavior_signature(code: str) -> str:
     """Return a name-insensitive Java signature for avoiding mislabeled negatives."""
-    without_comments = re.sub(r"/\*.*?\*/|//.*?$", "", code, flags=re.DOTALL | re.MULTILINE)
+    without_comments = re.sub(
+        r"/\*.*?\*/|//.*?$", "", code, flags=re.DOTALL | re.MULTILINE
+    )
     tokens = re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\S", without_comments)
     java_keywords = {
         "abstract",
@@ -3176,7 +3273,9 @@ def _load_poolc_pair_dataset(
 
     for parquet_file in parquet_files:
         table = pq.ParquetFile(parquet_file)
-        for batch in table.iter_batches(batch_size=1024, columns=["code1", "code2", "similar"]):
+        for batch in table.iter_batches(
+            batch_size=1024, columns=["code1", "code2", "similar"]
+        ):
             rows = batch.to_pylist()
             for item in rows:
                 binary_label = 1 if bool(item.get("similar")) else 0
@@ -3191,8 +3290,12 @@ def _load_poolc_pair_dataset(
                     continue
 
                 pair_id = f"poolc_{len(explicit_pairs):06d}"
-                file_a = _write_pair_submission(submissions, target_dir, f"{pair_id}_a.py", code_a)
-                file_b = _write_pair_submission(submissions, target_dir, f"{pair_id}_b.py", code_b)
+                file_a = _write_pair_submission(
+                    submissions, target_dir, f"{pair_id}_a.py", code_a
+                )
+                file_b = _write_pair_submission(
+                    submissions, target_dir, f"{pair_id}_b.py", code_b
+                )
                 explicit_pairs.append(
                     {
                         "file_a": file_a,
@@ -3233,8 +3336,12 @@ def _load_hf_binary_pair_rows(
             continue
 
         pair_id = f"{prefix}_{idx:06d}"
-        file_a = _write_pair_submission(submissions, target_dir, f"{pair_id}_a.{extension}", code_a)
-        file_b = _write_pair_submission(submissions, target_dir, f"{pair_id}_b.{extension}", code_b)
+        file_a = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_a.{extension}", code_a
+        )
+        file_b = _write_pair_submission(
+            submissions, target_dir, f"{pair_id}_b.{extension}", code_b
+        )
         explicit_pairs.append(
             {"file_a": file_a, "file_b": file_b, "label": 3 if binary_label else 0}
         )
@@ -3255,7 +3362,9 @@ def _load_poj104_pair_dataset(
 
     dataset = load_from_disk(str(hf_path))
     by_label: Dict[str, List[Dict[str, Any]]] = {}
-    preferred_splits = [name for name in ("test", "validation", "train") if name in dataset]
+    preferred_splits = [
+        name for name in ("test", "validation", "train") if name in dataset
+    ]
     for split_name in preferred_splits or list(dataset.keys()):
         for item in dataset[split_name]:
             by_label.setdefault(str(item.get("label")), []).append(item)
@@ -3334,7 +3443,9 @@ def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, s
             try:
                 metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
             except Exception as exc:
-                logger.warning(f"Error reading demo dataset metadata {metadata_file}: {exc}")
+                logger.warning(
+                    f"Error reading demo dataset metadata {metadata_file}: {exc}"
+                )
         demo_language = metadata.get("language", "python")
 
         # For demo datasets, combine original and plagiarized files
@@ -3439,7 +3550,9 @@ def _job_metadata_path(job_id: str) -> PathLib:
     return _job_report_dir(job_id) / JOB_METADATA_FILENAME
 
 
-def _build_job_summary(results: List[Dict[str, Any]], threshold: float) -> Dict[str, Any]:
+def _build_job_summary(
+    results: List[Dict[str, Any]], threshold: float
+) -> Dict[str, Any]:
     suspicious_pairs = sum(
         1 for result in results if _coerce_float(result.get("score")) >= threshold
     )
@@ -3475,10 +3588,15 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
     flagged_lines, annotated_snippet) so the results page can display them.
     """
     signals = {
-        name: round(_coerce_float(value), 3) for name, value in (entry.get("signals") or {}).items()
+        name: round(_coerce_float(value), 3)
+        for name, value in (entry.get("signals") or {}).items()
     }
-    indicators = [str(indicator) for indicator in (entry.get("indicators") or []) if indicator]
-    signal_labels = {str(k): str(v) for k, v in (entry.get("signal_labels") or {}).items()}
+    indicators = [
+        str(indicator) for indicator in (entry.get("indicators") or []) if indicator
+    ]
+    signal_labels = {
+        str(k): str(v) for k, v in (entry.get("signal_labels") or {}).items()
+    }
     flagged_lines = [int(ln) for ln in (entry.get("flagged_lines") or []) if ln]
     # annotated_snippet: list of {line, text, flagged} — pass through as-is
     annotated_snippet = [
@@ -3551,6 +3669,15 @@ def _normalize_ai_detection(ai_detection: Any) -> Dict[str, Any]:
             "high": int(distribution.get("high") or 0),
         },
         "signal_summary": signal_summary,
+        "highest_signal": str(ai_detection.get("highest_signal") or ""),
+        "highest_signal_value": round(
+            _coerce_float(ai_detection.get("highest_signal_value")), 3
+        ),
+        "calibration_confidence": (
+            round(_coerce_float(ai_detection.get("calibration_confidence")), 3)
+            if ai_detection.get("calibration_confidence") is not None
+            else None
+        ),
         "submissions": submissions,
     }
 
@@ -3576,7 +3703,9 @@ def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
                 }
             )
         source_counts = (
-            entry.get("source_counts") if isinstance(entry.get("source_counts"), dict) else {}
+            entry.get("source_counts")
+            if isinstance(entry.get("source_counts"), dict)
+            else {}
         )
         submissions.append(
             {
@@ -3585,7 +3714,9 @@ def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
                 "match_count": int(entry.get("match_count") or 0),
                 "top_source": sources[0] if sources else None,
                 "sources": sources,
-                "source_counts": {str(k): int(v or 0) for k, v in source_counts.items()},
+                "source_counts": {
+                    str(k): int(v or 0) for k, v in source_counts.items()
+                },
             }
         )
 
@@ -3594,10 +3725,15 @@ def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
         "configured": bool(web_analysis.get("configured")),
         "status_message": str(web_analysis.get("status_message") or ""),
         "matched_submissions": int(web_analysis.get("matched_submissions") or 0),
-        "highest_similarity": round(_coerce_float(web_analysis.get("highest_similarity")), 3),
-        "average_similarity": round(_coerce_float(web_analysis.get("average_similarity")), 3),
+        "highest_similarity": round(
+            _coerce_float(web_analysis.get("highest_similarity")), 3
+        ),
+        "average_similarity": round(
+            _coerce_float(web_analysis.get("average_similarity")), 3
+        ),
         "source_totals": {
-            str(k): int(v or 0) for k, v in (web_analysis.get("source_totals") or {}).items()
+            str(k): int(v or 0)
+            for k, v in (web_analysis.get("source_totals") or {}).items()
         },
         "submissions": submissions,
     }
@@ -3609,7 +3745,9 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
     threshold = _coerce_float(normalized.get("threshold"), 0.5)
     results = [_normalize_result(result) for result in normalized.get("results", [])]
     submissions = (
-        normalized.get("submissions") if isinstance(normalized.get("submissions"), dict) else {}
+        normalized.get("submissions")
+        if isinstance(normalized.get("submissions"), dict)
+        else {}
     )
     file_count = normalized.get("file_count")
     try:
@@ -3627,14 +3765,24 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
 
     normalized["course_name"] = normalized.get("course_name") or "Unnamed Course"
     normalized["assignment_name"] = (
-        normalized.get("assignment_name") or normalized["course_name"] or "Unnamed Assignment"
+        normalized.get("assignment_name")
+        or normalized["course_name"]
+        or "Unnamed Assignment"
     )
-    normalized["created_at"] = normalized.get("created_at") or datetime.now().isoformat()
+    normalized["created_at"] = (
+        normalized.get("created_at") or datetime.now().isoformat()
+    )
     normalized["submissions"] = submissions
     normalized["file_count"] = (
         file_count
         or len(submissions)
-        or len({name for result in results for name in (result["file_a"], result["file_b"])})
+        or len(
+            {
+                name
+                for result in results
+                for name in (result["file_a"], result["file_b"])
+            }
+        )
     )
     normalized["review_status"] = (
         normalized.get("review_status")
@@ -3657,19 +3805,23 @@ def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, An
         else {}
     )
     normalized["ai_text_trust"] = (
-        normalized.get("ai_text_trust") if isinstance(normalized.get("ai_text_trust"), dict) else {}
+        normalized.get("ai_text_trust")
+        if isinstance(normalized.get("ai_text_trust"), dict)
+        else {}
     )
     normalized["ai_detection"] = _normalize_ai_detection(normalized.get("ai_detection"))
     normalized["web_analysis"] = _normalize_web_analysis(normalized.get("web_analysis"))
 
     report_dir = _job_report_dir(job_id)
-    normalized["report_path"] = normalized.get("report_path") or str(report_dir / "report.html")
+    normalized["report_path"] = normalized.get("report_path") or str(
+        report_dir / "report.html"
+    )
     normalized["report_json_path"] = normalized.get("report_json_path") or str(
         report_dir / "report.json"
     )
-    normalized["committee_report_path"] = normalized.get("committee_report_path") or str(
-        report_dir / "committee_report.html"
-    )
+    normalized["committee_report_path"] = normalized.get(
+        "committee_report_path"
+    ) or str(report_dir / "committee_report.html")
 
     if from_disk and normalized.get("status") in {"processing", "analyzing"}:
         normalized["status"] = "failed"
@@ -3737,7 +3889,9 @@ def _persist_ai_detection_results(job_id: str, ai_detection: Dict[str, Any]) -> 
         logger.warning("Failed to persist AI detection results for job %s", job_id)
 
 
-def _update_job_status_in_db(job_id: str, status: str, error_message: str | None = None) -> None:
+def _update_job_status_in_db(
+    job_id: str, status: str, error_message: str | None = None
+) -> None:
     """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
     try:
         with SessionLocal() as db:
@@ -3767,7 +3921,9 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
     try:
         report_data = json.loads(report_json_path.read_text(encoding="utf-8"))
     except Exception:
-        logger.exception(f"Failed to recover job metadata for {job_id} from report.json")
+        logger.exception(
+            f"Failed to recover job metadata for {job_id} from report.json"
+        )
         return None
 
     report_pairs = report_data.get("comparisons") or report_data.get("pairs") or []
@@ -3777,17 +3933,26 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
                 "file_a": comparison.get("file_a", ""),
                 "file_b": comparison.get("file_b", ""),
                 "score": comparison.get("score", 0),
-                "risk_level": comparison.get("risk") or comparison.get("risk_level") or "",
+                "risk_level": comparison.get("risk")
+                or comparison.get("risk_level")
+                or "",
                 "features": comparison.get("features") or {},
             }
         )
         for comparison in report_pairs
     ]
     threshold = _coerce_float(report_data.get("threshold"), 0.5)
-    title = str(report_data.get("title") or "").replace("IntegrityDesk Report -", "").strip()
+    title = (
+        str(report_data.get("title") or "")
+        .replace("IntegrityDesk Report -", "")
+        .strip()
+    )
     assignment_name = title or f"Recovered Assignment {job_id}"
     file_names = {
-        name for result in results for name in (result["file_a"], result["file_b"]) if name
+        name
+        for result in results
+        for name in (result["file_a"], result["file_b"])
+        if name
     }
 
     recovered_job = _normalize_job(
@@ -3803,7 +3968,9 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
             "summary": _build_job_summary(results, threshold),
             "report_path": str(_job_report_dir(job_id) / "report.html"),
             "report_json_path": str(report_json_path),
-            "committee_report_path": str(_job_report_dir(job_id) / "committee_report.html"),
+            "committee_report_path": str(
+                _job_report_dir(job_id) / "committee_report.html"
+            ),
             "submissions": {},
             "ai_detection": report_data.get("ai_detection", {}),
             "web_analysis": report_data.get("web_analysis", {}),
@@ -3875,16 +4042,22 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                 "id": job_id,
                 "status": db_job.status or "completed",
                 "assignment_name": db_job.name or f"Job {job_id}",
-                "threshold": (float(db_job.threshold) if db_job.threshold is not None else 0.5),
+                "threshold": (
+                    float(db_job.threshold) if db_job.threshold is not None else 0.5
+                ),
                 "file_count": db_job.file_count or len(subs),
-                "created_at": (db_job.created_at.isoformat() if db_job.created_at else None),
+                "created_at": (
+                    db_job.created_at.isoformat() if db_job.created_at else None
+                ),
                 "tenant_id": db_job.tenant_id,
                 "results": [
                     {
                         "file_a": r.submission_a_id,
                         "file_b": r.submission_b_id,
                         "score": (
-                            float(r.similarity_score) if r.similarity_score is not None else 0.0
+                            float(r.similarity_score)
+                            if r.similarity_score is not None
+                            else 0.0
                         ),
                         "risk_level": (
                             "CRITICAL"
@@ -3892,11 +4065,17 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                             else (
                                 "HIGH"
                                 if float(r.similarity_score or 0) >= 0.7
-                                else ("MEDIUM" if float(r.similarity_score or 0) >= 0.5 else "LOW")
+                                else (
+                                    "MEDIUM"
+                                    if float(r.similarity_score or 0) >= 0.5
+                                    else "LOW"
+                                )
                             )
                         ),
                         "confidence": (
-                            float(r.confidence_level) if r.confidence_level is not None else None
+                            float(r.confidence_level)
+                            if r.confidence_level is not None
+                            else None
                         ),
                         "verdict": r.verdict,
                         "matching_blocks": r.matching_blocks or [],
@@ -3988,7 +4167,9 @@ def _extract_ai_evidence_patterns(code: str, language: str) -> Dict[str, Any]:
     docstring_pattern = r'^\s*("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\')'
     for i, line in enumerate(lines):
         if re.search(docstring_pattern, line):
-            patterns_found["docstring_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+            patterns_found["docstring_patterns"].append(
+                {"line": i + 1, "text": line.strip()[:80]}
+            )
 
     # Comment patterns (AI uses formal, generic comments)
     comment_patterns = [
@@ -4008,25 +4189,35 @@ def _extract_ai_evidence_patterns(code: str, language: str) -> Dict[str, Any]:
     type_hint_pattern = r":\s*(Optional|Union|Dict|List|Tuple|Set|Any)\[|->.*:"
     for i, line in enumerate(lines):
         if re.search(type_hint_pattern, line):
-            patterns_found["type_hint_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+            patterns_found["type_hint_patterns"].append(
+                {"line": i + 1, "text": line.strip()[:80]}
+            )
 
     # Exception handling (AI uses explicit exception handling)
-    exception_pattern = r"raise\s+(ValueError|TypeError|Exception|RuntimeError|KeyError)\s*\("
+    exception_pattern = (
+        r"raise\s+(ValueError|TypeError|Exception|RuntimeError|KeyError)\s*\("
+    )
     for i, line in enumerate(lines):
         if re.search(exception_pattern, line):
-            patterns_found["exception_handling"].append({"line": i + 1, "text": line.strip()[:80]})
+            patterns_found["exception_handling"].append(
+                {"line": i + 1, "text": line.strip()[:80]}
+            )
 
     # Logging statements
     logging_pattern = r"logging\.(debug|info|warning|error|critical)\s*\("
     for i, line in enumerate(lines):
         if re.search(logging_pattern, line):
-            patterns_found["logging_statements"].append({"line": i + 1, "text": line.strip()[:80]})
+            patterns_found["logging_statements"].append(
+                {"line": i + 1, "text": line.strip()[:80]}
+            )
 
     # Import patterns (AI uses many standard imports)
     import_pattern = r"^import\s+|^from\s+\S+\s+import"
     for i, line in enumerate(lines):
         if re.search(import_pattern, line):
-            patterns_found["import_patterns"].append({"line": i + 1, "text": line.strip()[:80]})
+            patterns_found["import_patterns"].append(
+                {"line": i + 1, "text": line.strip()[:80]}
+            )
 
     # Filter out empty patterns
     return {k: v for k, v in patterns_found.items() if v}
@@ -4111,11 +4302,15 @@ def _compute_code_metrics(code: str) -> Dict[str, Any]:
     classes = len(re.findall(r"^\s*class\s+\w+", code, re.MULTILINE))
 
     # Count type hints
-    type_hints = len(re.findall(r":\s*(Optional|Union|Dict|List|Tuple|Set|Any)\[|->", code))
+    type_hints = len(
+        re.findall(r":\s*(Optional|Union|Dict|List|Tuple|Set|Any)\[|->", code)
+    )
 
     # Average line length
     avg_line_length = (
-        sum(len(l) for l in non_empty_lines) / len(non_empty_lines) if non_empty_lines else 0
+        sum(len(l) for l in non_empty_lines) / len(non_empty_lines)
+        if non_empty_lines
+        else 0
     )
 
     return {
@@ -4148,10 +4343,15 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     signal_totals: Dict[str, float] = {}
     signal_peaks: Dict[str, float] = {}
     signal_counts: Dict[str, int] = {}
+    calibration_info: Dict[str, Any] = {"available": False, "samples": 0}
 
     for name, code in submissions.items():
         language = _infer_language_from_filename(name)
         result = detector.analyze(code, language=language)
+        calibration_info = {
+            "available": bool(result.get("calibration", {}).get("available")),
+            "samples": int(result.get("calibration", {}).get("samples") or 0),
+        }
         ai_probability = round(_coerce_float(result.get("ai_probability")), 3)
         confidence = round(_coerce_float(result.get("confidence")), 3)
         signals = {
@@ -4161,8 +4361,12 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
         signal_labels = result.get("signal_labels") or {}
 
         for signal_name, signal_value in signals.items():
-            signal_totals[signal_name] = signal_totals.get(signal_name, 0.0) + signal_value
-            signal_peaks[signal_name] = max(signal_peaks.get(signal_name, 0.0), signal_value)
+            signal_totals[signal_name] = (
+                signal_totals.get(signal_name, 0.0) + signal_value
+            )
+            signal_peaks[signal_name] = max(
+                signal_peaks.get(signal_name, 0.0), signal_value
+            )
             signal_counts[signal_name] = signal_counts.get(signal_name, 0) + 1
 
         # Build annotated code snippet (first 60 lines, flagged lines marked)
@@ -4192,9 +4396,9 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
                 "signals": signals,
                 "signal_labels": signal_labels,
                 "signal_interpretations": signal_interpretations,
-                "indicators": [str(indicator) for indicator in (result.get("indicators") or [])][
-                    :6
-                ],
+                "indicators": [
+                    str(indicator) for indicator in (result.get("indicators") or [])
+                ][:6],
                 "flagged_lines": flagged_lines[:30],
                 "flagged_regions": (result.get("flagged_regions") or [])[:10],
                 "classifier": result.get("classifier"),
@@ -4218,11 +4422,42 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     highest_score = max((entry["ai_probability"] for entry in entries), default=0.0)
     signal_summary = {
         name: {
-            "average": round(signal_totals[name] / max(signal_counts.get(name, 1), 1), 3),
+            "average": round(
+                signal_totals[name] / max(signal_counts.get(name, 1), 1), 3
+            ),
             "peak": round(signal_peaks.get(name, 0.0), 3),
         }
         for name in sorted(signal_totals)
     }
+
+    # Most indicative signal: the one with the highest average across files.
+    highest_signal_name = (
+        max(signal_summary, key=lambda name: signal_summary[name]["average"])
+        if signal_summary
+        else ""
+    )
+    _SIGNAL_LABELS = {
+        "perplexity": "Token Entropy",
+        "burstiness": "Code Burstiness",
+        "stylometry": "Style Profile",
+        "pattern_library": "LLM Fingerprints",
+        "structural_entropy": "AST Uniformity",
+        "vocabulary_richness": "Vocabulary Diversity",
+        "whitespace_rhythm": "Whitespace Rhythm",
+        "docstring_density": "Docstring Density",
+        "binoculars": "Binoculars Detection",
+        "ast": "AST Structure",
+    }
+    highest_signal = (
+        entries[0].get("signal_labels", {}).get(highest_signal_name)
+        if highest_signal_name and entries
+        else None
+    ) or _SIGNAL_LABELS.get(highest_signal_name)
+    highest_signal_value = (
+        round(signal_summary[highest_signal_name]["average"], 3)
+        if highest_signal_name
+        else 0.0
+    )
 
     return {
         "enabled": True,
@@ -4236,13 +4471,22 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
             "not as proof of AI authorship."
         ),
         "flagged_count": sum(
-            1 for entry in entries if entry["ai_probability"] >= AI_MEDIUM_RISK_THRESHOLD
+            1
+            for entry in entries
+            if entry["ai_probability"] >= AI_MEDIUM_RISK_THRESHOLD
         ),
         "total_files": len(entries),
         "average_score": round(average_score, 3),
         "highest_score": round(highest_score, 3),
         "distribution": distribution,
         "signal_summary": signal_summary,
+        "highest_signal": highest_signal,
+        "highest_signal_value": highest_signal_value,
+        "calibration_confidence": (
+            round(min(1.0, calibration_info["samples"] / 20.0), 3)
+            if calibration_info.get("available")
+            else None
+        ),
         "submissions": entries,
     }
 
@@ -4283,7 +4527,11 @@ def _build_pair_ai_details(
                 3,
             ),
             "confidence": round(
-                (_coerce_float(ai_a.get("confidence")) + _coerce_float(ai_b.get("confidence"))) / 2,
+                (
+                    _coerce_float(ai_a.get("confidence"))
+                    + _coerce_float(ai_b.get("confidence"))
+                )
+                / 2,
                 3,
             ),
             "indicators": indicators[:5],
@@ -4297,7 +4545,9 @@ def _build_fusion_debug(result: Any, threshold: float) -> Dict[str, Any]:
     features = getattr(result, "features", {}) or {}
     contributions = getattr(result, "contributions", {}) or {}
     active = []
-    for engine, score in sorted(features.items(), key=lambda item: -_coerce_float(item[1])):
+    for engine, score in sorted(
+        features.items(), key=lambda item: -_coerce_float(item[1])
+    ):
         normalized_score = round(_coerce_float(score), 3)
         contribution = round(_coerce_float(contributions.get(engine)), 3)
         active.append(
@@ -4420,8 +4670,12 @@ def _build_web_analysis_summary(
         return {}
 
     settings_payload = settings_payload or {}
-    source_sites = _normalize_source_scan_sites(settings_payload.get("source_scan_sites"))
-    web_enabled = bool(settings_payload.get("source_scan_enabled")) and bool(source_sites)
+    source_sites = _normalize_source_scan_sites(
+        settings_payload.get("source_scan_sites")
+    )
+    web_enabled = bool(settings_payload.get("source_scan_enabled")) and bool(
+        source_sites
+    )
     github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
     stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
 
@@ -4463,15 +4717,21 @@ def _build_web_analysis_summary(
             )
 
         source_counts = (
-            result.get("source_counts") if isinstance(result.get("source_counts"), dict) else {}
+            result.get("source_counts")
+            if isinstance(result.get("source_counts"), dict)
+            else {}
         )
         for source_name, count in source_counts.items():
-            source_totals[source_name] = source_totals.get(source_name, 0) + int(count or 0)
+            source_totals[source_name] = source_totals.get(source_name, 0) + int(
+                count or 0
+            )
 
         entries.append(
             {
                 "name": name,
-                "max_similarity": round(_coerce_float(result.get("max_web_similarity")), 3),
+                "max_similarity": round(
+                    _coerce_float(result.get("max_web_similarity")), 3
+                ),
                 "match_count": len(result.get("web_results") or []),
                 "sources": sources,
                 "source_counts": {
@@ -4482,7 +4742,9 @@ def _build_web_analysis_summary(
 
     entries.sort(key=lambda entry: (-entry["max_similarity"], entry["name"]))
     average_similarity = (
-        sum(entry["max_similarity"] for entry in entries) / len(entries) if entries else 0.0
+        sum(entry["max_similarity"] for entry in entries) / len(entries)
+        if entries
+        else 0.0
     )
 
     return {
@@ -4532,14 +4794,18 @@ def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
     except Exception:
         logger.warning("DB job listing fallback failed")
 
-    return sorted(jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True)
+    return sorted(
+        jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True
+    )
 
 
 @app.get("/api/auth/status")
 async def auth_status():
     user_count = await run_in_threadpool(_get_user_count)
     _ensure_auth_secret()
-    return JSONResponse(content={"bootstrapped": user_count > 0, "user_count": user_count})
+    return JSONResponse(
+        content={"bootstrapped": user_count > 0, "user_count": user_count}
+    )
 
 
 def _get_user_count():
@@ -4563,7 +4829,9 @@ async def bootstrap_admin(request: Request):
         _bootstrap_admin_sync, email, full_name, password, tenant_name
     )
     _ensure_auth_secret()
-    response = JSONResponse(content={"user": user_data, "message": "Admin account created"})
+    response = JSONResponse(
+        content={"user": user_data, "message": "Admin account created"}
+    )
     # Issue a session cookie so the newly created admin can use the dashboard
     # immediately without logging in again.
     user = await run_in_threadpool(_get_user_for_cookie, email)
@@ -4578,9 +4846,13 @@ def _bootstrap_admin_sync(email, full_name, password, tenant_name):
     try:
         existing_users = int(db.scalar(select(func.count()).select_from(User)) or 0)
         if existing_users > 0:
-            raise HTTPException(status_code=400, detail="Bootstrap has already been completed")
+            raise HTTPException(
+                status_code=400, detail="Bootstrap has already been completed"
+            )
 
-        tenant = _create_tenant(db, tenant_name or _generate_tenant_name(full_name, email))
+        tenant = _create_tenant(
+            db, tenant_name or _generate_tenant_name(full_name, email)
+        )
         user = User(
             tenant_id=tenant.id,
             email=email,
@@ -4603,7 +4875,12 @@ def _login_sync(email, password):
     db = SessionLocal()
 
     try:
-        user = db.query(User).options(joinedload(User.tenant)).filter(User.email == email).first()
+        user = (
+            db.query(User)
+            .options(joinedload(User.tenant))
+            .filter(User.email == email)
+            .first()
+        )
 
         if not user or not _verify_password(password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -4681,9 +4958,13 @@ async def list_users(request: Request):
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
         users = db.scalars(
-            select(User).options(joinedload(User.tenant)).order_by(User.created_at.desc())
+            select(User)
+            .options(joinedload(User.tenant))
+            .order_by(User.created_at.desc())
         ).all()
-        return JSONResponse(content={"users": [_serialize_user(user) for user in users]})
+        return JSONResponse(
+            content={"users": [_serialize_user(user) for user in users]}
+        )
 
 
 @app.post("/api/admin/users")
@@ -4705,9 +4986,13 @@ async def create_user(request: Request):
 
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.email == email)):
-            raise HTTPException(status_code=409, detail="A user with that email already exists")
+            raise HTTPException(
+                status_code=409, detail="A user with that email already exists"
+            )
 
-        tenant = _create_tenant(db, tenant_name or _generate_tenant_name(full_name, email))
+        tenant = _create_tenant(
+            db, tenant_name or _generate_tenant_name(full_name, email)
+        )
         user = User(
             tenant_id=tenant.id,
             email=email,
@@ -4719,7 +5004,9 @@ async def create_user(request: Request):
         db.add(user)
         db.commit()
         # Refresh with tenant loaded
-        user = db.scalar(select(User).options(joinedload(User.tenant)).where(User.id == user.id))
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
 
         return JSONResponse(
             status_code=201,
@@ -4817,14 +5104,18 @@ async def admin_assign_instructor_to_course(request: Request):
                 db.commit()
                 return {"success": True, "message": "Role updated"}
 
-            assignment = CourseInstructor(course_id=course_id, user_id=user_id, role=role)
+            assignment = CourseInstructor(
+                course_id=course_id, user_id=user_id, role=role
+            )
             db.add(assignment)
             db.commit()
 
             return {"success": True, "message": "Instructor assigned"}
     except Exception:
         logger.exception("Failed to assign instructor")
-        return JSONResponse(status_code=500, content={"error": "Failed to assign instructor"})
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to assign instructor"}
+        )
 
 
 @app.delete("/api/admin/course-instructors")
@@ -4856,7 +5147,9 @@ async def admin_remove_instructor_from_course(request: Request):
             return {"success": True, "removed": deleted > 0}
     except Exception:
         logger.exception("Failed to remove instructor")
-        return JSONResponse(status_code=500, content={"error": "Failed to remove instructor"})
+        return JSONResponse(
+            status_code=500, content={"error": "Failed to remove instructor"}
+        )
 
 
 @app.post("/api/admin/create-demo-dataset")
@@ -4966,7 +5259,9 @@ async def create_demo_dataset(request: Request):
 
     except Exception as e:
         logger.error(f"Failed to create demo dataset: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create demo dataset: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create demo dataset: {str(e)}"
+        )
 
 
 def generate_synthetic_code(index: int, language: str, similarity_type: str) -> str:
@@ -5922,7 +6217,9 @@ async def upload_zip(
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
     if not file.filename or not file.filename.lower().endswith(".zip"):
-        return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
+        return JSONResponse(
+            status_code=400, content={"error": "Please upload a .zip file"}
+        )
 
     job_id = str(uuid.uuid4())[:8]
     _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
@@ -6053,25 +6350,27 @@ async def calibrate_ai_detector(
 ):
     """
     Calibrate AI detection scores using labeled examples.
-    
+
     Use this endpoint to provide feedback on detection accuracy.
     - raw_score: The original uncalibrated score (0.0-1.0)
     - is_ai_generated: True if the code was AI-generated, False if human-written
     - code_sample: Optional code snippet for context
     """
     with _CALIBRATION_LOCK:
-        _calibration_data.append({
-            "raw_score": raw_score,
-            "label": 1.0 if is_ai_generated else 0.0,
-            "code_sample": code_sample[:500] if code_sample else "",
-            "timestamp": datetime.now().isoformat(),
-        })
-    
+        _calibration_data.append(
+            {
+                "raw_score": raw_score,
+                "label": 1.0 if is_ai_generated else 0.0,
+                "code_sample": code_sample[:500] if code_sample else "",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
     return JSONResponse(
         content={
             "status": "accepted",
             "total_samples": len(_calibration_data),
-            "message": "Calibration sample recorded. Use /api/ai-detect/retrain to update the model."
+            "message": "Calibration sample recorded. Use /api/ai-detect/retrain to update the model.",
         }
     )
 
@@ -6080,43 +6379,41 @@ async def calibrate_ai_detector(
 async def retrain_ai_detector():
     """
     Retrain the AI detection calibration model with collected feedback.
-    
+
     This endpoint should be called periodically to improve detection reliability.
     """
     global _calibration_data
-    
+
     if len(_calibration_data) < 10:
         return JSONResponse(
-            status_code=400,
-            content={"error": "Need at least 10 calibration samples"}
+            status_code=400, content={"error": "Need at least 10 calibration samples"}
         )
-    
+
     try:
         from src.backend.engines.score_calibration import ScoreCalibrator
-        
+
         raw_scores = [_d["raw_score"] for _d in _calibration_data]
         labels = [_d["label"] for _d in _calibration_data]
-        
+
         calibrator = ScoreCalibrator()
         calibrator.fit(raw_scores, labels)
-        
+
         # Save the calibrated model
         model_path = project_root / "backend" / ".calibrator.pkl"
         calibrator.save(str(model_path))
-        
+
         return JSONResponse(
             content={
                 "status": "success",
                 "samples_used": len(_calibration_data),
                 "model_path": str(model_path),
-                "message": "Calibration model retrained successfully"
+                "message": "Calibration model retrained successfully",
             }
         )
     except Exception as e:
         logger.error(f"Retraining failed: {e}")
         return JSONResponse(
-            status_code=500,
-            content={"error": f"Retraining failed: {str(e)}"}
+            status_code=500, content={"error": f"Retraining failed: {str(e)}"}
         )
 
 
@@ -6157,7 +6454,9 @@ async def _run_analysis(
                     ):
                         course_name = assignment.course.name
         except Exception:
-            logger.warning(f"Failed to resolve assignment_id={assignment_id} for name lookup")
+            logger.warning(
+                f"Failed to resolve assignment_id={assignment_id} for name lookup"
+            )
 
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
     try:
@@ -6210,12 +6509,17 @@ async def _run_analysis(
         "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": selected_tool_ids,
         "selected_tools": [
-            BENCHMARK_TOOL_METADATA.get(tool_id, {}).get("name", tool_id.replace("-", " ").title())
+            BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
+                "name", tool_id.replace("-", " ").title()
+            )
             for tool_id in selected_tool_ids
         ],
         "external_tool_results": {},
         "active_engines": (
-            [ENGINE_DISPLAY_LABELS.get(key, key.title()) for key in selected_engine_keys]
+            [
+                ENGINE_DISPLAY_LABELS.get(key, key.title())
+                for key in selected_engine_keys
+            ]
             if "integritydesk" in selected_tool_ids
             else []
         ),
@@ -6256,7 +6560,8 @@ async def _run_analysis(
                             id=job_id,
                             tenant_id=tenant_id,
                             assignment_id=_jobs[job_id].get("assignment_id"),
-                            name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
+                            name=_jobs[job_id].get("assignment_name")
+                            or f"Upload {job_id}",
                             status=_jobs[job_id].get("status", "analyzing"),
                             threshold=_jobs[job_id].get("threshold", 0.5),
                             created_at=datetime.now(),
@@ -6275,9 +6580,13 @@ async def _run_analysis(
                             )
                         db.commit()
                     else:
-                        logger.warning(f"DB persist skipped for job {job_id} - no tenant available")
+                        logger.warning(
+                            f"DB persist skipped for job {job_id} - no tenant available"
+                        )
         except Exception:
-            logger.warning(f"DB persist skipped for job {job_id} (file storage still used)")
+            logger.warning(
+                f"DB persist skipped for job {job_id} (file storage still used)"
+            )
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -6295,7 +6604,9 @@ async def _run_analysis(
             report = service.generate_report(results)
         else:
             service = BatchDetectionService(threshold=threshold)
-            results = _build_external_comparison_results(external_tool_results, all_pairs)
+            results = _build_external_comparison_results(
+                external_tool_results, all_pairs
+            )
             report = service.generate_report(results)
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
@@ -6310,22 +6621,32 @@ async def _run_analysis(
         if assignment_id:
             try:
                 with SessionLocal() as db:
-                    ass = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+                    ass = (
+                        db.query(Assignment)
+                        .filter(Assignment.id == assignment_id)
+                        .first()
+                    )
                     if ass and ass.settings:
                         for key in ("source_scan_enabled", "source_scan_sites"):
                             if key in ass.settings:
                                 settings_payload[key] = ass.settings[key]
             except Exception:
-                logger.warning("Failed to load per-assignment external scan settings override")
+                logger.warning(
+                    "Failed to load per-assignment external scan settings override"
+                )
 
         # Per-submission override from upload form (highest priority)
         if job_id in _jobs and "source_scan_enabled_override" in _jobs[job_id]:
-            settings_payload["source_scan_enabled"] = _jobs[job_id]["source_scan_enabled_override"]
+            settings_payload["source_scan_enabled"] = _jobs[job_id][
+                "source_scan_enabled_override"
+            ]
 
         web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
-        reproducibility_report = _build_reproducibility_report(submissions, selected_tool_ids, mode)
+        reproducibility_report = _build_reproducibility_report(
+            submissions, selected_tool_ids, mode
+        )
         ai_text_trust = _build_ai_text_trust_report(ai_detection)
 
         comparison_details = []
@@ -6466,10 +6787,12 @@ async def _run_analysis(
                     external_ev = _external_evidence_for_pair(
                         r.file_a, r.file_b, external_tool_results
                     )
-                    mb = getattr(r, "matching_blocks", None) or getattr(r, "features", {}).get(
-                        "matching_blocks", []
+                    mb = getattr(r, "matching_blocks", None) or getattr(
+                        r, "features", {}
+                    ).get("matching_blocks", [])
+                    conf = getattr(r, "confidence", None) or getattr(
+                        r, "confidence_level", None
                     )
-                    conf = getattr(r, "confidence", None) or getattr(r, "confidence_level", None)
 
                     db.add(
                         SimilarityResult(
@@ -6505,7 +6828,9 @@ async def _run_analysis(
             _jobs[job_id]["error"] = str(e)
             _persist_job(job_id)
             _update_job_status_in_db(job_id, "failed", str(e))
-        return JSONResponse(status_code=500, content={"error": f"Analysis failed: {str(e)}"})
+        return JSONResponse(
+            status_code=500, content={"error": f"Analysis failed: {str(e)}"}
+        )
 
 
 @app.get("/api/jobs")
@@ -6572,10 +6897,13 @@ async def update_job_review(job_id: str, request: Request):
                             .first()
                         )
                         if sim:
-                            if "status" in review_data or "review_status" in review_data:
-                                sim.review_status = review_data.get("status") or review_data.get(
-                                    "review_status"
-                                )
+                            if (
+                                "status" in review_data
+                                or "review_status" in review_data
+                            ):
+                                sim.review_status = review_data.get(
+                                    "status"
+                                ) or review_data.get("review_status")
                             if "notes" in review_data or "review_notes" in review_data:
                                 sim.review_notes = (
                                     review_data.get("notes")
@@ -6587,7 +6915,11 @@ async def update_job_review(job_id: str, request: Request):
             logger.warning(f"Failed to persist per-pair reviews for job {job_id}")
 
     # Also reflect in in-memory results if present
-    if "results" in job and isinstance(job["results"], list) and "pair_reviews" in payload:
+    if (
+        "results" in job
+        and isinstance(job["results"], list)
+        and "pair_reviews" in payload
+    ):
         for r in job["results"]:
             k = f"{r.get('file_a')}::{r.get('file_b')}"
             if k in payload["pair_reviews"]:
@@ -6607,7 +6939,11 @@ async def update_job_review(job_id: str, request: Request):
 async def delete_job(job_id: str, request: Request):
     _require_job_access(job_id, request)
     job = _jobs.pop(job_id, None)
-    if not job and not _job_metadata_path(job_id).exists() and not _job_report_dir(job_id).exists():
+    if (
+        not job
+        and not _job_metadata_path(job_id).exists()
+        and not _job_report_dir(job_id).exists()
+    ):
         raise HTTPException(status_code=404, detail="Job not found")
     job_dir = UPLOADS_DIR / job_id
     if job_dir.exists():
@@ -6620,7 +6956,11 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/benchmark-tools")
 async def get_benchmark_tools():
-    tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
+    tools = [
+        tool
+        for tool in _list_benchmark_tools()
+        if tool["id"] in REAL_BENCHMARK_TOOL_IDS
+    ]
     # Add 'available' field for frontend compatibility
     for tool in tools:
         tool["available"] = tool.get("runnable", False)
@@ -6651,7 +6991,9 @@ async def compute_real_fpr_on_clean_corpus(
             continue
 
     if len(submissions) < 2:
-        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
+        raise HTTPException(
+            status_code=400, detail="Could not load enough valid submissions."
+        )
 
     try:
         # Use very low threshold to capture full distribution
@@ -6780,16 +7122,18 @@ async def compute_real_fpr_on_clean_corpus(
     elif max_clean > 0.65:
         overall_risk = "Some very similar clean pairs exist. Review the highest-scoring clean pairs to understand why."
     else:
-        overall_risk = (
-            "Your clean data looks healthy. The system behaves as expected on non-plagiarized work."
-        )
+        overall_risk = "Your clean data looks healthy. The system behaves as expected on non-plagiarized work."
 
     # Actionable suggestions
     suggested_actions = []
     if not very_safe or very_safe["fpr"] > 0.02:
-        suggested_actions.append("Raise the default decision threshold by 5–8 percentage points.")
+        suggested_actions.append(
+            "Raise the default decision threshold by 5–8 percentage points."
+        )
     if mean_clean > 0.20:
-        suggested_actions.append("Enable or improve starter-code / boilerplate suppression.")
+        suggested_actions.append(
+            "Enable or improve starter-code / boilerplate suppression."
+        )
     if max_clean > 0.70:
         suggested_actions.append(
             "Manually review the top 5–10 clean pairs with the highest scores."
@@ -6813,7 +7157,9 @@ async def compute_real_fpr_on_clean_corpus(
         idx = min(int(s * 10), 9)
         bins[idx] += 1
 
-    histogram = [{"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)]
+    histogram = [
+        {"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)
+    ]
 
     return JSONResponse(
         content={
@@ -6829,8 +7175,13 @@ async def compute_real_fpr_on_clean_corpus(
             "overall_assessment": overall_risk,
             "suggested_actions": suggested_actions,
             # Key decision values captured at the time of the run
-            "recommended_threshold": balanced["threshold"] if balanced else fpr_table[-1]["threshold"],
-            "fpr_at_recommended_threshold": (balanced["fpr"] if balanced else fpr_table[-1]["fpr"]) / 100.0,
+            "recommended_threshold": (
+                balanced["threshold"] if balanced else fpr_table[-1]["threshold"]
+            ),
+            "fpr_at_recommended_threshold": (
+                balanced["fpr"] if balanced else fpr_table[-1]["fpr"]
+            )
+            / 100.0,
         }
     )
 
@@ -6860,9 +7211,14 @@ async def save_fpr_validation_run(
         user_id = current_user.get("id")
 
         if not tenant_id:
-            raise HTTPException(status_code=400, detail="No tenant associated with user")
+            raise HTTPException(
+                status_code=400, detail="No tenant associated with user"
+            )
 
-        name = payload.name or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        name = (
+            payload.name
+            or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        )
         result_data = payload.result
 
         run = FprValidationRun(
@@ -6875,7 +7231,9 @@ async def save_fpr_validation_run(
             mean_score=result_data.get("mean_score"),
             max_score=result_data.get("max_score"),
             recommended_threshold=result_data.get("recommended_threshold"),
-            fpr_at_recommended_threshold=result_data.get("fpr_at_recommended_threshold"),
+            fpr_at_recommended_threshold=result_data.get(
+                "fpr_at_recommended_threshold"
+            ),
             notes=payload.notes,
             status="completed",
         )
@@ -6953,7 +7311,9 @@ async def get_fpr_validation_run(run_id: str, request: Request):
             )
 
             if not run:
-                raise HTTPException(status_code=404, detail="FPR validation run not found")
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
 
             return {
                 "id": run.id,
@@ -6990,7 +7350,9 @@ async def delete_fpr_validation_run(run_id: str, request: Request):
             )
 
             if not run:
-                raise HTTPException(status_code=404, detail="FPR validation run not found")
+                raise HTTPException(
+                    status_code=404, detail="FPR validation run not found"
+                )
 
             db.delete(run)
             db.commit()
@@ -7094,7 +7456,9 @@ def _read_benchmark_history() -> List[Dict[str, Any]]:
 def _write_benchmark_history(history: List[Dict[str, Any]]) -> None:
     """Persist benchmark run history with a bounded number of recent entries."""
     history_path = _benchmark_history_path()
-    history_path.write_text(json.dumps(history[:100], indent=2, sort_keys=True), encoding="utf-8")
+    history_path.write_text(
+        json.dumps(history[:100], indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _metric_from_benchmark_response(response: Dict[str, Any], metric: str) -> float:
@@ -7125,8 +7489,12 @@ def _benchmark_run_summary(response: Dict[str, Any]) -> Dict[str, Any]:
         "f1_score": _metric_from_benchmark_response(response, "f1_score"),
         "plagdet": _metric_from_benchmark_response(response, "plagdet"),
         "auc_pr": _metric_from_benchmark_response(response, "auc_pr"),
-        "false_positive_rate": _metric_from_benchmark_response(response, "false_positive_rate"),
-        "avg_runtime_seconds": _metric_from_benchmark_response(response, "avg_runtime_seconds"),
+        "false_positive_rate": _metric_from_benchmark_response(
+            response, "false_positive_rate"
+        ),
+        "avg_runtime_seconds": _metric_from_benchmark_response(
+            response, "avg_runtime_seconds"
+        ),
     }
     return {
         "job_id": response.get("job_id"),
@@ -7149,7 +7517,9 @@ def _find_previous_benchmark_run(
     for item in history:
         if item.get("job_id") == current.get("job_id"):
             continue
-        same_preset = item.get("preset_id") and item.get("preset_id") == current.get("preset_id")
+        same_preset = item.get("preset_id") and item.get("preset_id") == current.get(
+            "preset_id"
+        )
         same_dataset = item.get("dataset") == current.get("dataset")
         same_mode = item.get("benchmark_type") == current.get("benchmark_type")
         if same_dataset and same_mode and (same_preset or not current.get("preset_id")):
@@ -7183,14 +7553,18 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
     """Save a full benchmark response and update the compact run history."""
     summary = _benchmark_run_summary(response)
     history = _read_benchmark_history()
-    comparison = _build_benchmark_delta(summary, _find_previous_benchmark_run(history, summary))
+    comparison = _build_benchmark_delta(
+        summary, _find_previous_benchmark_run(history, summary)
+    )
     summary["comparison"] = comparison
 
     run_path = BENCHMARK_RUNS_DIR / f"{summary['job_id']}.json"
     response["history_summary"] = summary
     response["comparison"] = comparison
     response["runAt"] = summary["run_at"]
-    run_path.write_text(json.dumps(response, indent=2, sort_keys=True), encoding="utf-8")
+    run_path.write_text(
+        json.dumps(response, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     history = [item for item in history if item.get("job_id") != summary["job_id"]]
     history.insert(0, summary)
@@ -7211,7 +7585,9 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
                 if not db_job:
                     run_at = summary.get("run_at")
                     try:
-                        created_at = datetime.fromisoformat(run_at) if run_at else datetime.now()
+                        created_at = (
+                            datetime.fromisoformat(run_at) if run_at else datetime.now()
+                        )
                     except Exception:
                         created_at = datetime.now()
 
@@ -7257,7 +7633,9 @@ async def get_benchmark_presets() -> Dict[str, Any]:
         blocked_tools = [
             {
                 "id": tool_id,
-                "status": available_tools.get(tool_id, {}).get("status", "Not installed"),
+                "status": available_tools.get(tool_id, {}).get(
+                    "status", "Not installed"
+                ),
             }
             for tool_id in preset["tools"]
             if tool_id not in runnable_tools
@@ -7447,19 +7825,23 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
     pair_results = run.get("pair_results", [])
     tool_scores = run.get("tool_scores", {})
     evaluation = run.get("evaluation", {})
-    dataset_name = run.get("summary", {}).get("dataset_name") or run.get("dataset", "benchmark")
+    dataset_name = run.get("summary", {}).get("dataset_name") or run.get(
+        "dataset", "benchmark"
+    )
 
     # Determine primary tool (integritydesk preferred)
     primary_tool = (
-        "integritydesk" if "integritydesk" in tool_scores else (next(iter(tool_scores), None))
+        "integritydesk"
+        if "integritydesk" in tool_scores
+        else (next(iter(tool_scores), None))
     )
 
     # Get threshold from evaluation or default
     threshold = 0.5
     if primary_tool and evaluation.get(primary_tool):
-        t = evaluation[primary_tool].get("best_threshold") or evaluation[primary_tool].get(
-            "fixed_threshold"
-        )
+        t = evaluation[primary_tool].get("best_threshold") or evaluation[
+            primary_tool
+        ].get("fixed_threshold")
         if t is not None:
             threshold = float(t)
 
@@ -7504,7 +7886,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
                 engine_fp_counts[dominant] = engine_fp_counts.get(dominant, 0) + 1
             if len(false_positive_cases) < 10:
                 false_positive_cases.append(
-                    _make_error_case(pair, score, "false_positive", features, contributions)
+                    _make_error_case(
+                        pair, score, "false_positive", features, contributions
+                    )
                 )
         elif is_plagiarism and not predicted:
             fn += 1
@@ -7517,7 +7901,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
                 engine_fn_counts[dominant] = engine_fn_counts.get(dominant, 0) + 1
             if len(false_negative_cases) < 10:
                 false_negative_cases.append(
-                    _make_error_case(pair, score, "false_negative", features, contributions)
+                    _make_error_case(
+                        pair, score, "false_negative", features, contributions
+                    )
                 )
         else:
             tn += 1
@@ -7536,7 +7922,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
     eval_data = evaluation.get(primary_tool, {})
     engine_contrib = eval_data.get("engine_contribution", {})
 
-    def _engine_pct_from_counts(counts: Dict[str, int], total_count: int) -> Dict[str, int]:
+    def _engine_pct_from_counts(
+        counts: Dict[str, int], total_count: int
+    ) -> Dict[str, int]:
         return {
             k: round(v / total_count * 100)
             for k, v in sorted(counts.items(), key=lambda x: -x[1])[:6]
@@ -7548,7 +7936,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
         else _invert_engine_contrib(engine_contrib)
     )
     fn_engine_pct = (
-        _engine_pct_from_counts(engine_fn_counts, fn_total) if engine_fn_counts else engine_contrib
+        _engine_pct_from_counts(engine_fn_counts, fn_total)
+        if engine_fn_counts
+        else engine_contrib
     )
 
     return {
@@ -7574,7 +7964,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
             "falsePositives": fp_engine_pct,
             "falseNegatives": fn_engine_pct,
         },
-        "recommendations": _generate_recommendations(fp, fn, precision, recall, engine_contrib),
+        "recommendations": _generate_recommendations(
+            fp, fn, precision, recall, engine_contrib
+        ),
     }
 
 
@@ -7676,7 +8068,9 @@ def _build_error_analysis_from_jobs() -> Dict[str, Any]:
     }
 
 
-def _find_likely_false_negatives(not_flagged: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _find_likely_false_negatives(
+    not_flagged: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """Identify pairs that were not flagged but show suspicious feature patterns."""
     candidates = []
     for r in not_flagged:
@@ -7684,7 +8078,9 @@ def _find_likely_false_negatives(not_flagged: List[Dict[str, Any]]) -> List[Dict
         if not features:
             continue
         # High token/winnowing but low overall score suggests obfuscation
-        token_score = float(features.get("token", features.get("token_similarity", 0)) or 0)
+        token_score = float(
+            features.get("token", features.get("token_similarity", 0)) or 0
+        )
         winnow_score = float(features.get("winnowing", features.get("winnow", 0)) or 0)
         ast_score = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
         max_sub = max(token_score, winnow_score, ast_score)
@@ -7707,7 +8103,9 @@ def _make_error_case(
         else "token"
     )
     dominant_pct = (
-        round(float(contributions.get(dominant_engine, 0)) * 100, 1) if contributions else 0
+        round(float(contributions.get(dominant_engine, 0)) * 100, 1)
+        if contributions
+        else 0
     )
 
     if error_type == "false_positive":
@@ -7729,7 +8127,9 @@ def _make_error_case(
         )
         recommendation = _fn_recommendation(reason)
 
-    top_features = sorted(features.items(), key=lambda x: float(x[1] or 0), reverse=True)[:3]
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
     snippet = (
         "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
         if top_features
@@ -7754,7 +8154,9 @@ def _make_job_error_case(r: Dict[str, Any], error_type: str) -> Dict[str, Any]:
     """Build an error case dict from a job result."""
     features = r.get("features", {})
     score = r["score"]
-    top_features = sorted(features.items(), key=lambda x: float(x[1] or 0), reverse=True)[:3]
+    top_features = sorted(
+        features.items(), key=lambda x: float(x[1] or 0), reverse=True
+    )[:3]
     snippet = (
         "\n".join(f"# {k}: {float(v):.3f}" for k, v in top_features)
         if top_features
@@ -7837,7 +8239,9 @@ def _fn_recommendation(reason: str) -> str:
     return "Lower the detection threshold and enable all available detection engines."
 
 
-def _aggregate_engine_contributions(feature_list: List[Dict[str, Any]]) -> Dict[str, int]:
+def _aggregate_engine_contributions(
+    feature_list: List[Dict[str, Any]]
+) -> Dict[str, int]:
     """Compute average engine contribution percentages across a list of feature dicts."""
     totals: Dict[str, float] = {}
     count = 0
@@ -8067,7 +8471,9 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
                 dataset_info,
                 dataset_dir=dataset_dir,
             ),
-            "size": _infer_dataset_size_label(dataset_dir, metadata, dataset_info, is_demo),
+            "size": _infer_dataset_size_label(
+                dataset_dir, metadata, dataset_info, is_demo
+            ),
             "created_by": metadata.get("created_by", "System"),
             "created_at": metadata.get("created", metadata.get("created_at", "")),
             "is_demo": is_demo,
@@ -8081,7 +8487,9 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
         # Add demo-specific fields if applicable
         if is_demo:
             dataset_record["files_created"] = metadata.get("files_created", 0)
-            dataset_record["similarity_type"] = metadata.get("similarity_type", "unknown")
+            dataset_record["similarity_type"] = metadata.get(
+                "similarity_type", "unknown"
+            )
 
         datasets.append(dataset_record)
 
@@ -8111,7 +8519,9 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
             "created_by": metadata.get("created_by", "System"),
             "created_at": metadata.get("created", metadata.get("created_at", "")),
             "is_demo": False,
-            "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, dataset_root),
+            "has_ground_truth": _dataset_has_pair_ground_truth(
+                dataset_id, dataset_root
+            ),
             "benchmark_availability": readiness,
         }
         if benchmark_quality:
@@ -8130,7 +8540,9 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
     if dataset_id == "kaggle_student_code":
         return (dataset_root / "cheating_dataset.csv").exists()
     if dataset_id in {"CodeSimilarityDataset", "bigclonebench", "conplag"}:
-        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get("runnable", False)
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
     if dataset_id in {"xiangtan", "google_codejam"}:
         return (dataset_root / "pairs.csv").exists() or (
             dataset_root / "ground_truth.json"
@@ -8138,9 +8550,13 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
     if dataset_id in {"poj104", "codexglue_clone"}:
         return (dataset_root / "huggingface" / "dataset_dict.json").exists()
     if dataset_id == "poolc_600k_python":
-        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get("runnable", False)
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
     if dataset_id in {"IR-Plag-Dataset", "conplag_classroom_java"}:
-        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get("runnable", False)
+        return _build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+            "runnable", False
+        )
     return False
 
 
@@ -8167,7 +8583,9 @@ async def run_benchmark(
 
     logger.info(f"[BENCHMARK {job_id}] Starting benchmark job")
     logger.info(f"[BENCHMARK {job_id}] Requested tools: {', '.join(tools)}")
-    logger.info(f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}")
+    logger.info(
+        f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}"
+    )
     normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
     benchmark_type = normalized_protocol["benchmark_type"]
     protocol = normalized_protocol["protocol"]
@@ -8203,14 +8621,16 @@ async def run_benchmark(
     logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
         logger.info(f"[BENCHMARK {job_id}] Loading dataset: {dataset}")
-        submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(dataset, job_dir)
+        submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
+            dataset, job_dir
+        )
         if explicit_pairs:
             explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
                 dataset, explicit_pairs
             )
-            selected_files = {str(pair.get("file_a", "")) for pair in explicit_pairs} | {
-                str(pair.get("file_b", "")) for pair in explicit_pairs
-            }
+            selected_files = {
+                str(pair.get("file_a", "")) for pair in explicit_pairs
+            } | {str(pair.get("file_b", "")) for pair in explicit_pairs}
             submissions = {
                 filename: content
                 for filename, content in submissions.items()
@@ -8222,7 +8642,9 @@ async def run_benchmark(
         logger.info(f"[BENCHMARK {job_id}] Processing {len(files)} uploaded files")
         submissions = await _store_benchmark_uploads(files, job_dir)
 
-    logger.info(f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully")
+    logger.info(
+        f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully"
+    )
     if pair_sampling_audit:
         logger.info(
             "[BENCHMARK %s] Pair sampling: %s selected from %s (%s)",
@@ -8234,7 +8656,9 @@ async def run_benchmark(
 
     if len(submissions) < 2:
         shutil.rmtree(job_dir, ignore_errors=True)
-        return JSONResponse(status_code=400, content={"error": "At least 2 code files required"})
+        return JSONResponse(
+            status_code=400, content={"error": "At least 2 code files required"}
+        )
 
     if explicit_pairs:
         all_pairs = [
@@ -8287,7 +8711,9 @@ async def run_benchmark(
                 ):
                     should_disable_embedding = True
                     os.environ["EMBEDDING_RUNTIME"] = "none"
-                    logger.info("Benchmark: Disabled embedding engine (no GPU detected)")
+                    logger.info(
+                        "Benchmark: Disabled embedding engine (no GPU detected)"
+                    )
 
             service = BatchDetectionService(threshold=0.3)
             logger.info(
@@ -8307,7 +8733,9 @@ async def run_benchmark(
                         "file_b": r.file_b,
                         "score": round(r.score, 3),
                         "features": {k: round(v, 3) for k, v in r.features.items()},
-                        "contributions": {k: round(v, 3) for k, v in r.contributions.items()},
+                        "contributions": {
+                            k: round(v, 3) for k, v in r.contributions.items()
+                        },
                     }
                     for r in results
                 ]
@@ -8329,11 +8757,15 @@ async def run_benchmark(
     current_tool_idx = 1
     from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
-    external_tool_runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
+    external_tool_runner = ExternalToolRunner(
+        moss_user_id=_get_setting_secret("moss_user_id")
+    )
     for tool in tools:
         if tool == "integritydesk":
             continue
-        logger.info(f"[BENCHMARK {job_id}] Running tool {current_tool_idx}/{total_tools}: {tool}")
+        logger.info(
+            f"[BENCHMARK {job_id}] Running tool {current_tool_idx}/{total_tools}: {tool}"
+        )
         current_tool_idx += 1
         tool_started = time.perf_counter()
         try:
@@ -8453,7 +8885,11 @@ async def run_benchmark(
         "job_id": job_id,
         "preset_id": preset_id,
         "preset_name": next(
-            (preset["name"] for preset in BENCHMARK_WORKFLOW_PRESETS if preset["id"] == preset_id),
+            (
+                preset["name"]
+                for preset in BENCHMARK_WORKFLOW_PRESETS
+                if preset["id"] == preset_id
+            ),
             "",
         ),
         "requested_tools": tools,
@@ -8476,7 +8912,9 @@ async def run_benchmark(
         "pair_results": pair_results,
         "summary": {
             "pairs_tested": len(pair_results),
-            "tools_compared": len([t for t in tool_results if "error" not in tool_results[t]]),
+            "tools_compared": len(
+                [t for t in tool_results if "error" not in tool_results[t]]
+            ),
             "accuracy": {
                 "integritydesk": round(id_avg, 4),
                 "best_competitor": round(comp_avg, 4),
@@ -8488,7 +8926,9 @@ async def run_benchmark(
             },
             "dataset_name": dataset or "custom",
             "dataset_size": len(submissions),
-            "positive_pairs": int(sum(1 for label in ground_truth_labels if label >= 2)),
+            "positive_pairs": int(
+                sum(1 for label in ground_truth_labels if label >= 2)
+            ),
             "negative_pairs": int(sum(1 for label in ground_truth_labels if label < 2)),
             "optimization_trials": 17,
             "cross_validation_folds": 1,
@@ -8520,7 +8960,8 @@ async def run_benchmark(
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
         response["benchmark_trust"] = (
-            evaluation_results.get("integritydesk") or next(iter(evaluation_results.values()), {})
+            evaluation_results.get("integritydesk")
+            or next(iter(evaluation_results.values()), {})
         ).get("benchmark_trust", {})
         if benchmark_type == "regression_test":
             response["quality_gates"] = _build_regression_quality_gates(
@@ -8628,7 +9069,9 @@ def _run_benchmark_background(
 
         if dataset and dataset != "custom":
             _progress(f"Loading dataset: {dataset}")
-            submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(dataset, job_dir)
+            submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(
+                dataset, job_dir
+            )
             if explicit_pairs:
                 explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
                     dataset, explicit_pairs
@@ -8637,7 +9080,9 @@ def _run_benchmark_background(
                     str(p.get("file_b", "")) for p in explicit_pairs
                 }
                 submissions = {
-                    fn: content for fn, content in submissions.items() if fn in selected_files
+                    fn: content
+                    for fn, content in submissions.items()
+                    if fn in selected_files
                 }
             if not submissions:
                 submissions = _load_benchmark_dataset(dataset, job_dir)
@@ -8719,7 +9164,9 @@ def _run_benchmark_background(
                             "file_b": r.file_b,
                             "score": round(r.score, 3),
                             "features": {k: round(v, 3) for k, v in r.features.items()},
-                            "contributions": {k: round(v, 3) for k, v in r.contributions.items()},
+                            "contributions": {
+                                k: round(v, 3) for k, v in r.contributions.items()
+                            },
                         }
                         for r in results
                     ]
@@ -8741,7 +9188,9 @@ def _run_benchmark_background(
             ExternalToolRunner,
         )
 
-        ext_runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
+        ext_runner = ExternalToolRunner(
+            moss_user_id=_get_setting_secret("moss_user_id")
+        )
         for tool in tools:
             if tool == "integritydesk":
                 continue
@@ -8760,7 +9209,9 @@ def _run_benchmark_background(
                 tool_timings[tool] = time.perf_counter() - t0
 
         explicit_pair_labels = {
-            frozenset((str(p.get("file_a", "")), str(p.get("file_b", "")))): int(p.get("label", 0))
+            frozenset((str(p.get("file_a", "")), str(p.get("file_b", "")))): int(
+                p.get("label", 0)
+            )
             for p in explicit_pairs
         }
         pair_results = []
@@ -8878,7 +9329,9 @@ def _run_benchmark_background(
             "pair_results": pair_results,
             "summary": {
                 "pairs_tested": len(pair_results),
-                "tools_compared": len([t for t in tool_results if "error" not in tool_results[t]]),
+                "tools_compared": len(
+                    [t for t in tool_results if "error" not in tool_results[t]]
+                ),
                 "accuracy": {
                     "integritydesk": round(id_avg, 4),
                     "best_competitor": round(comp_avg, 4),
@@ -8890,8 +9343,12 @@ def _run_benchmark_background(
                 },
                 "dataset_name": dataset or "custom",
                 "dataset_size": len(submissions),
-                "positive_pairs": int(sum(1 for label in ground_truth_labels if label >= 2)),
-                "negative_pairs": int(sum(1 for label in ground_truth_labels if label < 2)),
+                "positive_pairs": int(
+                    sum(1 for label in ground_truth_labels if label >= 2)
+                ),
+                "negative_pairs": int(
+                    sum(1 for label in ground_truth_labels if label < 2)
+                ),
                 "optimization_trials": 17,
                 "cross_validation_folds": 1,
                 "optimization_method": "Threshold sweep over 17 cutoffs, maximising F1",
@@ -9019,7 +9476,9 @@ async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
     }
 
 
-def _get_ground_truth_labels(dataset: str, pair_results: List[Dict[str, Any]]) -> List[int]:
+def _get_ground_truth_labels(
+    dataset: str, pair_results: List[Dict[str, Any]]
+) -> List[int]:
     """Get ground truth labels for built-in datasets.
 
     Labels: 0=unrelated, 1=weak, 2=semantic clone, 3=exact clone
@@ -9029,7 +9488,9 @@ def _get_ground_truth_labels(dataset: str, pair_results: List[Dict[str, Any]]) -
         return []
 
     explicit_labels = [
-        int(pair["ground_truth_label"]) for pair in pair_results if "ground_truth_label" in pair
+        int(pair["ground_truth_label"])
+        for pair in pair_results
+        if "ground_truth_label" in pair
     ]
     if len(explicit_labels) == len(pair_results) and explicit_labels:
         return explicit_labels
@@ -9111,7 +9572,9 @@ def _normalize_benchmark_protocol(benchmark_type: str) -> Dict[str, str]:
         "comparison": "tool_comparison",
         "tool_comparison": "tool_comparison",
     }
-    normalized_benchmark_type = benchmark_type_aliases.get(benchmark_type, "tool_comparison")
+    normalized_benchmark_type = benchmark_type_aliases.get(
+        benchmark_type, "tool_comparison"
+    )
 
     if normalized_benchmark_type == "pan_optimization":
         return {
@@ -9153,7 +9616,9 @@ def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:
     for metric_key, config in REGRESSION_QUALITY_GATE_THRESHOLDS.items():
         value = _coerce_float(metrics.get(metric_key))
         direction = str(config["direction"])
-        threshold = _coerce_float(config.get("min") if direction == "min" else config.get("max"))
+        threshold = _coerce_float(
+            config.get("min") if direction == "min" else config.get("max")
+        )
         passed = value >= threshold if direction == "min" else value <= threshold
         gates.append(
             {
@@ -9199,7 +9664,8 @@ def _diagnose_regression_gate_failure(
     if (
         "recall" in failed_metrics
         and precision >= REGRESSION_QUALITY_GATE_THRESHOLDS["precision"]["min"]
-        and false_positive_rate <= REGRESSION_QUALITY_GATE_THRESHOLDS["false_positive_rate"]["max"]
+        and false_positive_rate
+        <= REGRESSION_QUALITY_GATE_THRESHOLDS["false_positive_rate"]["max"]
     ):
         return {
             "mode": "detector_recall_failure",
@@ -9270,7 +9736,9 @@ def _infer_filename_ground_truth_labels(
     for pair in pair_results:
         label = (
             3
-            if _is_original_plagiarized_match(pair.get("file_a", ""), pair.get("file_b", ""))
+            if _is_original_plagiarized_match(
+                pair.get("file_a", ""), pair.get("file_b", "")
+            )
             else 0
         )
         saw_positive = saw_positive or label >= 2
@@ -9283,7 +9751,9 @@ def _is_original_plagiarized_match(file_a: str, file_b: str) -> bool:
     """Return true when filenames represent the same original/plagiarized item."""
     base_a, role_a = _ground_truth_filename_parts(file_a)
     base_b, role_b = _ground_truth_filename_parts(file_b)
-    return bool(base_a and base_a == base_b and {role_a, role_b} == {"original", "plagiarized"})
+    return bool(
+        base_a and base_a == base_b and {role_a, role_b} == {"original", "plagiarized"}
+    )
 
 
 def _ground_truth_filename_parts(filename: str) -> tuple[str, str]:
@@ -9344,7 +9814,9 @@ def _compute_evaluation_metrics(
 
     fixed_threshold, fixed_threshold_source = _benchmark_fixed_threshold()
     normalized_threshold_strategy = (
-        "fixed_threshold" if threshold_strategy == "fixed_threshold" else "calibration_holdout"
+        "fixed_threshold"
+        if threshold_strategy == "fixed_threshold"
+        else "calibration_holdout"
     )
     best_threshold = fixed_threshold
     all_indices = list(range(len(binary_labels)))
@@ -9450,10 +9922,18 @@ def _compute_evaluation_metrics(
     plagdet = f1_score / math.log2(1 + granularity)
     evaluation_scores = [float(score) for score in headline_scores_arr.tolist()]
     evaluation_binary_labels = [int(label) for label in headline_labels_arr.tolist()]
-    top_10_retrieval = _compute_top_k_precision(evaluation_scores, evaluation_binary_labels, k=10)
-    top_20_retrieval = _compute_top_k_precision(evaluation_scores, evaluation_binary_labels, k=20)
-    top_10_recall = _compute_top_k_recall(evaluation_scores, evaluation_binary_labels, k=10)
-    top_20_recall = _compute_top_k_recall(evaluation_scores, evaluation_binary_labels, k=20)
+    top_10_retrieval = _compute_top_k_precision(
+        evaluation_scores, evaluation_binary_labels, k=10
+    )
+    top_20_retrieval = _compute_top_k_precision(
+        evaluation_scores, evaluation_binary_labels, k=20
+    )
+    top_10_recall = _compute_top_k_recall(
+        evaluation_scores, evaluation_binary_labels, k=10
+    )
+    top_20_recall = _compute_top_k_recall(
+        evaluation_scores, evaluation_binary_labels, k=20
+    )
     avg_runtime_seconds = runtime_seconds / max(1, len(scores))
     false_positive_rate = float(headline_metrics["false_positive_rate"])
     fixed_threshold_metrics = _binary_metrics_at_threshold(
@@ -9616,7 +10096,9 @@ def _binary_metrics_at_threshold(
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1_score_val = (
-            2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+            2 * precision * recall / (precision + recall)
+            if (precision + recall)
+            else 0.0
         )
         false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
@@ -9639,8 +10121,12 @@ def _build_stratified_calibration_holdout_split(
     binary_labels: List[int],
 ) -> Dict[str, Any]:
     """Create deterministic calibration and held-out indices with class balance."""
-    positive_indices = [index for index, label in enumerate(binary_labels) if label == 1]
-    negative_indices = [index for index, label in enumerate(binary_labels) if label == 0]
+    positive_indices = [
+        index for index, label in enumerate(binary_labels) if label == 1
+    ]
+    negative_indices = [
+        index for index, label in enumerate(binary_labels) if label == 0
+    ]
     can_holdout = len(positive_indices) >= 2 and len(negative_indices) >= 2
 
     if not can_holdout:
@@ -9655,7 +10141,9 @@ def _build_stratified_calibration_holdout_split(
             "calibration_negative_pairs": len(negative_indices),
             "holdout_positive_pairs": len(positive_indices),
             "holdout_negative_pairs": len(negative_indices),
-            "warning": ("Need at least two positive and two negative pairs for a held-out split."),
+            "warning": (
+                "Need at least two positive and two negative pairs for a held-out split."
+            ),
         }
 
     calibration_indices: List[int] = []
@@ -9677,7 +10165,9 @@ def _build_stratified_calibration_holdout_split(
         "calibration_size": len(calibration_indices),
         "holdout_size": len(holdout_indices),
         "calibration_positive_pairs": int(sum(calibration_labels)),
-        "calibration_negative_pairs": int(len(calibration_labels) - sum(calibration_labels)),
+        "calibration_negative_pairs": int(
+            len(calibration_labels) - sum(calibration_labels)
+        ),
         "holdout_positive_pairs": int(sum(holdout_labels)),
         "holdout_negative_pairs": int(len(holdout_labels) - sum(holdout_labels)),
         "warning": "",
@@ -9760,13 +10250,17 @@ def _build_benchmark_trust_assessment(
 
     confidence_available = bool(confidence_intervals.get("available"))
     if not confidence_available:
-        reasons.append("Confidence intervals are unavailable or too unstable for certification.")
+        reasons.append(
+            "Confidence intervals are unavailable or too unstable for certification."
+        )
 
     if protocol == "deterministic_stratified_calibration_holdout":
         if (
             holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs"]
-            and holdout_positive >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
-            and holdout_negative >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_holdout_pairs_per_class"]
             and confidence_available
             and not blockers
         ):
@@ -9774,8 +10268,10 @@ def _build_benchmark_trust_assessment(
             score = 90
         elif (
             holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs"]
-            and holdout_positive >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
-            and holdout_negative >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_holdout_pairs_per_class"]
             and not blockers
         ):
             grade = "moderate"
@@ -9783,12 +10279,16 @@ def _build_benchmark_trust_assessment(
         else:
             grade = "limited"
             score = 45
-            reasons.append("Held-out slice is small; use this run for direction, not final gates.")
+            reasons.append(
+                "Held-out slice is small; use this run for direction, not final gates."
+            )
     elif protocol == "locked_full_sample_evaluation":
         if (
             holdout_size >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs"]
-            and holdout_positive >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
-            and holdout_negative >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["strong_locked_pairs_per_class"]
             and confidence_available
             and not blockers
         ):
@@ -9796,8 +10296,10 @@ def _build_benchmark_trust_assessment(
             score = 85
         elif (
             holdout_size >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs"]
-            and holdout_positive >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
-            and holdout_negative >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and holdout_positive
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
+            and holdout_negative
+            >= BENCHMARK_TRUST_THRESHOLDS["moderate_locked_pairs_per_class"]
             and not blockers
         ):
             grade = "moderate"
@@ -9818,7 +10320,9 @@ def _build_benchmark_trust_assessment(
         grade = "invalid"
         score = 0
 
-    can_gate = grade in {"strong", "moderate"} and threshold_strategy == "fixed_threshold"
+    can_gate = (
+        grade in {"strong", "moderate"} and threshold_strategy == "fixed_threshold"
+    )
     if threshold_strategy != "fixed_threshold":
         reasons.append(
             "Threshold was calibrated in this run; use fixed-threshold regression "
@@ -9862,11 +10366,15 @@ def _build_metric_integrity_summary(
     if positive_count == 0 or negative_count == 0:
         warnings.append("Metrics need both positive and negative labeled pairs.")
     if split_protocol.get("protocol") == "resubstitution_fallback":
-        warnings.append(str(split_protocol.get("warning") or "No held-out split available."))
+        warnings.append(
+            str(split_protocol.get("warning") or "No held-out split available.")
+        )
     if split_protocol.get("protocol") == "locked_full_sample_evaluation":
         warnings.append(str(split_protocol.get("warning", "")))
     if score_diagnostics.get("label_conflict"):
-        warnings.append(str(score_diagnostics.get("message", "Label conflict detected.")))
+        warnings.append(
+            str(score_diagnostics.get("message", "Label conflict detected."))
+        )
     warnings.extend(benchmark_trust.get("warnings", []))
     warnings.extend(benchmark_trust.get("blockers", []))
 
@@ -9878,7 +10386,9 @@ def _build_metric_integrity_summary(
         "fixed_threshold": round(float(fixed_threshold), 6),
         "calibration_confusion_matrix": optimized_metrics.get("confusion_matrix", {}),
         "heldout_confusion_matrix": heldout_metrics.get("confusion_matrix", {}),
-        "fixed_threshold_confusion_matrix": fixed_threshold_metrics.get("confusion_matrix", {}),
+        "fixed_threshold_confusion_matrix": fixed_threshold_metrics.get(
+            "confusion_matrix", {}
+        ),
         "calibration_f1": round(float(optimized_metrics.get("f1_score", 0.0)), 4),
         "heldout_f1": round(float(heldout_metrics.get("f1_score", 0.0)), 4),
         "fixed_threshold_f1": fixed_threshold_metrics.get("f1_score", 0.0),
@@ -9979,7 +10489,9 @@ def _manual_engine_tuning_options(
     ) -> None:
         if current is None:
             return
-        rounded_current = _round_config_value(current) if isinstance(current, float) else current
+        rounded_current = (
+            _round_config_value(current) if isinstance(current, float) else current
+        )
         rounded_proposed = (
             _round_config_value(proposed) if isinstance(proposed, float) else proposed
         )
@@ -10030,7 +10542,9 @@ def _manual_engine_tuning_options(
                 weight_adjustments.get(dominant_engine, 0.0) - 0.025
             )
         if "embedding" in weights:
-            weight_adjustments["embedding"] = weight_adjustments.get("embedding", 0.0) - 0.02
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.02
+            )
 
     add_option(
         "decision.default_threshold",
@@ -10200,7 +10714,8 @@ def _build_engine_tuning_recommendations(
     fpr_problem = false_positive_rate > 0.05
     ranking_problem = auc_pr < 0.85
     separation_problem = bool(
-        score_diagnostics.get("score_overlap_warning") or score_diagnostics.get("label_conflict")
+        score_diagnostics.get("score_overlap_warning")
+        or score_diagnostics.get("label_conflict")
     )
     previous_candidate_pending = bool(advanced.get("weights_need_validation"))
     changes: List[Dict[str, Any]] = []
@@ -10262,7 +10777,9 @@ def _build_engine_tuning_recommendations(
             min(5, max(3, current_concrete + 1)),
             "False positives need stronger token/AST/execution corroboration.",
         )
-        current_semantic_cap = _coerce_float(precision_guard.get("semantic_only_cap"), 0.38)
+        current_semantic_cap = _coerce_float(
+            precision_guard.get("semantic_only_cap"), 0.38
+        )
         _add_config_change(
             changes,
             "precision_guard.semantic_only_cap",
@@ -10287,7 +10804,9 @@ def _build_engine_tuning_recommendations(
     dominant_engine = ""
     dominant_value = 0.0
     if contributions:
-        dominant_engine, dominant_value = max(contributions.items(), key=lambda item: item[1])
+        dominant_engine, dominant_value = max(
+            contributions.items(), key=lambda item: item[1]
+        )
 
     weight_adjustments: Dict[str, float] = {}
     if precision_problem or fpr_problem:
@@ -10296,7 +10815,9 @@ def _build_engine_tuning_recommendations(
                 weight_adjustments.get(dominant_engine, 0.0) - 0.04
             )
         if "embedding" in weights:
-            weight_adjustments["embedding"] = weight_adjustments.get("embedding", 0.0) - 0.03
+            weight_adjustments["embedding"] = (
+                weight_adjustments.get("embedding", 0.0) - 0.03
+            )
         for key, delta in (("token", 0.025), ("winnowing", 0.025), ("execution", 0.02)):
             if key in weights:
                 weight_adjustments[key] = weight_adjustments.get(key, 0.0) + delta
@@ -10314,12 +10835,16 @@ def _build_engine_tuning_recommendations(
 
     tuning_mode = (
         "separation_first"
-        if recall_problem and separation_problem and not (precision_problem or fpr_problem)
+        if recall_problem
+        and separation_problem
+        and not (precision_problem or fpr_problem)
         else (
             "precision_first"
             if precision_problem or fpr_problem
             else (
-                "recall_first" if recall_problem else ("ranking" if ranking_problem else "balanced")
+                "recall_first"
+                if recall_problem
+                else ("ranking" if ranking_problem else "balanced")
             )
         )
     )
@@ -10360,7 +10885,9 @@ def _build_engine_tuning_recommendations(
         )
 
     if (precision_problem or fpr_problem) and dominant_engine == "ast":
-        current_ast_boost = _coerce_float(ast_boost.get("minimum_guaranteed_score"), 0.68)
+        current_ast_boost = _coerce_float(
+            ast_boost.get("minimum_guaranteed_score"), 0.68
+        )
         _add_config_change(
             changes,
             "ast_boost.minimum_guaranteed_score",
@@ -10378,7 +10905,9 @@ def _build_engine_tuning_recommendations(
         )
 
     if precision_problem or fpr_problem:
-        current_deep_agreement = int(deep_verify.get("minimum_agreeing_engines", 3) or 3)
+        current_deep_agreement = int(
+            deep_verify.get("minimum_agreeing_engines", 3) or 3
+        )
         _add_config_change(
             changes,
             "deep_verify.minimum_agreeing_engines",
@@ -10542,7 +11071,9 @@ def _apply_engine_optimization_changes(
         path = str(change.get("path") or "").strip()
         parts = [part for part in path.split(".") if part]
         if len(parts) < 2 or parts[0] not in ENGINE_OPTIMIZATION_ALLOWED_PREFIXES:
-            raise HTTPException(status_code=400, detail=f"Unsupported config path: {path}")
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported config path: {path}"
+            )
 
         proposed = change.get("proposed")
         _validate_engine_optimization_value(path, proposed)
@@ -10551,7 +11082,9 @@ def _apply_engine_optimization_changes(
         for part in parts[:-1]:
             target = target.setdefault(part, {})
             if not isinstance(target, dict):
-                raise HTTPException(status_code=400, detail=f"Invalid config path: {path}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid config path: {path}"
+                )
         target[parts[-1]] = proposed
         applied_changes.append(
             {
@@ -10593,7 +11126,9 @@ def _build_threshold_calibration_points(
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
         f1_score = (
-            2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
         )
         points.append(
             {
@@ -10608,7 +11143,9 @@ def _build_threshold_calibration_points(
     return points
 
 
-def _build_score_diagnostics(scores_arr: np.ndarray, labels_arr: np.ndarray) -> Dict[str, Any]:
+def _build_score_diagnostics(
+    scores_arr: np.ndarray, labels_arr: np.ndarray
+) -> Dict[str, Any]:
     """Summarize score separation to explain precision and retrieval failures."""
     positives = scores_arr[labels_arr == 1]
     negatives = scores_arr[labels_arr == 0]
@@ -10635,9 +11172,13 @@ def _build_score_diagnostics(scores_arr: np.ndarray, labels_arr: np.ndarray) -> 
     negatives_above_best_positive = int(np.sum(negatives > max_positive))
     negatives_above_worst_positive = int(np.sum(negatives >= min_positive))
     negatives_above_median_positive = int(np.sum(negatives >= median_positive))
-    label_conflict = bool(max_negative >= max_positive or mean_negative >= mean_positive)
+    label_conflict = bool(
+        max_negative >= max_positive or mean_negative >= mean_positive
+    )
     score_overlap_warning = bool(
-        label_conflict or max_negative >= median_positive or median_negative >= median_positive
+        label_conflict
+        or max_negative >= median_positive
+        or median_negative >= median_positive
     )
 
     diagnostics.update(
@@ -10676,7 +11217,9 @@ def _build_score_diagnostics(scores_arr: np.ndarray, labels_arr: np.ndarray) -> 
     return diagnostics
 
 
-def _compute_top_k_precision(scores: List[float], binary_labels: List[int], k: int = 10) -> float:
+def _compute_top_k_precision(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
     """Compute precision@k for whether the top-ranked pairs are true positives."""
     if k <= 0 or not scores:
         return 0.0
@@ -10688,7 +11231,9 @@ def _compute_top_k_precision(scores: List[float], binary_labels: List[int], k: i
     return sum(label for _, label in top_k) / len(top_k)
 
 
-def _compute_top_k_recall(scores: List[float], binary_labels: List[int], k: int = 10) -> float:
+def _compute_top_k_recall(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
     """Compute recall@k as a supplemental retrieval diagnostic."""
     total_positives = sum(binary_labels)
     if total_positives <= 0:
@@ -10699,7 +11244,9 @@ def _compute_top_k_recall(scores: List[float], binary_labels: List[int], k: int 
     return retrieved_positives / total_positives
 
 
-def _compute_top_k_retrieval(scores: List[float], binary_labels: List[int], k: int = 10) -> float:
+def _compute_top_k_retrieval(
+    scores: List[float], binary_labels: List[int], k: int = 10
+) -> float:
     """Backward-compatible alias for top-k precision."""
     return _compute_top_k_precision(scores, binary_labels, k)
 
@@ -10720,11 +11267,15 @@ def _compute_engine_contribution(pairs: List[Dict[str, Any]]) -> Dict[str, float
 
     return {
         name: round(value / total, 4)
-        for name, value in sorted(totals.items(), key=lambda item: item[1], reverse=True)
+        for name, value in sorted(
+            totals.items(), key=lambda item: item[1], reverse=True
+        )
     }
 
 
-def _compute_auc_fallback(scores: np.ndarray, labels: np.ndarray, curve_type: str) -> float:
+def _compute_auc_fallback(
+    scores: np.ndarray, labels: np.ndarray, curve_type: str
+) -> float:
     """Fallback AUC computation without sklearn."""
     if len(np.unique(labels)) < 2:
         return 0.0
@@ -10774,7 +11325,9 @@ def _refresh_html_report_from_json(job_id: str) -> None:
 
     # Hoist report_id from metadata to top-level so generate_html_report can find it
     if not report_payload.get("report_id"):
-        report_payload["report_id"] = report_payload.get("metadata", {}).get("report_id") or job_id
+        report_payload["report_id"] = (
+            report_payload.get("metadata", {}).get("report_id") or job_id
+        )
 
     institution_name = str(
         report_payload.get("metadata", {}).get("institution")
@@ -11017,7 +11570,9 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
     payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
-    payload["source_scan_sites"] = _normalize_source_scan_sites(payload.get("source_scan_sites"))
+    payload["source_scan_sites"] = _normalize_source_scan_sites(
+        payload.get("source_scan_sites")
+    )
 
     openai_key = str(payload.get("openai_api_key") or "")
     anthropic_key = str(payload.get("anthropic_api_key") or "")
@@ -11034,7 +11589,9 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
         professor_profile_catalog,
     )
 
-    applied_professor_profile = apply_professor_profile(payload.get("professor_profile"))
+    applied_professor_profile = apply_professor_profile(
+        payload.get("professor_profile")
+    )
     payload["professor_profile_catalog"] = professor_profile_catalog()
     payload["professor_profile"] = dict(applied_professor_profile.profile.__dict__)
     payload["applied_professor_profile"] = applied_professor_profile.to_dict()
@@ -11094,7 +11651,9 @@ def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
         "ast": _coerce_float(engine_weights.get("ast")),
         "ngram": _coerce_float(engine_weights.get("ngram")),
         "graph": _coerce_float(engine_weights.get("graph")),
-        "embedding": _coerce_float(engine_weights.get("embedding", engine_weights.get("semantic"))),
+        "embedding": _coerce_float(
+            engine_weights.get("embedding", engine_weights.get("semantic"))
+        ),
         "static_rules": _coerce_float(engine_weights.get("static_rules")),
     }
     if not any(value > 0 for value in fusion_weights.values()):
@@ -11116,7 +11675,9 @@ def _issue_auth_cookie(response: Response, user: User) -> None:
 
 
 def _clear_auth_cookie(response: Response) -> None:
-    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/", secure=settings.AUTH_COOKIE_SECURE)
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME, path="/", secure=settings.AUTH_COOKIE_SECURE
+    )
 
 
 def _generate_tenant_name(full_name: str, email: str) -> str:
@@ -11127,7 +11688,9 @@ def _generate_tenant_name(full_name: str, email: str) -> str:
 def _create_tenant(db, name: str) -> Tenant:
     tenant = Tenant(
         name=name,
-        api_key_hash=hashlib.sha256(f"{uuid.uuid4()}:{name}".encode("utf-8")).hexdigest(),
+        api_key_hash=hashlib.sha256(
+            f"{uuid.uuid4()}:{name}".encode("utf-8")
+        ).hexdigest(),
     )
     db.add(tenant)
     db.flush()
@@ -11146,14 +11709,18 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
     try:
         payload = jwt.decode(token, _ensure_auth_secret(), algorithms=["HS256"])
     except JWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid or expired session") from exc
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired session"
+        ) from exc
 
     user_id = str(payload.get("sub") or "").strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     with SessionLocal() as db:
-        user = db.scalar(select(User).options(joinedload(User.tenant)).where(User.id == user_id))
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user_id)
+        )
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
         serialized = _serialize_user(user)
@@ -11226,7 +11793,9 @@ async def dashboard_auth_middleware(request: Request, call_next):
     request.state.user_id = user["id"]
     request.state.user_role = user["role"]
     request.state.tenant_id = user.get("tenant_id")
-    _apply_runtime_settings_from_record(_load_tenant_settings_record(user.get("tenant_id")))
+    _apply_runtime_settings_from_record(
+        _load_tenant_settings_record(user.get("tenant_id"))
+    )
     return await call_next(request)
 
 
@@ -11240,7 +11809,9 @@ async def download_report_html(request: Request, job_id: str):
     return FileResponse(
         str(rp),
         media_type="text/html",
-        headers={"Content-Disposition": f'inline; filename="integritydesk_report_{job_id}.html"'},
+        headers={
+            "Content-Disposition": f'inline; filename="integritydesk_report_{job_id}.html"'
+        },
     )
 
 
@@ -11333,7 +11904,9 @@ async def download_report_pdf(job_id: str, request: Request):
         return response
 
     except ImportError:
-        logger.warning("weasyprint not available, returning print-ready HTML for %s", job_id)
+        logger.warning(
+            "weasyprint not available, returning print-ready HTML for %s", job_id
+        )
         styled_html = html_content.replace(
             "</head>",
             """<style>
@@ -11423,7 +11996,9 @@ async def download_benchmark_csv(job_id: str):
         writer.writerow(row)
 
     response = Response(content=si.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = f"attachment; filename=benchmark_results_{job_id}.csv"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=benchmark_results_{job_id}.csv"
+    )
     return response
 
 
@@ -11488,21 +12063,29 @@ async def download_benchmark_pdf(job_id: str):
 
         pdf = weasyprint.HTML(string=html_content).write_pdf()
         response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
+        response.headers["Content-Disposition"] = (
+            f"attachment; filename=benchmark_{job_id}.pdf"
+        )
         return response
     except ImportError:
         return Response(
             content=html_content,
             media_type="text/html",
-            headers={"Content-Disposition": f"attachment; filename=benchmark_{job_id}.html"},
+            headers={
+                "Content-Disposition": f"attachment; filename=benchmark_{job_id}.html"
+            },
         )
     except Exception as exc:
-        logger.warning("Benchmark PDF export fell back to minimal PDF for %s: %s", job_id, exc)
+        logger.warning(
+            "Benchmark PDF export fell back to minimal PDF for %s: %s", job_id, exc
+        )
         response = Response(
             content=_minimal_pdf_bytes(f"Benchmark {job_id}"),
             media_type="application/pdf",
         )
-        response.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
+        response.headers["Content-Disposition"] = (
+            f"attachment; filename=benchmark_{job_id}.pdf"
+        )
         return response
 
 
@@ -11588,7 +12171,9 @@ def _metric_action(metric: str, value: float) -> str:
                 "Detections may be split into too many fragments. Merge adjacent or overlapping "
                 "evidence spans for the same file pair."
             )
-        return "Granularity is close to ideal. Keep one coherent detection per true pair."
+        return (
+            "Granularity is close to ideal. Keep one coherent detection per true pair."
+        )
     if metric == "avg_runtime_seconds":
         if value > 0.5:
             return (
@@ -11604,7 +12189,9 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
     pair_results = payload.get("pair_results") or []
     evaluation = payload.get("evaluation") or {}
     tool_timings = payload.get("tool_timings") or {}
-    dataset_name = payload.get("datasetName") or payload.get("dataset_name") or "Benchmark Dataset"
+    dataset_name = (
+        payload.get("datasetName") or payload.get("dataset_name") or "Benchmark Dataset"
+    )
     generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
     benchmark_type = payload.get("benchmark_type") or "tool_comparison"
     total_submissions = payload.get("total_submissions", 0)
@@ -11633,7 +12220,9 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
         "tool_comparison": _build_tool_comparison(valid_evaluations, tool_timings),
         "risk_assessment": _build_risk_assessment(valid_evaluations),
         "recommendations": _build_recommendations(valid_evaluations),
-        "detailed_breakdown": _build_detailed_breakdown(pair_results, valid_evaluations),
+        "detailed_breakdown": _build_detailed_breakdown(
+            pair_results, valid_evaluations
+        ),
     }
 
     return scorecard
@@ -11801,14 +12390,20 @@ def _build_tool_comparison(
     return {
         "tools": comparison_data,
         "summary": {
-            "best_overall": (comparison_data[0]["tool_name"] if comparison_data else "N/A"),
+            "best_overall": (
+                comparison_data[0]["tool_name"] if comparison_data else "N/A"
+            ),
             "fastest": (
-                min(comparison_data, key=lambda x: x["metrics"]["runtime_seconds"])["tool_name"]
+                min(comparison_data, key=lambda x: x["metrics"]["runtime_seconds"])[
+                    "tool_name"
+                ]
                 if comparison_data
                 else "N/A"
             ),
             "most_accurate": (
-                max(comparison_data, key=lambda x: x["metrics"]["f1_score"])["tool_name"]
+                max(comparison_data, key=lambda x: x["metrics"]["f1_score"])[
+                    "tool_name"
+                ]
                 if comparison_data
                 else "N/A"
             ),
@@ -12023,7 +12618,9 @@ def _build_detailed_breakdown(
         # Use the best tool for analysis
         best_tool_result = None
         if evaluations:
-            best_tool = max(evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0))
+            best_tool = max(
+                evaluations.keys(), key=lambda t: evaluations[t].get("f1_score", 0)
+            )
             best_tool_result = next(
                 (tr for tr in tool_results if tr.get("tool") == best_tool), None
             )
@@ -12082,7 +12679,9 @@ def _build_detailed_breakdown(
             "false_positives": len(false_positives),
             "false_negatives": len(false_negatives),
         },
-        "top_false_positives": false_positives[:10],  # Top 10 most confident false positives
+        "top_false_positives": false_positives[
+            :10
+        ],  # Top 10 most confident false positives
         "top_false_negatives": false_negatives[:10],  # Top 10 most missed true cases
         "confusion_matrix": {
             "predicted_positive_actual_positive": len(true_positives),
@@ -12162,7 +12761,9 @@ def _identify_tool_weaknesses(metrics: Dict[str, Any]) -> List[str]:
     return weaknesses if weaknesses else ["No major weaknesses identified"]
 
 
-def _generate_mitigation_strategy(risks: List[Dict[str, Any]], metrics: Dict[str, Any]) -> str:
+def _generate_mitigation_strategy(
+    risks: List[Dict[str, Any]], metrics: Dict[str, Any]
+) -> str:
     """Generate an overall mitigation strategy."""
     if not risks:
         return "Current configuration appears stable. Continue monitoring performance."
@@ -12184,7 +12785,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
     summary = payload.get("summary") or {}
     evaluation = payload.get("evaluation") or {}
     tool_scores = payload.get("tool_scores") or {}
-    dataset_name = payload.get("datasetName") or summary.get("dataset_name") or "Benchmark"
+    dataset_name = (
+        payload.get("datasetName") or summary.get("dataset_name") or "Benchmark"
+    )
     generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
     benchmark_type = payload.get("benchmark_type") or payload.get("benchmarkMode") or ""
     requested_tools = payload.get("requested_tools") or list(tool_scores.keys())
@@ -12213,7 +12816,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
     ]
 
     if primary_metrics:
-        f1 = float(primary_metrics.get("f1_score") or primary_metrics.get("best_f1") or 0)
+        f1 = float(
+            primary_metrics.get("f1_score") or primary_metrics.get("best_f1") or 0
+        )
         precision = float(primary_metrics.get("precision") or 0)
         recall = float(primary_metrics.get("recall") or 0)
         fpr = float(primary_metrics.get("false_positive_rate") or 0)
@@ -12232,7 +12837,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
             ]
         )
         if precision < 0.85:
-            lines.append("Main risk: false positives are too high for trusted review workflows.")
+            lines.append(
+                "Main risk: false positives are too high for trusted review workflows."
+            )
         elif recall < 0.85:
             lines.append("Main risk: known plagiarism pairs are being missed.")
         elif f1 < 0.85:
@@ -12246,9 +12853,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
         metric_integrity = primary_metrics.get("metric_integrity") or {}
         split_protocol = primary_metrics.get("split_protocol") or {}
         confidence_intervals = primary_metrics.get("confidence_intervals") or {}
-        benchmark_trust = primary_metrics.get("benchmark_trust") or metric_integrity.get(
-            "benchmark_trust", {}
-        )
+        benchmark_trust = primary_metrics.get(
+            "benchmark_trust"
+        ) or metric_integrity.get("benchmark_trust", {})
         heldout_confusion = metric_integrity.get("heldout_confusion_matrix") or {}
         fixed_threshold_metrics = primary_metrics.get("fixed_threshold_metrics") or {}
         trust_level = benchmark_trust.get("grade", "limited")
@@ -12265,7 +12872,8 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
                         == "deterministic_stratified_calibration_holdout"
                         else (
                             "locked fixed-threshold evaluation"
-                            if split_protocol.get("protocol") == "locked_full_sample_evaluation"
+                            if split_protocol.get("protocol")
+                            == "locked_full_sample_evaluation"
                             else "fallback evaluation without separate holdout"
                         )
                     )
@@ -12316,7 +12924,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
                 ]
             )
             for action in tuning.get("actions") or []:
-                lines.append(f"- {action.get('title', 'Action')}: {action.get('detail', '')}")
+                lines.append(
+                    f"- {action.get('title', 'Action')}: {action.get('detail', '')}"
+                )
             if tuning_changes:
                 lines.append("Proposed YAML edits:")
                 for change in tuning_changes:
@@ -12363,7 +12973,9 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
                 if value is None:
                     continue
                 display = (
-                    _format_report_percent(value) if as_percent else _format_report_number(value, 3)
+                    _format_report_percent(value)
+                    if as_percent
+                    else _format_report_number(value, 3)
                 )
                 lines.append(f"- {label}: {display}")
             lines.append("")
@@ -12397,7 +13009,8 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
                 contribution.items(), key=lambda item: float(item[1] or 0), reverse=True
             )[:4]
             rendered = ", ".join(
-                f"{name} {_format_report_percent(value)}" for name, value in top_contributors
+                f"{name} {_format_report_percent(value)}"
+                for name, value in top_contributors
             )
             lines.append(f"Engine contribution focus: {rendered}.")
         warnings = (primary_metrics.get("metric_integrity") or {}).get("warnings") or []
@@ -12488,7 +13101,11 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
             ground_truth = pair.get("ground_truth_label")
             lines.append(
                 f"{label}: {pair.get('file_a', '')} vs {pair.get('file_b', '')}"
-                + (f" | ground truth {ground_truth}" if ground_truth is not None else "")
+                + (
+                    f" | ground truth {ground_truth}"
+                    if ground_truth is not None
+                    else ""
+                )
             )
             for tool_result in pair.get("tool_results") or []:
                 tool = _benchmark_tool_display_name(tool_result.get("tool", "tool"))
@@ -12507,13 +13124,16 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
                     features.items(), key=lambda item: float(item[1] or 0), reverse=True
                 )[:4]
                 rendered_features = ", ".join(
-                    f"{name} {_format_report_percent(value)}" for name, value in top_features
+                    f"{name} {_format_report_percent(value)}"
+                    for name, value in top_features
                 )
                 lines.append(f"  IntegrityDesk signal breakdown: {rendered_features}")
         if len(pair_results) > 80:
             lines.append(f"... {len(pair_results) - 80} additional pairs omitted.")
     else:
-        lines.extend(["Pair-Level Appendix", "No pair-level rows were included in the result."])
+        lines.extend(
+            ["Pair-Level Appendix", "No pair-level rows were included in the result."]
+        )
 
     return lines
 
@@ -12636,7 +13256,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
 
     # Executive Summary
     exec_summary = scorecard["executive_summary"]
-    status_class = f"status-{exec_summary.get('status_color', 'blue').lower().replace(' ', '-')}"
+    status_class = (
+        f"status-{exec_summary.get('status_color', 'blue').lower().replace(' ', '-')}"
+    )
     status_description = exec_summary.get("status_description", "")
 
     html_content += f"""
@@ -12666,7 +13288,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
 
     for name, value, target in metrics_info:
         status = "✓" if _meets_target(value, target) else "⚠"
-        status_class = "metric-good" if _meets_target(value, target) else "metric-warning"
+        status_class = (
+            "metric-good" if _meets_target(value, target) else "metric-warning"
+        )
         html_content += f"""
                     <tr>
                         <td>{name}</td>
@@ -12894,7 +13518,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
     lines.append(scorecard["metadata"]["title"])
     lines.append("")
     lines.append(f"Dataset: {scorecard['metadata']['dataset']}")
-    lines.append(f"Generated: {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}")
+    lines.append(
+        f"Generated: {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
     lines.append("")
 
     # Executive Summary
@@ -12976,7 +13602,9 @@ def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
 
     # Footer
     lines.append("-" * 60)
-    lines.append(f"Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}")
+    lines.append(
+        f"Generated on {scorecard['metadata']['generated_at'][:19].replace('T', ' ')}"
+    )
     lines.append(
         f"Dataset: {scorecard['metadata']['dataset']} | {scorecard['metadata']['tools_evaluated']} tools evaluated"
     )
@@ -13059,7 +13687,9 @@ def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
         )
 
     kids = " ".join(f"{page_id} 0 R" for page_id in page_object_ids)
-    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode("utf-8")
+    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode(
+        "utf-8"
+    )
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
     output = bytearray(b"%PDF-1.4\n")
@@ -13196,7 +13826,9 @@ async def export_benchmark_pdf(request: Request):
 
         rows = ""
         for name, value, why, action in metrics:
-            display = f"{value:.3f}s" if name == "Avg Runtime" else f"{value * 100:.1f}%"
+            display = (
+                f"{value:.3f}s" if name == "Avg Runtime" else f"{value * 100:.1f}%"
+            )
             if name == "Granularity":
                 display = f"{value:.3f}"
             rows += f"""
@@ -13356,13 +13988,17 @@ async def export_benchmark_pdf(request: Request):
 
         pdf = weasyprint.HTML(string=html_content).write_pdf()
         response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
+        response.headers["Content-Disposition"] = (
+            "attachment; filename=benchmark_report.pdf"
+        )
         return response
     except ImportError:
         return Response(
             content=html_content,
             media_type="text/html",
-            headers={"Content-Disposition": "attachment; filename=benchmark_report.html"},
+            headers={
+                "Content-Disposition": "attachment; filename=benchmark_report.html"
+            },
         )
     except Exception as exc:
         logger.warning("Benchmark PDF export fell back to minimal PDF: %s", exc)
@@ -13370,7 +14006,9 @@ async def export_benchmark_pdf(request: Request):
             content=_minimal_pdf_bytes(f"{dataset_name} Benchmark Report"),
             media_type="application/pdf",
         )
-        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
+        response.headers["Content-Disposition"] = (
+            "attachment; filename=benchmark_report.pdf"
+        )
         return response
 
 
@@ -13438,7 +14076,10 @@ def _extract_student_info(filename):
             id_num = part
             break
     if id_num and len(parts) >= 2:
-        name = " ".join(p.capitalize() for p in parts if not p.isdigit()) or f"Student {id_num}"
+        name = (
+            " ".join(p.capitalize() for p in parts if not p.isdigit())
+            or f"Student {id_num}"
+        )
     elif id_num:
         name = f"Student {id_num}"
     else:
@@ -13457,7 +14098,9 @@ def _render_code_table(code, max_lines=80):
     rows = []
     for i, line in enumerate(lines, 1):
         escaped = _escape_html(line)
-        rows.append(f'<tr><td class="line-num">{i}</td><td class="line-code">{escaped}</td></tr>')
+        rows.append(
+            f'<tr><td class="line-num">{i}</td><td class="line-code">{escaped}</td></tr>'
+        )
     if len(code or "") > sum(len(line) for line in lines):
         rows.append(
             f'<tr><td class="line-num"></td><td class="line-code" style="color:#6b7280;">// ... truncated ({len(code.split(chr(10)))-max_lines} more lines)</td></tr>'
@@ -13645,9 +14288,13 @@ def _generate_committee_report(
         ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
         ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
         badge_class = (
-            "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+            "sim-high"
+            if c.score >= 0.9
+            else "sim-medium" if c.score >= 0.75 else "sim-low"
         )
-        risk_label = "Critical" if c.score >= 0.9 else "High" if c.score >= 0.75 else "Medium"
+        risk_label = (
+            "Critical" if c.score >= 0.9 else "High" if c.score >= 0.75 else "Medium"
+        )
         flagged_engines = sum(1 for v in c.features.values() if v >= threshold)
         html += f"""<tr>
 <td><strong>{c.file_a}</strong> vs <strong>{c.file_b}</strong></td>
@@ -13666,12 +14313,16 @@ def _generate_committee_report(
         ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
         ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
         badge_class = (
-            "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+            "sim-high"
+            if c.score >= 0.9
+            else "sim-medium" if c.score >= 0.75 else "sim-low"
         )
 
         engine_items = ""
         for name, value in sorted(c.features.items(), key=lambda x: -x[1])[:5]:
-            ecolor = "#dc3545" if value >= 0.75 else "#fd7e14" if value >= 0.5 else "#28a745"
+            ecolor = (
+                "#dc3545" if value >= 0.75 else "#fd7e14" if value >= 0.5 else "#28a745"
+            )
             engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(value*100):.0f}%</div></div>'
 
         ca = c.code_a or "N/A"
@@ -13762,7 +14413,9 @@ async def get_upload_settings(request: Request):
     ]
     return JSONResponse(
         content={
-            "default_threshold": payload.get("default_threshold", settings.DEFAULT_THRESHOLD),
+            "default_threshold": payload.get(
+                "default_threshold", settings.DEFAULT_THRESHOLD
+            ),
             "active_engines": active_engines,
             "active_engine_keys": [
                 key for key, value in engine_weights.items() if _coerce_float(value) > 0
@@ -13815,9 +14468,13 @@ async def suggest_assignment_mode(request: Request) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid suggestion payload")
 
-    filenames = payload.get("filenames") if isinstance(payload.get("filenames"), list) else []
+    filenames = (
+        payload.get("filenames") if isinstance(payload.get("filenames"), list) else []
+    )
     content_samples = (
-        payload.get("content_samples") if isinstance(payload.get("content_samples"), list) else []
+        payload.get("content_samples")
+        if isinstance(payload.get("content_samples"), list)
+        else []
     )
     return recommend_assignment_mode(
         assignment_name=str(payload.get("assignment_name") or ""),
@@ -13905,7 +14562,9 @@ async def update_settings(request: Request):
 
         applied_profile = apply_professor_profile(data.get("professor_profile"))
         engine_config["weights"] = professor_profile_to_engine_weights(applied_profile)
-        engine_config.setdefault("professor_profile", {})["applied"] = applied_profile.to_dict()
+        engine_config.setdefault("professor_profile", {})[
+            "applied"
+        ] = applied_profile.to_dict()
     if "baseline_correction" in data:
         engine_config["baseline_correction"] = data["baseline_correction"]
 
@@ -13937,7 +14596,9 @@ async def test_ai_provider_connection(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Invalid test payload")
     provider = str(payload.get("provider") or "openai").strip().lower()
     if provider not in ("openai", "anthropic"):
-        raise HTTPException(status_code=400, detail="Provider must be openai or anthropic")
+        raise HTTPException(
+            status_code=400, detail="Provider must be openai or anthropic"
+        )
     api_key_override = payload.get("api_key")
     api_key_override = str(api_key_override).strip() if api_key_override else None
 
@@ -13951,7 +14612,9 @@ async def test_ai_provider_connection(request: Request) -> Dict[str, Any]:
             "provider": provider,
         }
     if not result.get("ok"):
-        result["message"] = f"Connection failed: {result.get('message', 'unknown error')}"
+        result["message"] = (
+            f"Connection failed: {result.get('message', 'unknown error')}"
+        )
     return result
 
 
@@ -13991,7 +14654,12 @@ async def analyze_evidence_summary(request: Request) -> Dict[str, Any]:
         )
     except Exception as exc:
         logger.exception("Evidence summary generation failed unexpectedly")
-        return {"summary": "Evidence summary unavailable.", "provider": "error", "source": "error", "fallback_reason": str(exc)}
+        return {
+            "summary": "Evidence summary unavailable.",
+            "provider": "error",
+            "source": "error",
+            "fallback_reason": str(exc),
+        }
     return result
 
 

@@ -152,6 +152,15 @@ class AIDetectionOrchestrator:
         )
         combined_confidence = max(0.4, (0.6 * bino_conf + 0.4 * legacy_conf))
 
+        # Apply the learned calibrator (trained via /api/ai-detect/retrain) to
+        # the fused score so shared calibration feedback affects the live path.
+        calibrator = getattr(self.legacy_engine, "calibrator", None)
+        if calibrator is not None and callable(getattr(calibrator, "predict", None)):
+            try:
+                fused_probability = float(calibrator.predict([fused_probability])[0])
+            except Exception:  # pragma: no cover
+                pass  # Keep the sigmoid-calibrated score on failure
+
         # Merge indicators (prefer Binoculars evidence when strong)
         indicators = legacy_result.get("indicators", [])
         if bino_result.get("available") and bino_result.get("ai_probability", 0) > 0.65:
@@ -170,6 +179,11 @@ class AIDetectionOrchestrator:
                 "confidence": legacy_result.get("confidence"),
             },
         }
+        if calibrator is not None:
+            layers["calibration"] = {
+                "available": True,
+                "samples": int(getattr(self.legacy_engine, "calibrator_samples", 0)),
+            }
         if ensemble_result:
             layers["ensemble"] = {
                 "ai_probability": ensemble_result.get("ai_probability"),
@@ -180,6 +194,15 @@ class AIDetectionOrchestrator:
 
         # Flagged regions from the perplexity/uniformity scanner (line ranges).
         flagged_regions = ensemble_result.get("flagged_regions", [])
+
+        calibration = (
+            {
+                "available": True,
+                "samples": int(getattr(self.legacy_engine, "calibrator_samples", 0)),
+            }
+            if calibrator is not None
+            else {"available": False, "samples": 0}
+        )
 
         return {
             "ai_probability": round(max(0.0, min(1.0, fused_probability)), 3),
@@ -196,6 +219,7 @@ class AIDetectionOrchestrator:
             "flagged_lines": legacy_result.get("flagged_lines", [])[:30],
             "flagged_regions": flagged_regions[:10],
             "language": language,
+            "calibration": calibration,
             "layers": layers,
         }
 
