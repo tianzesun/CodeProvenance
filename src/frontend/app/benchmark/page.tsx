@@ -2372,28 +2372,14 @@ const BENCHMARK_MODES = [
     icon: Zap,
     eyebrow: 'IntegrityDesk optimization',
     label: 'Evaluate & Improve',
-    tagline: 'Run labeled tests, inspect per-run F1 / Precision / Recall / FPR, and keep improving IntegrityDesk.',
-    description: 'Run IntegrityDesk on labeled benchmark data, tune the threshold, and inspect the misses and false alarms that are blocking quality.',
-    bestFor: 'Best for improving your own detector',
-    outputs: ['Per-run F1 / Precision / Recall / FPR', 'Best threshold', 'Top misses and false alarms'],
+    tagline: 'Run labeled tests on IntegrityDesk — tune the threshold for maximum quality, or validate a locked build against pass/fail gates.',
+    description: 'Run IntegrityDesk on labeled benchmark data. Tune the decision threshold and inspect misses and false alarms, or validate the current build at the fixed production threshold with pass/fail quality gates.',
+    bestFor: 'Best for improving and validating your own detector',
+    outputs: ['Per-run F1 / Precision / Recall / FPR', 'Threshold tuning with top misses and false alarms', 'Locked-threshold pass/fail quality gates'],
     accent: 'from-violet-500 via-fuchsia-500 to-rose-400',
     accentSoft: 'bg-violet-100 text-violet-700',
     border: 'border-violet-200',
-    detailNote: 'A single-tool IntegrityDesk scorecard with threshold tuning and concrete next steps for improving quality.',
-  },
-  {
-    id: 'release',
-    icon: CheckCircle2,
-    eyebrow: 'Locked internal regression',
-    label: 'Validate Version',
-    tagline: 'Run IntegrityDesk at the fixed production threshold and use pass/fail quality gates.',
-    description: 'Validate IntegrityDesk on labeled benchmark data without tuning the threshold during the run.',
-    bestFor: 'Best for internal go/no-go checks',
-    outputs: ['Fixed-threshold F1 / Precision / Recall / FPR', 'Pass/fail gates', 'Trust grade and sample audit'],
-    accent: 'from-emerald-500 via-teal-500 to-cyan-400',
-    accentSoft: 'bg-emerald-100 text-emerald-700',
-    border: 'border-emerald-200',
-    detailNote: 'A locked-threshold scorecard for checking whether the current IntegrityDesk build is safe to keep.',
+    detailNote: 'A single-tool IntegrityDesk scorecard — tune for quality, then lock in and validate against regression gates.',
   },
   {
     id: 'comparison',
@@ -2411,6 +2397,20 @@ const BENCHMARK_MODES = [
   },
 ];
 
+// ── IntegrityDesk run protocols (sub-modes of the Evaluate & Improve tab) ──
+const BENCHMARK_PROTOCOLS = [
+  {
+    id: 'development',
+    label: 'Tune threshold',
+    hint: 'pan_optimization',
+  },
+  {
+    id: 'release',
+    label: 'Locked validation',
+    hint: 'regression_test',
+  },
+];
+
 // ── Shared Workbench ───────────────────────────────────────────────────────
 export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'benchmark' | 'comparison' }) {
   const { user, loading: authLoading } = useAuth();
@@ -2420,6 +2420,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   );
   const defaultModeId = modeScope === 'comparison' ? 'comparison' : 'development';
   const [activeModeId, setActiveModeId] = useState(defaultModeId);
+  const [activeProtocolId, setActiveProtocolId] = useState('development');
   const [step, setStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [selectedTools, setSelectedTools] = useState([]);
@@ -2450,10 +2451,13 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   }, []);
 
   const activeMode = availableModes.find(m => m.id === activeModeId) || availableModes[0];
+  const activeProtocol = BENCHMARK_PROTOCOLS.find(p => p.id === activeProtocolId) || BENCHMARK_PROTOCOLS[0];
+  const effectiveBenchmarkMode = activeModeId === 'development' ? activeProtocolId : activeModeId;
 
   // Reset wizard state when modeScope changes
   useEffect(() => {
     setActiveModeId(defaultModeId);
+    setActiveProtocolId('development');
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
@@ -2464,6 +2468,17 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
 
   const switchMode = useCallback((modeId) => {
     setActiveModeId(modeId);
+    setActiveProtocolId('development');
+    setStep(0);
+    setCompletedSteps([]);
+    setResults(null);
+    setSelectedTools([]);
+    setSelectedDataset(null);
+    setFiles([]);
+  }, []);
+
+  const switchProtocol = useCallback((protocolId) => {
+    setActiveProtocolId(protocolId);
     setStep(0);
     setCompletedSteps([]);
     setResults(null);
@@ -2539,6 +2554,27 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
             </div>
           )}
 
+          {/* ── Protocol selector (Evaluate & Improve sub-modes) ───────── */}
+          {activeModeId === 'development' && (
+            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              {BENCHMARK_PROTOCOLS.map(protocol => {
+                const isActive = activeProtocolId === protocol.id;
+                return (
+                  <button
+                    key={protocol.id}
+                    type="button"
+                    onClick={() => switchProtocol(protocol.id)}
+                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${isActive
+                      ? 'bg-violet-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                  >
+                    <span>{protocol.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* ── Step wizard ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -2551,7 +2587,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   uploadMode={uploadMode}
                   files={files}
                   benchmarkDatasets={benchmarkDatasets}
-                  modeName={activeMode.label}
+                  modeName={activeModeId === 'development' ? activeProtocol.label : activeMode.label}
                   modeColor={activeMode.accentSoft}
                 />
               </div>
@@ -2578,7 +2614,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   files={files}
                   setFiles={setFiles}
                   benchmarkDatasets={benchmarkDatasets}
-                  benchmarkMode={activeModeId}
+                  benchmarkMode={effectiveBenchmarkMode}
                   canManageDemoDatasets={user?.role === 'admin'}
                   onBack={() => setStep(0)}
                   onNext={() => goToStep(2, 1)}
@@ -2592,7 +2628,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   files={files}
                   benchmarkDatasets={benchmarkDatasets}
                   selectedPreset={null}
-                  benchmarkMode={activeModeId}
+                  benchmarkMode={effectiveBenchmarkMode}
                   autoStart
                   onBack={() => setStep(1)}
                   onComplete={data => { setResults(data); goToStep(3, 2); }}
@@ -2604,7 +2640,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                     results={results}
                     onRestart={restart}
                     onRerun={rerunBenchmark}
-                    benchmarkMode={activeModeId}
+                    benchmarkMode={effectiveBenchmarkMode}
                   />
                 </ReportErrorBoundary>
               )}
