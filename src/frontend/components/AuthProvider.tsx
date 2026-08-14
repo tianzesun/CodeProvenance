@@ -60,93 +60,17 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Check for debug mode to bypass auth
-  const isDebugMode = typeof window !== 'undefined' && localStorage.getItem('integritydesk_debug_mode') === 'true';
-
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    // In debug mode, return a mock user
-    if (isDebugMode) {
-      return {
-        id: 'debug-user-1',
-        email: 'admin@debug.local',
-        full_name: 'Debug Admin',
-        role: 'admin' as AuthRole,
-        tenant_id: 'debug-tenant',
-        tenant_name: 'Debug Workspace',
-        is_active: true,
-        suspended: false,
-        last_login_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      };
-    }
-    // Try to restore user from localStorage on initial load
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('integritydesk_auth_user');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // Basic validation of stored user data
-          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
-            return parsed;
-          } else {
-            // Invalid data, remove it
-            localStorage.removeItem('integritydesk_auth_user');
-          }
-        }
-      } catch {
-        // If parsing fails, clean up
-        localStorage.removeItem('integritydesk_auth_user');
-      }
-    }
-    return null;
-  });
-  const [status, setStatus] = useState<AuthStatus>(() => {
-    // In debug mode, return authenticated
-    if (isDebugMode) {
-      return 'authenticated';
-    }
-    // Set initial status based on stored user
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('integritydesk_auth_user');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // Basic validation of stored user data
-          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
-            return 'authenticated';
-          } else {
-            localStorage.removeItem('integritydesk_auth_user');
-          }
-        }
-      } catch {
-        localStorage.removeItem('integritydesk_auth_user');
-      }
-    }
-    return 'loading';
-  });
+  // Authentication is verified against the backend HttpOnly session cookie on
+  // every startup. localStorage is NEVER treated as proof of identity: a stale
+  // or forged `integritydesk_auth_user` must not grant dashboard access, so
+  // identity starts unset and is only populated from /api/auth/me.
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [status, setStatus] = useState<AuthStatus>('loading');
   const [bootstrapped, setBootstrapped] = useState(() => {
-    // In debug mode, consider system bootstrapped
-    if (isDebugMode) {
-      return true;
-    }
-    // Initialize bootstrapped from localStorage if available
+    // Optimistic UI hint only (controls login-page wording). Whether the
+    // workspace is initialized is always re-checked server-side on startup.
     if (typeof window !== 'undefined') {
-      const storedBootstrapped = localStorage.getItem('integritydesk_bootstrapped');
-      if (storedBootstrapped === 'true') {
-        return true;
-      }
-      // Also assume bootstrapped if we have stored user data
-      const stored = localStorage.getItem('integritydesk_auth_user');
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
-            return true; // Assume system is bootstrapped if we have valid user data
-          }
-        } catch {
-          // Invalid data
-        }
-      }
+      return localStorage.getItem('integritydesk_bootstrapped') === 'true';
     }
     return false;
   });
@@ -164,93 +88,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const refreshSession = useCallback(async () => {
-    // If we already have user data from localStorage, just verify the system is bootstrapped
-    const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
-
+    // Always validate against the backend. localStorage user data is never a
+    // substitute for the server-issued HttpOnly cookie.
     try {
       const statusRes = await apiClient.get('/api/auth/status');
       const nextBootstrapped = Boolean(statusRes.data?.bootstrapped);
 
       if (!nextBootstrapped) {
-        setBootstrapped(true);
+        setBootstrapped(false);
         clearSession();
         return;
       }
 
       setBootstrapped(true);
 
-      // If we have stored user data, try to verify it's still valid
-      if (hasStoredUser && user) {
-        try {
-          const meRes = await apiClient.get('/api/auth/me');
-          const currentUser = meRes.data?.user ?? null;
+      const meRes = await apiClient.get('/api/auth/me');
+      const currentUser = meRes.data?.user ?? null;
 
-          // Update user data if it changed
-          if (currentUser && JSON.stringify(currentUser) !== JSON.stringify(user)) {
-            setUser(currentUser);
-            localStorage.setItem('integritydesk_auth_user', JSON.stringify(currentUser));
-          }
-        } catch {
-          // If verification fails, clear the session
-          clearSession();
-        }
-      } else {
-        // No stored user, try to get current user
-        const meRes = await apiClient.get('/api/auth/me');
-        const nextUser = meRes.data?.user ?? null;
+      setUser(currentUser);
+      setStatus(currentUser ? 'authenticated' : 'anonymous');
 
-        setUser(nextUser);
-        setStatus(nextUser ? 'authenticated' : 'anonymous');
-
-        if (nextUser) {
-          localStorage.setItem('integritydesk_auth_user', JSON.stringify(nextUser));
-        }
+      if (currentUser) {
+        localStorage.setItem('integritydesk_auth_user', JSON.stringify(currentUser));
       }
     } catch {
-      setBootstrapped(true);
-      // Don't clear session if we have stored user data - it might just be a network issue
-      if (!hasStoredUser) {
-        clearSession();
-      }
+      // Backend could not confirm a valid session cookie, so treat the user
+      // as anonymous instead of trusting cached localStorage identity.
+      clearSession();
     }
-  }, [user, clearSession]);
+  }, [clearSession]);
 
   useEffect(() => {
     installAuthInterceptors(async () => {
       await handleSessionExpired();
     });
 
-    // Only check bootstrap status once, not on every navigation
-    if (!bootstrapped) {
-      apiClient.get('/api/auth/status').then((statusRes) => {
-        const nextBootstrapped = Boolean(statusRes.data?.bootstrapped);
-        setBootstrapped(nextBootstrapped);
+    // Always validate the session on startup. The previous code skipped this
+    // whenever `bootstrapped` was already true from localStorage, which let a
+    // stale/forged stored user render the dashboard without a valid cookie and
+    // then bounce every refresh/click to login once the first API call 401'd.
+    refreshSession();
+  }, [handleSessionExpired, refreshSession]);
 
-        if (!nextBootstrapped) {
-          clearSession();
-          return;
-        }
-
-        // If we have stored user data and system is bootstrapped, we're good
-        const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
-        if (!hasStoredUser) {
-          // No stored user, try to refresh session
-          refreshSession();
-        }
-      }).catch(() => {
-        // If we can't check status, assume system is bootstrapped to avoid loops
-        setBootstrapped(true);
-        const hasStoredUser = typeof window !== 'undefined' && localStorage.getItem('integritydesk_auth_user');
-        if (!hasStoredUser) {
-          clearSession();
-        }
-      });
-    }
-  }, [bootstrapped, handleSessionExpired, refreshSession, clearSession]);
-
-// Periodic session validation (every 5 minutes) - skip in debug mode
+// Periodic session validation (every 5 minutes)
   useEffect(() => {
-    if (isDebugMode) return;
     if (!user || status !== 'authenticated') return;
 
     const interval = setInterval(async () => {
@@ -263,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 5 * 60 * 1000); // 5 minutes
 
     return () => clearInterval(interval);
-  }, [user, status, clearSession, isDebugMode]);
+  }, [user, status, clearSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiClient.post('/api/auth/login', { email, password });

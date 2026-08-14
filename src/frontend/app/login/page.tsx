@@ -148,38 +148,6 @@ export default function LoginPage() {
     setEmailError('');
     setPasswordError('');
 
-    // Check for debug mode bypass
-    const isDebugMode = typeof window !== 'undefined' && localStorage.getItem('integritydesk_debug_mode') === 'true';
-
-    if (isDebugMode) {
-      // In debug mode, simulate successful login
-      setSubmitting(true);
-      try {
-        // Store mock user data in localStorage
-        const mockUser = {
-          id: 'debug-user-1',
-          email: email.trim() || 'admin@debug.local',
-          full_name: fullName.trim() || 'Debug Admin',
-          role: 'admin',
-          tenant_id: 'debug-tenant',
-          tenant_name: tenantName.trim() || 'Debug Workspace',
-          is_active: true,
-          suspended: false,
-          last_login_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-        };
-        localStorage.setItem('integritydesk_auth_user', JSON.stringify(mockUser));
-        // Store bootstrap status
-        localStorage.setItem('integritydesk_bootstrapped', 'true');
-        router.replace(nextPath);
-      } catch {
-        setFormError('Debug login failed');
-      } finally {
-        setSubmitting(false);
-      }
-      return;
-    }
-
     const trimmedEmail = email.trim();
     const trimmedFullName = fullName.trim();
     const trimmedTenantName = tenantName.trim();
