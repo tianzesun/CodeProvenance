@@ -82,11 +82,20 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
   (grouped-holdout, per-generator, heuristic-vs-ML) directly in the product,
   with methodology disclosures — the same evidence Turnitin-style vendors
   publish, so reviewers can judge the detector on data rather than UI.
+- Built the **student-code holdout ingestion pipeline** (folder/CSV/JSONL →
+  benchmark format + `--dataset-dir`) so the single biggest blocker for
+  enabling ML — a validated student-code dataset — becomes a data-acquisition
+  problem, not a tooling problem.
 
 ## Suggested ordering to close the gap
 
 1. Enable ML classifier after validating on a student-code holdout (seed
-   precision regression tests).
+   precision regression tests). **Pipeline ready (2026-08-14):** the blocker is
+   data, not tooling — `build_student_dataset.py` now ingests a labelled
+   student-code holdout (folder/CSV/JSONL) into the benchmark format, and
+   `benchmark_classifier --dataset-dir <dir>` runs the same grouped-holdout
+   methodology on it. Validate the classifier on a real holdout, fix the
+   short-code false-positive regression, and enable it.
 2. Wire causal code-LM perplexity (`huggingface_model`) for a default-on
    transformer signal. **Decision (2026-08-14):** measured ~6s/score + ~17s
    one-time load on CPU vs near-instant for the statistical model, and

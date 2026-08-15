@@ -51,11 +51,24 @@ from src.backend.engines.ai.perplexity import PerplexityScorer  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+OUTPUT_DIR_ARG = "--dataset-dir"
 DATASET_DIR = Path(__file__).resolve().parents[4] / "data" / "datasets" / "aigcodeset"
 DATA_DIR = DATASET_DIR / "data"
 REPORT_PATH = DATASET_DIR / "benchmark_report.json"
 
 MIN_CODE_CHARS = 20
+
+
+def set_dataset_dir(dataset_dir: Path) -> None:
+    """Point the benchmark at a different materialised dataset directory.
+
+    Used to validate the ML classifier on a labelled student-code holdout (see
+    ``build_student_dataset.py``) with the same grouped-holdout methodology as
+    the AIGCodeSet run.
+    """
+    global DATA_DIR, REPORT_PATH
+    DATA_DIR = dataset_dir / "data"
+    REPORT_PATH = dataset_dir / "benchmark_report.json"
 
 
 def _load_meta() -> List[Dict[str, Any]]:
@@ -176,18 +189,25 @@ def _threshold_metrics(
 def main() -> None:
     """Run all benchmark evaluations and persist the report."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="Benchmark the AI-code classifier.")
+    parser.add_argument("--limit", type=int, default=0, help="stratifed subset size")
+    parser.add_argument("--out", type=str, default="", help="report path override")
+    parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default="",
+        help="materialised dataset dir (default: AIGCodeSet); must contain data/samples.jsonl",
+    )
+    args = parser.parse_args()
+    if args.dataset_dir:
+        set_dataset_dir(Path(args.dataset_dir))
+
     codes, labels, problems, llms = load_dataset()
     n_ai = sum(labels)
     logger.info(
         "Loaded %d samples (%d AI, %d human)", len(codes), n_ai, len(labels) - n_ai
     )
 
-    # Optional subset for controlled comparisons (e.g. statistical vs code-LM
-    # features). Always stratified by label so proportions stay representative.
-    parser = argparse.ArgumentParser(description="Benchmark the AI-code classifier.")
-    parser.add_argument("--limit", type=int, default=0, help="stratifed subset size")
-    parser.add_argument("--out", type=str, default="", help="report path override")
-    args = parser.parse_args()
     if args.limit:
         idx = list(range(len(codes)))
         random.Random(1).shuffle(idx)
