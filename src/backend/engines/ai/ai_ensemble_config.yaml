@@ -49,4 +49,11 @@ perplexity:
   # microsoft/CodeGPT-small-py) to prefer transformer-based perplexity. Must
   # have a trained LM head; encoder-only models like microsoft/codebert-base
   # yield meaningless perplexity. Leave empty for the statistical model.
+  #
+  # Latency note (measured on CPU, 2026-08-14): with the code LM enabled each
+  # score costs ~6s (statistical is near-instant) plus a ~17s one-time model
+  # load, and /api/ai-detect scores every uploaded file synchronously. A 20-file
+  # submission would wait ~2 minutes. Off by default for that reason; enable
+  # explicitly (set huggingface_model or the AICODE_TRANSFORMER_MODEL env var)
+  # when latency is acceptable or AI detection runs as a background job.
   huggingface_model: ""

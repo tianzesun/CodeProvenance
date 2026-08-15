@@ -88,7 +88,13 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 1. Enable ML classifier after validating on a student-code holdout (seed
    precision regression tests).
 2. Wire causal code-LM perplexity (`huggingface_model`) for a default-on
-   transformer signal.
+   transformer signal. **Decision (2026-08-14):** measured ~6s/score + ~17s
+   one-time load on CPU vs near-instant for the statistical model, and
+   `/api/ai-detect` scores synchronously — default-on would stall 20-file
+   submissions ~2 minutes. Kept off by default; the opt-in (config or
+   `AICODE_TRANSFORMER_MODEL` env var) is documented in
+   `ai_ensemble_config.yaml`. Revisit when AI detection becomes a background
+   job.
 3. Build adversarial-resistance tests (paraphrase, comment-strip, refactor).
    **Done (2026-08-14):** `tests/unit/test_ai_detector_adversarial.py`.
 4. Document per-language support honestly (drop/qualify `.kt`/`.swift` claims).
