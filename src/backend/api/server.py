@@ -6170,6 +6170,63 @@ async def retrain_ai_detector():
         )
 
 
+AIGCODESET_REPORT_DIR = project_root.parent / "data" / "datasets" / "aigcodeset"
+
+
+def _read_ai_benchmark_report(filename: str) -> Optional[Dict[str, Any]]:
+    """Return the parsed AIGCodeSet benchmark report JSON if it exists."""
+    path = AIGCODESET_REPORT_DIR / filename
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception(f"Failed to parse AI benchmark report {filename}")
+        return None
+
+
+@app.get("/api/ai-detect/accuracy")
+async def get_ai_detection_accuracy():
+    """
+    Return the AI detector's measured accuracy on AIGCodeSet (grouped holdout).
+
+    Surfaces the real, reproducible numbers the detector achieves on unseen
+    problems — grouped-holdout metrics, per-generator sensitivity, and a
+    heuristic-vs-ML comparison — so reviewers can judge the engine on data
+    rather than on UI polish. Numbers come from
+    ``data/datasets/aigcodeset/benchmark_report*.json``; empty when the dataset
+    has not been built/benchmarked.
+    """
+    from src.backend.engines.ai.ensemble import AIEnsembleConfig
+
+    config = AIEnsembleConfig()
+    reports = {
+        "main": _read_ai_benchmark_report("benchmark_report.json"),
+        "statistical": _read_ai_benchmark_report("benchmark_report.statistical.json"),
+        "codelm": _read_ai_benchmark_report("benchmark_report.codelm.json"),
+    }
+    return JSONResponse(
+        content={
+            "dataset": "AIGCodeSet (Demirok & Kutlu, IEEE SIU 2025, arXiv:2412.16594)",
+            "methodology": (
+                "Grouped holdout by problem_id: the same programming problem "
+                "never appears in both train and test, preventing style-memorisation "
+                "leakage. AI = positive class."
+            ),
+            "runtime": {
+                "ml_classifier_enabled": config.classification_enabled,
+                "perplexity_model": (
+                    config.perplexity_config().get("huggingface_model")
+                    or "statistical-bigram"
+                ),
+                "default_engine": "heuristic (ML disabled unless classification.enabled)",
+            },
+            "reports": reports,
+            "available": any(reports.values()),
+        }
+    )
+
+
 async def _run_analysis(
     job_id,
     job_dir,

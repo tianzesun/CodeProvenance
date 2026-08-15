@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ClipboardList,
   FileText,
+  FlaskConical,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -93,6 +94,12 @@ export default function Sidebar() {
               label: 'FPR Validation',
               icon: ShieldCheck,
               activeOn: ['/tools/fpr-validation'],
+            },
+            {
+              href: '/ai-detector/accuracy',
+              label: 'AI Accuracy',
+              icon: FlaskConical,
+              activeOn: ['/ai-detector/accuracy'],
             },
           ]
           : []),
