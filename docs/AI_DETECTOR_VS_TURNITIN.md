@@ -70,7 +70,10 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
    comment-stripping / refactor attacks; a credulous humanizer would defeat the
    heuristic path.
 6. **Language overclaim.** `.kt`/`.swift` advertised in the upload UI while the
-   feature kit is Python-weighted — a correctness-of-claims issue.
+   feature kit is Python-weighted — a correctness-of-claims issue. **Addressed
+   (2026-08-14):** the upload page now qualifies that Kotlin/Swift get lexical +
+   statistical signals only (no AST-structure signal) and treats those results
+   as review indicators.
 
 ## What we did about this (this work item)
 
@@ -87,5 +90,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 2. Wire causal code-LM perplexity (`huggingface_model`) for a default-on
    transformer signal.
 3. Build adversarial-resistance tests (paraphrase, comment-strip, refactor).
+   **Done (2026-08-14):** `tests/unit/test_ai_detector_adversarial.py`.
 4. Document per-language support honestly (drop/qualify `.kt`/`.swift` claims).
+   **Done (2026-08-14):** upload page qualifies Kotlin/Swift as lexical-only.
 5. Only then consider prose/essay detection and Binoculars.

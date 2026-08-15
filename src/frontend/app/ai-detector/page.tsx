@@ -211,6 +211,13 @@ export default function AIDetectorPage() {
               Scores above 70% indicate elevated likelihood of assistance and warrant review, 
               but do not constitute proof of academic misconduct.
             </p>
+            <p className="mt-3 leading-relaxed">
+              <span className="font-semibold text-slate-700">Language coverage:</span> full AST-backed
+              analysis (structure + statistical signals) is available for Python, Java, C/C++, C#,
+              JavaScript/TypeScript, Go and Rust. Kotlin and Swift files are still analyzed with the
+              lexical and statistical signals, but skip the AST-structure signal, so scores there are
+              comparatively weaker. Treat those results as review indicators, not definitive verdicts.
+            </p>
           </section>
 
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
