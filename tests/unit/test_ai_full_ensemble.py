@@ -83,6 +83,22 @@ class TestTreeSitterASTExtractor:
         assert fv.parse_success is True
         assert fv.function_count >= 1
 
+    def test_typescript_parses(self) -> None:
+        """TypeScript must parse via the AST extractor.
+
+        tree_sitter_typescript exposes ``language_typescript`` (not
+        ``language``), so the loader must resolve the correct symbol. A lexical
+        fallback would still score code, but report parse_success=False and
+        miss the AST-structure signal the UI promises for TypeScript.
+        """
+        fv = get_ast_features(
+            "function add(a: number, b: number): number { return a + b; }\n"
+            "const r: number = add(1, 2);",
+            "typescript",
+        )
+        assert fv.parse_success is True
+        assert fv.function_count >= 1
+
     def test_fallback_for_unsupported_language(self) -> None:
         fv = get_ast_features("PROGRAM hello; BEGIN writeln(hello); END.", "pascal")
         assert fv.parse_success is False
@@ -162,11 +178,7 @@ class TestAIEnsembleScorer:
     def test_flagged_region_lines_survive_blank_gaps(self) -> None:
         scorer = AIEnsembleScorer()
         # Repetitive predictable code (low perplexity) above a large blank gap.
-        code = (
-            "print(\"constant\")\n" * 40
-            + "\n" * 60
-            + "print(\"constant\")\n" * 40
-        )
+        code = 'print("constant")\n' * 40 + "\n" * 60 + 'print("constant")\n' * 40
         result = scorer.score(code, "python")
         regions = result["flagged_regions"]
         assert regions

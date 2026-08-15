@@ -236,7 +236,14 @@ class TreeSitterASTExtractor:
         self._attempted: set = set()
 
     def _language_module_name(self, language: str) -> Optional[str]:
-        """Return the tree-sitter language package name for a language."""
+        """Return the tree-sitter language package name for a language.
+
+        Maps each supported language to its tree-sitter package. The package
+        may expose the ``Language`` under a different attribute than ``language``
+        (e.g. ``tree_sitter_typescript`` exports ``language_typescript`` and
+        ``language_tsx``), so the loader tries ``language``, ``language_<lang>``
+        and the tree-sitter standard name.
+        """
         mapping = {
             "python": "tree_sitter_python",
             "java": "tree_sitter_java",
@@ -249,6 +256,15 @@ class TreeSitterASTExtractor:
             "rust": "tree_sitter_rust",
         }
         return mapping.get(language)
+
+    def _language_symbol_candidates(self, language: str) -> List[str]:
+        """Ordered attribute names to try when building a Language object."""
+        return [
+            "language",
+            f"language_{language}",
+            "language_typescript",
+            "language_tsx",
+        ]
 
     def _load_language(self, language: str) -> Optional[Any]:
         """Lazily load a tree-sitter Language object or None on failure."""
@@ -267,7 +283,23 @@ class TreeSitterASTExtractor:
             from tree_sitter import Language, Parser
 
             module = __import__(module_name, fromlist=["language"])
-            lang = Language(module.language())
+            symbol = next(
+                (
+                    candidate
+                    for candidate in self._language_symbol_candidates(language)
+                    if hasattr(module, candidate)
+                ),
+                None,
+            )
+            if symbol is None:
+                logger.info(
+                    "Tree-sitter module %s has no language symbol (tried %s)",
+                    module_name,
+                    self._language_symbol_candidates(language),
+                )
+                self._loaded[language] = None
+                return None
+            lang = Language(getattr(module, symbol)())
             parser = Parser(lang)
             self._loaded[language] = (lang, parser)
             return self._loaded[language]
