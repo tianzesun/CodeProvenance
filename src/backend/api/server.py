@@ -6227,6 +6227,182 @@ async def get_ai_detection_accuracy():
     )
 
 
+def _analytics_term_label(value: Optional[datetime]) -> str:
+    """Return an academic term label (Winter/Summer/Fall + year) for a timestamp.
+
+    Terms map from calendar months: Jan–Apr = Winter, May–Aug = Summer,
+    Sep–Dec = Fall. Unknown timestamps fall back to "—".
+    """
+    if value is None:
+        return "—"
+    if value.month <= 4:
+        return f"Winter {value.year}"
+    if value.month <= 8:
+        return f"Summer {value.year}"
+    return f"Fall {value.year}"
+
+
+def _analytics_month_label(value: Optional[datetime]) -> str:
+    """Return a short month label (e.g. \"Jun 2026\") for a timestamp."""
+    if value is None:
+        return "—"
+    return value.strftime("%b %Y")
+
+
+@app.get("/api/analytics/overview")
+async def get_analytics_overview(request: Request) -> Dict[str, Any]:
+    """
+    Return department integrity analytics aggregated from live database records.
+
+    Each figure is computed from the current ``cases``, ``courses``,
+    ``assignments`` and linked-similarity-result rows; nothing is synthesized.
+    Empty datasets degrade gracefully to zero-valued series so the dashboard
+    charts render honest empties instead of fabricated numbers.
+    """
+    _require_current_user(request)
+
+    from src.backend.models.database import Case, CaseResultLink
+
+    with SessionLocal() as db:
+        courses = db.query(Course).all()
+        assignments = db.query(Assignment).all()
+        cases = db.query(Case).all()
+        links = db.query(CaseResultLink).all()
+
+        course_by_id = {c.id: c for c in courses}
+        assignment_by_id = {a.id: a for a in assignments}
+
+        # ── Cases by course (via assignment → course) ──────────────────────
+        by_course: Dict[str, int] = {}
+        for case in cases:
+            assignment = assignment_by_id.get(case.assignment_id)
+            course = course_by_id.get(assignment.course_id) if assignment else None
+            label = course.code or "Unassigned" if course else "Unassigned"
+            by_course[label] = by_course.get(label, 0) + 1
+        cases_by_course = [
+            {"course": code, "cases": count}
+            for code, count in sorted(by_course.items(), key=lambda kv: -kv[1])
+        ]
+
+        # ── Term risk (high vs medium by case priority) ────────────────────
+        term_risk: Dict[str, Dict[str, int]] = {}
+        for case in cases:
+            term = _analytics_term_label(case.created_at)
+            bucket = term_risk.setdefault(term, {"high": 0, "medium": 0})
+            if case.priority in ("HIGH", "URGENT"):
+                bucket["high"] += 1
+            else:
+                bucket["medium"] += 1
+        semester_risk = [
+            {"semester": term, "high": b["high"], "medium": b["medium"]}
+            for term, b in term_risk.items()
+        ]
+
+        # ── Repeat offender buckets (linked-similarity-result count) ───────
+        link_counts: Dict[str, int] = {}
+        for link in links:
+            key = str(link.case_id)
+            link_counts[key] = link_counts.get(key, 0) + 1
+        repeat_buckets = {
+            "First case": 0,
+            "Prior warning": 0,
+            "Repeat pattern": 0,
+        }
+        for case in cases:
+            n = link_counts.get(str(case.id), 0)
+            if n <= 1:
+                repeat_buckets["First case"] += 1
+            elif n <= 3:
+                repeat_buckets["Prior warning"] += 1
+            else:
+                repeat_buckets["Repeat pattern"] += 1
+        repeat_offenders = [
+            {"label": label, "value": value}
+            for label, value in repeat_buckets.items()
+        ]
+
+        # ── Suspicion trend (review cases per month, high-priority split) ──
+        month_counts: Dict[str, Dict[str, int]] = {}
+        for case in cases:
+            month = _analytics_month_label(case.created_at)
+            bucket = month_counts.setdefault(month, {"cases": 0, "high": 0})
+            bucket["cases"] += 1
+            if case.priority in ("HIGH", "URGENT"):
+                bucket["high"] += 1
+        suspicion_trend = [
+            {"week": month, "cases": b["cases"], "high": b["high"]}
+            for month, b in month_counts.items()
+        ]
+
+        # ── Derived KPI / insight values ───────────────────────────────────
+        total_cases = len(cases)
+        high_priority = sum(1 for c in cases if c.priority in ("HIGH", "URGENT"))
+        courses_affected = len(by_course)
+        repeat_cases = (
+            repeat_buckets["Prior warning"] + repeat_buckets["Repeat pattern"]
+        )
+
+        hotspot = cases_by_course[0] if cases_by_course else None
+        hotspot_share = (
+            round((hotspot["cases"] / total_cases) * 100) if hotspot and total_cases else 0
+        )
+
+        sorted_terms = [b for b in semester_risk if b["semester"] != "—"]
+        trend_change = None
+        if len(sorted_terms) >= 2:
+            prev, curr = sorted_terms[-2], sorted_terms[-1]
+            base = prev["high"] or (prev["medium"] or 1)
+            trend_change = round(((curr["high"] - prev["high"]) / base) * 100)
+
+        insights = [
+            {
+                "kind": "hotspot",
+                "text": (
+                    f"{hotspot['course']} accounts for {hotspot_share}% of flagged cases."
+                    if hotspot
+                    else "No cases recorded yet in the current dataset."
+                ),
+            },
+            {
+                "kind": "trend",
+                "text": (
+                    f"High-priority activity is {'rising' if (trend_change or 0) > 0 else 'holding or falling'} "
+                    f"with {trend_change}% change vs the prior term and {len(sorted_terms)} recorded term(s)."
+                    if trend_change is not None
+                    else (
+                        f"Currently {len(sorted_terms) or 0} recorded term(s); "
+                        "a second term is needed to measure the high-priority trend."
+                    )
+                ),
+            },
+            {
+                "kind": "repeat",
+                "text": (
+                    f"{repeat_cases} case(s) link to prior-warning or repeat-pattern history."
+                    if repeat_cases
+                    else "No prior-warning or repeat-pattern links in the current dataset."
+                ),
+            },
+        ]
+
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "summary": {
+                "total_cases": total_cases,
+                "open_cases": sum(1 for c in cases if c.status == "OPEN"),
+                "courses_affected": courses_affected,
+                "high_priority": high_priority,
+                "repeats": repeat_cases,
+                "trend_change": trend_change,
+            },
+            "cases_by_course": cases_by_course,
+            "semester_risk": semester_risk,
+            "repeat_offenders": repeat_offenders,
+            "suspicion_trend": suspicion_trend,
+            "insights": insights,
+        }
+
+
 async def _run_analysis(
     job_id,
     job_dir,
