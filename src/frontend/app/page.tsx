@@ -1062,6 +1062,7 @@ const EditableDashboardCard = ({
           <button
             type="button"
             onClick={onActivate}
+            aria-label={`Select ${label} card`}
             className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold ${isActive
                 ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
                 : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]'
@@ -1073,6 +1074,7 @@ const EditableDashboardCard = ({
             type="button"
             onClick={onMoveEarlier}
             disabled={!canMoveEarlier}
+            aria-label={`Move ${label} card earlier`}
             className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArrowLeft size={13} />
@@ -1082,6 +1084,7 @@ const EditableDashboardCard = ({
             type="button"
             onClick={onMoveLater}
             disabled={!canMoveLater}
+            aria-label={`Move ${label} card later`}
             className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             Later
@@ -1090,6 +1093,7 @@ const EditableDashboardCard = ({
           <button
             type="button"
             onClick={onHide}
+            aria-label={`Hide ${label} card`}
             className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-600"
           >
             <EyeOff size={13} />

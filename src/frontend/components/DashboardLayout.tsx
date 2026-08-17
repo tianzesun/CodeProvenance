@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
+import { useTheme } from '@/components/ThemeProvider';
 import Sidebar from '@/components/Sidebar';
 import SkeletonLoader from '@/components/SkeletonLoader';
 import { SunMedium, MoonStar } from 'lucide-react';
@@ -18,6 +19,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading, bootstrapped } = useAuth();
+  const { toggleTheme } = useTheme();
 
   // Prevent redirect loops by tracking last redirect
   const lastRedirectRef = useRef<string | null>(null);
@@ -70,8 +72,16 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   return (
     <SmoothScroll>
       <div className="min-h-screen bg-slate-50 relative overflow-hidden theme-shell">
+        {/* Skip link for keyboard users */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+        >
+          Skip to main content
+        </a>
+
         {/* Background Effects */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
           <div className="absolute top-0 left-1/4 w-[800px] h-[800px] bg-blue-200/20 rounded-full blur-3xl animate-[shift_25s_ease-in-out_infinite]" />
           <div className="absolute bottom-0 right-1/4 w-[600px] h-[600px] bg-brand-100/30 rounded-full blur-3xl animate-[shift_25s_ease-in-out_infinite_reverse]" />
           <div className="absolute inset-0 opacity-[0.03] bg-[url('/grain.svg')] repeat" />
@@ -79,7 +89,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
 
         <Sidebar />
 
-        <main className="dashboard-main relative z-10 min-h-screen pt-6 pb-16 lg:pt-8 lg:pb-20 flex min-w-0 flex-col transition-all duration-300 ease-out">
+        <main id="main-content" className="dashboard-main relative z-10 min-h-screen pt-6 pb-16 lg:pt-8 lg:pb-20 flex min-w-0 flex-col transition-all duration-300 ease-out">
           <div className="flex-grow">
             {children}
           </div>
@@ -94,10 +104,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
        `}</style>
         {/* Floating theme toggle button */}
         <button
-          onClick={() => {
-            const event = new CustomEvent('toggleTheme');
-            window.dispatchEvent(event);
-          }}
+          onClick={toggleTheme}
           className="fixed bottom-6 right-6 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl hover:scale-105 transition-all"
           aria-label="Toggle theme"
           title="Toggle dark/light mode"

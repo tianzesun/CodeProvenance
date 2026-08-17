@@ -14,7 +14,6 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +25,14 @@ class EmailService:
     def _get_backend() -> str:
         """Get the configured email backend."""
         import os
+
         return os.getenv("EMAIL_BACKEND", "console").lower()
 
     @staticmethod
     def _get_smtp_config() -> dict:
         """Get SMTP configuration from environment."""
         import os
+
         return {
             "host": os.getenv("EMAIL_HOST", "localhost"),
             "port": int(os.getenv("EMAIL_PORT", "587")),
@@ -89,7 +90,9 @@ class EmailService:
             if backend == "smtp":
                 return EmailService._send_via_smtp(email, subject, html_body, text_body)
             elif backend == "sendgrid":
-                return await EmailService._send_via_sendgrid(email, subject, html_body, text_body)
+                return await EmailService._send_via_sendgrid(
+                    email, subject, html_body, text_body
+                )
             else:
                 return EmailService._send_via_console(email, subject, reset_url)
         except Exception as e:
@@ -106,7 +109,7 @@ class EmailService:
             f"  Reset URL: {reset_url}"
         )
         print(f"\n{'='*60}")
-        print(f"PASSWORD RESET EMAIL (console mode — not sent)")
+        print("PASSWORD RESET EMAIL (console mode — not sent)")
         print(f"  To: {email}")
         print(f"  Subject: {subject}")
         print(f"  Reset URL: {reset_url}")
@@ -144,6 +147,7 @@ class EmailService:
     ) -> bool:
         """Send email via SendGrid API."""
         import os
+
         api_key = os.getenv("SENDGRID_API_KEY")
         if not api_key:
             logger.error("SENDGRID_API_KEY not set but EMAIL_BACKEND=sendgrid")

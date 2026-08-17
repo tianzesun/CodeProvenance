@@ -87,73 +87,138 @@ Teacher decisions feed back into the system:
 ```
 IntegrityDesk/
 ├── src/
-│   ├── application/services/
-│   │   ├── batch_detection_service.py    # File ingestion + all-pairs comparison
-│   │   ├── dashboard_service.py          # Teacher review interface
-│   │   └── detection_service.py          # Detection orchestration
-│   ├── api/routes/                       # FastAPI REST endpoints
-│   ├── engines/similarity/               # 6 similarity engines
-│   │   ├── ast_similarity.py             # Structure analysis
-│   │   ├── winnowing_similarity.py       # K-gram fingerprinting
-│   │   ├── codebert_similarity.py        # GPU CodeBERT embeddings
-│   │   ├── execution_similarity.py       # Runtime comparison
-│   │   ├── ngram_similarity.py           # Sequence matching
-│   │   └── token_similarity.py           # Token analysis
-│   ├── features/                         # Feature extraction
-│   ├── scoring/                          # Fusion scoring
-│   ├── infrastructure/
-│   │   ├── report_generator.py           # HTML/JSON report generation
-│   │   └── ...
-│   ├── web_gui.py                        # Web interface
-│   ├── evaluation/                       # Online metrics
-│   ├── evaluation_lab/                   # Offline optimization
-│   └── evaluation_dataset/               # Training data generation
-├── benchmark/                            # Benchmark runners (BigCloneBench, etc.)
-├── ml/                                   # ML training (threshold optimizer)
-└── tools/                                # External tool integrations
+│   ├── backend/
+│   │   ├── api/
+│   │   │   ├── routes/                     # FastAPI routers (auth, cases, users, jobs, ...)
+│   │   │   ├── middleware/                 # Auth, rate limiting, request ID
+│   │   │   └── server.py                   # App entrypoint & core endpoints
+│   │   ├── application/services/           # Business logic (cases, batch detection, ...)
+│   │   ├── engines/                        # Similarity & AI detection engines
+│   │   │   ├── similarity/                 # AST, Winnowing, N-gram, Embedding, Token
+│   │   │   ├── execution/                  # Runtime output comparison
+│   │   │   └── ai/                         # AI-code detection (Binoculars, stylometry)
+│   │   ├── infrastructure/                 # DB, email, reports, GPU service
+│   │   ├── config/                         # Settings, database
+│   │   ├── models/                         # SQLAlchemy models
+│   │   ├── services/                       # Webhook delivery, embedding server
+│   │   ├── workers/                        # GPU / webhook background workers
+│   │   ├── cli/                            # CLI commands
+│   │   └── main.py                         # Minimal public entrypoint
+│   └── frontend/                           # Next.js/React dashboard (App Router)
+│       ├── app/                            # Pages (dashboard, cases, benchmark, AI detector)
+│       ├── components/                     # Shared UI components
+│       └── types/                          # Shared TypeScript API types
+├── tests/
+│   ├── unit/                               # Fast unit tests
+│   └── integration/                        # DB-backed integration tests
+├── alembic/                                # Database migrations
+├── benchmark/                              # Benchmark runners (BigCloneBench, IR-Plag, ...)
+└── scripts/                                # Operational helpers
 ```
 
 ---
 
 ## 🔧 Quick Start
 
-### Install Dependencies
+### Prerequisites
+- Python 3.10+
+- PostgreSQL database (Neon or any Postgres) — required by the backend
+- Node.js 18+ for the frontend
+
+### Backend Setup
 ```bash
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-pip install -r requirements-gui.txt   # For web UI
+
+# Configure environment (see src/backend/.env.example)
+cp src/backend/.env.example src/backend/.env.local
+# Edit .env.local with your DATABASE_URL and AUTH_JWT_SECRET
+
+# Run migrations
+alembic upgrade head
+
+# Start the API server
+uvicorn src.backend.api.server:app --host 0.0.0.0 --port 8000
 ```
 
-### For GPU Server Deployment
+### Frontend Setup
 ```bash
-pip install transformers torch
+cd src/frontend
+npm install
+npm run dev   # http://localhost:3000
+```
+
+### With Docker
+```bash
+docker compose up --build
 ```
 
 ### API Usage
 ```python
-from src.application.services.batch_detection_service import BatchDetectionService
+from src.backend.application.services.batch_detection_service import BatchDetectionService
 
 service = BatchDetectionService(threshold=0.5)
-report = service.run_analysis(Path("./student_submissions"), 
+report = service.run_analysis(Path("./student_submissions"),
                                save_to=Path("./results/report.json"))
 
 print(f"Suspicious pairs: {report['summary']['suspicious_pairs']}")
 ```
 
-### Web Interface
+### REST API
 ```bash
-uvicorn src.web_gui:app --host 0.0.0.0 --port 8000
-# Navigate to http://localhost:8000
+# Health check
+curl http://localhost:8000/health
+
+# Login and get a session cookie
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@school.edu", "password": "YourPassword"}'
+
+# Bootstrap the first admin user (fresh installs only)
+curl -X POST http://localhost:8000/api/auth/bootstrap-admin \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@school.edu", "full_name": "Admin", "password": "YourPassword", "tenant_name": "My University"}'
 ```
+
+### Email Configuration (password reset)
+The email service supports three backends via `EMAIL_BACKEND`:
+- `console` (default): logs reset links to stdout — use for development
+- `smtp`: production SMTP delivery (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASSWORD`)
+- `sendgrid`: SendGrid API (`SENDGRID_API_KEY`)
 
 ### GPU CodeBERT
 ```python
-from src.engines.similarity.codebert_similarity import CodeBERTSimilarity
+from src.backend.engines.similarity.codebert_similarity import CodeBERTSimilarity
 
 similarity = CodeBERTSimilarity(device='cuda')  # auto-detects GPU
 score = similarity.compare(
     {'raw': student_code_a},
     {'raw': student_code_b}
 )
+```
+
+> For GPU servers, install GPU dependencies: `pip install -r requirements-gpu.txt`
+
+---
+
+## 🧪 Testing
+
+```bash
+# Unit tests (fast, no database)
+pytest tests/unit/
+
+# Integration tests (require a reachable database; skipped automatically if unavailable)
+pytest tests/integration/
+
+# Run everything
+pytest
+```
+
+Linting and formatting are enforced with `ruff` and `black`:
+```bash
+ruff check src/ tests/
+black --check src/ tests/
 ```
 
 ---
