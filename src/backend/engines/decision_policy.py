@@ -38,7 +38,7 @@ This system converges to:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Dict
 
 from src.backend.engines.evidence_aggregator import EvidenceVector
 
@@ -66,6 +66,37 @@ class DecisionPolicy:
     """
 
     @staticmethod
+    def _calibrated_confidence(verdict: str, evidence: EvidenceVector) -> float:
+        """Return a monotone, continuous confidence for a verdict band.
+
+        Each verdict maps to a non-overlapping value band, interpolated by the
+        strongest evidence signal.  This fixes two past defects: clean pairs
+        were assigned the same confidence as TRUE hits, and the fixed rule
+        constants could not rank by evidence strength.
+
+        Returns:
+            A float in [0.05, 1.0], monotone in evidence strength.
+        """
+        strength = min(
+            1.0,
+            max(
+                evidence.structural,
+                evidence.lexical,
+                evidence.semantic,
+                evidence.style,
+                evidence.coverage,
+            ),
+        )
+        bands = {
+            "CLEAN": (0.05, 0.35),
+            "PROBABLE": (0.70, 0.85),
+            "REVIEW": (0.40, 0.70),
+            "TRUE": (0.85, 1.00),
+        }
+        low, high = bands[verdict]
+        return round(low + (high - low) * strength, 4)
+
+    @staticmethod
     def decide(evidence: EvidenceVector) -> Decision:
         """
         Apply deterministic rules to evidence.
@@ -84,7 +115,7 @@ class DecisionPolicy:
         if evidence.structural < 0.60:
             return Decision(
                 verdict="CLEAN",
-                confidence=0.95,
+                confidence=DecisionPolicy._calibrated_confidence("CLEAN", evidence),
                 evidence=evidence.to_dict(),
                 reason="stability_guard_no_structural_evidence",
                 triggered_layer="structural",
@@ -98,7 +129,7 @@ class DecisionPolicy:
         ):
             return Decision(
                 verdict="TRUE",
-                confidence=0.95,
+                confidence=DecisionPolicy._calibrated_confidence("TRUE", evidence),
                 evidence=evidence.to_dict(),
                 reason="strong_structural_with_supporting_evidence",
                 triggered_layer="structural",
@@ -108,7 +139,7 @@ class DecisionPolicy:
         if evidence.semantic >= 0.95 and evidence.structural >= 0.50:
             return Decision(
                 verdict="PROBABLE",
-                confidence=0.85,
+                confidence=DecisionPolicy._calibrated_confidence("PROBABLE", evidence),
                 evidence=evidence.to_dict(),
                 reason="semantic_dominance_with_structural_support",
                 triggered_layer="semantic",
@@ -118,7 +149,7 @@ class DecisionPolicy:
         if evidence.structural >= 0.75 and evidence.lexical >= 0.50:
             return Decision(
                 verdict="PROBABLE",
-                confidence=0.80,
+                confidence=DecisionPolicy._calibrated_confidence("PROBABLE", evidence),
                 evidence=evidence.to_dict(),
                 reason="medium_structural_lexical_support",
                 triggered_layer="structural",
@@ -128,7 +159,7 @@ class DecisionPolicy:
         if evidence.structural >= 0.50 and evidence.style >= 0.70:
             return Decision(
                 verdict="PROBABLE",
-                confidence=0.75,
+                confidence=DecisionPolicy._calibrated_confidence("PROBABLE", evidence),
                 evidence=evidence.to_dict(),
                 reason="moderate_structural_strong_style",
                 triggered_layer="structural_style",
@@ -146,7 +177,7 @@ class DecisionPolicy:
         ):
             return Decision(
                 verdict="REVIEW",
-                confidence=0.55,
+                confidence=DecisionPolicy._calibrated_confidence("REVIEW", evidence),
                 evidence=evidence.to_dict(),
                 reason="ast_only_structural_no_corroboration",
                 triggered_layer="ast",
@@ -156,7 +187,7 @@ class DecisionPolicy:
         if evidence.semantic >= 0.85 and evidence.structural < 0.50:
             return Decision(
                 verdict="REVIEW",
-                confidence=0.60,
+                confidence=DecisionPolicy._calibrated_confidence("REVIEW", evidence),
                 evidence=evidence.to_dict(),
                 reason="semantic_only_requires_review",
                 triggered_layer="semantic",
@@ -170,7 +201,7 @@ class DecisionPolicy:
         ):
             return Decision(
                 verdict="REVIEW",
-                confidence=0.40,
+                confidence=DecisionPolicy._calibrated_confidence("REVIEW", evidence),
                 evidence=evidence.to_dict(),
                 reason="borderline_signals",
                 triggered_layer="borderline",
@@ -179,7 +210,7 @@ class DecisionPolicy:
         # Rule 9: Clean - No evidence
         return Decision(
             verdict="CLEAN",
-            confidence=0.95,
+            confidence=DecisionPolicy._calibrated_confidence("CLEAN", evidence),
             evidence=evidence.to_dict(),
             reason="clean_no_evidence",
             triggered_layer="none",

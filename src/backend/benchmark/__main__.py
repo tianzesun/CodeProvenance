@@ -252,6 +252,45 @@ def main() -> int:
         help="Output directory",
     )
 
+    engine_eval_parser = subparsers.add_parser(
+        "engine-eval",
+        help=(
+            "Score all IntegrityDesk engines plus real MOSS/JPlag/Dolos against "
+            "the IR-Plag labeled dataset"
+        ),
+    )
+    engine_eval_parser.add_argument(
+        "--dataset-root",
+        help="Path to the IR-Plag dataset root (default: data/datasets/IR-Plag-Dataset)",
+    )
+    engine_eval_parser.add_argument(
+        "--threshold-step",
+        type=float,
+        default=0.02,
+        help="Threshold sweep step size",
+    )
+    engine_eval_parser.add_argument(
+        "--moss-user-id",
+        help="Stanford MOSS user id (required to run real MOSS jobs)",
+    )
+    engine_eval_parser.add_argument(
+        "--tools",
+        nargs="+",
+        choices=["moss", "jplag", "dolos"],
+        default=None,
+        help="External tools to attempt (default: all available)",
+    )
+    engine_eval_parser.add_argument(
+        "--pair-limit",
+        type=int,
+        help="Optional cap on labeled pairs scored (for quick verification runs)",
+    )
+    engine_eval_parser.add_argument(
+        "--output",
+        default="reports/engine_evaluation",
+        help="Output directory",
+    )
+
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -461,6 +500,39 @@ def main() -> int:
         print(f"Model artifact: {report.best_model_path}")
         print(f"Markdown report: {markdown_path}")
         print(f"JSON results: {json_path}")
+
+    elif args.command == "engine-eval":
+        from pathlib import Path
+        from src.backend.benchmark.runners.engine_evaluation_runner import (
+            run_engine_evaluation,
+        )
+
+        logger.info("Starting engine evaluation harness")
+        report = run_engine_evaluation(
+            output_dir=Path(args.output),
+            dataset_root=Path(args.dataset_root) if args.dataset_root else None,
+            threshold_step=args.threshold_step,
+            moss_user_id=args.moss_user_id or "",
+            enabled_tools=args.tools,
+            pair_limit=args.pair_limit,
+        )
+        print("\nEngine Evaluation Completed!\n")
+        print(f"Pairs: {report.pair_count} "
+              f"({report.positive_pairs} positive, {report.negative_pairs} negative)")
+        for scorer in sorted(
+            [item for item in report.scorers if item.available],
+            key=lambda item: item.auc_roc,
+            reverse=True,
+        ):
+            print(
+                f"  {scorer.name:14} {scorer.kind:16} "
+                f"AUC={scorer.auc_roc:.4f}  F1@best={scorer.best_f1:.4f}"
+            )
+        for scorer in report.scorers:
+            if not scorer.available:
+                print(f"  {scorer.name:14} UNAVAILABLE: {scorer.error}")
+        print(f"\nJSON report: {args.output}/{report.run_id}.json")
+        print(f"Markdown report: {args.output}/{report.run_id}.md")
 
     return 0
 

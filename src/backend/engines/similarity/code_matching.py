@@ -56,17 +56,18 @@ class CodeHighlighter:
         self._token_cache: Dict[str, List[str]] = {}
 
     def _normalize_identifiers(self, line: str) -> str:
-        """Normalize identifiers, literals and strings in a single line.
+        """Normalize identifiers, literals, strings and whitespace in a line.
 
         Used for clone matching so renamed identifiers still register as
-        matching blocks (Type-2 clone detection). Mirrors the normalization
-        applied in ``_tokenize`` with ``normalize=True`` but per-line so the
-        resulting block can be diffed and highlighted line-by-line.
+        matching blocks (Type-2 clone detection). Whitespace is collapsed so
+        indent-reformatted clones (e.g. tabs replaced by spaces) still match;
+        without this, difflib finds no blocks for tidy-but-renamed code and
+        coverage collapses to 0.0, which the fusion hard-gate then vetoes.
         """
         line = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", "IDENT", line)
         line = re.sub(r"\b\d+\.?\d*\b", "LITERAL", line)
         line = re.sub(r'["\'].*?["\']', "STRING", line)
-        return line
+        return " ".join(line.split())
 
     def _tokenize(self, code: str, normalize: bool = False) -> List[str]:
         """Tokenize code with optional normalization for clone detection."""

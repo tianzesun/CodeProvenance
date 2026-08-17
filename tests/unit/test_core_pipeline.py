@@ -352,3 +352,47 @@ class TestDecisionEngine:
         assert isinstance(result.confidence, float)
         assert isinstance(result.threshold_used, float)
         assert result.threshold_used == 0.5
+
+
+class TestDecisionPolicyCalibration:
+    """Calibrated confidences must be monotone and rank clean pairs low."""
+
+    def _decide(self, structural, lexical, semantic, style):
+        from src.backend.engines.evidence_aggregator import EvidenceVector
+        from src.backend.engines.decision_policy import DecisionPolicy
+
+        ev = EvidenceVector(
+            structural=structural,
+            lexical=lexical,
+            semantic=semantic,
+            style=style,
+        )
+        return DecisionPolicy.decide(ev)
+
+    def test_clean_ranks_below_review_below_probable_below_true(self):
+        clean = self._decide(0.30, 0.10, 0.10, 0.10)
+        review = self._decide(0.80, 0.20, 0.20, 0.20)
+        probable = self._decide(0.80, 0.60, 0.20, 0.60)
+        true = self._decide(0.95, 0.55, 0.40, 0.20)
+
+        scores = [
+            clean.confidence,
+            review.confidence,
+            probable.confidence,
+            true.confidence,
+        ]
+        assert clean.verdict == "CLEAN"
+        assert review.verdict == "REVIEW"
+        assert probable.verdict == "PROBABLE"
+        assert true.verdict == "TRUE"
+        assert scores == sorted(scores)
+        assert clean.confidence <= 0.5
+
+    def test_confidence_is_continuous_not_categorical(self):
+        values = {
+            "a": self._decide(0.91, 0.55, 0.40, 0.20).confidence,
+            "b": self._decide(0.98, 0.55, 0.40, 0.20).confidence,
+        }
+        # Two different TRUE-strength pairs must not share a fixed constant.
+        assert len(set(values.values())) == 2
+        assert values["b"] > values["a"]

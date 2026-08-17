@@ -222,11 +222,11 @@ class BatchDetectionService:
     def compare_all_pairs(self, submissions: Dict[str, str]) -> List[ComparisonResult]:
         """Compare all pairs of submissions and return ranked results."""
         from src.backend.engines.similarity.code_matching import CodeHighlighter
-        
+
         results = []
         files = list(submissions.keys())
         highlighter = CodeHighlighter(min_match_length=4)
-        
+
         for i, fa in enumerate(files):
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
@@ -293,7 +293,7 @@ class BatchDetectionService:
     ) -> List[ComparisonResult]:
         """Compare an explicit set of labeled benchmark pairs."""
         from src.backend.engines.similarity.code_matching import CodeHighlighter
-        
+
         highlighter = CodeHighlighter(min_match_length=4)
         scored_pairs = []
         for pair in pairs:
@@ -321,7 +321,7 @@ class BatchDetectionService:
                 features.ngram,
                 features.winnowing,
             )
-            
+
             # Compute matching blocks
             match_result = highlighter.find_matching_segments(ca, cb)
             matching_blocks = [
@@ -334,7 +334,7 @@ class BatchDetectionService:
                 }
                 for seg in match_result.segments
             ]
-            
+
             scored_pairs.append(
                 {
                     "file_a": fa,
@@ -342,6 +342,7 @@ class BatchDetectionService:
                     "label": int(
                         pair.get("label", pair.get("ground_truth_label", 0)) or 0
                     ),
+                    "fused_score": fused.final_score,
                     "raw_score": raw_score,
                     "logic_flow": logic_flow,
                     "features": features,
@@ -358,6 +359,7 @@ class BatchDetectionService:
         results = []
         for item in scored_pairs:
             features = item["features"]
+            fused_score = item["fused_score"]
             raw_score = item["raw_score"]
             baseline_adjusted_score = _subtract_clean_baseline(
                 raw_score, clean_baseline
@@ -377,6 +379,7 @@ class BatchDetectionService:
                             "ngram": features.ngram,
                             "winnowing": features.winnowing,
                             "logic_flow": item["logic_flow"],
+                            "fused_score": fused_score,
                             "raw_score": raw_score,
                             "clean_baseline": clean_baseline,
                             "baseline_adjusted_score": baseline_adjusted_score,

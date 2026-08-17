@@ -615,22 +615,46 @@ class FeatureExtractor:
             A float in [0.0, 1.0].
         """
         try:
-            from src.backend.engines.similarity.code_matching import CodeHighlighter
+            from src.backend.engines.similarity.code_matching import (
+                CodeHighlighter,
+            )
 
             highlighter = CodeHighlighter()
-            result = highlighter.find_matching_segments(code_a, code_b)
+            lines_a = self._non_noise_normalized_lines(code_a, highlighter)
+            lines_b = self._non_noise_normalized_lines(code_b, highlighter)
+            if not lines_a or not lines_b:
+                return 0.0
 
-            lines_a = max(len(code_a.splitlines()), 1)
-            lines_b = max(len(code_b.splitlines()), 1)
+            import difflib
 
-            coverage_a = result.total_matched_lines_a / lines_a
-            coverage_b = result.total_matched_lines_b / lines_b
-
-            # Return the max coverage (either file could be the plagiarised one)
-            return max(coverage_a, coverage_b)
+            matcher = difflib.SequenceMatcher(None, lines_a, lines_b, autojunk=False)
+            matched_a = sum(block.size for block in matcher.get_matching_blocks())
+            return matched_a / max(len(lines_a), 1)
         except Exception as exc:
             logger.debug("CodeHighlighter coverage computation failed: %s", exc)
             return 0.0
+
+    def _non_noise_normalized_lines(self, code: str, highlighter: Any) -> List[str]:
+        """Return normalized code lines, skipping blank and comment-only lines.
+
+        Coverage is measured over these lines so clones that are renamed or
+        lightly reformatted still register as overlapping; blank lines and
+        comment banners are noise and would otherwise fragment the matching.
+        """
+        normalized = []
+        for line in code.splitlines():
+            normalized_line = highlighter._normalize_identifiers(line.rstrip())
+            compact = normalized_line.replace(" ", "").replace("\t", "")
+            if not compact:
+                continue
+            if (
+                compact.startswith("//")
+                or compact.startswith("/*")
+                or compact.startswith("*")
+            ):
+                continue
+            normalized.append(normalized_line)
+        return normalized
 
     def _counter_cosine(self, left: Counter[str], right: Counter[str]) -> float:
         """Return cosine similarity for sparse counter features."""
@@ -641,4 +665,3 @@ class FeatureExtractor:
         if left_norm == 0.0 or right_norm == 0.0:
             return 0.0
         return max(0.0, min(1.0, numerator / (left_norm * right_norm)))
-
