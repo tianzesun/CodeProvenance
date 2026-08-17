@@ -59,11 +59,16 @@ def test_perform_full_web_scan_sorts_by_computed_similarity(monkeypatch) -> None
             }
         )
 
-    monkeypatch.setattr("src.infrastructure.indexing.web_search.requests.get", fake_get)
+    monkeypatch.setattr(
+        "src.backend.infrastructure.indexing.web_search.requests.get", fake_get
+    )
     result = service.perform_full_web_scan(
         "def calculate_sum(values): return sum(values)",
         "python",
     )
 
     assert result["web_results"][0]["source"] == "github"
-    assert result["web_results"][0]["similarity"] >= result["web_results"][-1]["similarity"]
+    assert (
+        result["web_results"][0]["similarity"]
+        >= result["web_results"][-1]["similarity"]
+    )

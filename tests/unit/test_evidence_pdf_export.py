@@ -142,11 +142,7 @@ class TestVisualizationGenerators:
 class TestEvidenceChainPdfExporter:
     @pytest.fixture
     def exporter(self, tmp_path):
-        template_dir = Path(__file__).parent.parent.parent / "src" / "infrastructure" / "reporting" / "templates"
-        return EvidenceChainPdfExporter(
-            template_dir=template_dir,
-            output_dir=tmp_path / "evidence",
-        )
+        return EvidenceChainPdfExporter(output_dir=tmp_path / "evidence")
 
     def test_export_html(self, exporter, tmp_path):
         html_path = exporter.export_html(SAMPLE_CASE_DATA, tmp_path / "test.html")
@@ -213,11 +209,7 @@ class TestEvidenceChainIntegration:
     """Integration test: full pipeline from case data to HTML report."""
 
     def test_full_pipeline_produces_complete_report(self, tmp_path):
-        template_dir = Path(__file__).parent.parent.parent / "src" / "infrastructure" / "reporting" / "templates"
-        exporter = EvidenceChainPdfExporter(
-            template_dir=template_dir,
-            output_dir=tmp_path,
-        )
+        exporter = EvidenceChainPdfExporter(output_dir=tmp_path)
 
         html_path = exporter.export_html(SAMPLE_CASE_DATA, tmp_path / "full_report.html")
         assert html_path.exists()

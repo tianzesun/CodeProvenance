@@ -1,3 +1,5 @@
+import pytest
+
 from src.backend.api import server
 
 
@@ -173,17 +175,7 @@ def test_merge_external_features_into_integritydesk_results():
     assert result.features == {"token": 0.7, "jplag": 0.9}
 
 
-def test_run_pairwise_tool_preserves_exact_scores():
-    result = server._run_pairwise_tool(
-        {"a.py": "a", "b.py": "b"},
-        [("a.py", "b.py")],
-        lambda _code_a, _code_b: 0.9999,
-    )
-
-    assert result == {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.9999}]}
-
-
-def test_run_sherlock_cli_parses_real_binary_output(tmp_path, monkeypatch):
+def _run_local_sherlock(tmp_path, percentage):
     external = tmp_path / "external" / "sherlock"
     external.mkdir(parents=True)
     sherlock_bin = external / "sherlock"
@@ -192,21 +184,34 @@ def test_run_sherlock_cli_parses_real_binary_output(tmp_path, monkeypatch):
             [
                 "#!/usr/bin/env bash",
                 'source_dir="${@: -1}"',
-                'printf "%s/a.py;%s/b.py;42%%\\n" "$source_dir" "$source_dir"',
+                f'printf "%s/a.py;%s/b.py;{percentage}%%\\n" "$source_dir" "$source_dir"',
             ]
         ),
         encoding="utf-8",
     )
     sherlock_bin.chmod(0o755)
 
-    monkeypatch.setattr(server, "TOOLS_DIR", tmp_path)
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
-    result = server._run_sherlock_cli(
+    return ExternalToolRunner(tools_dir=tmp_path).run_tool(
+        "sherlock",
         {
             "a.py": "def add(a, b):\n    return a + b\n",
             "b.py": "def sum_numbers(x, y):\n    return x + y\n",
         },
         [("a.py", "b.py")],
     )
+
+
+def test_run_pairwise_tool_preserves_exact_scores(tmp_path):
+    result = _run_local_sherlock(tmp_path, "99.99")
+
+    assert result["pairs"][0]["file_a"] == "a.py"
+    assert result["pairs"][0]["file_b"] == "b.py"
+    assert result["pairs"][0]["score"] == pytest.approx(0.9999)
+
+
+def test_run_sherlock_cli_parses_real_binary_output(tmp_path):
+    result = _run_local_sherlock(tmp_path, "42")
 
     assert result == {"pairs": [{"file_a": "a.py", "file_b": "b.py", "score": 0.42}]}

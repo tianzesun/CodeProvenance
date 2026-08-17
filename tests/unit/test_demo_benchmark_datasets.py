@@ -585,11 +585,13 @@ def test_pan_benchmark_reports_tool_errors_with_ground_truth(tmp_path, monkeypat
         encoding="utf-8",
     )
 
-    def failing_tool(tool, submissions, pairs):
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
+
+    def failing_tool(self, tool, submissions, pairs, progress_cb=None):
         raise RuntimeError(f"{tool} failed before scoring")
 
     monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
-    monkeypatch.setattr(server, "_run_competitor_tool", failing_tool)
+    monkeypatch.setattr(ExternalToolRunner, "run_tool", failing_tool)
 
     client = TestClient(server.app)
     response = client.post(
@@ -649,8 +651,14 @@ def test_load_benchmark_dataset_supports_pair_based_huggingface_rows(
 def test_benchmark_dataset_cards_derive_metadata_from_huggingface_layout(
     tmp_path, monkeypatch
 ):
-    dataset_root = tmp_path / "poj104" / "huggingface" / "train"
+    hf_root = tmp_path / "poj104" / "huggingface"
+    dataset_root = hf_root / "train"
     dataset_root.mkdir(parents=True)
+    (hf_root / "dataset_dict.json").write_text(
+        json.dumps({"splits": ["train"]}), encoding="utf-8"
+    )
+    (dataset_root / "state.json").write_text("{}", encoding="utf-8")
+    (dataset_root / "data-00000-of-00001.arrow").write_bytes(b"ARROW")
     (dataset_root / "dataset_info.json").write_text(
         json.dumps(
             {
@@ -683,15 +691,26 @@ def test_benchmark_dataset_cards_derive_metadata_from_huggingface_layout(
         "created_by": "System",
         "created_at": "",
         "is_demo": False,
-        "has_ground_truth": False,
+        "has_ground_truth": True,
+        "benchmark_availability": {
+            "runnable": True,
+            "status": "ready",
+            "reason": "POJ-104 HuggingFace dataset is loadable.",
+        },
     }
 
 
 def test_benchmark_dataset_cards_support_test_only_huggingface_layout(
     tmp_path, monkeypatch
 ):
-    dataset_root = tmp_path / "human_eval" / "huggingface" / "test"
+    hf_root = tmp_path / "human_eval" / "huggingface"
+    dataset_root = hf_root / "test"
     dataset_root.mkdir(parents=True)
+    (hf_root / "dataset_dict.json").write_text(
+        json.dumps({"splits": ["test"]}), encoding="utf-8"
+    )
+    (dataset_root / "state.json").write_text("{}", encoding="utf-8")
+    (dataset_root / "data-00000-of-00001.arrow").write_bytes(b"ARROW")
     (dataset_root / "dataset_info.json").write_text(
         json.dumps(
             {
@@ -725,7 +744,12 @@ def test_benchmark_dataset_cards_support_test_only_huggingface_layout(
         "created_by": "System",
         "created_at": "",
         "is_demo": False,
-        "has_ground_truth": False,
+        "has_ground_truth": True,
+        "benchmark_availability": {
+            "runnable": True,
+            "status": "ready",
+            "reason": "human_eval HuggingFace dataset is loadable.",
+        },
     }
 
 
@@ -747,15 +771,19 @@ def test_read_files_from_dir_preserves_nested_duplicate_filenames(tmp_path):
 
 def test_benchmark_dataset_cards_count_unique_nested_files(tmp_path, monkeypatch):
     dataset_root = tmp_path / "IR-Plag-Dataset"
-    (dataset_root / "case-01").mkdir(parents=True)
-    (dataset_root / "case-02").mkdir(parents=True)
-    (dataset_root / "case-01" / "Main.java").write_text(
+    (dataset_root / "case-01" / "original").mkdir(parents=True)
+    (dataset_root / "case-01" / "plagiarized").mkdir(parents=True)
+    (dataset_root / "case-01" / "non-plagiarized").mkdir(parents=True)
+    (dataset_root / "case-01" / "original" / "Main.java").write_text(
         "class Main { int a = 1; }\n",
         encoding="utf-8",
     )
-    (dataset_root / "case-02" / "Main.java").write_text(
+    (dataset_root / "case-01" / "plagiarized" / "Main.java").write_text(
         "class Main { int b = 2; }\n",
         encoding="utf-8",
+    )
+    (dataset_root / "metadata.json").write_text(
+        json.dumps({"language": "java"}), encoding="utf-8"
     )
 
     monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
@@ -775,5 +803,13 @@ def test_benchmark_dataset_cards_count_unique_nested_files(tmp_path, monkeypatch
         "created_by": "System",
         "created_at": "",
         "is_demo": False,
-        "has_ground_truth": False,
+        "has_ground_truth": True,
+        "benchmark_availability": {
+            "runnable": True,
+            "status": "ready",
+            "reason": "IR-Plag dataset with 1 labeled pairs across 1 cases.",
+            "pair_count": 1,
+            "positive_pairs": 0,
+            "negative_pairs": 0,
+        },
     }

@@ -65,7 +65,7 @@ def test_build_web_analysis_summary_defaults_to_disabled(monkeypatch) -> None:
     assert summary["enabled"] is False
     assert summary["matched_submissions"] == 0
     assert summary["submissions"] == []
-    assert "disabled by default" in summary["status_message"]
+    assert "disabled in admin settings" in summary["status_message"]
 
 
 def test_normalize_job_preserves_analysis_sections() -> None:

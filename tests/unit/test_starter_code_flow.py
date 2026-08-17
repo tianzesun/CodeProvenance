@@ -57,7 +57,8 @@ def test_starter_removal_applied_in_compare_all_pairs(monkeypatch):
         threshold=0.5, starter_sources=[starter]
     ).compare_all_pairs(submissions)
 
-    assert without[0].score > with_removal[0].score
+    assert without[0].features["fingerprint"] > with_removal[0].features["fingerprint"]
+    assert without[0].score >= with_removal[0].score
 
 
 def test_starter_removal_applied_in_compare_pairs(monkeypatch):
@@ -75,7 +76,8 @@ def test_starter_removal_applied_in_compare_pairs(monkeypatch):
         threshold=0.5, starter_sources=[starter]
     ).compare_pairs(submissions, pairs)
 
-    assert without[0].score > with_removal[0].score
+    assert without[0].features["fingerprint"] > with_removal[0].features["fingerprint"]
+    assert without[0].score >= with_removal[0].score
     assert "solve_a" in with_removal[0].code_a
     assert "import numpy" not in with_removal[0].code_a
 

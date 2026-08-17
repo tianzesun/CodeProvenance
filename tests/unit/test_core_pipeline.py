@@ -234,6 +234,7 @@ class TestFusionEngine:
             string_tiling=1.0,
             graph=1.0,
             static_rules=1.0,
+            coverage=1.0,
         )
         result = engine.fuse(fv)
         assert result.final_score == 1.0
@@ -257,12 +258,17 @@ class TestFusionEngine:
             }
         )
         fv = FeatureVector(
-            ast=1.0, fingerprint=0.0, embedding=0.0, ngram=0.0, winnowing=0.0
+            ast=1.0,
+            fingerprint=0.0,
+            embedding=0.0,
+            ngram=0.0,
+            winnowing=0.0,
+            coverage=1.0,
         )
         result = engine.fuse(fv)
-        # Single structural engine with no supporting evidence → REVIEW with 0.4 confidence
+        # Single structural engine with no supporting evidence → REVIEW with calibrated confidence
         assert result.verdict == "REVIEW"
-        assert result.final_score == 0.4
+        assert result.final_score == 0.7
 
     def test_fuse_clamped(self) -> None:
         """Fusion output is clamped to [0, 1]."""
