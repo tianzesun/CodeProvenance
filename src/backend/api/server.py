@@ -155,7 +155,6 @@ AUTH_EXEMPT_PATHS = {
     "/api/benchmark-datasets",
     "/api/ai-detect",
 }
-<<<<<<< HEAD
 AUTH_EXEMPT_PREFIXES = (
     "/api/cases/",
     "/api/users/",
@@ -3900,7 +3899,6 @@ def _persist_job(job_id: str) -> None:
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
-<<<<<<< HEAD
 def _persist_ai_detection_results(job_id: str, ai_detection: Dict[str, Any]) -> None:
     """Best-effort persistence of AI detection results to the database.
 
@@ -3944,8 +3942,6 @@ def _persist_ai_detection_results(job_id: str, ai_detection: Dict[str, Any]) -> 
         logger.warning("Failed to persist AI detection results for job %s", job_id)
 
 
-=======
->>>>>>> 5e705ac0 (feat: update various components before pulling latest changes)
 def _update_job_status_in_db(
     job_id: str, status: str, error_message: str | None = None
 ) -> None:
