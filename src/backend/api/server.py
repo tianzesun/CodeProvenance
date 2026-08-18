@@ -5138,6 +5138,32 @@ async def create_user(request: Request):
         )
 
 
+@app.patch("/api/admin/users/{user_id}")
+async def update_user(request: Request, user_id: str):
+    """Update a user (admin only)."""
+    _require_current_user(request, admin_only=True)
+    payload = await request.json()
+
+    suspension = payload.get("suspended")
+    is_active = not bool(suspension) if suspension is not None else None
+
+    with SessionLocal() as db:
+        result = db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if suspension is not None:
+            user.is_active = is_active
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        user = db.scalar(
+            select(User).options(joinedload(User.tenant)).where(User.id == user.id)
+        )
+        return JSONResponse(status_code=200, content={"user": _serialize_user(user)})
+
+
 # ============================================================
 # Admin - Course Instructor Management (new many-to-many)
 # ============================================================
@@ -11819,6 +11845,7 @@ def _serialize_user(user: User) -> Dict[str, Any]:
         "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
         "tenant_name": tenant.name if tenant else None,
         "is_active": bool(user.is_active),
+        "suspended": not bool(user.is_active),
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
