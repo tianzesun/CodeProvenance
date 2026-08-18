@@ -15149,7 +15149,13 @@ async def trigger_calibration():
     try:
         from src.backend.engines.scoring.fusion_engine import FusionEngine
 
-        result = FusionEngine.calibrate_optimal_weights()
+        result = FusionEngine.run_calibration_benchmark()
+
+        if result.get("status") == "failed":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Calibration failed: {result.get('error', 'unknown error')}",
+            )
 
         return {
             "success": True,
