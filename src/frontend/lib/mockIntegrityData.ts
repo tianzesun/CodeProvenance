@@ -9,18 +9,15 @@ export const trendData = [
 ];
 
 export const courseData = [
-  { code: 'CSC108', name: 'Intro to Computer Programming', students: 412, assignments: 6, flagged: 9 },
-  { code: 'CSC148', name: 'Data Structures', students: 286, assignments: 5, flagged: 14 },
-  { code: 'CSC207', name: 'Software Design', students: 174, assignments: 4, flagged: 5 },
-  { code: 'MAT244', name: 'Applied Algorithms', students: 138, assignments: 3, flagged: 3 },
-  { code: 'CSC369', name: 'Operating Systems', students: 96, assignments: 4, flagged: 7 },
-  { code: 'CSC384', name: 'AI Fundamentals', students: 152, assignments: 5, flagged: 4 },
+  { code: 'CSC108', name: 'Intro to Programming', students: 412, assignments: 1, flagged: 2 },
+  { code: 'CSC148', name: 'Data Structures', students: 286, assignments: 1, flagged: 1 },
+  { code: 'CS101', name: 'CS 101 - Introduction to Programming', students: 174, assignments: 0, flagged: 0 },
 ];
 
 export const assignmentCases = [
   {
     rank: 1,
-    id: 'case-001',
+    id: '2e6189b4-ae25-48aa-b57f-aef135546fc1',
     course: 'CSC108',
     assignment: 'A2 Recursion',
     students: 'Maya Chen vs Lucas Park',
@@ -32,7 +29,7 @@ export const assignmentCases = [
   },
   {
     rank: 2,
-    id: 'case-002',
+    id: 'fb9f8673-7f2f-490e-b1a3-9e700e0a0ddb',
     course: 'CSC148',
     assignment: 'BST Lab',
     students: 'Ari Singh vs Noor Ahmed',
@@ -44,39 +41,15 @@ export const assignmentCases = [
   },
   {
     rank: 3,
-    id: 'case-003',
-    course: 'CSC207',
-    assignment: 'Design Patterns',
+    id: 'eca6d1c4-865d-4ebb-be68-d74ef015b9e4',
+    course: 'CSC108',
+    assignment: 'A2 Recursion',
     students: 'Elena Rossi vs Theo Grant',
     risk: 88,
     confidence: 'Medium',
     status: 'New',
     reason: 'Uncommon class structure and copied comments',
     reviewer: 'Unassigned',
-  },
-  {
-    rank: 4,
-    id: 'case-004',
-    course: 'CSC369',
-    assignment: 'Shell',
-    students: 'Priya Shah vs Daniel Kim',
-    risk: 76,
-    confidence: 'Medium',
-    status: 'Reviewed',
-    reason: 'Similar parsing strategy after starter code removal',
-    reviewer: 'Dr. Lee',
-  },
-  {
-    rank: 5,
-    id: 'case-005',
-    course: 'CSC384',
-    assignment: 'Search Agent',
-    students: 'Sam Taylor vs June Wu',
-    risk: 64,
-    confidence: 'Medium',
-    status: 'New',
-    reason: 'Shared heuristic ordering and matching fallback logic',
-    reviewer: 'TA Morgan',
   },
 ];
 
