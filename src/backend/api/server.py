@@ -3627,6 +3627,29 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         for item in (entry.get("annotated_snippet") or [])
         if isinstance(item, dict)
     ]
+    # code_metrics / evidence_patterns / signal_interpretations are produced
+    # by the engine but were dropped here, leaving the results page's metrics
+    # and evidence-pattern sections permanently empty. Pass them through so
+    # professors can see the concrete lines and numbers behind a verdict.
+    code_metrics = {
+        str(k): (round(float(v), 3) if isinstance(v, (int, float)) else v)
+        for k, v in (entry.get("code_metrics") or {}).items()
+    }
+    evidence_patterns = {
+        str(k): [
+            {
+                "line": int(item.get("line", 0)) if isinstance(item, dict) else 0,
+                "text": (
+                    str(item.get("text", "")) if isinstance(item, dict) else str(item)
+                ),
+            }
+            for item in (value or [])
+        ]
+        for k, value in (entry.get("evidence_patterns") or {}).items()
+    }
+    signal_interpretations = {
+        str(k): str(v) for k, v in (entry.get("signal_interpretations") or {}).items()
+    }
 
     return {
         "name": str(entry.get("name") or ""),
@@ -3643,6 +3666,9 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
         "flagged_regions": (entry.get("flagged_regions") or [])[:10],
         "classifier": entry.get("classifier"),
         "annotated_snippet": annotated_snippet,
+        "code_metrics": code_metrics,
+        "evidence_patterns": evidence_patterns,
+        "signal_interpretations": signal_interpretations,
         "error": str(entry.get("error") or ""),
     }
 
@@ -3965,6 +3991,7 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
                 or comparison.get("engine_scores")
                 or {},
                 "matching_blocks": comparison.get("matching_blocks") or [],
+                "fusion_debug": comparison.get("fusion_debug") or {},
                 "code_a": comparison.get("code_a")
                 or report_submissions.get(comparison.get("file_a", ""), ""),
                 "code_b": comparison.get("code_b")
@@ -4044,9 +4071,7 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _load_job_from_db(job_id)
 
 
-def _read_job_submission_sources(
-    job_id: str, subs: List[Any]
-) -> Dict[str, str]:
+def _read_job_submission_sources(job_id: str, subs: List[Any]) -> Dict[str, str]:
     """Read stored source code for a job's submissions from disk.
 
     Attempts to locate the uploaded files under the job's upload directory,

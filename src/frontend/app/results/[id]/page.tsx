@@ -544,7 +544,7 @@ export default function ResultsPage() {
   const confidenceDisplay = Math.round(safeScore * 100);
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
-  const evidenceSignals = buildEvidenceSignals(activeResult);
+  const evidenceSignals = buildEvidenceSignals(activeResult).filter((s) => s.fired);
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
@@ -914,24 +914,6 @@ export default function ResultsPage() {
               </Card>
             )}
 
-            {/* Side-by-side code comparison */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <CodePanel
-                title={activeResult?.file_a || 'Student A'}
-                code={leftCode}
-                highlights={leftHighlights}
-                panelRef={leftRef}
-                onScroll={() => syncScroll(leftRef, rightRef)}
-              />
-              <CodePanel
-                title={activeResult?.file_b || 'Student B'}
-                code={rightCode}
-                highlights={rightHighlights}
-                panelRef={rightRef}
-                onScroll={() => syncScroll(rightRef, leftRef)}
-              />
-            </div>
-
             {/* Similarity Legend */}
             <Card className="overflow-hidden">
               <div className="px-5 py-3">
@@ -941,19 +923,39 @@ export default function ResultsPage() {
                 <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-3 rounded-sm bg-red-500/60 border border-red-400"></span>
-                    Identical blocks (exact copy)
+                    Identical (exact copy)
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-3 rounded-sm bg-amber-500/50 border border-amber-400"></span>
-                    Renamed variables (renamed identifiers/literals)
+                    Renamed (renamed identifiers/literals)
                   </span>
                   <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-blue-500/40 border border-blue-400"></span>
-                    Uncommon logic match (modified or semantically similar)
+                    <span className="w-4 h-3 rounded-sm bg-blue-500/50 border border-blue-400"></span>
+                    Logic (modified or semantically similar)
                   </span>
                 </div>
               </div>
             </Card>
+
+            {/* Side-by-side code comparison */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <CodePanel
+                title={activeResult?.file_a || 'Student A'}
+                code={leftCode}
+                highlights={leftHighlights}
+                panelRef={leftRef}
+                isLeft={true}
+                onScroll={() => syncScroll(leftRef, rightRef)}
+              />
+              <CodePanel
+                title={activeResult?.file_b || 'Student B'}
+                code={rightCode}
+                highlights={rightHighlights}
+                panelRef={rightRef}
+                isLeft={false}
+                onScroll={() => syncScroll(rightRef, leftRef)}
+              />
+            </div>
 
             {job?.review_notes && (
               <Card>
@@ -995,19 +997,16 @@ const BLOCK_STYLES = {
   identical: {
     border: 'border-red-200 dark:border-red-800/40',
     chip: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-    codeBg: 'bg-red-500/60',
     label: 'identical block',
   },
   renamed: {
     border: 'border-amber-200 dark:border-amber-800/40',
     chip: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-    codeBg: 'bg-amber-500/50',
     label: 'renamed variables',
   },
   logic: {
     border: 'border-blue-200 dark:border-blue-800/40',
     chip: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-    codeBg: 'bg-blue-500/40',
     label: 'uncommon logic match',
   },
 };
@@ -1029,6 +1028,7 @@ function BlockDetail({ block, codeA, codeB }) {
   const sliceA = sliceCodeLines(codeA, block.lines_a);
   const sliceB = sliceCodeLines(codeB, block.lines_b);
   const startA = Number(String(block.lines_a || '0').split('-')[0]) || 0;
+  const paneClass = PANEL_COLORS[cat] || PANEL_COLORS.logic;
 
   return (
     <div className={`rounded-lg border p-3 ${style.border}`}>
@@ -1044,16 +1044,16 @@ function BlockDetail({ block, codeA, codeB }) {
       </div>
       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
         {[
-          { title: 'File A', lines: sliceA, base: startA },
-          { title: 'File B', lines: sliceB, base: Number(String(block.lines_b || '0').split('-')[0]) || 0 },
-        ].map(({ title, lines, base }) => (
+          { title: 'File A', lines: sliceA, base: startA, paneClass },
+          { title: 'File B', lines: sliceB, base: Number(String(block.lines_b || '0').split('-')[0]) || 0, paneClass },
+        ].map(({ title, lines, base, paneClass }) => (
           <div key={title} className="overflow-hidden rounded-md bg-slate-950">
             <div className="border-b border-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               {title}
             </div>
             <pre className="max-h-40 overflow-auto p-2 font-mono text-xs leading-5 text-slate-100">
               {lines.length > 0 ? lines.map((line, i) => (
-                <div key={i} className={`px-1 ${style.codeBg}`}>
+                <div key={i} className={`px-1 ${paneClass}`}>
                   <span className="mr-2 select-none text-white/60">{base + i}</span>
                   {line || ' '}
                 </div>
@@ -1067,34 +1067,47 @@ function BlockDetail({ block, codeA, codeB }) {
   );
 }
 
+const PANEL_COLORS = {
+  identical: 'bg-red-500/60 text-red-50',
+  renamed: 'bg-amber-500/50 text-amber-50',
+  logic: 'bg-blue-500/50 text-blue-50',
+};
+
+const CATEGORY_SWATCH = {
+  identical: 'bg-red-500/60 border-red-400',
+  renamed: 'bg-amber-500/50 border-amber-400',
+  logic: 'bg-blue-500/50 border-blue-400',
+};
+
 const CodePanel = ({ title, code, highlights, panelRef, onScroll, isLeft }) => {
-  // Get highlight class based on match category:
-  // identical blocks (exact copy) -> red
-  // renamed variables (renamed identifiers/literals) -> amber
-  // uncommon logic match (modified/semantically similar) -> blue
-  const getHighlightClass = (category) => {
-    if (category === 'identical') return 'bg-red-500/60 text-red-50';
-    if (category === 'renamed') return 'bg-amber-500/50 text-amber-50';
-    return 'bg-blue-500/40 text-blue-50';
-  };
+  // One shared palette across both files so a matching pair is instantly
+  // recognizable: identical (exact copy) -> red, renamed (renamed
+  // identifiers/literals) -> amber, logic (modified/semantically similar)
+  // -> blue. The panels are still distinguishable by their tinted headers.
+  const getHighlightClass = (category) => PANEL_COLORS[category] || PANEL_COLORS.logic;
 
   return (
     <div className="overflow-hidden rounded-lg border border-[color:var(--border)] bg-white shadow-sm">
-      <div className="border-b border-[color:var(--border)] px-4 py-3">
-        <h2 className="font-semibold text-[var(--text-primary)]">{title}</h2>
+      <div className={`border-b px-4 py-3 ${isLeft ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-blue-200/70 bg-blue-50/50 dark:border-blue-900/40 dark:bg-blue-950/20'}`}>
+        <h2 className={`font-semibold ${isLeft ? 'text-red-800 dark:text-red-300' : 'text-blue-800 dark:text-blue-300'}`}>{title}</h2>
+        {highlights && highlights.size > 0 && (
+          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+            {highlights.size} highlighted line{highlights.size === 1 ? '' : 's'}
+          </div>
+        )}
       </div>
       <div
         ref={panelRef}
         onScroll={onScroll}
-        className="max-h-[1600px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
+        className="max-h-[560px] overflow-auto bg-slate-950 text-sm leading-6 text-slate-100"
       >
         <pre className="min-w-full py-3 font-mono">
           {String(code || '').split('\n').map((line, index) => {
             const lineNumber = index + 1;
             const category = highlights.get(lineNumber);
             const isMatched = Boolean(category);
-            // Color coding: red = identical, amber = renamed variables,
-            // blue = uncommon logic match
+            // Color coding (per panel palette): identical / renamed /
+            // uncommon logic match
             const highlightClass = isMatched
               ? `${getHighlightClass(category)}`
               : '';

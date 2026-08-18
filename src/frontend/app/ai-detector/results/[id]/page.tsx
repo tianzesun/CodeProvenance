@@ -76,11 +76,11 @@ const SIGNAL_DESCRIPTIONS = {
   ast: 'AST Structure: measures uniformity of the abstract syntax tree; very regular structure may indicate assistance.',
 };
 
-function SignalBar({ name, value, label }) {
+function SignalBar({ name, value, label, interpretation }) {
   const pct = Math.round((Number(value) || 0) * 100);
   const tone = riskTone(value);
   const [showTip, setShowTip] = useState(false);
-  const desc = SIGNAL_DESCRIPTIONS[name] || '';
+  const desc = interpretation || SIGNAL_DESCRIPTIONS[name] || '';
 
   return (
     <div className="group relative">
@@ -202,6 +202,7 @@ function SubmissionCard({ entry }) {
   const tone = riskTone(prob);
   const signals = entry.signals || {};
   const signalLabels = entry.signal_labels || {};
+  const signalInterpretations = entry.signal_interpretations || {};
   const indicators = entry.indicators || [];
   const snippet = entry.annotated_snippet || [];
   const hasSnippet = snippet.length > 0;
@@ -352,6 +353,7 @@ function SubmissionCard({ entry }) {
                     name={key}
                     value={val}
                     label={signalLabels[key] || SIGNAL_LABELS[key] || key}
+                    interpretation={signalInterpretations[key] || ''}
                   />
                 ))}
               </div>
