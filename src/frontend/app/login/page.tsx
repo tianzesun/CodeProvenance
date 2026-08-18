@@ -35,6 +35,20 @@ function getErrorMessage(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
+function sanitizeNextPath(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) {
+    return '/';
+  }
+
+  const target = value.split('#')[0];
+  try {
+    const url = new URL(target, window.location.origin);
+    return url.origin === window.location.origin ? url.pathname : '/';
+  } catch {
+    return '/';
+  }
+}
+
 function validatePasswordInput(password: string): string | null {
   if (password.length < 8) {
     return 'Password must be at least 8 characters long.';
@@ -117,7 +131,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setNextPath(params.get('next') || '/');
+    setNextPath(sanitizeNextPath(params.get('next')));
   }, []);
 
   useEffect(() => {

@@ -6261,7 +6261,7 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 async def upload_files(
     request: Request,
     files: List[UploadFile] = File(...),
-    starter_files: Optional[List[UploadFile]] = File(default=None),
+    starter_files: List[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     assignment_id: Optional[str] = Form(default=None),
@@ -6325,7 +6325,7 @@ async def upload_files(
 async def upload_zip(
     request: Request,
     file: UploadFile = File(...),
-    starter_files: Optional[List[UploadFile]] = File(default=None),
+    starter_files: List[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
     assignment_id: Optional[str] = Form(default=None),

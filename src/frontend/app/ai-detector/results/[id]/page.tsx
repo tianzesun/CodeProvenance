@@ -462,7 +462,7 @@ export default function AIDetectorReportPage() {
                 </div>
                 <div className="no-print flex flex-wrap items-center gap-3">
                   <a
-                    href={`/api/report/${id}/ai-originality-pdf`}
+                    href={`/report/${id}/ai-originality-pdf`}
                     className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Download size={16} />
