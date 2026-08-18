@@ -10,11 +10,15 @@ from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import Session
 
 from src.backend.models.database import Case, CaseResultLink, CaseComment
-from src.backend.application.services.timeline_service import TimelineService, TimelineEventType
+from src.backend.application.services.timeline_service import (
+    TimelineService,
+    TimelineEventType,
+)
 
 
 class CaseStatus(str):
     """Case status values."""
+
     OPEN = "OPEN"
     UNDER_REVIEW = "UNDER_REVIEW"
     ESCALATED = "ESCALATED"
@@ -23,6 +27,7 @@ class CaseStatus(str):
 
 class CasePriority(str):
     """Case priority values."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -31,11 +36,11 @@ class CasePriority(str):
 
 class CaseService:
     """Service for managing investigation cases."""
-    
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.timeline = TimelineService(db)
-    
+
     def create_case(
         self,
         organization_id: uuid.UUID,
@@ -59,7 +64,7 @@ class CaseService:
         self.db.add(case)
         self.db.commit()
         self.db.refresh(case)
-        
+
         # Log timeline event
         self.timeline.create_event(
             case_id=case.id,
@@ -68,16 +73,14 @@ class CaseService:
             title="Case Created",
             description=title,
         )
-        
+
         return case
-    
+
     def get_case(self, case_id: uuid.UUID) -> Optional[Case]:
         """Get a case by ID."""
-        result = self.db.execute(
-            select(Case).where(Case.id == case_id)
-        )
+        result = self.db.execute(select(Case).where(Case.id == case_id))
         return result.scalar_one_or_none()
-    
+
     def get_cases_by_organization(
         self,
         organization_id: uuid.UUID,
@@ -91,7 +94,7 @@ class CaseService:
         query = query.order_by(desc(Case.created_at)).limit(limit)
         result = self.db.execute(query)
         return list(result.scalars())
-    
+
     def assign_reviewer(self, case_id: uuid.UUID, reviewer_id: uuid.UUID) -> Case:
         """Assign a reviewer to a case."""
         case = self.get_case(case_id)
@@ -101,7 +104,7 @@ class CaseService:
             case.updated_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(case)
-            
+
             self.timeline.create_event(
                 case_id=case_id,
                 user_id=reviewer_id,
@@ -110,7 +113,7 @@ class CaseService:
                 description=f"Assigned to {reviewer_id}",
             )
         return case
-    
+
     def link_result(self, case_id: uuid.UUID, result_id: uuid.UUID) -> CaseResultLink:
         """Link a similarity result to a case."""
         link = CaseResultLink(
@@ -122,16 +125,16 @@ class CaseService:
         self.db.add(link)
         self.db.commit()
         self.db.refresh(link)
-        
+
         self.timeline.create_event(
             case_id=case_id,
             event_type=TimelineEventType.RESULT_LINKED,
             title="Result Linked",
             description=f"Linked result {result_id}",
         )
-        
+
         return link
-    
+
     def add_comment(
         self,
         case_id: uuid.UUID,
@@ -149,7 +152,7 @@ class CaseService:
         self.db.add(comment)
         self.db.commit()
         self.db.refresh(comment)
-        
+
         self.timeline.create_event(
             case_id=case_id,
             user_id=user_id,
@@ -157,9 +160,9 @@ class CaseService:
             title="Note Added",
             description=body[:100],
         )
-        
+
         return comment
-    
+
     def update_status(
         self,
         case_id: uuid.UUID,
@@ -175,7 +178,7 @@ class CaseService:
                 case.closed_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(case)
-            
+
             self.timeline.create_event(
                 case_id=case_id,
                 user_id=user_id,
@@ -184,31 +187,39 @@ class CaseService:
                 description=f"Status changed to {status}",
             )
         return case
-    
+
     def get_case_with_results(self, case_id: uuid.UUID) -> Dict[str, Any]:
         """Get a case with all linked results and comments."""
         case = self.get_case(case_id)
         if not case:
             return {}
-        
+
         # Get linked results
-        result_links = self.db.execute(
-            select(CaseResultLink).where(CaseResultLink.case_id == case_id)
-        ).scalars().all()
-        
+        result_links = (
+            self.db.execute(
+                select(CaseResultLink).where(CaseResultLink.case_id == case_id)
+            )
+            .scalars()
+            .all()
+        )
+
         result_ids = [link.similarity_result_id for link in result_links]
-        
+
         # Get comments
-        comments = self.db.execute(
-            select(CaseComment)
-            .where(CaseComment.case_id == case_id)
-            .order_by(desc(CaseComment.created_at))
-        ).scalars().all()
-        
+        comments = (
+            self.db.execute(
+                select(CaseComment)
+                .where(CaseComment.case_id == case_id)
+                .order_by(desc(CaseComment.created_at))
+            )
+            .scalars()
+            .all()
+        )
+
         # Serialize case and comments to avoid SQLAlchemy state issues
         case_dict = {}
         for key, value in case.__dict__.items():
-            if key.startswith('__') or key == '_sa_instance_state':
+            if key.startswith("__") or key == "_sa_instance_state":
                 continue
             if isinstance(value, uuid.UUID):
                 case_dict[key] = str(value)
@@ -216,12 +227,26 @@ class CaseService:
                 case_dict[key] = value.isoformat()
             else:
                 case_dict[key] = value
-        
+
+        if case.assignment is not None:
+            case_dict["assignment"] = {
+                "id": str(case.assignment.id),
+                "title": case.assignment.name,
+                "course_name": (
+                    case.assignment.course.name if case.assignment.course else None
+                ),
+            }
+        if case.investigator is not None:
+            case_dict["investigator"] = {
+                "id": str(case.investigator.id),
+                "name": case.investigator.full_name,
+            }
+
         comments_list = []
         for c in comments:
             comment_dict = {}
             for key, value in c.__dict__.items():
-                if key.startswith('__') or key == '_sa_instance_state':
+                if key.startswith("__") or key == "_sa_instance_state":
                     continue
                 if isinstance(value, uuid.UUID):
                     comment_dict[key] = str(value)
@@ -230,7 +255,7 @@ class CaseService:
                 else:
                     comment_dict[key] = value
             comments_list.append(comment_dict)
-        
+
         return {
             "case": case_dict,
             "result_ids": [str(rid) for rid in result_ids],

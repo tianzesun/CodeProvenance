@@ -12,7 +12,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.backend.config.database import get_db
-from src.backend.application.services.case_service import CaseService, CaseStatus, CasePriority
+from src.backend.application.services.case_service import (
+    CaseService,
+    CaseStatus,
+    CasePriority,
+)
 from src.backend.models.database import User, Case, CaseComment
 
 router = APIRouter()
@@ -22,6 +26,7 @@ security = HTTPBearer(auto_error=False)
 # Pydantic schemas
 class CaseCreate(BaseModel):
     """Schema for creating a case."""
+
     title: str = Field(..., min_length=1, max_length=255)
     assignment_id: Optional[uuid.UUID] = None
     priority: str = Field(default="MEDIUM", pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
@@ -29,29 +34,36 @@ class CaseCreate(BaseModel):
 
 class CaseUpdate(BaseModel):
     """Schema for updating a case."""
+
     title: Optional[str] = Field(None, min_length=1, max_length=255)
-    status: Optional[str] = Field(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$")
+    status: Optional[str] = Field(
+        None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"
+    )
     priority: Optional[str] = Field(None, pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
     investigator_id: Optional[uuid.UUID] = None
 
 
 class CaseAssign(BaseModel):
     """Schema for assigning a reviewer."""
+
     reviewer_id: uuid.UUID
 
 
 class CaseCommentCreate(BaseModel):
     """Schema for adding a comment."""
+
     body: str = Field(..., min_length=1)
 
 
 class ResultLinkCreate(BaseModel):
     """Schema for linking a result."""
+
     result_id: uuid.UUID
 
 
 class CaseResponse(BaseModel):
     """Pydantic model for Case serialization."""
+
     id: str
     organization_id: str
     assignment_id: Optional[str] = None
@@ -74,10 +86,10 @@ def _serialize_case(case: Any) -> dict:
         return {}
     data = {}
     for key, value in case.__dict__.items():
-        if key.startswith('__'):
+        if key.startswith("__"):
             continue
         # Skip SQLAlchemy internal state
-        if key in ('_sa_instance_state',):
+        if key in ("_sa_instance_state",):
             continue
         # Convert UUID to string for JSON serialization
         if isinstance(value, uuid.UUID):
@@ -86,14 +98,30 @@ def _serialize_case(case: Any) -> dict:
         elif isinstance(value, datetime):
             data[key] = value.isoformat()
         # Handle nested objects that might be ORM instances (relationships)
-        elif hasattr(value, '__dict__') and not isinstance(value, (str, int, float, bool, list, dict)):
+        elif hasattr(value, "__dict__") and not isinstance(
+            value, (str, int, float, bool, list, dict)
+        ):
             # Try to get the ID if it's a relationship
-            if hasattr(value, 'id'):
+            if hasattr(value, "id"):
                 data[key] = str(value.id)
             else:
                 data[key] = None
         else:
             data[key] = value
+    if isinstance(case, Case):
+        assignment = case.assignment
+        if assignment is not None:
+            data["assignment"] = {
+                "id": str(assignment.id),
+                "title": assignment.name,
+                "course_name": assignment.course.name if assignment.course else None,
+            }
+        investigator = case.investigator
+        if investigator is not None:
+            data["investigator"] = {
+                "id": str(investigator.id),
+                "name": investigator.full_name,
+            }
     return data
 
 
@@ -103,7 +131,7 @@ def _serialize_comment(comment: Any) -> dict:
         return {}
     data = {}
     for key, value in comment.__dict__.items():
-        if key.startswith('__') or key in ('_sa_instance_state',):
+        if key.startswith("__") or key in ("_sa_instance_state",):
             continue
         if isinstance(value, uuid.UUID):
             data[key] = str(value)
@@ -126,7 +154,9 @@ def get_current_tenant() -> dict:
 
 @router.get("/cases", response_model=List[dict])
 async def list_cases(
-    status: Optional[str] = Query(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"),
+    status: Optional[str] = Query(
+        None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"
+    ),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
@@ -164,8 +194,8 @@ async def create_case(
 @router.get("/cases/{case_id}", response_model=dict)
 async def get_case(
     case_id: uuid.UUID,
-    user = Depends(get_current_user),
-    tenant = Depends(get_current_tenant),
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
     """Get a case with all linked results and comments."""
@@ -178,7 +208,10 @@ async def get_case(
     result = {
         "case": _serialize_case(case_obj) if isinstance(case_obj, Case) else case_obj,
         "result_ids": [str(rid) for rid in case_data.get("result_ids", [])],
-        "comments": [_serialize_comment(c) if isinstance(c, CaseComment) else c for c in case_data.get("comments", [])],
+        "comments": [
+            _serialize_comment(c) if isinstance(c, CaseComment) else c
+            for c in case_data.get("comments", [])
+        ],
     }
     return result
 
@@ -187,7 +220,7 @@ async def get_case(
 async def update_case(
     case_id: uuid.UUID,
     payload: CaseUpdate,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update a case."""
@@ -195,12 +228,12 @@ async def update_case(
     case = service.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    
+
     if payload.status:
         case = service.update_status(case_id, payload.status, user["id"])
     if payload.investigator_id:
         case = service.assign_reviewer(case_id, payload.investigator_id)
-    
+
     return _serialize_case(case)
 
 
@@ -208,7 +241,7 @@ async def update_case(
 async def assign_reviewer(
     case_id: uuid.UUID,
     payload: CaseAssign,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Assign a reviewer to a case."""
@@ -223,7 +256,7 @@ async def assign_reviewer(
 async def link_result(
     case_id: uuid.UUID,
     payload: ResultLinkCreate,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Link a similarity result to a case."""
@@ -236,7 +269,7 @@ async def link_result(
 async def add_comment(
     case_id: uuid.UUID,
     payload: CaseCommentCreate,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Add a comment to a case."""
@@ -248,20 +281,20 @@ async def add_comment(
 @router.get("/cases/{case_id}/timeline", response_model=List[dict])
 async def get_timeline(
     case_id: uuid.UUID,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get timeline events for a case."""
     service = CaseService(db)
     timeline_service = service.timeline
     events = timeline_service.get_case_timeline(case_id)
-    return [_serialize_case(e) if hasattr(e, '__dict__') else e for e in events]
+    return [_serialize_case(e) if hasattr(e, "__dict__") else e for e in events]
 
 
 @router.get("/cases/{case_id}/export", response_model=dict)
 async def export_case(
     case_id: uuid.UUID,
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Export case data as JSON for audit purposes."""
