@@ -322,33 +322,84 @@ class FusionEngine:
 
     @classmethod
     def run_calibration_benchmark(cls) -> Dict[str, Any]:
-        """Run standard benchmark dataset and return accuracy metrics."""
-        try:
-            from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
-            from src.backend.evaluation.metrics import calculate_accuracy_metrics
+        """Run a labeled benchmark and return accuracy metrics.
 
-            dataset = IRPlagDataset()
+        Uses the synthetic clone-pair generator so calibration works without
+        requiring external datasets. Pair features are extracted through the
+        same pipeline used for real submissions.
+        """
+        try:
+            import numpy as np
+
+            from src.backend.benchmark.datasets.synthetic_generator import (
+                SyntheticDatasetGenerator,
+            )
+            from src.backend.benchmark.evaluation.metrics import (
+                compute_metrics,
+                compute_roc_curve,
+            )
+            from src.backend.engines.features.feature_extractor import (
+                FeatureExtractor,
+            )
+
+            generator = SyntheticDatasetGenerator(seed=42)
+            dataset = generator.generate_pair_count(
+                type1=25, type2=25, type3=25, type4=25, non_clone=100
+            )
+            extractor = FeatureExtractor()
             results = []
 
-            for pair in dataset.test_pairs:
-                score = cls().fuse(pair.features)
+            for pair in dataset.pairs:
+                features = extractor.extract(pair.code_a, pair.code_b)
+                score = cls().fuse(features)
                 results.append(
-                    {"score": score.final_score, "ground_truth": pair.is_plagiarized}
+                    {
+                        "score": score.final_score,
+                        "ground_truth": pair.label,
+                    }
                 )
 
-            metrics = calculate_accuracy_metrics(results)
+            scores = np.array([r["score"] for r in results])
+            labels = np.array([r["ground_truth"] for r in results])
+
+            roc_curve = compute_roc_curve(labels, scores)
+            roc_auc = float(np.trapz(roc_curve.tpr, roc_curve.fpr))
+
+            # Pick the threshold that maximizes F1 on the ROC curve.
+            best_f1 = 0.0
+            best_threshold = 0.5
+            for threshold in roc_curve.thresholds:
+                preds = (scores >= threshold).astype(int)
+                m = compute_metrics(labels, preds)
+                if m["f1"] > best_f1:
+                    best_f1 = m["f1"]
+                    best_threshold = float(threshold)
+
+            final_metrics = compute_metrics(
+                labels, (scores >= best_threshold).astype(int)
+            )
+
+            roc_points = []
+            for fpr_val, tpr_val in zip(roc_curve.fpr, roc_curve.tpr):
+                roc_points.append({"fpr": float(fpr_val), "tpr": float(tpr_val)})
+
             return {
                 "status": "completed",
-                "f1": metrics.f1,
-                "precision": metrics.precision,
-                "recall": metrics.recall,
-                "accuracy": metrics.accuracy,
-                "auc_roc": metrics.auc_roc,
-                "roc_curve": metrics.roc_points,
-                "optimal_threshold": metrics.optimal_threshold,
-                "confusion_matrix": metrics.confusion_matrix,
+                "f1": final_metrics["f1"],
+                "precision": final_metrics["precision"],
+                "recall": final_metrics["recall"],
+                "accuracy": final_metrics["accuracy"],
+                "auc_roc": roc_auc,
+                "roc_curve": roc_points,
+                "optimal_threshold": best_threshold,
+                "confusion_matrix": {
+                    "tp": final_metrics["tp"],
+                    "fp": final_metrics["fp"],
+                    "tn": final_metrics["tn"],
+                    "fn": final_metrics["fn"],
+                },
                 "total_pairs": len(results),
-                "runtime_ms": metrics.runtime_ms,
+                "runtime_ms": 0,
             }
         except Exception as e:
             return {"status": "failed", "error": str(e)}
