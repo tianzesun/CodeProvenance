@@ -3594,6 +3594,9 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
         "features": features,
         "contributions": contributions,
         "fusion_debug": result.get("fusion_debug") or {},
+        "matching_blocks": result.get("matching_blocks") or [],
+        "code_a": result.get("code_a"),
+        "code_b": result.get("code_b"),
     }
 
 
@@ -3943,16 +3946,29 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     report_pairs = report_data.get("comparisons") or report_data.get("pairs") or []
+    report_submissions = (
+        report_data.get("submissions")
+        if isinstance(report_data.get("submissions"), dict)
+        else {}
+    )
     results = [
         _normalize_result(
             {
                 "file_a": comparison.get("file_a", ""),
                 "file_b": comparison.get("file_b", ""),
-                "score": comparison.get("score", 0),
+                "score": comparison.get("score")
+                or comparison.get("similarity_score", 0),
                 "risk_level": comparison.get("risk")
                 or comparison.get("risk_level")
                 or "",
-                "features": comparison.get("features") or {},
+                "features": comparison.get("features")
+                or comparison.get("engine_scores")
+                or {},
+                "matching_blocks": comparison.get("matching_blocks") or [],
+                "code_a": comparison.get("code_a")
+                or report_submissions.get(comparison.get("file_a", ""), ""),
+                "code_b": comparison.get("code_b")
+                or report_submissions.get(comparison.get("file_b", ""), ""),
             }
         )
         for comparison in report_pairs
@@ -4028,6 +4044,58 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _load_job_from_db(job_id)
 
 
+def _read_job_submission_sources(
+    job_id: str, subs: List[Any]
+) -> Dict[str, str]:
+    """Read stored source code for a job's submissions from disk.
+
+    Attempts to locate the uploaded files under the job's upload directory,
+    matching by stored name (a normalized relative path). Falls back to
+    ``storage_path``/``file_paths`` columns when the file is not under the
+    default upload directory, so the results/[id] page can always render
+    source code even after a full reload from the database.
+
+    Args:
+        job_id: The job identifier used to locate its upload directory.
+        subs: Submission ORM rows for the job.
+
+    Returns:
+        Mapping of submission name to concatenated source content.
+    """
+    sources: Dict[str, str] = {}
+    job_dir = UPLOADS_DIR / job_id
+    on_disk: Dict[str, str] = {}
+    if job_dir.exists():
+        try:
+            on_disk = _read_files_from_dir(job_dir)
+        except Exception:
+            logger.warning(f"Failed to read sources for job {job_id} from disk")
+
+    for sub in subs:
+        sub_name = sub.name
+        if sub_name in on_disk:
+            sources[sub_name] = on_disk[sub_name]
+            continue
+
+        content_parts: List[str] = []
+        for path in [sub.storage_path, *list(sub.file_paths or [])]:
+            if not path:
+                continue
+            p = PathLib(path)
+            if not p.exists():
+                p = job_dir / str(path).lstrip("/")
+            if p.is_file():
+                try:
+                    content_parts.append(p.read_text(encoding="utf-8", errors="ignore"))
+                except Exception:
+                    logger.warning(f"Failed to read submission source {path}")
+            elif p.is_dir():
+                content_parts.extend(_read_files_from_dir(p).values())
+        sources[sub_name] = "\n".join(content_parts)
+
+    return sources
+
+
 def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
     """Minimal loader for jobs persisted to the database via the ORM wiring.
 
@@ -4053,6 +4121,8 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                 .limit(200)
                 .all()
             )
+
+            submissions = _read_job_submission_sources(job_id, subs)
 
             job_dict: Dict[str, Any] = {
                 "id": job_id,
@@ -4101,10 +4171,12 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                         ),
                         "review_status": r.review_status or "unreviewed",
                         "review_notes": r.review_notes or "",
+                        "code_a": submissions.get(r.submission_a_id, ""),
+                        "code_b": submissions.get(r.submission_b_id, ""),
                     }
                     for r in sim_results
                 ],
-                "submissions": {s.name: "" for s in subs},
+                "submissions": submissions,
                 "summary": {"total_pairs": len(sim_results)},
                 "review_status": "unreviewed",
                 "review_notes": "",
@@ -6941,6 +7013,8 @@ async def _run_analysis(
                 "similarity_score": r.score,
                 "risk_level": r.risk_level,
                 "engine_scores": r.features,
+                "matching_blocks": r.matching_blocks or [],
+                "fusion_debug": _build_fusion_debug(r, threshold),
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
                 "code_a": submissions.get(r.file_a, ""),
                 "code_b": submissions.get(r.file_b, ""),

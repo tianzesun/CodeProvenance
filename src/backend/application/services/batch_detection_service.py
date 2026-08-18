@@ -331,6 +331,7 @@ class BatchDetectionService:
                     "lines_a": f"{seg.start_line_a}-{seg.end_line_a}",
                     "lines_b": f"{seg.start_line_b}-{seg.end_line_b}",
                     "similarity": seg.similarity,
+                    "clone_type": seg.clone_type.value if seg.clone_type else None,
                 }
                 for seg in match_result.segments
             ]

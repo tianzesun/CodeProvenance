@@ -17,7 +17,6 @@ import {
   X,
   TreePine,
   GitBranch,
-  BookOpen,
 } from 'lucide-react';
 
 function formatPercent(value) {
@@ -165,30 +164,73 @@ function fallbackCode(label) {
   ].join('\n');
 }
 
+function cloneCategory(block) {
+  // Map backend clone_type to a display category for color highlighting.
+  const type = block?.clone_type;
+  if (type === 'Type 1') return 'identical';
+  if (type === 'Type 2') return 'renamed';
+  if (type === 'Type 3' || type === 'Type 4') return 'logic';
+  // Fallback when clone_type is missing (legacy data): infer from similarity.
+  const similarity = typeof block?.similarity === 'number' ? block.similarity : 0.75;
+  if (similarity >= 0.9) return 'identical';
+  if (similarity >= 0.7) return 'renamed';
+  return 'logic';
+}
+
+function cloneCategoryLabel(block) {
+  const labels = {
+    identical: 'identical block',
+    renamed: 'renamed variables',
+    logic: 'uncommon logic match',
+  };
+  return labels[cloneCategory(block)];
+}
+
+function cloneReason(block) {
+  // Plain-language basis for a matching block, mirroring the code-matching
+  // engine's clone-type classification (Type 1..4).
+  const type = block?.clone_type;
+  const pct = Math.round((block.similarity || 0.75) * 100);
+  if (type === 'Type 1') {
+    return `The snippet matches byte-for-byte (line-for-line) between the two files. Exact copies score ${pct}% — this is the strongest evidence of copying.`;
+  }
+  if (type === 'Type 2') {
+    return `The snippet has identical structure and literal values, but identifier names were changed. Renaming still scores ${pct}% because the underlying tokens match after normalizing names.`;
+  }
+  if (type === 'Type 3') {
+    return `The snippet is a near match with some statements added, removed, or reordered. At ${pct}% it still indicates a likely common origin.`;
+  }
+  return `The snippet achieves the same behavior through different syntax. At ${pct}% it suggests shared intent rather than shared code.`;
+}
+
+const CATEGORY_PRIORITY = { identical: 3, renamed: 2, logic: 1 };
+
 function highlightedLines(code, matchingBlocks, isLeft = true) {
-  // Returns a Map of line number -> similarity score for colored highlighting
-  // If matching_blocks provided, parse line ranges from backend data
+  // Returns a Map of line number -> category ('identical' | 'renamed' | 'logic')
+  // If matching_blocks provided, parse line ranges from backend data.
+  // Categories map to clone types: Type 1 = identical, Type 2 = renamed
+  // identifiers/literals, Type 3/4 = modified or semantically similar logic.
   if (matchingBlocks && Array.isArray(matchingBlocks) && matchingBlocks.length > 0) {
-    const lineScores = new Map();
+    const lineCategories = new Map();
     for (const block of matchingBlocks) {
       // Use lines_a for left panel, lines_b for right panel
       const rangeKey = isLeft ? 'lines_a' : 'lines_b';
       const range = block[rangeKey];
-      // Use block's similarity if available, otherwise default to 0.75 (medium-high)
-      const similarity = typeof block.similarity === 'number' ? block.similarity : 0.75;
+      const category = cloneCategory(block);
       if (range) {
         const [start, end] = range.split('-').map(Number);
         if (!isNaN(start) && !isNaN(end)) {
           for (let i = start; i <= end; i++) {
-            // Keep highest similarity score for each line
-            if (!lineScores.has(i) || lineScores.get(i) < similarity) {
-              lineScores.set(i, similarity);
+            // Keep the strongest category for each line
+            const existing = lineCategories.get(i);
+            if (!existing || CATEGORY_PRIORITY[category] > CATEGORY_PRIORITY[existing]) {
+              lineCategories.set(i, category);
             }
           }
         }
       }
     }
-    return lineScores;
+    return lineCategories;
   }
   // Fallback: no matching blocks data available
   return new Map();
@@ -211,103 +253,109 @@ function pairKey(result) {
   return `${result.file_a || ''}::${result.file_b || ''}`;
 }
 
-function buildEvidenceTree(result) {
-  // Build evidence tree from features/scores
-  const features = result?.features || {};
-  const score = Number(result?.score) || 0;
-  
-  const evidenceTree = {
-    root: {
-      name: 'Similarity Analysis',
-      score: Math.round(score * 100),
-      status: score >= 0.75 ? 'strong' : score >= 0.5 ? 'moderate' : 'weak',
-    },
-    children: []
+const ENGINE_META = {
+  ast: {
+    name: 'Structure (AST)',
+    what: 'How similarly the code is organized at the syntax level.',
+    why: 'Same structure even when names or details differ.',
+  },
+  fingerprint: {
+    name: 'Token fingerprint',
+    what: 'Overlap in the raw token (identifier/keyword) sequence.',
+    why: 'The token streams line up almost exactly.',
+  },
+  embedding: {
+    name: 'Semantic meaning',
+    what: 'Model-based comparison of what both files mean.',
+    why: 'Both files express the same behavior and intent.',
+  },
+  ngram: {
+    name: 'Token n-gram match',
+    what: 'Shared consecutive token runs (typical n-gram overlap).',
+    why: 'Long identical token runs appear in both files.',
+  },
+  winnowing: {
+    name: 'Chunk hash match',
+    what: 'Rabin-fingerprint / winnowing chunk overlap.',
+    why: 'Near-identical code chunks are detected by hashing.',
+  },
+  logic_flow: {
+    name: 'Logic flow',
+    what: 'Order and shape of the control flow graph.',
+    why: 'Both files follow the same path through branches and loops.',
+  },
+};
+
+function normalizeKeyword(key) {
+  return String(key || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function engineMetaFor(key) {
+  const norm = normalizeKeyword(key);
+  for (const k of Object.keys(ENGINE_META)) {
+    if (normalizeKeyword(k) === norm) return ENGINE_META[k];
+  }
+  // Fuzzy match so legacy keys like "ast_similarity" still resolve.
+  for (const k of Object.keys(ENGINE_META)) {
+    if (norm.includes(normalizeKeyword(k)) || normalizeKeyword(k).includes(norm)) {
+      return ENGINE_META[k];
+    }
+  }
+  return {
+    name: key,
+    what: 'Similarity signal from this analysis engine.',
+    why: 'This signal draws comparisons across the two files.',
   };
-  
-  // Structural evidence (AST, control flow)
-  const structuralScore = features?.ast_similarity || features?.control_flow_similarity || 0;
-  if (structuralScore > 0) {
-    evidenceTree.children.push({
-      name: 'Structural Evidence',
-      type: 'branch',
-      score: Math.round(structuralScore * 100),
-      status: structuralScore >= 0.7 ? 'strong' : structuralScore >= 0.4 ? 'moderate' : 'weak',
-      children: [
-        {
-          name: 'AST Structure',
-          type: 'leaf',
-          score: Math.round(structuralScore * 100),
-          description: 'Code organization patterns show alignment'
-        },
-        {
-          name: 'Control Flow',
-          type: 'leaf',
-          score: Math.round(structuralScore * 100),
-          description: 'Program execution patterns show alignment'
-        }
-      ]
+}
+
+function buildEvidenceSignals(result) {
+  // Derive professor-readable evidence from the real backend feature keys
+  // plus the fusion_debug breakdown (which engine fired past the threshold).
+  // Returns an ordered list of { key, name, what, why, score, fired, source }.
+  const features = result?.features || {};
+  const debug = result?.fusion_debug || {};
+  const threshold = typeof debug.threshold === 'number' ? debug.threshold : 0.5;
+  const firedSet = new Set((debug.engines_fired || []).map(normalizeKeyword));
+
+  const signals = [];
+  for (const [key, raw] of Object.entries(features)) {
+    const score = Number(raw) || 0;
+    if (score <= 0) continue;
+    const meta = engineMetaFor(key);
+    const fired = debug.engines_fired ? firedSet.has(normalizeKeyword(key)) : score >= threshold;
+    signals.push({
+      key,
+      name: meta.name,
+      what: meta.what,
+      why: meta.why,
+      score,
+      fired,
     });
   }
-  
-  // Lexical evidence (token, fingerprint)
-  const lexicalScore = features?.fingerprint || features?.token_similarity || features?.winnowing || 0;
-  if (lexicalScore > 0) {
-    evidenceTree.children.push({
-      name: 'Lexical Evidence',
-      type: 'branch',
-      score: Math.round(lexicalScore * 100),
-      status: lexicalScore >= 0.7 ? 'strong' : lexicalScore >= 0.4 ? 'moderate' : 'weak',
-      children: [
-        {
-          name: 'Token Sequence',
-          type: 'leaf',
-          score: Math.round(lexicalScore * 100),
-          description: 'Code sequences show overlapping patterns'
-        }
-      ]
+
+  // If fusion_debug carries active_evidence with engines the feature map
+  // omits, backfill them so no fired engine is hidden.
+  for (const entry of debug.active_evidence || []) {
+    const key = String(entry.engine);
+    if (signals.some((s) => s.key === key)) continue;
+    const score = Number(entry.score) || 0;
+    if (score <= 0) continue;
+    const meta = engineMetaFor(key);
+    signals.push({
+      key,
+      name: meta.name,
+      what: meta.what,
+      why: meta.why,
+      score,
+      fired: Boolean(entry.fired),
     });
   }
-  
-  // Semantic evidence
-  const semanticScore = features?.embedding_similarity || 0;
-  if (semanticScore > 0) {
-    evidenceTree.children.push({
-      name: 'Semantic Evidence',
-      type: 'branch',
-      score: Math.round(semanticScore * 100),
-      status: semanticScore >= 0.7 ? 'strong' : semanticScore >= 0.4 ? 'moderate' : 'weak',
-      children: [
-        {
-          name: 'Embedding Similarity',
-          type: 'leaf',
-          score: Math.round(semanticScore * 100),
-          description: 'Conceptual alignment between submissions'
-        }
-      ]
-    });
-  }
-  
-  // Divergence evidence (differences)
-  const divergenceScore = features?.divergence_score || 0;
-  if (divergenceScore > 0) {
-    evidenceTree.children.push({
-      name: 'Divergence Analysis',
-      type: 'branch',
-      score: Math.round((1 - divergenceScore) * 100),
-      status: divergenceScore >= 0.7 ? 'strong' : divergenceScore >= 0.4 ? 'moderate' : 'weak',
-      children: [
-        {
-          name: 'Structural Differences',
-          type: 'leaf',
-          score: Math.round((1 - divergenceScore) * 100),
-          description: 'Implementation differences reduce similarity concerns'
-        }
-      ]
-    });
-  }
-  
-  return evidenceTree;
+
+  return signals
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
 }
 
 export default function ResultsPage() {
@@ -496,7 +544,7 @@ export default function ResultsPage() {
   const confidenceDisplay = Math.round(safeScore * 100);
   const evidenceTypes = getEvidenceTypes(activeResult);
   const cluster = buildCluster(activeResult, results);
-  const evidenceTree = buildEvidenceTree(activeResult);
+  const evidenceSignals = buildEvidenceSignals(activeResult);
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
@@ -716,8 +764,8 @@ export default function ResultsPage() {
         {/* ── Full-screen Pair Detail View ────────────────────────────────────── */}
         {drawerOpen && activeResult ? (
           <div className="space-y-4">
-            <Card>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <Card className="overflow-hidden">
+              <div className="flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Pair Detail Inspector</div>
                   <div className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">
@@ -729,7 +777,7 @@ export default function ResultsPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <ActionButton
                     variant="primary"
                     icon={ShieldCheck}
@@ -764,42 +812,80 @@ export default function ResultsPage() {
               </div>
             </Card>
 
-            {/* Evidence Tree */}
-            <Card>
-              <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950 dark:text-white">
+            {/* Evidence Summary - why this pair was flagged */}
+            <Card className="overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                 <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
-                Evidence Tree
+                <div>
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    The signals below are the independent checks that support this verdict. A check is
+                    marked as contributing when its score crosses the alert threshold.
+                  </div>
+                </div>
               </div>
-              <EvidenceTreeNode node={evidenceTree} />
+              <div className="px-5 py-4">
+                {evidenceSignals.length > 0 ? (
+                  <div className="space-y-3">
+                    {evidenceSignals.map((signal) => (
+                      <div
+                        key={signal.key}
+                        className={`rounded-lg border p-3 ${signal.fired ? 'border-blue-200 bg-blue-50/70 dark:border-blue-800/40 dark:bg-blue-950/30' : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40'}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-950 dark:text-white">{signal.name}</span>
+                            {signal.fired ? (
+                              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                Contributing
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                Supporting
+                              </span>
+                            )}
+                            <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">
+                              {Math.round(signal.score * 100)}%
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                          <div
+                            className={`h-full rounded-full ${signal.fired ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-400 dark:bg-slate-600'}`}
+                            style={{ width: `${Math.min(100, Math.max(0, Math.round(signal.score * 100)))}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
+                          {signal.what}{' '}
+                          <span className="font-medium text-slate-700 dark:text-slate-300">{signal.why}</span>
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+                    No individual engine signal was above zero for this pair. Review the highlighted
+                    blocks and verdict context below for guidance.
+                  </div>
+                )}
+              </div>
             </Card>
 
             {/* Evidence Blocks - matching code blocks between submissions */}
             {activeResult?.matching_blocks && activeResult.matching_blocks.length > 0 && (
-              <Card>
-                <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-950 dark:text-white">
+              <Card className="overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                   <GitBranch size={16} className="text-purple-600 dark:text-purple-400" />
-                  Evidence Blocks
-                </div>
-                <div className="space-y-3">
-                  {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
-                    <div key={idx} className="rounded-lg border border-purple-100 bg-purple-50 p-3 dark:border-purple-800/30 dark:bg-purple-900/20">
-                      <div className="flex items-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-400 mb-2">
-                        <span>Block {idx + 1}</span>
-                        <span className="rounded bg-purple-100 px-2 py-0.5 dark:bg-purple-800/30 dark:text-purple-300">
-                          {Math.round((block.similarity || 0.75) * 100)}% match
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-2 text-xs">
-                        <div>
-                          <span className="text-slate-500 dark:text-slate-400">File A lines:</span>
-                          <span className="ml-1 font-mono text-slate-700 dark:text-slate-300">{block.lines_a || 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 dark:text-slate-400">File B lines:</span>
-                          <span className="ml-1 font-mono text-slate-700 dark:text-slate-300">{block.lines_b || 'N/A'}</span>
-                        </div>
-                      </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Evidence Blocks</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      Matching code regions highlighted in the panels below.
                     </div>
+                  </div>
+                </div>
+                <div className="space-y-3 px-5 py-4">
+                  {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
+                    <BlockDetail key={idx} block={block} codeA={leftCode} codeB={rightCode} />
                   ))}
                   {activeResult.matching_blocks.length > 5 && (
                     <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -811,13 +897,22 @@ export default function ResultsPage() {
             )}
 
             {/* Evidence chips (simplified view) */}
-            <div className="flex flex-wrap gap-2">
-              {evidenceTypes.map((item) => (
-                <span key={item} className="rounded-full border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
-                  {item}
-                </span>
-              ))}
-            </div>
+            {evidenceTypes.length > 0 && (
+              <Card className="overflow-hidden">
+                <div className="px-5 py-4">
+                  <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Evidence Signals
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {evidenceTypes.map((item) => (
+                      <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {/* Side-by-side code comparison */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -838,20 +933,27 @@ export default function ResultsPage() {
             </div>
 
             {/* Similarity Legend */}
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-3 rounded-sm bg-red-500/30 border border-red-400/50"></span>
-                High similarity (75%+)
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-3 rounded-sm bg-amber-500/25 border border-amber-400/40"></span>
-                Moderate similarity (50-74%)
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-3 rounded-sm bg-emerald-500/20 border border-emerald-400/30"></span>
-                Low similarity (30-49%)
-              </span>
-            </div>
+            <Card className="overflow-hidden">
+              <div className="px-5 py-3">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Highlight Legend
+                </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-red-500/60 border border-red-400"></span>
+                    Identical blocks (exact copy)
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-amber-500/50 border border-amber-400"></span>
+                    Renamed variables (renamed identifiers/literals)
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-3 rounded-sm bg-blue-500/40 border border-blue-400"></span>
+                    Uncommon logic match (modified or semantically similar)
+                  </span>
+                </div>
+              </div>
+            </Card>
 
             {job?.review_notes && (
               <Card>
@@ -889,59 +991,91 @@ const CheckRow = ({ title, detail }) => (
   </div>
 );
 
-function EvidenceTreeNode({ node, depth = 0 }) {
-  const statusColors = {
-    strong: 'text-red-600 bg-red-50 border-red-100 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800/30',
-    moderate: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-900/20 dark:border-amber-800/30',
-    weak: 'text-emerald-600 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/20 dark:border-emerald-800/30',
-  };
-  const statusColor = statusColors[node.status] || 'text-slate-600 bg-slate-50 dark:text-slate-400 dark:bg-slate-900/50 dark:border-slate-800/50';
-  
+const BLOCK_STYLES = {
+  identical: {
+    border: 'border-red-200 dark:border-red-800/40',
+    chip: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+    codeBg: 'bg-red-500/60',
+    label: 'identical block',
+  },
+  renamed: {
+    border: 'border-amber-200 dark:border-amber-800/40',
+    chip: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+    codeBg: 'bg-amber-500/50',
+    label: 'renamed variables',
+  },
+  logic: {
+    border: 'border-blue-200 dark:border-blue-800/40',
+    chip: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+    codeBg: 'bg-blue-500/40',
+    label: 'uncommon logic match',
+  },
+};
+
+function sliceCodeLines(code, rangeKey) {
+  // Extract the exact source lines a matching block spans so the professor
+  // sees the copied region verbatim, not just a line range.
+  const lines = String(code || '').split('\n');
+  const [start, end] = String(rangeKey || '').split('-').map(Number);
+  if (!isNaN(start) && !isNaN(end)) {
+    return lines.slice(start - 1, end);
+  }
+  return [];
+}
+
+function BlockDetail({ block, codeA, codeB }) {
+  const cat = cloneCategory(block);
+  const style = BLOCK_STYLES[cat] || BLOCK_STYLES.logic;
+  const sliceA = sliceCodeLines(codeA, block.lines_a);
+  const sliceB = sliceCodeLines(codeB, block.lines_b);
+  const startA = Number(String(block.lines_a || '0').split('-')[0]) || 0;
+
   return (
-    <div className={`relative ${depth > 0 ? 'ml-4 pl-4 before:absolute before:left-2 before:top-0 before:bottom-0 before:border-slate-200' : ''}`}>
-      <div className={`rounded-lg border p-3 mb-2 ${statusColor}`}>
-        <div className="flex items-center gap-2">
-          {node.type === 'branch' && (
-            <GitBranch size={14} className="shrink-0" />
-          )}
-          {node.type === 'leaf' && (
-            <BookOpen size={14} className="shrink-0" />
-          )}
-          <div className="flex-1">
-<div className="font-semibold text-sm dark:text-white">{node.name}</div>
-             {node.description && (
-               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{node.description}</div>
-             )}
-             {node.score !== undefined && (
-               <div className="flex items-center gap-2 mt-1 text-xs">
-                 <span className="font-medium dark:text-white">{node.score}%</span>
-                 <span className="text-slate-400 dark:text-slate-500">similarity</span>
-               </div>
-             )}
-          </div>
-        </div>
+    <div className={`rounded-lg border p-3 ${style.border}`}>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-medium mb-2">
+        <span className="text-slate-500 dark:text-slate-400">Block</span>
+        <span className={`rounded px-2 py-0.5 ${style.chip}`}>{style.label}</span>
+        <span className={`rounded px-2 py-0.5 ${style.chip}`}>
+          {Math.round((block.similarity || 0.75) * 100)}% match
+        </span>
+        <span className="text-slate-500 dark:text-slate-400">
+          File A lines {block.lines_a || 'N/A'} · File B lines {block.lines_b || 'N/A'}
+        </span>
       </div>
-      {node.children && node.children.length > 0 && (
-        <div className="space-y-2">
-          {node.children.map((child, idx) => (
-            <EvidenceTreeNode 
-              key={idx} 
-              node={child} 
-              depth={depth + 1} 
-            />
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+        {[
+          { title: 'File A', lines: sliceA, base: startA },
+          { title: 'File B', lines: sliceB, base: Number(String(block.lines_b || '0').split('-')[0]) || 0 },
+        ].map(({ title, lines, base }) => (
+          <div key={title} className="overflow-hidden rounded-md bg-slate-950">
+            <div className="border-b border-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              {title}
+            </div>
+            <pre className="max-h-40 overflow-auto p-2 font-mono text-xs leading-5 text-slate-100">
+              {lines.length > 0 ? lines.map((line, i) => (
+                <div key={i} className={`px-1 ${style.codeBg}`}>
+                  <span className="mr-2 select-none text-white/60">{base + i}</span>
+                  {line || ' '}
+                </div>
+              )) : (<div className="text-slate-500">No source available</div>)}
+            </pre>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">{cloneReason(block)}</p>
     </div>
   );
 }
 
 const CodePanel = ({ title, code, highlights, panelRef, onScroll, isLeft }) => {
-  // Get highlight color based on similarity score
-  const getHighlightClass = (score) => {
-    if (score >= 0.75) return 'bg-red-500/30 outline-red-400/50'; // High similarity - red
-    if (score >= 0.5) return 'bg-amber-500/25 outline-amber-400/40'; // Medium - amber
-    return 'bg-emerald-500/20 outline-emerald-400/30'; // Low - emerald
+  // Get highlight class based on match category:
+  // identical blocks (exact copy) -> red
+  // renamed variables (renamed identifiers/literals) -> amber
+  // uncommon logic match (modified/semantically similar) -> blue
+  const getHighlightClass = (category) => {
+    if (category === 'identical') return 'bg-red-500/60 text-red-50';
+    if (category === 'renamed') return 'bg-amber-500/50 text-amber-50';
+    return 'bg-blue-500/40 text-blue-50';
   };
 
   return (
@@ -957,18 +1091,19 @@ const CodePanel = ({ title, code, highlights, panelRef, onScroll, isLeft }) => {
         <pre className="min-w-full py-3 font-mono">
           {String(code || '').split('\n').map((line, index) => {
             const lineNumber = index + 1;
-            const similarity = highlights.get(lineNumber) || 0;
-            const isMatched = similarity > 0;
-            // Color coding: Red = highly similar, Amber = moderately similar, Emerald = low similarity
-            const highlightClass = isMatched 
-              ? `${getHighlightClass(similarity)} outline outline-1`
+            const category = highlights.get(lineNumber);
+            const isMatched = Boolean(category);
+            // Color coding: red = identical, amber = renamed variables,
+            // blue = uncommon logic match
+            const highlightClass = isMatched
+              ? `${getHighlightClass(category)}`
               : '';
             return (
               <div
                 key={lineNumber}
                 className={`grid grid-cols-[52px_1fr] px-3 ${highlightClass}`}
               >
-                <span className="select-none pr-3 text-right text-slate-500">{lineNumber}</span>
+                <span className={`select-none pr-3 text-right ${isMatched ? 'text-white/70' : 'text-slate-500'}`}>{lineNumber}</span>
                 <code className="whitespace-pre">{line || ' '}</code>
               </div>
             );
