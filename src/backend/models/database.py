@@ -109,7 +109,7 @@ class Job(Base):
         Index("idx_jobs_tenant_status_created_at", "tenant_id", "status", "created_at"),
     )
     
-    id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
+    id = Column(String(36), primary_key=True)
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     assignment_id = Column(UUID(as_uuid=False), ForeignKey("assignments.id"), nullable=True)
     name = Column(String(255), nullable=False)
@@ -123,7 +123,7 @@ class Job(Base):
     template_files = Column(JSONB, nullable=True)
     settings = Column(JSONB, nullable=True)
     idempotency_key = Column(String(255), nullable=True, unique=True)
-    retention_days = Column(Integer, nullable=True)
+    retention_days = Column(Integer, nullable=False, default=90)
     high_similarity_count = Column(Integer, default=0)
     total_pairs_analyzed = Column(Integer, default=0)
     total_submissions = Column(Integer, default=0)
@@ -152,7 +152,7 @@ class Submission(Base):
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
     name = Column(String(255), nullable=False)
     file_count = Column(Integer, default=1)
     language_detected = Column(String(50), nullable=True)
@@ -185,9 +185,9 @@ class SimilarityResult(Base):
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
-    submission_a_id = Column(UUID(as_uuid=False), nullable=False)
-    submission_b_id = Column(UUID(as_uuid=False), nullable=False)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    submission_a_id = Column(String(255), nullable=False)
+    submission_b_id = Column(String(255), nullable=False)
     similarity_score = Column(Numeric(5, 4), nullable=False)
     confidence_level = Column(Numeric(3, 2), nullable=True)
     confidence_lower = Column(Numeric(5, 4), nullable=True)
@@ -217,7 +217,7 @@ class AIDetectionResult(Base):
     )
 
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
     submission_name = Column(String(500), nullable=False)
     language = Column(String(50), nullable=True)
     ai_probability = Column(Numeric(5, 4), nullable=True)
@@ -248,7 +248,7 @@ class WebhookEvent(Base):
     )
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
     event_type = Column(String(100), nullable=False)
     status = Column(String(50), default="pending")
     payload = Column(JSONB, nullable=True)
@@ -301,7 +301,7 @@ class AuditLog(Base):
     
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=True)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
     user_id = Column(UUID(as_uuid=False), nullable=True)
     action = Column(String(100), nullable=False)
     resource_type = Column(String(100), nullable=True)
@@ -471,7 +471,7 @@ class Report(Base):
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     organization_id = Column(UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=True)
 
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
 
     report_type = Column(String(50), nullable=False)
@@ -521,7 +521,7 @@ class Notification(Base):
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
 
-    related_job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    related_job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
     related_case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
     related_report_id = Column(UUID(as_uuid=False), ForeignKey("reports.id"), nullable=True)
 
@@ -556,7 +556,7 @@ class BehavioralSession(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     submission_id = Column(UUID(as_uuid=False), ForeignKey("submissions.id"), nullable=False)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
     session_id = Column(String(100), nullable=True)
@@ -679,7 +679,7 @@ class TimelineEvent(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, server_default=text('uuid_generate_v4()'))
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("jobs.id"), nullable=True)
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
     event_type = Column(String(100), nullable=False)

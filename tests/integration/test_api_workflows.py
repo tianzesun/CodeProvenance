@@ -9,7 +9,6 @@ automatically if the database is unreachable.
 Run with: pytest tests/integration/test_api_workflows.py
 """
 
-import time
 import uuid
 
 import pytest
@@ -60,11 +59,10 @@ class TestPublicEndpoints:
         assert "Welcome to IntegrityDesk" in response.json()["message"]
 
     def test_health_endpoint(self, client):
-        """The health endpoint is reachable (may not be mounted in server app)."""
+        """The health endpoint is reachable and mounted on the server app."""
         response = client.get("/health")
-        # server.py doesn't define /health; it's either 401 (auth-guarded),
-        # 404 (not mounted), or 200 (if mounted).
-        assert response.status_code in (200, 401, 404)
+        assert response.status_code == 200
+        assert response.json().get("status") == "healthy"
 
 
 class TestAuthWorkflow:
@@ -104,13 +102,12 @@ class TestAuthWorkflow:
 
 
 class TestCaseEndpoints:
-    """Tests for the case management flow (auth-exempt read paths)."""
+    """Tests for the case management flow (authenticated read paths)."""
 
-    def test_list_cases_is_reachable(self, client, require_db):
-        """Case listing returns an HTTP 200 with a list payload."""
+    def test_list_cases_requires_auth(self, client, require_db):
+        """Case listing is reachable but enforces auth (401 unauthenticated)."""
         response = client.get("/api/cases")
-        # The endpoint is reachable; body shape may vary, but it must be JSON.
-        assert response.status_code == 200
+        assert response.status_code == 401
         payload = response.json()
         assert isinstance(payload, (list, dict))
 

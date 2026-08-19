@@ -3947,12 +3947,13 @@ def _update_job_status_in_db(
     job_id: str, status: str, error_message: str | None = None
 ) -> None:
     """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
+    db_status = _db_job_status(status)
     try:
         with SessionLocal() as db:
             db_job = db.query(Job).filter(Job.id == job_id).first()
             if not db_job:
                 return
-            db_job.status = status
+            db_job.status = db_status
             now = datetime.now()
             if status == "analyzing" and not db_job.started_at:
                 db_job.started_at = now
@@ -3965,6 +3966,18 @@ def _update_job_status_in_db(
             db.commit()
     except Exception:
         logger.warning(f"Failed to update job {job_id} status in DB")
+
+
+def _db_job_status(app_status: str) -> str:
+    """Map in-app job status to the statuses allowed by the DB check constraint."""
+    return {
+        "analyzing": "processing",
+        "queued": "queued",
+        "processing": "processing",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }.get(app_status, app_status)
 
 
 def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
@@ -4165,7 +4178,7 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
                 "threshold": (
                     float(db_job.threshold) if db_job.threshold is not None else 0.5
                 ),
-                "file_count": db_job.file_count or len(subs),
+                "file_count": db_job.total_submissions or len(subs),
                 "created_at": (
                     db_job.created_at.isoformat() if db_job.created_at else None
                 ),
@@ -6978,10 +6991,12 @@ async def _run_analysis(
                             assignment_id=_jobs[job_id].get("assignment_id"),
                             name=_jobs[job_id].get("assignment_name")
                             or f"Upload {job_id}",
-                            status=_jobs[job_id].get("status", "analyzing"),
+                            status=_db_job_status(
+                                _jobs[job_id].get("status", "analyzing")
+                            ),
                             threshold=_jobs[job_id].get("threshold", 0.5),
                             created_at=datetime.now(),
-                            file_count=len(submissions),
+                            total_submissions=len(submissions),
                         )
                         db.add(db_job)
                         for sub_name in list(submissions.keys())[:100]:
@@ -7212,12 +7227,14 @@ async def _run_analysis(
                         r, "confidence_level", None
                     )
 
+                    a_name, b_name = sorted([r.file_a, r.file_b])
+
                     db.add(
                         SimilarityResult(
                             id=str(uuid.uuid4()),
                             job_id=job_id,
-                            submission_a_id=r.file_a,
-                            submission_b_id=r.file_b,
+                            submission_a_id=a_name,
+                            submission_b_id=b_name,
                             similarity_score=r.score,
                             confidence_level=conf,
                             confidence_lower=getattr(r, "confidence_lower", None),
@@ -7237,6 +7254,8 @@ async def _run_analysis(
             logger.exception(
                 f"DB results persist skipped for job {job_id}"
             )  # shows full traceback in logs
+
+        _update_job_status_in_db(job_id, "completed")
 
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
     except Exception as e:
@@ -7304,7 +7323,7 @@ async def update_job_review(job_id: str, request: Request):
                         else str(pair_key).split(":")
                     )
                     if len(parts) >= 2:
-                        a_id, b_id = parts[0], parts[1]
+                        a_id, b_id = sorted([parts[0], parts[1]])
                         sim = (
                             db.query(SimilarityResult)
                             .filter(
