@@ -6,7 +6,6 @@ import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
   BarChart3,
-  Bot,
   CheckCircle2,
   FlaskConical,
   Info,
@@ -38,25 +37,24 @@ function tone(value, higherIsBetter = true) {
   return 'bg-red-50 text-red-700';
 }
 
-function MetricCell({ value, higherIsBetter = true, soc }) {
+function MetricCell({ value, higherIsBetter = true }) {
   return (
     <td>
       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tone(value, higherIsBetter)}`}>
-        {soc === 'auc' ? auc(value) : fmt(value)}
+        {fmt(value)}
       </span>
     </td>
   );
 }
 
-function renderMetrics(metrics, soc = 'none') {
+function renderMetrics(metrics) {
   if (!metrics) return null;
-  const socKey = soc === 'auc' ? 'auc' : null;
   return (
     <>
-      <MetricCell value={metrics.accuracy} soc={socKey} />
-      <MetricCell value={metrics.precision} soc={socKey} />
-      <MetricCell value={metrics.recall} soc={socKey} />
-      <MetricCell value={metrics.f1} soc={socKey} />
+      <MetricCell value={metrics.accuracy} />
+      <MetricCell value={metrics.precision} />
+      <MetricCell value={metrics.recall} />
+      <MetricCell value={metrics.f1} />
     </>
   );
 }
@@ -86,7 +84,7 @@ function ThresholdTable({ report, soc }) {
           {rows.map((row) => (
             <tr key={row.label} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
-              {renderMetrics(row.metrics, soc)}
+              {renderMetrics(row.metrics)}
               {soc === 'auc' && (
                 <td>
                   <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
@@ -126,7 +124,7 @@ function ComparisonTable({ report }) {
           {rows.map((row) => (
             <tr key={row.label} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
-              {renderMetrics(row.metrics, 'auc')}
+              {renderMetrics(row.metrics)}
               <td>
                 <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   {auc(row.metrics.auc)}
