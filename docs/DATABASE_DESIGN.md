@@ -16,7 +16,7 @@ This document details the database architecture for IntegrityDesk, a B2B SaaS si
 
 The database connection string is stored in `.env.local` (never committed):
 ```
-DATABASE_URL=postgresql://neondb_owner:npg_OcT7SN5PtHAa@ep-soft-voice-any9rwdn-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+DATABASE_URL=postgresql://neondb_owner:REDACTED@ep-soft-voice-any9rwdn-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 ```
 
 ## Database Architecture

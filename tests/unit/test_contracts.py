@@ -248,11 +248,11 @@ class TestReproducibility:
         config2 = {"b": 2, "a": 1}
         assert compute_config_hash(config1) == compute_config_hash(config2)
 
-    def test_reproducibility_hash_creation(self) -> None:
+    def test_reproducibility_hash_creation(self, tmp_path) -> None:
         """Test reproducibility hash creation."""
         config = {"test": "value"}
         hash_obj = compute_reproducibility_hash(
-            dataset_path=Path("/tmp"),
+            dataset_path=tmp_path,
             code_version="abc123",
             config=config,
         )
@@ -260,16 +260,16 @@ class TestReproducibility:
         assert len(hash_obj.combined_hash) == 64
         assert hash_obj.timestamp
 
-    def test_reproducibility_hash_deterministic(self) -> None:
+    def test_reproducibility_hash_deterministic(self, tmp_path) -> None:
         """Test reproducibility hash is deterministic."""
         config = {"test": "value"}
         hash1 = compute_reproducibility_hash(
-            dataset_path=Path("/tmp"),
+            dataset_path=tmp_path,
             code_version="abc123",
             config=config,
         )
         hash2 = compute_reproducibility_hash(
-            dataset_path=Path("/tmp"),
+            dataset_path=tmp_path,
             code_version="abc123",
             config=config,
         )

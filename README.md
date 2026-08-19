@@ -204,22 +204,29 @@ score = similarity.compare(
 
 ## 🧪 Testing
 
+CI gates on the real test suite (`.github/workflows/ci.yml`). Run locally:
+
 ```bash
-# Unit tests (fast, no database)
-pytest tests/unit/
+# Unit tests (fast, no database) — the CI merge gate
+pytest -o addopts="" tests/unit/
 
 # Integration tests (require a reachable database; skipped automatically if unavailable)
-pytest tests/integration/
+pytest -o addopts="" tests/integration/
 
-# Run everything
-pytest
+# Frontend type-check + production build (the other CI merge gate)
+cd src/frontend && npx tsc --noEmit && npm run build
 ```
 
-Linting and formatting are enforced with `ruff` and `black`:
+Linting and formatting run in CI as non-blocking reports until the pre-existing
+findings are cleared (935 `ruff`, 41 `eslint`), then they become merge gates:
 ```bash
-ruff check src/ tests/
-black --check src/ tests/
+ruff check src/backend --output-format=concise
+ruff format --check src/backend
+black --check src/backend
+cd src/frontend && npm run lint
 ```
+Note: `pyproject.toml` does not exist yet; `ruff` currently runs with default
+settings. Add one with a `[tool.ruff]` section when the lint debt is cleared.
 
 ---
 

@@ -6,8 +6,30 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Fake connection strings so backend settings import in CI without .env.local.
+  DATABASE_URL: "postgresql://ci_user:ci_pass@localhost:5432/ci_db"
+  REDIS_URL: "redis://localhost:6379/0"
+  EMBEDDING_SERVER_URL: "http://localhost:8001"
+  BACKEND_URL: "http://localhost:8000"
+  NEXT_PUBLIC_API_URL: "http://localhost:8000"
+
 jobs:
-  test:
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  backend-tests:
+    name: Backend Tests (pytest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,64 +42,45 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m venv venv
-          ./venv/bin/pip install --upgrade pip
-          ./venv/bin/pip install -r requirements.txt
-          ./venv/bin/pip install flask
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
 
-      - name: Run imports check
+      - name: Run unit test suite
         run: |
-          ./venv/bin/python -c "
-          import sys; sys.path.insert(0, 'src')
-          from benchmark.pipeline import BenchmarkRunner, BenchmarkConfig
-          from benchmark.pipeline.external_loader import ExternalDatasetLoader
-          from benchmark.similarity.engines import HybridEngine, TokenWinnowingEngine
-          from benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
-          from benchmark.registry import registry
-          print('All imports OK')
-          "
+          python -m pytest tests/unit/ -q -o addopts="-v --tb=short --strict-markers --disable-warnings"
 
-      - name: Run unit tests
-        run: |
-          ./venv/bin/python -c "
-          import sys; sys.path.insert(0, 'src')
-          from benchmark.pipeline.runner import BenchmarkRunner, BenchmarkRunResult
-          from benchmark.pipeline.config import BenchmarkConfig, EngineConfig, OutputConfig, ThresholdConfig
-          from benchmark.pipeline.loader import CanonicalDataset, CodePair
-
-          runner = BenchmarkRunner(seed=42)
-          config = BenchmarkConfig(
-              engine=EngineConfig(name='hybrid'),
-              threshold=ThresholdConfig(optimize=True),
-              output=OutputConfig(json=False, html=False, leaderboard=False),
-          )
-
-          # Test with balanced dataset
-          pairs = []
-          for i in range(4):
-              pairs.append(CodePair(id_a=f'a{i}', id_b=f'b{i}', code_a=f'def foo{i}(): return {i}', code_b=f'def foo{i}(): return {i}', label=1))
-          for i in range(4):
-              pairs.append(CodePair(id_a=f'na{i}', id_b=f'nb{i}', code_a=f'x = {i}', code_b=f'y = {i+100}', label=0))
-
-          ds = CanonicalDataset(name='test', version='1.0', pairs=pairs)
-          result = runner.run(ds, config)
-          assert result.success, f'Benchmark failed: {result.error}'
-          assert result.metrics.f1 > 0, f'F1 should be > 0, got {result.metrics.f1}'
-          print(f'Test passed: F1={result.metrics.f1:.4f}')
-
-          # Test validation
-          empty = CanonicalDataset(name='e', version='1.0', pairs=[])
-          r = runner.run(empty, config)
-          assert not r.success, 'Empty dataset should fail'
-          print('Validation test passed')
-          "
-
-      - name: Run benchmark (POJ-104)
-        run: |
-          ./venv/bin/python run_external_benchmark.py poj104 50
-
-  dashboard:
+  frontend-build:
+    name: Frontend TypeScript + Build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npm run build
+
+  lint-format:
+    name: Python Lint + Format (ruff/black)
+    runs-on: ubuntu-latest
+    # TODO(phase-0 cleanup): clear the 935 pre-existing ruff findings across
+    # src/backend, then set continue-on-error to false to make this a merge gate.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -85,33 +88,42 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black
+
+      - name: Run ruff
+        run: ruff check src/backend --output-format=concise
+
+      - name: Run ruff format check
+        run: ruff format --check src/backend
+
+      - name: Run black check
+        run: black --check src/backend
+
+  frontend-lint:
+    name: Frontend Lint (eslint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    # TODO(phase-0 cleanup): clear the 41 pre-existing errors (no-explicit-any,
+    # react/no-unescaped-entities), then set continue-on-error to false.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: src/frontend/package-lock.json
 
       - name: Install dependencies
-        run: |
-          python -m venv venv
-          ./venv/bin/pip install --upgrade pip
-          ./venv/bin/pip install -r requirements.txt
-          ./venv/bin/pip install flask
+        run: npm ci
 
-      - name: Dashboard smoke test
-        run: |
-          timeout 10 ./venv/bin/python -c "
-          import sys, os, threading, time
-          sys.path.insert(0, 'src')
-          os.environ['WERKZEUG_RUN_MAIN'] = 'true'
-
-          from web_dashboard import app
-          def run_server():
-              app.run(host='127.0.0.1', port=5555)
-          t = threading.Thread(target=run_server, daemon=True)
-          t.start()
-          time.sleep(2)
-
-          import urllib.request
-          for path in ['/', '/api/engines', '/api/datasets', '/api/leaderboard', '/api/reports']:
-              resp = urllib.request.urlopen(f'http://127.0.0.1:5555{path}')
-              assert resp.status == 200, f'{path} returned {resp.status}'
-              print(f'{path}: OK ({resp.status})')
-          print('Dashboard smoke test passed')
-          "
+      - name: Run eslint
+        run: npm run lint

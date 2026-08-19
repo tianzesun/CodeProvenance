@@ -12,7 +12,7 @@
 
 ## Code Style
 - Format with `black` before committing
-- Lint with `ruff` (config in `pyproject.toml`)
+- Lint with `ruff` (default settings; no `pyproject.toml` exists yet — add a `[tool.ruff]` section when clearing lint debt)
 - All functions and classes must have docstrings
 - Follow PEP 8 style guide
 - Maximum line length: 100 characters
