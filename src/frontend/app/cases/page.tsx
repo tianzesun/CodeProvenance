@@ -23,7 +23,6 @@ type CaseItem = {
   priority: string;
   course?: string;
   assignment?: string;
-  students?: string;
   risk?: number;
   reviewer?: string;
   updatedAt?: string;
@@ -37,12 +36,17 @@ type RawCase = {
   status?: string;
   priority?: string;
   course?: string;
-  students_display?: string;
-  risk_score?: number;
   updated_at?: string;
   created_at?: string;
   assignment?: { title?: string; course_name?: string };
   investigator?: { name?: string };
+};
+
+const PRIORITY_RISK: Record<string, number> = {
+  URGENT: 97,
+  HIGH: 92,
+  MEDIUM: 72,
+  LOW: 40,
 };
 
 const STATUS_TABS: { key: CaseStatus | 'ALL'; label: string }[] = [
@@ -69,7 +73,6 @@ function matchesSearch(caseItem: CaseItem, query: string): boolean {
     caseItem.title,
     caseItem.course,
     caseItem.assignment,
-    caseItem.students,
     caseItem.reviewer,
     caseItem.status,
     caseItem.priority,
@@ -106,8 +109,7 @@ export default function CasesQueuePage() {
           priority: c.priority || 'MEDIUM',
           course: c.assignment?.course_name || c.course || 'Unknown Course',
           assignment: c.assignment?.title || c.title,
-          students: c.students_display || 'Multiple students',
-          risk: c.risk_score || 75,
+          risk: PRIORITY_RISK[c.priority || 'MEDIUM'] || 72,
           reviewer: c.investigator?.name || 'Unassigned',
           updatedAt: c.updated_at || c.created_at,
         }));
@@ -358,8 +360,7 @@ export default function CasesQueuePage() {
                         <div className="mt-1 text-xs text-slate-500">{item.assignment}</div>
                       </td>
                       <td className="px-5 py-4">
-                        <div className="text-sm font-semibold text-slate-950">{item.students}</div>
-                        <div className="mt-1 text-xs text-slate-500">{item.title}</div>
+                        <div className="text-sm font-semibold text-slate-950">{item.title}</div>
                       </td>
                       <td className="px-5 py-4">
                         <RiskBadge value={item.risk || 50} />

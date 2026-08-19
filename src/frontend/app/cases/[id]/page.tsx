@@ -37,6 +37,13 @@ type CaseData = {
   comments?: { id: string; user_id: string; body: string; created_at: string }[];
 };
 
+const PRIORITY_RISK: Record<string, number> = {
+  URGENT: 97,
+  HIGH: 92,
+  MEDIUM: 72,
+  LOW: 40,
+};
+
 type User = {
   id: string;
   name: string;
@@ -47,11 +54,15 @@ type User = {
 export default function CompareCasePage() {
   const { id } = useParams();
   const [caseData, setCaseData] = useState<CaseData | null>(null);
+  const [comments, setComments] = useState<CaseData['comments']>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [noteText, setNoteText] = useState('');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [totalSubmissions, setTotalSubmissions] = useState(0);
+  const [casesNeedingReview, setCasesNeedingReview] = useState(0);
+  const [analysesCompleted, setAnalysesCompleted] = useState(0);
   
   const [studentA, studentB] = ['Student A', 'Student B'];
   const leftRef = useRef(null);
@@ -62,10 +73,11 @@ export default function CompareCasePage() {
     const fetchCase = async () => {
       try {
         const response = await apiClient.get(`/api/cases/${id}`);
-        setCaseData(response.data);
-      } catch (err: any) {
+        setCaseData(response.data?.case || response.data);
+        setComments(response.data?.comments || []);
+      } catch (err) {
         console.error('Failed to fetch case:', err);
-        setError(err?.message || 'Failed to load case details.');
+        setError(err instanceof Error ? err.message : 'Failed to load case details.');
       } finally {
         setLoading(false);
       }
@@ -80,9 +92,30 @@ export default function CompareCasePage() {
       }
     };
 
+    const fetchStats = async () => {
+      try {
+        const [casesRes, jobsRes] = await Promise.all([
+          apiClient.get('/api/cases', { params: { limit: 1000 } }),
+          apiClient.get('/api/jobs'),
+        ]);
+        const allCases = casesRes.data || [];
+        const jobs = (jobsRes.data || {}).jobs || [];
+        setCasesNeedingReview(
+          allCases.filter((c: { status?: string }) => c.status === 'OPEN').length
+        );
+        setTotalSubmissions(
+          jobs.reduce((sum: number, job: { file_count?: number }) => sum + (Number(job.file_count) || 0), 0)
+        );
+        setAnalysesCompleted(jobs.length);
+      } catch (err) {
+        console.error('Failed to fetch stats:', err);
+      }
+    };
+
     if (id) {
       fetchCase();
       fetchUsers();
+      fetchStats();
     }
   }, [id]);
 
@@ -150,9 +183,9 @@ export default function CompareCasePage() {
                 </div>
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
-                <HeaderMetric value="412" label="submissions analyzed" />
-                <HeaderMetric value="9" label="cases may need instructor review" />
-                <HeaderMetric value="2m 14s" label="analysis completed" />
+                <HeaderMetric value={totalSubmissions.toLocaleString()} label="submissions analyzed" />
+                <HeaderMetric value={casesNeedingReview} label="cases need instructor review" />
+                <HeaderMetric value={analysesCompleted.toLocaleString()} label="analyses completed" />
                 <HeaderMetric value={caseData?.priority || 'MEDIUM'} label="queue priority" />
               </div>
             </div>
@@ -175,7 +208,7 @@ export default function CompareCasePage() {
                   for manual review, not treated as a misconduct conclusion.
                 </p>
               </div>
-              <RiskBadge value={caseData?.risk_score || 50} label="High Risk" />
+              <RiskBadge value={PRIORITY_RISK[caseData?.priority || 'MEDIUM'] || 72} label="High Risk" />
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -392,8 +425,8 @@ export default function CompareCasePage() {
           <div className="p-5 space-y-4">
             {/* Existing Comments */}
             <div className="space-y-3 max-h-60 overflow-y-auto">
-              {caseData?.comments && caseData.comments.length > 0 ? (
-                caseData.comments.map((comment) => (
+              {comments && comments.length > 0 ? (
+                comments.map((comment) => (
                   <div key={comment.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
                     <div className="font-medium text-slate-700 mb-1">Instructor</div>
                     <div className="text-slate-600">{comment.body}</div>
