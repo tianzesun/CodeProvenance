@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -85,27 +85,15 @@ def _serialize_case(case: Any) -> dict:
     if case is None:
         return {}
     data = {}
-    for key, value in case.__dict__.items():
-        if key.startswith("__"):
-            continue
-        # Skip SQLAlchemy internal state
-        if key in ("_sa_instance_state",):
-            continue
+    for column in Case.__table__.columns:
+        key = column.name
+        value = getattr(case, key)
         # Convert UUID to string for JSON serialization
         if isinstance(value, uuid.UUID):
             data[key] = str(value)
         # Convert datetime to ISO format
         elif isinstance(value, datetime):
             data[key] = value.isoformat()
-        # Handle nested objects that might be ORM instances (relationships)
-        elif hasattr(value, "__dict__") and not isinstance(
-            value, (str, int, float, bool, list, dict)
-        ):
-            # Try to get the ID if it's a relationship
-            if hasattr(value, "id"):
-                data[key] = str(value.id)
-            else:
-                data[key] = None
         else:
             data[key] = value
     if isinstance(case, Case):
@@ -130,9 +118,9 @@ def _serialize_comment(comment: Any) -> dict:
     if comment is None:
         return {}
     data = {}
-    for key, value in comment.__dict__.items():
-        if key.startswith("__") or key in ("_sa_instance_state",):
-            continue
+    for column in CaseComment.__table__.columns:
+        key = column.name
+        value = getattr(comment, key)
         if isinstance(value, uuid.UUID):
             data[key] = str(value)
         elif isinstance(value, datetime):
@@ -142,18 +130,96 @@ def _serialize_comment(comment: Any) -> dict:
     return data
 
 
-def get_current_user() -> dict:
-    """Get current user - for development, returns mock user."""
+def _serialize_result_link(link: Any) -> dict:
+    """Serialize a CaseResultLink object to a dictionary."""
+    if link is None:
+        return {}
+    data = {}
+    for column in link.__table__.columns:
+        key = column.name
+        value = getattr(link, key)
+        if isinstance(value, uuid.UUID):
+            data[key] = str(value)
+        elif isinstance(value, datetime):
+            data[key] = value.isoformat()
+        else:
+            data[key] = value
+    return data
+
+
+def _serialize_orm_event(event: Any) -> dict:
+    """Serialize any ORM object to a JSON-safe dictionary."""
+    if event is None:
+        return {}
+    data = {}
+    state = getattr(event, "_sa_instance_state", None)
+    if state is None or state.mapper is None:
+        return {}
+    for column_attr in state.mapper.column_attrs:
+        key = column_attr.key
+        value = state.attrs[key].value
+        if isinstance(value, uuid.UUID):
+            data[key] = str(value)
+        elif isinstance(value, datetime):
+            data[key] = value.isoformat()
+        else:
+            data[key] = value
+    return data
+
+
+def get_current_user(request: Request = None) -> dict:
+    """Resolve the current user from the dashboard session cookie.
+
+    Falls back to a mock user when no valid session is present (dev mode)
+    so read-only case listing and detail views keep working unauthenticated.
+    """
+    from src.backend.config.settings import settings
+
+    token = (request.cookies if request else {}).get("integritydesk_session")
+    if token and settings.AUTH_JWT_SECRET:
+        try:
+            import jwt as _jwt
+
+            payload = _jwt.decode(token, settings.AUTH_JWT_SECRET, algorithms=["HS256"])
+            user_id = str(payload.get("sub") or "").strip()
+            if user_id:
+                from src.backend.config.database import SessionLocal
+
+                with SessionLocal() as db:
+                    user = db.get(User, user_id)
+                    if user and user.is_active:
+                        return {
+                            "id": str(user.id),
+                            "email": user.email,
+                            "role": user.role,
+                            "tenant_id": (
+                                str(user.tenant_id)
+                                if user.tenant_id is not None
+                                else None
+                            ),
+                            "organization_id": (
+                                str(user.organization_id)
+                                if user.organization_id is not None
+                                else None
+                            ),
+                        }
+        except Exception:
+            pass
+    # Development fallback
     return {"id": uuid.uuid4(), "email": "user@example.com", "role": "professor"}
 
 
-def get_current_tenant() -> dict:
-    """Get current tenant/organization - for development, returns mock tenant."""
+def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
+    """Get current organization from the resolved user (mock fallback)."""
+    org_id = user.get("organization_id") or user.get("tenant_id")
+    if org_id:
+        return {"id": uuid.UUID(org_id)}
     return {"id": uuid.UUID("2bde87ba-3ad4-4282-b199-02243991150e")}
 
 
 @router.get("/cases", response_model=List[dict])
 async def list_cases(
+    request: Request,
     status: Optional[str] = Query(
         None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"
     ),
@@ -161,8 +227,8 @@ async def list_cases(
     db: Session = Depends(get_db),
 ):
     """List cases for the current tenant/organization."""
-    user = get_current_user()
-    tenant = get_current_tenant()
+    user = get_current_user(request)
+    tenant = get_current_tenant(user)
     service = CaseService(db)
     cases = service.get_cases_by_organization(
         organization_id=tenant["id"],
@@ -174,12 +240,13 @@ async def list_cases(
 
 @router.post("/cases", response_model=dict, status_code=201)
 async def create_case(
+    request: Request,
     payload: CaseCreate,
     db: Session = Depends(get_db),
 ):
     """Create a new investigation case."""
-    user = get_current_user()
-    tenant = get_current_tenant()
+    user = get_current_user(request)
+    tenant = get_current_tenant(user)
     service = CaseService(db)
     case = service.create_case(
         organization_id=tenant["id"],
@@ -262,7 +329,7 @@ async def link_result(
     """Link a similarity result to a case."""
     service = CaseService(db)
     link = service.link_result(case_id, payload.result_id)
-    return _serialize_case(link)
+    return _serialize_result_link(link)
 
 
 @router.post("/cases/{case_id}/comments", response_model=dict, status_code=201)
@@ -275,7 +342,7 @@ async def add_comment(
     """Add a comment to a case."""
     service = CaseService(db)
     comment = service.add_comment(case_id, user["id"], payload.body)
-    return _serialize_case(comment)
+    return _serialize_comment(comment)
 
 
 @router.get("/cases/{case_id}/timeline", response_model=List[dict])
@@ -288,7 +355,7 @@ async def get_timeline(
     service = CaseService(db)
     timeline_service = service.timeline
     events = timeline_service.get_case_timeline(case_id)
-    return [_serialize_case(e) if hasattr(e, "__dict__") else e for e in events]
+    return [_serialize_orm_event(e) for e in events]
 
 
 @router.get("/cases/{case_id}/export", response_model=dict)
