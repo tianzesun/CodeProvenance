@@ -12214,16 +12214,15 @@ async def download_report_json(job_id: str, request: Request):
 @app.get("/report/{job_id}/committee", response_class=HTMLResponse)
 async def download_committee_report(request: Request, job_id: str):
     _require_job_access(job_id, request)
-    _refresh_html_report_from_json(job_id)
-    rp = _resolve_report_path(job_id, "report_path", "report.html")
+    rp = _resolve_report_path(job_id, "committee_report_path", "committee_report.html")
     if not rp.exists():
-        raise HTTPException(status_code=404, detail="Report file not found")
+        raise HTTPException(status_code=404, detail="Committee report not found")
     return FileResponse(
         str(rp),
         media_type="text/html",
         headers={
             "Content-Disposition": (
-                f'inline; filename="integritydesk_originality_report_{job_id}.html"'
+                f'inline; filename="integritydesk_committee_report_{job_id}.html"'
             )
         },
     )
