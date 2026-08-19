@@ -391,7 +391,6 @@ ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
     "fingerprint": "token",
     "semantic": "embedding",
     "unixcoder": "embedding",
-    "ngram": "gst",
     "structural": "gst",
     "string_tiling": "gst",
     "execution": "graph",
@@ -14909,6 +14908,20 @@ async def update_settings(request: Request):
                 continue
             if key in SECRET_SETTING_KEYS and value:
                 env_updates[SETTINGS_ATTR_MAP[key]] = value
+
+        # When only a professor profile is sent (no explicit engine weights),
+        # derive and persist the profile-based weights so the advanced sliders
+        # and the detection config stay in sync with the selected profile.
+        if "professor_profile" in data and "engine_weights" not in data:
+            from src.backend.engines.scoring.professor_profiles import (
+                apply_professor_profile,
+                professor_profile_to_engine_weights,
+            )
+
+            applied_profile = apply_professor_profile(data["professor_profile"])
+            stored_settings["engine_weights"] = professor_profile_to_engine_weights(
+                applied_profile
+            )
 
         tenant.settings = stored_settings
         db.add(tenant)

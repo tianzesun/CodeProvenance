@@ -71,6 +71,7 @@ export default function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showEngineWeights, setShowEngineWeights] = useState(false);
+  const [weightsDirty, setWeightsDirty] = useState(false);
   const [showPerformanceAdvanced, setShowPerformanceAdvanced] = useState(false);
   const [validationResult, setValidationResult] = useState<any | null>(null);
   const [validationLoading, setValidationLoading] = useState<boolean>(false);
@@ -209,7 +210,6 @@ export default function SettingsPage() {
     try {
       const payload = {
         professor_profile: settings.professor_profile || DEFAULT_PROFILE,
-        engine_weights: settings.engine_weights,
         default_threshold: settings.default_threshold,
         openai_api_key: settings.openai_api_key,
         openai_base_url: settings.openai_base_url,
@@ -234,9 +234,13 @@ export default function SettingsPage() {
         audit_retention_days: settings.audit_retention_days,
         debug_mode: settings.debug_mode,
       };
+      if (weightsDirty) {
+        (payload as { engine_weights?: unknown }).engine_weights = settings.engine_weights;
+      }
       await apiClient.patch('/api/settings', payload);
       const fresh = await apiClient.get('/api/settings');
       setSettings(fresh.data);
+      setWeightsDirty(false);
       setSuccess('Settings saved. Recommended profile applied.');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
@@ -416,7 +420,7 @@ export default function SettingsPage() {
                         key={key}
                         label={key}
                         value={Number(value || 0)}
-                        onChange={(next) => updateSetting('engine_weights', { ...settings.engine_weights, [key]: next })}
+                        onChange={(next) => { setWeightsDirty(true); updateSetting('engine_weights', { ...settings.engine_weights, [key]: next }); }}
                       />
                     ))}
                     {Math.abs(engineWeightTotal - 1.0) >= 0.001 && (
