@@ -82,6 +82,39 @@ journalctl -u integritydesk-dashboard -f  # tail dashboard logs
 | `OPENAI_API_KEY` | Optional; enables OpenAI embeddings |
 | `EMBEDDING_SERVER_URL` | Set to enable the local embedding server |
 
+## Secrets
+
+- **`deploy.conf`** and **`src/backend/.env.local`** are git-ignored and
+  generated on the server. Never commit them.
+- The `.env.local` is generated with a random `AUTH_JWT_SECRET` and
+  `WEBHOOK_SECRET_KEY` on each setup run (`openssl rand -hex 32`).
+
+### Rotating `AUTH_JWT_SECRET`
+
+Use this when a secret may be compromised or on a fixed schedule (e.g.
+quarterly). Note: rotating immediately invalidates all existing sessions —
+users must log in again, so do it in a low-traffic window.
+
+```bash
+# 1. Stop the services so no new tokens are minted mid-rotation
+sudo bash deploy/restart.sh   # or: systemctl stop integritydesk-backend integritydesk-dashboard
+
+# 2. Generate and write a new secret (keep a backup of the old value first!)
+cp src/backend/.env.local src/backend/.env.local.bak
+NEW_SECRET=$(openssl rand -hex 32)
+sed -i "s|^AUTH_JWT_SECRET=.*|AUTH_JWT_SECRET=$NEW_SECRET|" src/backend/.env.local
+
+# 3. Restart
+sudo bash deploy/restart.sh
+
+# 4. Verify a new session works
+curl -s http://127.0.0.1:8000/health   # expect {"status":"healthy"}
+```
+
+If a secret leak is suspected, also rotate `WEBHOOK_SECRET_KEY` the same way,
+revoke/rotate the DB password, and audit `git log --all -S '<old-secret>'` to
+check nothing leaked into history.
+
 ## Notes
 
 - **Web server**: both `deploy/apache/integritydesk.conf` and
@@ -97,7 +130,9 @@ journalctl -u integritydesk-dashboard -f  # tail dashboard logs
   `sudo bash deploy/setup.sh`.
 - **Webhook worker**: requires `REDIS_URL` to be reachable. If you don't need
   webhooks, you can `systemctl disable integritydesk-worker`.
-- **Secrets**: `deploy.conf` and `src/backend/.env.local` are git-ignored and
-  generated on the server. Never commit them.
-- The `.env.local` is generated with a random `AUTH_JWT_SECRET` and
-  `WEBHOOK_SECRET_KEY` on each setup run.
+- **Health checks**: the backend and embedding units verify they are serving
+  (`GET /health`) during startup via `ExecStartPost`; the dashboard starts only
+  after the backend unit reports healthy (`After=` ordering).
+- **Docker**: the old `docker-compose.yml` / `Dockerfile` were removed because
+  they carried stale, insecure defaults (default DB/Redis passwords,
+  `--reload`). Deployment is systemd-only.

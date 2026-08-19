@@ -135,6 +135,7 @@ app.add_middleware(
 # Auth exempt paths - must be defined before middleware setup
 AUTH_EXEMPT_PATHS = {
     "/",
+    "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -196,6 +197,7 @@ BENCHMARK_PROGRESS: Dict[str, List[str]] = {}
 LOGIN_ATTEMPTS: Dict[str, List[datetime]] = defaultdict(list)
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
 BENCHMARK_RESULTS: Dict[str, Any] = {}
 BENCHMARK_LOCK = threading.Lock()
 
@@ -4992,6 +4994,8 @@ def _bootstrap_admin_sync(email, full_name, password, tenant_name):
 
 
 def _login_sync(email, password):
+    _check_login_rate_limit(email)
+
     db = SessionLocal()
 
     try:
@@ -5003,10 +5007,13 @@ def _login_sync(email, password):
         )
 
         if not user or not _verify_password(password, user.password_hash):
+            _record_login_failure(email)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
+            _record_login_failure(email)
             raise HTTPException(status_code=403, detail="Your account is disabled")
 
+        _clear_login_attempts(email)
         user.last_login_at = datetime.utcnow()
         db.add(user)
         db.commit()
@@ -5016,6 +5023,35 @@ def _login_sync(email, password):
 
     finally:
         db.close()
+
+
+def _check_login_rate_limit(email: str) -> None:
+    """Reject login when too many recent failures exist for an email."""
+    now = datetime.now(timezone.utc)
+    with LOGIN_ATTEMPTS_LOCK:
+        attempts = [
+            ts
+            for ts in LOGIN_ATTEMPTS.get(email, [])
+            if now - ts < timedelta(seconds=LOGIN_WINDOW_SECONDS)
+        ]
+        LOGIN_ATTEMPTS[email] = attempts
+    if len(attempts) >= MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Try again later.",
+        )
+
+
+def _record_login_failure(email: str) -> None:
+    """Record a failed login attempt for rate limiting."""
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS[email].append(datetime.now(timezone.utc))
+
+
+def _clear_login_attempts(email: str) -> None:
+    """Reset the attempt counter after a successful login."""
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS.pop(email, None)
 
 
 def _get_user_for_cookie(email):
@@ -14773,6 +14809,12 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
     }
+
+
+@app.get("/health")
+async def health():
+    """Liveness probe for load balancers and systemd health checks."""
+    return {"status": "healthy"}
 
 
 @app.get("/api/settings")

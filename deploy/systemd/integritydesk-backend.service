@@ -15,6 +15,8 @@ Restart=always
 RestartSec=5
 # Prevent timeouts on model warmups / heavy analysis
 TimeoutStartSec=300
+# Fail fast if the app did not bind: verify it is serving before declaring up.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 60); do if curl -fsS http://127.0.0.1:@BACKEND_PORT@/health >/dev/null 2>&1; then exit 0; fi; sleep 1; done; exit 1'
 
 [Install]
 WantedBy=multi-user.target

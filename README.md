@@ -149,10 +149,9 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
-### With Docker
-```bash
-docker compose up --build
-```
+> Note: production is deployed via the systemd/nginx path in `deploy/`
+> (`deploy/README.md`). The Docker quickstart was removed in release hardening
+> because it served stale, insecure configuration.
 
 ### API Usage
 ```python
