@@ -6846,6 +6846,37 @@ async def get_analytics_overview(request: Request) -> Dict[str, Any]:
         }
 
 
+def _run_analysis_engines(
+    selected_tool_ids,
+    submissions,
+    all_pairs,
+    external_tool_results,
+    threshold,
+    fusion_weights,
+    starter_sources,
+):
+    """Run the selected comparison engines and build the report.
+
+    Runs in a worker thread via ``run_in_threadpool`` because the engine work
+    is CPU-bound and synchronous; keeping it inline in the async handler blocks
+    the event loop for the whole analysis.
+    """
+    if "integritydesk" in selected_tool_ids:
+        service = BatchDetectionService(
+            threshold=threshold,
+            weights=fusion_weights or None,
+            starter_sources=starter_sources,
+        )
+        results = service.compare_all_pairs(submissions)
+        _merge_external_features_into_results(results, external_tool_results)
+        report = service.generate_report(results)
+    else:
+        service = BatchDetectionService(threshold=threshold)
+        results = _build_external_comparison_results(external_tool_results, all_pairs)
+        report = service.generate_report(results)
+    return results, report
+
+
 async def _run_analysis(
     job_id,
     job_dir,
@@ -7024,21 +7055,18 @@ async def _run_analysis(
             selected_tool_ids, submissions, all_pairs
         )
 
-        if "integritydesk" in selected_tool_ids:
-            service = BatchDetectionService(
-                threshold=threshold,
-                weights=fusion_weights or None,
-                starter_sources=starter_sources,
-            )
-            results = service.compare_all_pairs(submissions)
-            _merge_external_features_into_results(results, external_tool_results)
-            report = service.generate_report(results)
-        else:
-            service = BatchDetectionService(threshold=threshold)
-            results = _build_external_comparison_results(
-                external_tool_results, all_pairs
-            )
-            report = service.generate_report(results)
+        # The engine work is CPU-bound and synchronous; offload it so the event
+        # loop stays responsive to other requests while a job analyzes.
+        results, report = await run_in_threadpool(
+            _run_analysis_engines,
+            selected_tool_ids,
+            submissions,
+            all_pairs,
+            external_tool_results,
+            threshold,
+            fusion_weights,
+            starter_sources,
+        )
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
