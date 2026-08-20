@@ -7,6 +7,7 @@ Produces:
 3. AI probability with key stylometry contribution features
 4. Summary score with HIGH/MEDIUM/LOW/SUSPICIOUS risk levels
 """
+
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,9 +20,11 @@ from collections import defaultdict
 # Plagiarism Type Classifier
 # =============================================================================
 
+
 @dataclass
 class PlagiarismType:
     """Detected plagiarism type with evidence."""
+
     type_code: str  # T1, T2, T3, T4, NONE
     type_name: str
     confidence: float
@@ -79,7 +82,8 @@ class PlagiarismTypeClassifier:
                 "Likely direct copy with minimal changes",
             ]
             return PlagiarismType(
-                type_code="T1", type_name="Identical Copy",
+                type_code="T1",
+                type_name="Identical Copy",
                 confidence=min(1.0, (token_sim + ast_sim) / 2),
                 evidence=evidence,
             )
@@ -95,7 +99,8 @@ class PlagiarismTypeClassifier:
             if cfg_sim > 0.5:
                 evidence.append(f"Control flow is equivalent (CFG {cfg_sim:.0%})")
             return PlagiarismType(
-                type_code="T2", type_name="Variable/Function Renaming",
+                type_code="T2",
+                type_name="Variable/Function Renaming",
                 confidence=min(1.0, ast_sim),
                 evidence=evidence,
             )
@@ -108,11 +113,14 @@ class PlagiarismTypeClassifier:
                 "Loop/recursion patterns are equivalent",
             ]
             if token_sim < 0.5:
-                evidence.append(f"Token similarity low ({token_sim:.0%}) despite structural match")
+                evidence.append(
+                    f"Token similarity low ({token_sim:.0%}) despite structural match"
+                )
             if pdg_sim > 0.3:
                 evidence.append(f"Data dependencies are preserved (PDG {pdg_sim:.0%})")
             return PlagiarismType(
-                type_code="T3", type_name="Restructured Code",
+                type_code="T3",
+                type_name="Restructured Code",
                 confidence=min(1.0, (cfg_sim + ast_sim) / 2),
                 evidence=evidence,
             )
@@ -125,7 +133,8 @@ class PlagiarismTypeClassifier:
                 "Different implementation but same semantics",
             ]
             return PlagiarismType(
-                type_code="T4", type_name="Semantic Clone",
+                type_code="T4",
+                type_name="Semantic Clone",
                 confidence=overall_sim,
                 evidence=evidence,
             )
@@ -133,11 +142,16 @@ class PlagiarismTypeClassifier:
         # T5: Independent Implementation
         default_evidence = [
             f"Overall similarity is low ({overall_sim:.0%})",
-            f"AST structure differs significantly ({ast_sim:.0%})" if ast_sim < 0.4 else "Some structural overlap detected",
+            (
+                f"AST structure differs significantly ({ast_sim:.0%})"
+                if ast_sim < 0.4
+                else "Some structural overlap detected"
+            ),
             "Likely independently written",
         ]
         return PlagiarismType(
-            type_code="T5", type_name="Independent Implementation",
+            type_code="T5",
+            type_name="Independent Implementation",
             confidence=1.0 - overall_sim,
             evidence=default_evidence,
         )
@@ -147,9 +161,11 @@ class PlagiarismTypeClassifier:
 # Code Highlighter / Diff Generator
 # =============================================================================
 
+
 @dataclass
 class SimilarBlock:
     """A block of similar code between two files."""
+
     line_start_a: int
     line_end_a: int
     line_start_b: int
@@ -168,3 +184,4 @@ class CodeDiffGenerator:
     Uses:
     1. Token-level matching (exact/near matches)
     2.
+    """
