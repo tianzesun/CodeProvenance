@@ -203,6 +203,8 @@ class Layer2Statistical:
         scores = engine_scores or {}
         details = engine_details or {}
 
+        has_code = bool(code_a and code_b and code_a.strip() and code_b.strip())
+
         # --- Graph similarity ---
         graph_score = float(scores.get("graph", scores.get("execution_cfg", 0.0)))
 
@@ -238,7 +240,10 @@ class Layer2Statistical:
             if key in style_b:
                 max_val = max(style_a[key], style_b[key], 1.0)
                 style_distances.append(abs(style_a[key] - style_b[key]) / max_val)
-        stylometric_distance = sum(style_distances) / max(1, len(style_distances))
+        if not has_code:
+            stylometric_distance = 1.0
+        else:
+            stylometric_distance = sum(style_distances) / max(1, len(style_distances))
         # Normalize: same style → 0.0, different → 1.0
 
         # --- Sentence structure similarity ---
@@ -289,9 +294,12 @@ class Layer2Statistical:
                     profile_a[key], profile_b[key]
                 )
                 struct_similarities.append(ratio)
-        sentence_structure_sim = sum(struct_similarities) / max(
-            1, len(struct_similarities)
-        )
+        if not has_code:
+            sentence_structure_sim = 0.0
+        else:
+            sentence_structure_sim = sum(struct_similarities) / max(
+                1, len(struct_similarities)
+            )
 
         # --- Control/data flow match from graph engine ---
         control_flow_match = float(details.get("control_flow_match", graph_score * 0.8))
