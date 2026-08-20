@@ -48,7 +48,7 @@ try:
     PDF_BACKEND = "weasyprint"
 except ImportError:
     try:
-        import pdfkit
+        import pdfkit  # noqa: F401
 
         PDF_BACKEND = "pdfkit"
     except ImportError:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -81,7 +82,11 @@ async def lti_pdp_callback(request: Request, submission_id: str):
 async def get_jwks():
     """Return the Public Key Set (JWKS)."""
     if os.path.exists(LTI_CONFIG_PATH):
-        with open(LTI_CONFIG_PATH, "r") as f:
-            config = json.load(f)
-            return config.get("jwks", {"keys": []})
+
+        def _read_jwks() -> dict:
+            with open(LTI_CONFIG_PATH, "r") as f:
+                return json.load(f)
+
+        config = await asyncio.to_thread(_read_jwks)
+        return config.get("jwks", {"keys": []})
     return {"keys": []}

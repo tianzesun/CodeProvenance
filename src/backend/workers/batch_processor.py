@@ -251,8 +251,7 @@ class BatchProcessor:
 # Celery task definitions
 try:
     import redis
-    from celery import Celery, chain, chord, group
-    from celery.result import AsyncResult
+    from celery import Celery, group
 
     celery_app = Celery("codeprovenance")
     celery_app.config_from_object("src.workers.celery_config")

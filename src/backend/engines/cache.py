@@ -152,7 +152,6 @@ def get_token_cache(maxsize: int = 8192) -> TokenCache:
 
 def invalidate_all_caches() -> None:
     """Clear both global caches (useful for testing or forced re-compute)."""
-    global _embedding_cache, _token_cache
     if _embedding_cache is not None:
         _embedding_cache.clear()
     if _token_cache is not None:

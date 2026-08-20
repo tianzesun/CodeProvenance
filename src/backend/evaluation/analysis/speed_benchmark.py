@@ -174,9 +174,7 @@ def benchmark_all_engines(
 
     for name, engine_class in sorted(engines.items()):
         try:
-            engine = (
-                engine_class() if not isinstance(engine_class, type) else engine_class()
-            )
+            engine = engine_class()
             profile = run_speed_benchmark(engine, code_pairs, warmup=2, n_runs=n_runs)
             results[name] = profile
         except Exception:

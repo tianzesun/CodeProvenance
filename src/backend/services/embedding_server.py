@@ -94,7 +94,6 @@ def _load_model_sync():
 
 async def ensure_model_loaded():
     """Thread-safe lazy model loader."""
-    global embedding_model
     if embedding_model is not None:
         return embedding_model
     async with _model_load_lock:
@@ -105,8 +104,6 @@ async def ensure_model_loaded():
 
 async def batch_worker():
     """Background batch processing worker."""
-    global embedding_model
-
     while True:
         await asyncio.sleep(BATCH_TIMEOUT)
 
