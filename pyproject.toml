@@ -1,3 +1,21 @@
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Naive (tz-naive UTC) datetimes are a deliberate project convention backed by
+# SQLAlchemy/token code that expects naive values. Converting to tz-aware values
+# is a behavior change outside lint scope.
+# BLE001: `except Exception` is the project's API-boundary containment pattern
+# (log the error, return a controlled response). Narrowing each catch is a
+# behavior review better tracked as its own task.
+ignore = ["DTZ003", "DTZ005", "DTZ006", "DTZ007", "BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependency-injection calls in parameter defaults are idiomatic.
+"src/backend/api/routes/*.py" = ["B008"]
+"src/backend/api/server.py" = ["B008"]
+# Typer CLI uses Argument()/Option() in defaults idiomatically.
+"src/backend/cli/**/*.py" = ["B008"]
+# __init__.py files re-export public API members.
+"src/**/__init__.py" = ["F401"]
