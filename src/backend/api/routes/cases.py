@@ -199,7 +199,7 @@ def get_current_user(request: Request = None) -> dict:
                                 else None
                             ),
                         }
-        except Exception:
+        except Exception:  # noqa: S110
             pass
     # Development fallback
     return {"id": uuid.uuid4(), "email": "user@example.com", "role": "professor"}

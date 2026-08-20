@@ -108,7 +108,7 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
             try:
                 with open(cache_path, "rb") as f:
                     return pickle.load(f)
-            except Exception:
+            except Exception:  # noqa: S110
                 # If cache is corrupted, we'll recompute
                 pass
 
@@ -122,7 +122,7 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
             try:
                 with open(cache_path, "wb") as f:
                     pickle.dump(embedding, f)
-            except Exception:
+            except Exception:  # noqa: S110
                 # If we can't cache, continue anyway
                 pass
 

@@ -25,7 +25,7 @@ import logging
 import math
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, ClassVar
 
 from src.backend.engines.features.code_stylometry import StylometryExtractor
 
@@ -130,7 +130,7 @@ class AIDetectionEngine:
         docstring_density   0.06
     """
 
-    _WEIGHTS: dict[str, float] = {
+    _WEIGHTS: ClassVar[dict[str, float]] = {
         "perplexity": 0.18,
         "burstiness": 0.14,
         "stylometry": 0.16,
@@ -232,7 +232,7 @@ class AIDetectionEngine:
                 "language": language,
             }
         except Exception as exc:
-            logger.error("AI detection failed: %s", exc, exc_info=True)
+            logger.exception("AI detection failed")
             return {
                 "ai_probability": 0.0,
                 "confidence": 0.0,
@@ -498,7 +498,7 @@ class AIDetectionEngine:
         if self.calibrator is not None:
             try:
                 calibrated = float(self.calibrator.predict([raw])[0])
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Fall back to sigmoid calibration
 
         return calibrated

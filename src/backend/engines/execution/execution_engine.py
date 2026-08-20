@@ -24,7 +24,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,7 @@ class SandboxExecutor:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -162,6 +163,7 @@ class SandboxExecutor:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                check=False,
             )
             elapsed = time.monotonic() - start
             return ExecutionResult(
@@ -236,6 +238,7 @@ class BaseToolRunner(ABC):
             timeout=self.timeout,
             env=run_env,
             cwd=str(cwd) if cwd else None,
+            check=False,
         )
 
 
@@ -251,7 +254,7 @@ class MossRunner(BaseToolRunner):
     MOSS runs remotely, so sandboxing is limited to local preprocessing.
     """
 
-    MOSS_LANG_MAP = {
+    MOSS_LANG_MAP: ClassVar[dict] = {
         "python": "py",
         "java": "java",
         "c": "cc",
@@ -376,7 +379,7 @@ class JPlagRunner(BaseToolRunner):
     - Multiple language frontends
     """
 
-    JPLAG_LANG_MAP = {
+    JPLAG_LANG_MAP: ClassVar[dict] = {
         "python": "python3",
         "java": "java",
         "c": "c",
@@ -727,7 +730,7 @@ class ExecutionEngine:
     Manages tool discovery, execution, and result collection.
     """
 
-    TOOL_REGISTRY = {
+    TOOL_REGISTRY: ClassVar[dict] = {
         "moss": MossRunner,
         "jplag": JPlagRunner,
         "dolos": DolosRunner,
@@ -795,5 +798,7 @@ class ExecutionEngine:
                 if runner.is_available():
                     available.append(tool_name)
             except Exception:
-                pass
+                logger.debug(
+                    "Tool availability probe failed: %s", tool_name, exc_info=True
+                )
         return available

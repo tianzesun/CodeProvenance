@@ -1179,11 +1179,10 @@ def _build_benchmark_dataset_readiness(
             with open(labels_csv, "r") as f:
                 reader = csv.DictReader(f)
                 total = sum(1 for row in reader)
-            positives = sum(
-                1
-                for row in csv.DictReader(open(labels_csv, "r"))
-                if row.get("verdict") == "1"
-            )
+            with open(labels_csv, "r") as f2:
+                positives = sum(
+                    1 for row in csv.DictReader(f2) if row.get("verdict") == "1"
+                )
             negatives = total - positives
         except Exception:
             return {
@@ -4272,7 +4271,7 @@ def _enrich_job_from_report(job_dict: dict[str, Any], job_id: str) -> dict[str, 
                 # Prefer the full rich pairs from the generated report (best for Results page)
                 job_dict["results"] = data["pairs"]
     except Exception:
-        pass
+        logger.debug("Report pairs unavailable", exc_info=True)
     return job_dict
 
 
@@ -6567,7 +6566,6 @@ async def retrain_ai_detector():
 
     This endpoint should be called periodically to improve detection reliability.
     """
-    global _calibration_data
 
     if len(_calibration_data) < 10:
         return JSONResponse(
@@ -7443,6 +7441,9 @@ async def compute_real_fpr_on_clean_corpus(
             if len(content.strip()) > 30:
                 submissions[upload.filename] = content
         except Exception:
+            logger.debug(
+                "Skipping unreadable submission: %s", upload.filename, exc_info=True
+            )
             continue
 
     if len(submissions) < 2:
@@ -8266,6 +8267,7 @@ async def get_error_analysis() -> dict[str, Any]:
                 labeled_run = run
                 break
         except Exception:
+            logger.debug("Failed to load labeled run", exc_info=True)
             continue
 
     if labeled_run:
@@ -8454,6 +8456,7 @@ def _build_error_analysis_from_jobs() -> dict[str, Any]:
                 )
             job_count += 1
         except Exception:
+            logger.debug("Failed to compute job result", exc_info=True)
             continue
 
     if not all_results:
@@ -8907,9 +8910,9 @@ async def get_benchmark_datasets() -> dict[str, Any]:
         color = dataset_colors.get("demo" if is_demo else "gray", "slate")
 
         # Try to find icon/color for known dataset types
-        for key in dataset_icons:
+        for key, dataset_icon in dataset_icons.items():
             if key in dataset_id.lower():
-                icon = dataset_icons[key]
+                icon = dataset_icon
                 color = dataset_colors.get(key, "slate")
                 break
 
@@ -9548,7 +9551,7 @@ def _run_benchmark_background(
                 try:
                     submissions[safe] = fbytes.decode("utf-8", errors="replace")
                 except Exception:
-                    pass
+                    logger.debug("Failed to decode submission", exc_info=True)
 
         _progress(f"Loaded {len(submissions)} submissions")
 
@@ -10333,10 +10336,10 @@ def _compute_evaluation_metrics(
     try:
         from sklearn.metrics import (
             average_precision_score,
-            confusion_matrix,
+            confusion_matrix,  # noqa: F401
             f1_score,
-            precision_score,
-            recall_score,
+            precision_score,  # noqa: F401
+            recall_score,  # noqa: F401
             roc_auc_score,
         )
 
@@ -12368,7 +12371,7 @@ async def download_report_pdf(job_id: str, request: Request):
             },
         )
     except Exception as exc:
-        logger.exception("PDF generation failed for %s: %s", job_id, exc)
+        logger.exception("PDF generation failed for %s", job_id)
         raise HTTPException(
             status_code=500,
             detail=f"PDF generation failed: {exc}. Try using the Print button in your browser instead.",
@@ -15192,12 +15195,11 @@ async def update_engine_config(config_update: dict[str, Any]):
         for section in validate_sections:
             if section in updated_config:
                 for key, value in updated_config[section].items():
-                    if isinstance(value, (int, float)):
-                        if not 0.0 <= value <= 1.0:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"{section}.{key} must be between 0.0 and 1.0, got {value}",
-                            )
+                    if isinstance(value, (int, float)) and not 0.0 <= value <= 1.0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"{section}.{key} must be between 0.0 and 1.0, got {value}",
+                        )
 
         # Save configuration
         save_engine_config(updated_config)

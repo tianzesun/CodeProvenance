@@ -7,6 +7,7 @@ are properly bounded and calibrated.
 
 import math
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -39,7 +40,7 @@ class SignalScores:
     docstring_density: float = 0.0
 
     # Signal weights (must sum to 1.0)
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "perplexity": 0.18,
         "burstiness": 0.14,
         "stylometry": 0.16,
@@ -60,7 +61,7 @@ class SignalScores:
         for signal_name in self._get_signal_names():
             score = getattr(self, signal_name)
             if not isinstance(score, (int, float)):
-                raise ValueError(f"{signal_name} must be numeric")
+                raise TypeError(f"{signal_name} must be numeric")
             if not (0.0 <= score <= 1.0):
                 raise ValueError(f"{signal_name} must be in [0.0, 1.0], got {score}")
 
@@ -156,19 +157,19 @@ class AIDetectionResult:
     def _validate_indicators(self):
         """Ensure indicators are valid."""
         if not isinstance(self.indicators, list):
-            raise ValueError("indicators must be a list")
+            raise TypeError("indicators must be a list")
         if len(self.indicators) > 6:
             raise ValueError(
                 f"indicators must have at most 6 items, got {len(self.indicators)}"
             )
         for indicator in self.indicators:
             if not isinstance(indicator, str):
-                raise ValueError("each indicator must be a string")
+                raise TypeError("each indicator must be a string")
 
     def _validate_flagged_lines(self):
         """Ensure flagged lines are valid."""
         if not isinstance(self.flagged_lines, list):
-            raise ValueError("flagged_lines must be a list")
+            raise TypeError("flagged_lines must be a list")
         if len(self.flagged_lines) > 30:
             raise ValueError(
                 f"flagged_lines must have at most 30 items, got {len(self.flagged_lines)}"

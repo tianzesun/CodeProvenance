@@ -280,6 +280,7 @@ class PerplexityScorer:
                 logger.info("Loaded HF code LM %s from local cache", candidate)
                 return
             except Exception:
+                logger.debug("Failed to load HF model %s", candidate, exc_info=True)
                 continue
 
     def train(self, texts: list[str]) -> None:

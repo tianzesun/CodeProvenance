@@ -128,7 +128,7 @@ def _load_profiles_payload() -> dict[str, Any]:
     with PROFILE_CONFIG_PATH.open("r", encoding="utf-8") as handle:
         payload = yaml.safe_load(handle) or {}
     if not isinstance(payload, dict):
-        raise ValueError("Course profile config must be a mapping")
+        raise TypeError("Course profile config must be a mapping")
     return payload
 
 

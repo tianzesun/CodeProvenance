@@ -142,6 +142,7 @@ class WebSearchService:
                 raw = requests.get(raw_url, headers=self.github_headers, timeout=8)
                 raw.raise_for_status()
             except Exception:
+                logger.debug("Failed to fetch raw source %s", raw_url, exc_info=True)
                 continue
 
             score = self._score_match(query_code, raw.text)

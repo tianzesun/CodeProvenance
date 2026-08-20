@@ -94,10 +94,8 @@ class EngineWeightConfig:
                 time.ctime(self._last_modified_time),
             )
 
-        except Exception as e:
-            logger.error(
-                "Failed to load engine weights config: %s", str(e), exc_info=True
-            )
+        except Exception:
+            logger.exception("Failed to load engine weights config")
             self._load_defaults()
 
     def reload_if_changed(self) -> bool:
@@ -122,7 +120,7 @@ class EngineWeightConfig:
             if engine not in self.valid_engines:
                 logger.warning("Unknown engine in weights: %s", engine)
             if not isinstance(weight, (int, float)):
-                raise ValueError(f"Invalid weight for {engine}: must be number")
+                raise TypeError(f"Invalid weight for {engine}: must be number")
             if weight < 0.0 or weight > 1.0:
                 raise ValueError(
                     f"Invalid weight for {engine}: must be between 0.0 and 1.0"

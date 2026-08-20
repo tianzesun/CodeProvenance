@@ -123,8 +123,8 @@ class BinocularsDetector:
                 "available": True,
             }
 
-        except Exception as exc:
-            logger.exception("Binoculars inference failed: %s", exc)
+        except Exception:
+            logger.exception("Binoculars inference failed")
             return {
                 "ai_probability": 0.5,
                 "confidence": 0.0,

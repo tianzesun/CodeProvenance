@@ -32,7 +32,7 @@ class GPUWorker:
                 import torch
 
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-            except:
+            except Exception:
                 device = "cpu"
         self.device = device
 
@@ -48,8 +48,8 @@ class GPUWorker:
             import torch
 
             torch.cuda.empty_cache()
-        except:
-            pass
+        except Exception:
+            logger.debug("CUDA cache clear failed", exc_info=True)
 
     def _load_model(self, model_name="microsoft/codebert-base"):
         """Lazy-load model (keeps it in memory for all tasks)."""

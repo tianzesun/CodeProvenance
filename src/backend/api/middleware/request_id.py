@@ -50,15 +50,17 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
                 handler.addFilter(RequestIdFilter())
 
             # Update formatter to include request_id if it uses standard format
-            if hasattr(handler.formatter, "_fmt"):
+            if (
+                hasattr(handler.formatter, "_fmt")
+                and "%(request_id)s" not in handler.formatter._fmt
+            ):
                 fmt = handler.formatter._fmt
-                if "%(request_id)s" not in fmt:
-                    # Insert request_id into the format string
-                    if "%(levelname)s" in fmt:
-                        new_fmt = fmt.replace(
-                            "%(levelname)s", "%(levelname)s [%(request_id)s]"
-                        )
-                        handler.setFormatter(logging.Formatter(new_fmt))
+                # Insert request_id into the format string
+                if "%(levelname)s" in fmt:
+                    new_fmt = fmt.replace(
+                        "%(levelname)s", "%(levelname)s [%(request_id)s]"
+                    )
+                    handler.setFormatter(logging.Formatter(new_fmt))
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -94,8 +96,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             # Attach request ID to exception
             exc.request_id = request_id
             logger.exception(
-                "Request failed with exception: %s",
-                str(exc),
+                "Request failed with exception",
                 extra={"exception": exc},
             )
             raise

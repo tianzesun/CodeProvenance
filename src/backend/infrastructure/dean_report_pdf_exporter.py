@@ -80,7 +80,7 @@ class DeanReportPdfExporter:
             }
             pdfkit.from_string(html_content, str(output_path), options=options)
             return output_path
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
         return self._export_html_fallback(report, output_path)

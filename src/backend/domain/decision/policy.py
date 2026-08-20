@@ -95,7 +95,7 @@ def load_policy(path: Path) -> PolicyConfig:
                             if k in PolicyConfig.__dataclass_fields__
                         }
                     )
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
     return PolicyConfig()
 

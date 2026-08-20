@@ -218,7 +218,7 @@ def _get_builtin_algorithms() -> dict[str, BaseSimilarityAlgorithm]:
         from .graph_similarity import GraphSimilarity
 
         _builtins["graph"] = GraphSimilarity()
-    except Exception:
+    except Exception:  # noqa: S110
         pass
 
     return _builtins
