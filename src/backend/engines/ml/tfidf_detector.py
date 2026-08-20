@@ -15,7 +15,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -36,7 +36,7 @@ class CodeTokenizer:
     """Tokenizes code into meaningful units."""
 
     # Language-specific keyword sets
-    PYTHON_KEYWORDS = {
+    PYTHON_KEYWORDS: ClassVar[set] = {
         "def",
         "class",
         "if",
@@ -68,7 +68,7 @@ class CodeTokenizer:
         "None",
     }
 
-    JAVA_KEYWORDS = {
+    JAVA_KEYWORDS: ClassVar[set] = {
         "public",
         "private",
         "protected",

@@ -499,12 +499,11 @@ class PDGBuilder:
                 # Use: record dependency
                 pass  # Uses are implicit in the AST walk
 
-            elif isinstance(stmt, ast.For):
+            elif isinstance(stmt, ast.For) and isinstance(stmt.target, ast.Name):
                 # Loop variable is a definition
-                if isinstance(stmt.target, ast.Name):
-                    def_node = self._make_pdg_node(
-                        stmt.target.id, getattr(stmt, "lineno", 0)
-                    )
+                def_node = self._make_pdg_node(
+                    stmt.target.id, getattr(stmt, "lineno", 0)
+                )
 
 
 class ASTNormalizer:

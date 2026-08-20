@@ -8,7 +8,7 @@ from labeled data, instead of hand-tuned fixed weights.
 
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -30,7 +30,7 @@ class LearnedScoringModel:
     - Dataset-specific patterns
     """
 
-    FEATURE_NAMES = [
+    FEATURE_NAMES: ClassVar[list] = [
         "ast_similarity",
         "token_similarity",
         "gst_similarity",

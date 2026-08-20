@@ -15,7 +15,7 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from src.backend.domain.models import EvidenceBlock, Finding
 
@@ -479,7 +479,7 @@ class NiCadAdapter:
 class AdapterRegistry:
     """Registry mapping tool names to their adapters."""
 
-    _adapters = {
+    _adapters: ClassVar[dict] = {
         "moss": MossAdapter,
         "jplag": JPlagAdapter,
         "dolos": DolosAdapter,

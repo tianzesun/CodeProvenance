@@ -6,7 +6,7 @@ Falls back to regex-based extraction when tree-sitter is unavailable.
 
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class ASTTokenExtractor:
     """
 
     # Language detection patterns
-    LANGUAGE_PATTERNS: dict[str, list[str]] = {
+    LANGUAGE_PATTERNS: ClassVar[dict[str, list[str]]] = {
         "python": [r"\bdef\s+\w+", r"\bclass\s+\w+", r"\bimport\s+\w+"],
         "javascript": [r"\bfunction\s+\w+", r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*="],
         "java": [r"\bpublic\s+class\s+\w+", r"\bprivate\s+\w+\s+\w+", r"\bvoid\s+\w+"],
@@ -61,7 +61,7 @@ class ASTTokenExtractor:
     def _try_load_tree_sitter(self):
         """Attempt to load tree-sitter for accurate parsing."""
         try:
-            import tree_sitter_languages
+            import tree_sitter_languages  # noqa: F401
 
             self.use_tree_sitter = True
             logger.debug("tree-sitter available for accurate AST parsing")

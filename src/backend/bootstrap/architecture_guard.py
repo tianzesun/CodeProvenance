@@ -4,13 +4,14 @@ This module provides the canonical architecture guard for the bootstrap layer.
 """
 
 from pathlib import Path
+from typing import ClassVar
 
 
 class ArchitectureGuard:
     """Prevents forbidden layer access with AST-based validation."""
 
     _enabled = False
-    _ALLOWED = {
+    _ALLOWED: ClassVar[dict] = {
         "domain": {
             "allow": ["domain"],
             "deny": [
@@ -56,7 +57,7 @@ class ArchitectureGuard:
         "infrastructure": {"allow": ["*"], "deny": []},
         "cli": {"allow": ["cli", "engines"], "deny": ["runners"]},
     }
-    LAYER_ORDER = {
+    LAYER_ORDER: ClassVar[dict] = {
         "api": 1,
         "web": 1,
         "workers": 1,

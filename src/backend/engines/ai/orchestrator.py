@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 from src.backend.engines.similarity.ai_detection import AIDetectionEngine
@@ -39,7 +39,7 @@ class AIDetectionOrchestrator:
 
     # Calibrated weights favoring Binoculars (Layer 1) for its published performance
     # Total weight = 1.0
-    _LAYER_WEIGHTS: dict[str, float] = {
+    _LAYER_WEIGHTS: ClassVar[dict[str, float]] = {
         "binoculars": 0.40,  # Zero-shot SOTA (ICML 2024)
         "pattern_library": 0.15,
         "perplexity": 0.12,
@@ -158,7 +158,7 @@ class AIDetectionOrchestrator:
         if calibrator is not None and callable(getattr(calibrator, "predict", None)):
             try:
                 fused_probability = float(calibrator.predict([fused_probability])[0])
-            except Exception:  # pragma: no cover
+            except Exception:  # pragma: no cover  # noqa: S110
                 pass  # Keep the sigmoid-calibrated score on failure
 
         # Merge indicators (prefer Binoculars evidence when strong)

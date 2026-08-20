@@ -17,7 +17,7 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -156,7 +156,7 @@ class BigCloneBenchLoader(GroundTruthLoader):
     Requires the BigCloneBench directory structure.
     """
 
-    CLONE_TYPE_MAP = {
+    CLONE_TYPE_MAP: ClassVar[dict] = {
         "Type-I": 1,
         "Type-II": 2,
         "Type-III": 3,

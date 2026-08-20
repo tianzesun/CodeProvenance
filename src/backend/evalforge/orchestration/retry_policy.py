@@ -5,7 +5,7 @@ Implements conservative retry logic that ensures failed jobs are retried
 appropriately without compromising scientific validity.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 
 class RetryPolicy:
@@ -17,7 +17,7 @@ class RetryPolicy:
     """
 
     MAX_ATTEMPTS = 3
-    FATAL_ERRORS = {
+    FATAL_ERRORS: ClassVar[dict] = {
         "OutOfMemoryError",
         "SegmentationFault",
         "IllegalInstruction",

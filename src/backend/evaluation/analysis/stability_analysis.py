@@ -32,7 +32,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -341,7 +341,7 @@ class FailureClusterAnalyzer:
     """
 
     # Known failure patterns with their fix recommendations
-    FAILURE_PATTERNS = {
+    FAILURE_PATTERNS: ClassVar[dict] = {
         "rename_heavy": {
             "description": "Variable/method rename not detected",
             "fix": "Add identifier normalization (stemming, type-aware mapping)",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 
 @dataclass
@@ -60,7 +61,7 @@ class ControlFlowTree:
 class ControlFlowVisualizer:
     """Generates control flow visualizations from source code."""
 
-    CONTROL_STRUCTURES = {"If", "For", "While", "With", "Try", "IfExp"}
+    CONTROL_STRUCTURES: ClassVar[dict] = {"If", "For", "While", "With", "Try", "IfExp"}
 
     def __init__(self) -> None:
         self._cache: dict[str, ControlFlowTree] = {}

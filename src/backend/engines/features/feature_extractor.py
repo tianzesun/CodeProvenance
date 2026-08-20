@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, ClassVar
 
 from src.backend.config.settings import settings
 from src.backend.engines.ast_multi_layer import compute_ast_layer_scores
@@ -109,7 +109,7 @@ class FeatureExtractor:
     affect the engines that need them.
     """
 
-    FEATURE_ORDER: list[str] = [
+    FEATURE_ORDER: ClassVar[list[str]] = [
         "fingerprint",
         "winnowing",
         "string_tiling",

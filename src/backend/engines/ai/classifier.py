@@ -14,7 +14,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import joblib
 
@@ -45,7 +45,7 @@ class AICodeClassifier:
     to persist. Use ``predict`` with a new feature dict.
     """
 
-    FEATURE_KEYS = [
+    FEATURE_KEYS: ClassVar[list] = [
         # AST features
         "node_type_entropy",
         "cyclomatic_complexity",

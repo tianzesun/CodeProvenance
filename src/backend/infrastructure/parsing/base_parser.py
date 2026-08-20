@@ -6,7 +6,7 @@ All language-specific parsers should inherit from this base class.
 
 import hashlib
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 
 class BaseParser(ABC):
@@ -83,7 +83,7 @@ class ParserFactory:
     Factory class for creating language-specific parsers.
     """
 
-    _parsers = {}
+    _parsers: ClassVar[dict] = {}
 
     @classmethod
     def register_parser(cls, language: str, parser_class):

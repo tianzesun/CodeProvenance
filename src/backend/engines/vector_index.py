@@ -113,11 +113,10 @@ class CodeVectorIndex:
         """Add a submission to the index."""
         vec = self.embed(code, engine_scores)
 
-        if not self.index.is_trained:
+        if not self.index.is_trained and len(self.id_map) >= 1000:
             # Train on first 1000 entries
-            if len(self.id_map) >= 1000:
-                all_vecs = np.array([self.embed(c) for c in self._metadata.values()])
-                self.train(all_vecs)
+            all_vecs = np.array([self.embed(c) for c in self._metadata.values()])
+            self.train(all_vecs)
 
         self.index.add(vec.reshape(1, -1).astype(np.float32))
         self.id_map.append(submission_id)

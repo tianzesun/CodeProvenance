@@ -16,7 +16,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -86,7 +86,7 @@ class CausalRankingEngine:
     """
 
     # Known improvement patterns with impact estimates
-    KNOWN_IMPROVEMENTS = {
+    KNOWN_IMPROVEMENTS: ClassVar[dict] = {
         "identifier_normalization": {
             "description": "Add canonical identifier renaming (v_1, v_2, ...)",
             "target": "Type-2 clone detection",

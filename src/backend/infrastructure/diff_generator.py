@@ -12,7 +12,7 @@ We are NOT doing text diff only. We are doing AST alignment + token alignment + 
 
 import difflib
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 # ─────────────────────────────────────────────
 # 1. Data Structures
@@ -328,7 +328,7 @@ class ConfidenceScorer:
 class EvidenceAssembler:
     """Assembles match blocks into explainable evidence for review."""
 
-    EXPLANATIONS = {
+    EXPLANATIONS: ClassVar[dict] = {
         "ast": "Structural similarity detected (AST node alignment). "
         "Control flow and logic structure are similar, which is strong evidence of copying.",
         "token": "High token sequence overlap detected. "

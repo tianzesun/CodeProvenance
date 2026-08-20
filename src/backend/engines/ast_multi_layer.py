@@ -80,7 +80,7 @@ import ast
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -133,7 +133,7 @@ class ASTEvidenceExtractor:
     rule engine uses to make decisions.
     """
 
-    LOGIC_NODES = {
+    LOGIC_NODES: ClassVar[set] = {
         "Call",
         "FunctionDef",
         "AsyncFunctionDef",
@@ -154,7 +154,7 @@ class ASTEvidenceExtractor:
         "GeneratorExp",
     }
 
-    CONTROL_NODES = {
+    CONTROL_NODES: ClassVar[set] = {
         "If",
         "For",
         "While",
@@ -169,13 +169,13 @@ class ASTEvidenceExtractor:
         "Continue",
     }
 
-    REACT_IMPORT_PATTERNS = [
+    REACT_IMPORT_PATTERNS: ClassVar[list] = [
         r"import\s+React\s+from\s+['\"]react['\"]",
         r"import\s+\{.*\}\s+from\s+['\"]react['\"]",
         r"from\s+['\"]react['\"]",
     ]
 
-    HOOK_PATTERNS = [
+    HOOK_PATTERNS: ClassVar[list] = [
         (r"useState\s*\(", "useState"),
         (r"useEffect\s*\(", "useEffect"),
         (r"useCallback\s*\(", "useCallback"),

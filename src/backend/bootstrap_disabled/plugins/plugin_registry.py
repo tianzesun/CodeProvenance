@@ -1,12 +1,14 @@
 """Plugin registry - single source of truth for execution plugins."""
 
+from typing import ClassVar
+
 from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
 
 
 class PluginRegistry:
     """Registry for execution plugins."""
 
-    _plugins: dict[str, ExecutionPlugin] = {}
+    _plugins: ClassVar[dict[str, ExecutionPlugin]] = {}
 
     @classmethod
     def register(cls, plugin: ExecutionPlugin) -> None:

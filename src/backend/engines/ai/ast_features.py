@@ -16,7 +16,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ class TreeSitterASTExtractor:
     Falls back to lexical features for unsupported languages.
     """
 
-    _NODE_TYPES: dict[str, list[str] | None] = {
+    _NODE_TYPES: ClassVar[dict[str, list[str] | None]] = {
         "python": [
             "function_definition",
             "class_definition",
@@ -388,8 +388,7 @@ class TreeSitterASTExtractor:
             if current is None:
                 continue
             yield current
-            for child in current.children:
-                stack.append(child)
+            stack.extend(current.children)
 
     def _count_node_types(self, node: Any, types: tuple[str, ...]) -> tuple[int, int]:
         """Count function and class node occurrences."""

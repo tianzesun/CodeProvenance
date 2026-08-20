@@ -1,8 +1,10 @@
 """Dependency Container - single wiring location."""
 
+from typing import ClassVar
+
 
 class Container:
-    _services = {}
+    _services: ClassVar[dict] = {}
 
     @classmethod
     def register(cls, key, factory):

@@ -1,8 +1,10 @@
 """Similarity Registry - extensible registry for all similarity algorithms."""
 
+from typing import ClassVar
+
 
 class SimilarityRegistry:
-    _engines = {}
+    _engines: ClassVar[dict] = {}
 
     @classmethod
     def register(cls, name, engine):

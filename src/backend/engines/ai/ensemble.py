@@ -12,7 +12,7 @@ import logging
 import math
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 
@@ -35,7 +35,7 @@ class AIEnsembleConfig:
     _instance: AIEnsembleConfig | None = None
     _lock = Lock()
 
-    DEFAULTS: dict[str, Any] = {
+    DEFAULTS: ClassVar[dict[str, Any]] = {
         "ensemble": {
             "heuristic": {
                 "ast": 0.20,
