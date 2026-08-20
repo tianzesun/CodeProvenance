@@ -202,6 +202,17 @@ class DashboardService:
 # ---------------------------------------------------------------------------
 
 
+# Class names for the similarity engines used by _extract_features
+# Mapped by module so a wrong-class lookup degrades to feature=0.0
+_ENGINE_CLASS_NAMES: dict[str, str] = {
+    "ast": "ASTSimilarity",
+    "fingerprint": "TokenSimilarity",
+    "embedding": "EnhancedWinnowingSimilarity",
+    "ngram": "NgramSimilarity",
+    "winnowing": "EnhancedWinnowingSimilarity",
+}
+
+
 def _extract_features(code_a: str, code_b: str) -> dict[str, float]:
     """Extract feature similarities from a code pair.
 

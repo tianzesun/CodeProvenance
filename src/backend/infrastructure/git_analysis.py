@@ -8,6 +8,7 @@ Detects plagiarism through Git history analysis:
 - Sudden code appearance detection (copy-paste detection)
 """
 
+import hashlib
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -90,6 +91,7 @@ class GitAnalyzer:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             return result.returncode == 0
         except Exception:
@@ -104,6 +106,7 @@ class GitAnalyzer:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
             return result.returncode == 0, result.stdout
         except Exception as e:

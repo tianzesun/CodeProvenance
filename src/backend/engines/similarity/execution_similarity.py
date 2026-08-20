@@ -21,6 +21,8 @@ import time
 from collections import Counter
 from typing import Any
 
+from src.backend.domain.models import EvidenceBlock, Finding
+
 from .base_similarity import BaseSimilarityAlgorithm
 
 
@@ -100,7 +102,11 @@ class DockerSandbox:
         """Check if Docker is available."""
         try:
             result = subprocess.run(
-                ["docker", "--version"], capture_output=True, text=True, timeout=5
+                ["docker", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -167,6 +173,7 @@ class DockerSandbox:
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
+                    check=False,
                 )
 
                 execution_time = time.time() - start_time
@@ -226,6 +233,7 @@ class DockerSandbox:
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
+                    check=False,
                 )
 
                 execution_time = time.time() - start_time
@@ -286,7 +294,9 @@ class DockerSandbox:
 
         # Check if interpreter exists
         try:
-            subprocess.run([interpreter, "--version"], capture_output=True, timeout=5)
+            subprocess.run(
+                [interpreter, "--version"], capture_output=True, timeout=5, check=False
+            )
             return interpreter
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None

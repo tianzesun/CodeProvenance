@@ -84,4 +84,4 @@ class TuningResult:
     all_trials: list[TrialResult] = field(default_factory=list)
     search_history: list[dict[str, Any]] = field(default_factory=list)
     n_iterations: int = 0
-    conver
+    converged: bool = False

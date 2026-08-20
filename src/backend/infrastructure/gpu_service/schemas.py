@@ -16,7 +16,7 @@ class TaskResponse(BaseModel):
 
 class ResultResponse(BaseModel):
     status: str
-    result: Dict | None = None
+    result: dict | None = None
 
 
 class CompareResult(BaseModel):
