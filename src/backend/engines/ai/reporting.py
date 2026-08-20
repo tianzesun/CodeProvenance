@@ -9,7 +9,6 @@ Generates comprehensive, instructor-facing reports with:
 """
 
 from datetime import datetime
-from typing import Dict
 
 from src.backend.engines.ai.agreement import analyze_signal_agreement
 from src.backend.engines.ai.models import AIDetectionResult, SignalScores
@@ -20,7 +19,7 @@ def generate_detection_report(
     result: AIDetectionResult,
     code: str,
     language: str = "python",
-) -> Dict:
+) -> dict:
     """Generate comprehensive detection report.
 
     Args:
@@ -54,7 +53,7 @@ def generate_detection_report(
     return report
 
 
-def generate_executive_summary(result: AIDetectionResult) -> Dict:
+def generate_executive_summary(result: AIDetectionResult) -> dict:
     """Generate executive summary section.
 
     Args:
@@ -108,7 +107,7 @@ def _get_risk_summary(result: AIDetectionResult) -> str:
         )
 
 
-def generate_overall_assessment(result: AIDetectionResult) -> Dict:
+def generate_overall_assessment(result: AIDetectionResult) -> dict:
     """Generate overall assessment section.
 
     Args:
@@ -168,8 +167,8 @@ def _get_recommendation(result: AIDetectionResult) -> str:
 
 def generate_signal_breakdown(
     signals: SignalScores,
-    reliabilities: Dict[str, float],
-) -> Dict:
+    reliabilities: dict[str, float],
+) -> dict:
     """Generate signal breakdown section.
 
     Args:
@@ -228,7 +227,7 @@ def _interpret_signal(signal_name: str, score: float) -> str:
     return indicator
 
 
-def generate_agreement_analysis(agreement: Dict) -> Dict:
+def generate_agreement_analysis(agreement: dict) -> dict:
     """Generate signal agreement analysis section.
 
     Args:
@@ -248,7 +247,7 @@ def generate_agreement_analysis(agreement: Dict) -> Dict:
     }
 
 
-def _interpret_agreement(agreement: Dict) -> str:
+def _interpret_agreement(agreement: dict) -> str:
     """Interpret signal agreement.
 
     Args:
@@ -271,7 +270,7 @@ def _interpret_agreement(agreement: Dict) -> str:
         return "Signals show low agreement with significant variation."
 
 
-def generate_evidence_summary(result: AIDetectionResult, code: str) -> Dict:
+def generate_evidence_summary(result: AIDetectionResult, code: str) -> dict:
     """Generate evidence summary section.
 
     Args:
@@ -292,7 +291,7 @@ def generate_evidence_summary(result: AIDetectionResult, code: str) -> Dict:
     }
 
 
-def generate_limitations_section() -> Dict:
+def generate_limitations_section() -> dict:
     """Generate limitations section.
 
     Returns:
@@ -301,18 +300,30 @@ def generate_limitations_section() -> Dict:
     return {
         "title": "Important Limitations",
         "limitations": [
-            "This analysis detects patterns associated with AI-generated code, "
-            "but cannot definitively prove AI generation.",
-            "False positives can occur with code that happens to match AI patterns "
-            "(e.g., well-documented code, code following best practices).",
-            "False negatives can occur with AI code that is heavily modified "
-            "or uses uncommon patterns.",
-            "The detector is calibrated for Python code. Results for other languages "
-            "may be less reliable.",
-            "This tool should be used as one factor in academic integrity assessment, "
-            "not as the sole determinant.",
-            "Student context matters: code written during office hours, with instructor "
-            "guidance, or using AI as a learning tool may legitimately show AI patterns.",
+            (
+                "This analysis detects patterns associated with AI-generated code, "
+                "but cannot definitively prove AI generation."
+            ),
+            (
+                "False positives can occur with code that happens to match AI patterns "
+                "(e.g., well-documented code, code following best practices)."
+            ),
+            (
+                "False negatives can occur with AI code that is heavily modified "
+                "or uses uncommon patterns."
+            ),
+            (
+                "The detector is calibrated for Python code. Results for other languages "
+                "may be less reliable."
+            ),
+            (
+                "This tool should be used as one factor in academic integrity assessment, "
+                "not as the sole determinant."
+            ),
+            (
+                "Student context matters: code written during office hours, with instructor "
+                "guidance, or using AI as a learning tool may legitimately show AI patterns."
+            ),
         ],
         "recommendations": [
             "Use this report as a starting point for instructor investigation.",
@@ -324,7 +335,7 @@ def generate_limitations_section() -> Dict:
     }
 
 
-def generate_recommendations(result: AIDetectionResult) -> Dict:
+def generate_recommendations(result: AIDetectionResult) -> dict:
     """Generate recommendations section.
 
     Args:
@@ -336,7 +347,9 @@ def generate_recommendations(result: AIDetectionResult) -> Dict:
     recommendations = []
 
     if result.risk_level == "High":
-        recommendations.append("Schedule a meeting with the student to discuss the submission.")
+        recommendations.append(
+            "Schedule a meeting with the student to discuss the submission."
+        )
         recommendations.append(
             "Ask the student to explain their code and problem-solving approach."
         )
@@ -345,8 +358,12 @@ def generate_recommendations(result: AIDetectionResult) -> Dict:
         )
 
     elif result.risk_level == "Elevated":
-        recommendations.append("Review the submission more carefully for signs of AI generation.")
-        recommendations.append("Compare with the student's previous submissions for style changes.")
+        recommendations.append(
+            "Review the submission more carefully for signs of AI generation."
+        )
+        recommendations.append(
+            "Compare with the student's previous submissions for style changes."
+        )
         recommendations.append("Consider asking clarifying questions about the code.")
 
     elif result.risk_level == "Moderate":
@@ -364,7 +381,7 @@ def generate_recommendations(result: AIDetectionResult) -> Dict:
     }
 
 
-def format_report_as_text(report: Dict) -> str:
+def format_report_as_text(report: dict) -> str:
     """Format report as human-readable text.
 
     Args:
@@ -412,7 +429,7 @@ def format_report_as_text(report: Dict) -> str:
     # Signal Breakdown
     lines.append("SIGNAL BREAKDOWN")
     lines.append("-" * 80)
-    for signal_name, signal_info in report["signal_breakdown"].items():
+    for signal_info in report["signal_breakdown"].values():
         lines.append(
             f"{signal_info['label']}: {signal_info['score']} "
             f"(Reliability: {signal_info['reliability']}) - {signal_info['interpretation']}"

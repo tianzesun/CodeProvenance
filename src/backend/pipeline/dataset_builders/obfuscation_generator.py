@@ -10,10 +10,10 @@ Generates obfuscated versions of source code at various levels:
 
 Used to benchmark detection system robustness against obfuscation.
 """
-from typing import Dict, List, Any, Optional, Tuple
-import re
+
 import ast
 import random
+import re
 import string
 from dataclasses import dataclass, field
 
@@ -21,12 +21,13 @@ from dataclasses import dataclass, field
 @dataclass
 class ObfuscationResult:
     """Result of obfuscation."""
+
     original: str
     obfuscated: str
     level: int
     level_name: str
-    transformations: List[str] = field(default_factory=list)
-    preserved_names: Dict[str, str] = field(default_factory=dict)  # old -> new
+    transformations: list[str] = field(default_factory=list)
+    preserved_names: dict[str, str] = field(default_factory=dict)  # old -> new
 
 
 LEVEL_NAMES = {
@@ -57,11 +58,12 @@ class ObfuscationGenerator:
     def _generate_name(self, prefix: str = "v") -> str:
         """Generate a unique obfuscated variable name."""
         self._name_counter += 1
-        suffix = ''.join(self.rng.choices(string.ascii_lowercase, k=3))
+        suffix = "".join(self.rng.choices(string.ascii_lowercase, k=3))
         return f"{prefix}_{suffix}_{self._name_counter}"
 
-    def obfuscate(self, source_code: str, level: int = 0,
-                  language: str = "python") -> ObfuscationResult:
+    def obfuscate(
+        self, source_code: str, level: int = 0, language: str = "python"
+    ) -> ObfuscationResult:
         """
         Obfuscate source code at the given level.
 
@@ -121,21 +123,21 @@ class ObfuscationGenerator:
             preserved_names=preserved_names,
         )
 
-    def _obfuscate_whitespace_python(self, code: str) -> Tuple[str, List[str]]:
+    def _obfuscate_whitespace_python(self, code: str) -> tuple[str, list[str]]:
         """Apply whitespace and formatting changes to Python code."""
         transformations = []
-        lines = code.split('\n')
+        lines = code.split("\n")
         result_lines = []
 
         for line in lines:
             # Add/remove spaces (but preserve indentation)
             stripped = line.lstrip()
-            indent = line[:len(line) - len(stripped)]
+            indent = line[: len(line) - len(stripped)]
 
             # Randomly add spaces around operators
             if self.rng.random() < 0.3:
-                stripped = re.sub(r'(\w)\s*=\s*(\w)', r'\1 = \2', stripped)
-                stripped = re.sub(r'(\w)\s*\+\s*(\w)', r'\1 + \2', stripped)
+                stripped = re.sub(r"(\w)\s*=\s*(\w)", r"\1 = \2", stripped)
+                stripped = re.sub(r"(\w)\s*\+\s*(\w)", r"\1 + \2", stripped)
 
             # Add blank comments
             if self.rng.random() < 0.2:
@@ -150,9 +152,11 @@ class ObfuscationGenerator:
             result_lines.insert(pos, "")
             transformations.append("Added extra newline")
 
-        return '\n'.join(result_lines), transformations
+        return "\n".join(result_lines), transformations
 
-    def _rename_python_variables(self, code: str) -> Tuple[str, List[str], Dict[str, str]]:
+    def _rename_python_variables(
+        self, code: str
+    ) -> tuple[str, list[str], dict[str, str]]:
         """Rename variables in Python code using AST."""
         transformations = []
         name_map = {}
@@ -163,8 +167,23 @@ class ObfuscationGenerator:
             return code, ["AST parse failed - skipping rename"], {}
 
         # First pass: collect local variable names (skip builtins, keywords, class/func defs)
-        builtin_names = {'self', 'cls', 'True', 'False', 'None', '__name__', '__main__',
-                         'print', 'len', 'range', 'int', 'str', 'list', 'dict', 'set'}
+        builtin_names = {
+            "self",
+            "cls",
+            "True",
+            "False",
+            "None",
+            "__name__",
+            "__main__",
+            "print",
+            "len",
+            "range",
+            "int",
+            "str",
+            "list",
+            "dict",
+            "set",
+        }
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -182,19 +201,19 @@ class ObfuscationGenerator:
         result = code
         for old_name, new_name in sorted(name_map.items(), key=lambda x: -len(x[0])):
             # Use word boundaries to avoid partial matches
-            pattern = r'\b' + re.escape(old_name) + r'\b'
+            pattern = r"\b" + re.escape(old_name) + r"\b"
             result = re.sub(pattern, new_name, result)
             transformations.append(f"Renamed '{old_name}' -> '{new_name}'")
 
         return result, transformations, name_map
 
-    def _reorder_python_statements(self, code: str) -> Tuple[str, List[str]]:
+    def _reorder_python_statements(self, code: str) -> tuple[str, list[str]]:
         """
         Reorder independent statements where possible.
         This is a simplified version - full version would use data flow analysis.
         """
         transformations = []
-        lines = code.split('\n')
+        lines = code.split("\n")
 
         # Find blocks of simple assignments and shuffle them
         result_lines = []
@@ -204,13 +223,14 @@ class ObfuscationGenerator:
             stripped = line.strip()
 
             # Check if this is a simple assignment
-            if re.match(r'^\w+\s*=.*$', stripped) and not stripped.startswith('def '):
-                block_start = i
+            if re.match(r"^\w+\s*=.*$", stripped) and not stripped.startswith("def "):
                 block = [line]
                 i += 1
                 while i < len(lines):
                     next_line = lines[i]
-                    if re.match(r'^\w+\s*=.*$', next_line.strip()) and not next_line.strip().startswith('def '):
+                    if re.match(
+                        r"^\w+\s*=.*$", next_line.strip()
+                    ) and not next_line.strip().startswith("def "):
                         block.append(next_line)
                         i += 1
                     else:
@@ -229,7 +249,7 @@ class ObfuscationGenerator:
                 result_lines.append(line)
                 i += 1
 
-        return '\n'.join(result_lines), transformations
+        return "\n".join(result_lines), transformations
 
     def _obfuscate_java(self, source_code: str, level: int) -> ObfuscationResult:
         """Obfuscate Java code."""
@@ -263,26 +283,47 @@ class ObfuscationGenerator:
             preserved_names=preserved_names,
         )
 
-    def _obfuscate_whitespace_java(self, code: str) -> Tuple[str, List[str]]:
+    def _obfuscate_whitespace_java(self, code: str) -> tuple[str, list[str]]:
         """Apply whitespace changes to Java code."""
         transformations = []
         # Normalize line endings
-        code = code.replace('\r\n', '\n')
+        code = code.replace("\r\n", "\n")
         # Add/remove braces style
         transformations.append("Normalized whitespace")
         return code, transformations
 
-    def _rename_java_identifiers(self, code: str) -> Tuple[str, List[str], Dict[str, str]]:
+    def _rename_java_identifiers(
+        self, code: str
+    ) -> tuple[str, list[str], dict[str, str]]:
         """Rename local variables in Java code."""
         transformations = []
         name_map = {}
 
         # Java pattern: type variableName = ...
-        pattern = r'\b(?:int|long|float|double|String|boolean|char|byte|short)\s+(\w+)\b'
-        
-        java_keywords = {'int', 'long', 'float', 'double', 'String', 'boolean', 
-                        'public', 'private', 'protected', 'static', 'final', 'void',
-                        'class', 'interface', 'extends', 'implements', 'return', 'new'}
+        pattern = (
+            r"\b(?:int|long|float|double|String|boolean|char|byte|short)\s+(\w+)\b"
+        )
+
+        java_keywords = {
+            "int",
+            "long",
+            "float",
+            "double",
+            "String",
+            "boolean",
+            "public",
+            "private",
+            "protected",
+            "static",
+            "final",
+            "void",
+            "class",
+            "interface",
+            "extends",
+            "implements",
+            "return",
+            "new",
+        }
 
         for match in re.finditer(pattern, code):
             var_name = match.group(1)
@@ -293,20 +334,20 @@ class ObfuscationGenerator:
         # Rename (reverse sorted to handle longer names first)
         result = code
         for old_name, new_name in sorted(name_map.items(), key=lambda x: -len(x[0])):
-            pattern = r'\b' + re.escape(old_name) + r'\b'
+            pattern = r"\b" + re.escape(old_name) + r"\b"
             result = re.sub(pattern, new_name, result)
             transformations.append(f"Renamed '{old_name}' -> '{new_name}'")
 
         return result, transformations, name_map
 
-    def _reorder_java_methods(self, code: str) -> Tuple[str, List[str]]:
+    def _reorder_java_methods(self, code: str) -> tuple[str, list[str]]:
         """Reorder method declarations in Java class."""
         transformations = []
-        
+
         # Find method boundaries
-        method_pattern = r'(public|private|protected)\s+.*?\}\s*\n'
+        method_pattern = r"(public|private|protected)\s+.*?\}\s*\n"
         methods = re.findall(method_pattern, code, re.DOTALL)
-        
+
         if len(methods) > 1 and self.rng.random() < 0.5:
             shuffled = methods.copy()
             self.rng.shuffle(shuffled)
@@ -329,17 +370,17 @@ class ObfuscationGenerator:
 
         if level >= 1:
             # Basic whitespace normalization
-            result = '\n'.join(line.rstrip() for line in result.split('\n'))
+            result = "\n".join(line.rstrip() for line in result.split("\n"))
             transformations.append("Normalized whitespace")
 
         if level >= 2:
             # Comment out random lines
-            lines = result.split('\n')
+            lines = result.split("\n")
             for i in range(len(lines)):
                 if self.rng.random() < 0.1:
                     lines[i] = "// " + lines[i]
                     transformations.append(f"Commented line {i+1}")
-            result = '\n'.join(lines)
+            result = "\n".join(lines)
 
         return ObfuscationResult(
             original=source_code,
@@ -349,8 +390,9 @@ class ObfuscationGenerator:
             transformations=transformations,
         )
 
-    def generate_dataset(self, original_code: str, language: str = "python",
-                         samples_per_level: int = 5) -> List[ObfuscationResult]:
+    def generate_dataset(
+        self, original_code: str, language: str = "python", samples_per_level: int = 5
+    ) -> list[ObfuscationResult]:
         """
         Generate obfuscated samples at all levels.
 

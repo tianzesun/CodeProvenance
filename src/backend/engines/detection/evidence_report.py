@@ -22,9 +22,9 @@ Output format:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.backend.engines.detection.layer1_deterministic import Layer1Result
 from src.backend.engines.detection.layer2_statistical import Layer2Result
@@ -73,13 +73,13 @@ class EvidenceReport:
     layer3_value: float = 0.0
 
     # --- Full evidence from each layer ---
-    layer1_evidence: Optional[Layer1Result] = None
-    layer2_evidence: Optional[Layer2Result] = None
-    layer3_evidence: Optional[Layer3Result] = None
-    explanation_evidence: Optional["ExplanationReport"] = None  # Layer 4
+    layer1_evidence: Layer1Result | None = None
+    layer2_evidence: Layer2Result | None = None
+    layer3_evidence: Layer3Result | None = None
+    explanation_evidence: ExplanationReport | None = None  # Layer 4
 
     # --- Current thresholds used ---
-    thresholds: Dict[str, float] = field(default_factory=dict)
+    thresholds: dict[str, float] = field(default_factory=dict)
 
     # --- Additive risk score (for compatibility with existing UI) ---
     # This is NOT used for decision-making — it's provided for the
@@ -107,7 +107,7 @@ class EvidenceReport:
             Verdict.CLEAN: "LOW",
         }.get(self.verdict, "LOW")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         result = {
             "verdict": self.verdict.value,
@@ -137,7 +137,7 @@ class EvidenceReport:
 
         return result
 
-    def to_legacy_dict(self) -> Dict[str, Any]:
+    def to_legacy_dict(self) -> dict[str, Any]:
         """Convert to legacy format for backward compatibility.
 
         Returns the old-style flat dict with score, risk_level, features, etc.
@@ -199,8 +199,8 @@ class EvidenceReport:
         cls,
         score: float,
         risk_level: str,
-        features: Dict[str, float],
-    ) -> "EvidenceReport":
+        features: dict[str, float],
+    ) -> EvidenceReport:
         """Create an EvidenceReport from legacy fusion output (for migration)."""
         # Map legacy risk level back to verdict
         verdict_map = {

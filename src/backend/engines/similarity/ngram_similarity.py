@@ -4,9 +4,10 @@ N-gram based similarity algorithm.
 Compares code based on character or token n-grams.
 """
 
-from typing import List, Dict, Any, Set
-from .base_similarity import BaseSimilarityAlgorithm
 import re
+from typing import Any
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 
 class NgramSimilarity(BaseSimilarityAlgorithm):
@@ -20,7 +21,7 @@ class NgramSimilarity(BaseSimilarityAlgorithm):
         super().__init__("ngram")
         self.n = n
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> float:
         """
         Compare two parsed code representations based on n-gram similarity.
 
@@ -61,7 +62,7 @@ class NgramSimilarity(BaseSimilarityAlgorithm):
 
         return (2.0 * intersection) / total
 
-    def _get_content_for_ngrams(self, parsed: Dict[str, Any]) -> str:
+    def _get_content_for_ngrams(self, parsed: dict[str, Any]) -> str:
         """
         Extract content suitable for n-gram analysis.
 
@@ -86,7 +87,7 @@ class NgramSimilarity(BaseSimilarityAlgorithm):
 
         return content
 
-    def _get_ngrams(self, text: str, n: int) -> List[str]:
+    def _get_ngrams(self, text: str, n: int) -> list[str]:
         """
         Generate n-grams from text.
 
@@ -117,7 +118,7 @@ class TokenNgramSimilarity(BaseSimilarityAlgorithm):
         super().__init__("token_ngram")
         self.n = n
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> float:
         """
         Compare two parsed code representations based on token n-gram similarity.
 
@@ -146,8 +147,8 @@ class TokenNgramSimilarity(BaseSimilarityAlgorithm):
             return 0.0
 
         # Calculate Sørensen–Dice coefficient of token n-gram sets
-        set_a = set(tuple(g) for g in ngrams_a)
-        set_b = set(tuple(g) for g in ngrams_b)
+        set_a = {tuple(g) for g in ngrams_a}
+        set_b = {tuple(g) for g in ngrams_b}
 
         intersection = len(set_a.intersection(set_b))
         total = len(set_a) + len(set_b)
@@ -157,7 +158,7 @@ class TokenNgramSimilarity(BaseSimilarityAlgorithm):
 
         return (2.0 * intersection) / total
 
-    def _get_token_ngrams(self, tokens: List[str], n: int) -> List[List[str]]:
+    def _get_token_ngrams(self, tokens: list[str], n: int) -> list[list[str]]:
         """
         Generate token n-grams from token list.
 

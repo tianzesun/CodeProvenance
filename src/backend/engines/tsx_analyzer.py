@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -21,9 +20,9 @@ class ComponentInfo:
     name: str
     line_start: int
     line_end: int
-    props: List[str]
+    props: list[str]
     has_hooks: bool
-    hook_names: List[str]
+    hook_names: list[str]
     jsx_depth: int
     children_count: int
 
@@ -32,11 +31,11 @@ class ComponentInfo:
 class TSXAnalysisResult:
     """Result of TSX-aware analysis."""
 
-    component_tree: List[ComponentInfo]
+    component_tree: list[ComponentInfo]
     has_jsx: bool
     has_react_imports: bool
-    hook_usage: Dict[str, int]
-    structural_patterns: List[str]
+    hook_usage: dict[str, int]
+    structural_patterns: list[str]
     component_similarity: float  # 0.0-1.0
     boilerplate_similarity: float  # 0.0-1.0 (to be discounted)
 
@@ -93,7 +92,7 @@ class TSXAnalyzer:
         """Check if file contains JSX syntax."""
         return bool(self._jsx_tag_pattern.search(code))
 
-    def _extract_components(self, code: str) -> List[ComponentInfo]:
+    def _extract_components(self, code: str) -> list[ComponentInfo]:
         """Extract React component definitions."""
         components = []
         try:
@@ -120,7 +119,7 @@ class TSXAnalyzer:
 
     def _analyze_component(
         self, node: ast.FunctionDef, code: str
-    ) -> Optional[ComponentInfo]:
+    ) -> ComponentInfo | None:
         """Analyze a component's structure."""
         props = []
         hook_names = []
@@ -134,11 +133,10 @@ class TSXAnalyzer:
 
         # Check for hooks in function body
         for child in ast.walk(node):
-            if isinstance(child, ast.Call):
-                if isinstance(child.func, ast.Name):
-                    if child.func.id.startswith("use"):
-                        has_hooks = True
-                        hook_names.append(child.func.id)
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+                if child.func.id.startswith("use"):
+                    has_hooks = True
+                    hook_names.append(child.func.id)
 
         # Estimate JSX depth and children from source
         lines = code.split("\n")
@@ -158,7 +156,7 @@ class TSXAnalyzer:
             children_count=children_count,
         )
 
-    def _extract_hooks(self, code: str) -> Dict[str, int]:
+    def _extract_hooks(self, code: str) -> dict[str, int]:
         """Extract hook usage counts."""
         hook_usage = {}
         for pattern, hook_name in self.HOOK_PATTERNS:
@@ -167,7 +165,7 @@ class TSXAnalyzer:
                 hook_usage[hook_name] = len(matches)
         return hook_usage
 
-    def _extract_structural_patterns(self, code: str) -> List[str]:
+    def _extract_structural_patterns(self, code: str) -> list[str]:
         """Extract structural patterns that should be discounted."""
         patterns = []
 
@@ -185,8 +183,8 @@ class TSXAnalyzer:
 
     def compare_components(
         self,
-        components_a: List[ComponentInfo],
-        components_b: List[ComponentInfo],
+        components_a: list[ComponentInfo],
+        components_b: list[ComponentInfo],
     ) -> float:
         """Compare component trees between two files."""
         if not components_a or not components_b:
@@ -239,7 +237,7 @@ def calculate_boilerplate_discount(analysis: TSXAnalysisResult) -> float:
     return 1.0
 
 
-def analyze_tsx_similarity(code_a: str, code_b: str) -> Dict[str, float]:
+def analyze_tsx_similarity(code_a: str, code_b: str) -> dict[str, float]:
     """Analyze TSX/JSX similarity with component-aware logic.
 
     Returns dictionary with:

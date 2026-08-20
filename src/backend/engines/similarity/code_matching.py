@@ -7,11 +7,11 @@ Implements:
 3. Token-based matching with winnowing for exact and near matches
 """
 
-import re
 import difflib
-from enum import Enum
-from typing import List, Tuple, Dict, Any, Optional, NamedTuple
+import re
 from dataclasses import dataclass
+from enum import Enum
+from typing import NamedTuple
 
 
 class CloneType(Enum):
@@ -40,9 +40,9 @@ class CodeSegment(NamedTuple):
 class MatchResult:
     """Result of code matching between two files."""
 
-    segments: List[CodeSegment]
+    segments: list[CodeSegment]
     overall_similarity: float
-    clone_distribution: Dict[CloneType, int]
+    clone_distribution: dict[CloneType, int]
     total_matched_lines_a: int
     total_matched_lines_b: int
 
@@ -53,7 +53,7 @@ class CodeHighlighter:
     def __init__(self, min_match_length: int = 4, token_threshold: float = 0.8):
         self.min_match_length = min_match_length
         self.token_threshold = token_threshold
-        self._token_cache: Dict[str, List[str]] = {}
+        self._token_cache: dict[str, list[str]] = {}
 
     def _normalize_identifiers(self, line: str) -> str:
         """Normalize identifiers, literals, strings and whitespace in a line.
@@ -69,7 +69,7 @@ class CodeHighlighter:
         line = re.sub(r'["\'].*?["\']', "STRING", line)
         return " ".join(line.split())
 
-    def _tokenize(self, code: str, normalize: bool = False) -> List[str]:
+    def _tokenize(self, code: str, normalize: bool = False) -> list[str]:
         """Tokenize code with optional normalization for clone detection."""
         cache_key = f"{hash(code)}:{normalize}"
         if cache_key in self._token_cache:
@@ -89,8 +89,8 @@ class CodeHighlighter:
         return tokens
 
     def _classify_clone_type(
-        self, lines_a: List[str], lines_b: List[str]
-    ) -> Tuple[CloneType, float]:
+        self, lines_a: list[str], lines_b: list[str]
+    ) -> tuple[CloneType, float]:
         """Classify clone type and calculate similarity between two code segments."""
         # Exact match check (Type 1)
         if lines_a == lines_b:
@@ -132,7 +132,7 @@ class CodeHighlighter:
         )
         matching_blocks = matcher.get_matching_blocks()
 
-        segments: List[CodeSegment] = []
+        segments: list[CodeSegment] = []
         clone_counts = {t: 0 for t in CloneType}
         matched_a = set()
         matched_b = set()

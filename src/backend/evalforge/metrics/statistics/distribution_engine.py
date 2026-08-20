@@ -6,28 +6,31 @@ across transformation space. This turns single-point observations into
 statistically defensible measurements.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List, Dict, Any
+from typing import Any
+
 import numpy as np
 
 
 @dataclass(frozen=True)
 class ScoreDistribution:
     """Statistical distribution of similarity scores across perturbations."""
+
     mean: float
     std: float
     min: float
     max: float
-    samples: List[float]
+    samples: list[float]
 
     @classmethod
-    def from_samples(cls, samples: List[float]) -> 'ScoreDistribution':
+    def from_samples(cls, samples: list[float]) -> "ScoreDistribution":
         return cls(
             mean=float(np.mean(samples)),
             std=float(np.std(samples)),
             min=float(np.min(samples)),
             max=float(np.max(samples)),
-            samples=samples
+            samples=samples,
         )
 
 
@@ -41,7 +44,7 @@ class DistributionEngine:
         self,
         tool_runner: Callable[[str, str, str], float],
         transformer: Any,
-        n_samples: int = 30
+        n_samples: int = 30,
     ):
         """
         Args:
@@ -53,7 +56,9 @@ class DistributionEngine:
         self.transformer = transformer
         self.n_samples = n_samples
 
-    def build_distribution(self, code_a: str, code_b: str, tool_id: str) -> ScoreDistribution:
+    def build_distribution(
+        self, code_a: str, code_b: str, tool_id: str
+    ) -> ScoreDistribution:
         """
         Generate a full score distribution for a code pair under perturbation.
 
@@ -77,10 +82,8 @@ class DistributionEngine:
         return ScoreDistribution.from_samples(scores)
 
     def build_batch_distributions(
-        self,
-        pairs: List[Dict[str, str]],
-        tool_id: str
-    ) -> List[ScoreDistribution]:
+        self, pairs: list[dict[str, str]], tool_id: str
+    ) -> list[ScoreDistribution]:
         """Build distributions for multiple pairs in batch mode."""
         return [
             self.build_distribution(pair["code_a"], pair["code_b"], tool_id)

@@ -14,13 +14,13 @@ Usage:
     generator.save_report(html_report, "report.html")
 """
 
+import hashlib
 import json
 import logging
-import hashlib
-from html import escape
 from datetime import datetime
+from html import escape
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from src.backend.engines.similarity.code_matching import CodeHighlighter
 
@@ -42,7 +42,7 @@ class ReportGenerator:
         self.institution_name = institution_name
         self.branding_color = branding_color
 
-    def generate_html_report(self, results: Dict[str, Any]) -> str:
+    def generate_html_report(self, results: dict[str, Any]) -> str:
         """Generate a comprehensive, Turnitin-grade HTML originality report."""
         now = datetime.now()
         timestamp = now.strftime("%B %d, %Y at %H:%M UTC")
@@ -94,7 +94,7 @@ class ReportGenerator:
         brand = self.branding_color
 
         selected_tools = results.get("selected_tools", [])
-        tools_str = escape(
+        escape(
             ", ".join(str(t) for t in selected_tools)
             if selected_tools
             else "IntegrityDesk"
@@ -267,10 +267,10 @@ class ReportGenerator:
             f'       class="btn btn-dl" style="display:none"\n'
             f'       onclick="event.preventDefault();downloadPDF(this)"\n'
             f'       data-job-id="{escape(report_id)}">\n'
-            f'      Download PDF\n'
+            f"      Download PDF\n"
             f"    </a>\n"
             f'    <button class="btn btn-pr" onclick="window.print()" style="display:none">\n'
-            f'      Print Report\n'
+            f"      Print Report\n"
             f"    </button>\n  </div>\n</header>\n\n"
             f'<div class="score-banner">\n'
             f'  <div class="score-circle"><span>{score_pct}</span></div>\n'
@@ -310,7 +310,7 @@ class ReportGenerator:
             f"</footer>\n\n</div>\n<script>{js}</script>\n</body>\n</html>"
         )
 
-    def generate_json_report(self, results: Dict[str, Any]) -> str:
+    def generate_json_report(self, results: dict[str, Any]) -> str:
         """Generate a JSON report for API consumption.
 
         Args:
@@ -353,7 +353,7 @@ class ReportGenerator:
         path.write_text(content)
         logger.info(f"Report saved to {filepath}")
 
-    def _generate_risk_cards(self, distribution: Dict[str, int]) -> str:
+    def _generate_risk_cards(self, distribution: dict[str, int]) -> str:
         """Generate risk level cards HTML."""
         risk_levels = [
             (
@@ -392,7 +392,7 @@ class ReportGenerator:
         return "".join(cards)
 
     def _generate_executive_decision(
-        self, results: Dict[str, Any], top_pair: Dict[str, Any]
+        self, results: dict[str, Any], top_pair: dict[str, Any]
     ) -> str:
         """Render the institutional decision recommendation."""
         pairs = results.get("pairs", [])
@@ -438,7 +438,7 @@ class ReportGenerator:
         """
 
     def _generate_chain_of_custody(
-        self, results: Dict[str, Any], timestamp: str, report_id: str = ""
+        self, results: dict[str, Any], timestamp: str, report_id: str = ""
     ) -> str:
         """Render chain-of-custody and reproducibility fields."""
         # Accept report_id as explicit param (preferred) or fall back to results
@@ -498,7 +498,7 @@ class ReportGenerator:
         </section>
         """
 
-    def _generate_ai_summary(self, ai_data: Dict[str, Any]) -> str:
+    def _generate_ai_summary(self, ai_data: dict[str, Any]) -> str:
         """Generate AI detection summary section."""
         if not ai_data:
             return ""
@@ -530,7 +530,7 @@ class ReportGenerator:
         </section>
         """
 
-    def _generate_heatmap(self, pairs: List[Dict[str, Any]]) -> str:
+    def _generate_heatmap(self, pairs: list[dict[str, Any]]) -> str:
         """Generate similarity heatmap visualization."""
         if not pairs:
             return "<p class='note'>No pairs to display.</p>"
@@ -564,7 +564,7 @@ class ReportGenerator:
 
         return "<div>" + "".join(rows) + "</div>"
 
-    def _generate_pair_details(self, pairs: List[Dict[str, Any]]) -> str:
+    def _generate_pair_details(self, pairs: list[dict[str, Any]]) -> str:
         """Generate detailed pair comparison sections."""
         if not pairs:
             return "<div class='sec-body note'>No pairs to display.</div>"
@@ -626,7 +626,7 @@ class ReportGenerator:
             return "badge-low"
         return "badge-medium"
 
-    def _render_engine_scores_new(self, engines: Dict[str, Any]) -> str:
+    def _render_engine_scores_new(self, engines: dict[str, Any]) -> str:
         """Render per-engine scores with mini bar charts."""
         if not engines:
             return "<p class='note'>No engine breakdown stored for this pair.</p>"
@@ -648,7 +648,7 @@ class ReportGenerator:
             )
         return "".join(rows)
 
-    def _review_label(self, pair: Dict[str, Any]) -> str:
+    def _review_label(self, pair: dict[str, Any]) -> str:
         """Return evidence-supported review wording for a pair."""
         score = self._safe_float(pair.get("similarity_score"))
         support = self._concrete_support_count(
@@ -662,7 +662,7 @@ class ReportGenerator:
             return "Needs Instructor Review"
         return "Low Priority"
 
-    def _case_decision_label(self, pairs: List[Dict[str, Any]]) -> str:
+    def _case_decision_label(self, pairs: list[dict[str, Any]]) -> str:
         """Return a case-level recommendation based on the strongest pair."""
         if not pairs:
             return "No Action Recommended"
@@ -681,7 +681,7 @@ class ReportGenerator:
             return "Instructor Review Required"
         return "No Action Recommended"
 
-    def _case_decision_text(self, top_pair: Dict[str, Any], support: int) -> str:
+    def _case_decision_text(self, top_pair: dict[str, Any], support: int) -> str:
         """Explain the case recommendation."""
         if not top_pair:
             return "No comparison pair exceeded the review threshold."
@@ -696,7 +696,7 @@ class ReportGenerator:
             "coverage. The score alone is not used as the decision record."
         )
 
-    def _evidence_standard_label(self, pair: Dict[str, Any]) -> str:
+    def _evidence_standard_label(self, pair: dict[str, Any]) -> str:
         """Classify whether the evidence package is strong enough for escalation."""
         if not pair:
             return "No Evidence"
@@ -711,7 +711,7 @@ class ReportGenerator:
         return "Evidence Incomplete"
 
     def _concrete_support_count(
-        self, engines: Dict[str, Any], external_evidence: List[Dict[str, Any]]
+        self, engines: dict[str, Any], external_evidence: list[dict[str, Any]]
     ) -> int:
         """Count concrete evidence sources that support escalation."""
         concrete_engine_names = {
@@ -745,7 +745,7 @@ class ReportGenerator:
         except (TypeError, ValueError):
             return 0.0
 
-    def _render_engine_scores(self, engines: Dict[str, Any]) -> str:
+    def _render_engine_scores(self, engines: dict[str, Any]) -> str:
         """Render the per-engine score table."""
         if not engines:
             return "<p class='note'>No engine breakdown was stored for this pair.</p>"
@@ -765,7 +765,7 @@ class ReportGenerator:
             )
         return "".join(rows)
 
-    def _render_ai_details(self, ai_info: Dict[str, Any]) -> str:
+    def _render_ai_details(self, ai_info: dict[str, Any]) -> str:
         """Render pair-specific AI detection support."""
         if not ai_info:
             return ""
@@ -784,7 +784,7 @@ class ReportGenerator:
             f"<p class='note'>AI indicators: {indicator_text}</p>"
         )
 
-    def _render_external_evidence(self, evidence: List[Dict[str, Any]]) -> str:
+    def _render_external_evidence(self, evidence: list[dict[str, Any]]) -> str:
         """Render independent external-tool evidence for a pair."""
         if not evidence:
             return ""
@@ -823,7 +823,7 @@ class ReportGenerator:
             "</div>"
         )
 
-    def _render_pair_decision_box(self, pair: Dict[str, Any]) -> str:
+    def _render_pair_decision_box(self, pair: dict[str, Any]) -> str:
         """Render pair-level recommendation and evidence sufficiency."""
         label = self._review_label(pair)
         support = self._concrete_support_count(
@@ -838,7 +838,7 @@ class ReportGenerator:
         </div>
         """
 
-    def _render_pair_provenance(self, pair: Dict[str, Any]) -> str:
+    def _render_pair_provenance(self, pair: dict[str, Any]) -> str:
         """Render file-level hashes for auditability."""
         file_a = str(pair.get("file_a", "File A"))
         file_b = str(pair.get("file_b", "File B"))
@@ -858,7 +858,7 @@ class ReportGenerator:
             return "unavailable"
         return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
-    def _report_submission_hash(self, pairs: List[Dict[str, Any]]) -> str:
+    def _report_submission_hash(self, pairs: list[dict[str, Any]]) -> str:
         """Return a stable hash over submitted code included in the report."""
         digest = hashlib.sha256()
         for pair in sorted(
@@ -871,7 +871,7 @@ class ReportGenerator:
             digest.update(str(pair.get("code_b", "")).encode("utf-8"))
         return digest.hexdigest()
 
-    def _pair_interpretation(self, score: float, engines: Dict[str, Any]) -> str:
+    def _pair_interpretation(self, score: float, engines: dict[str, Any]) -> str:
         """Explain why the pair should be reviewed."""
         strong_engines = []
         for name, value in engines.items():
@@ -954,7 +954,7 @@ class ReportGenerator:
             f"</div>"
         )
 
-    def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:
+    def _generate_recommendations(self, results: dict[str, Any]) -> list[str]:
         """Generate actionable recommendations based on results."""
         recommendations = []
         summary = results.get("summary", {})

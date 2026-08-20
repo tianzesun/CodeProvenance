@@ -5,24 +5,24 @@ Generates Kubernetes Job manifests for large-scale distributed execution.
 Supports parallelism up to 100 workers for full benchmark runs.
 """
 
-from typing import List, Dict, Any
 import json
 import uuid
+from typing import Any
 
 
 class KubernetesAdapter:
     """
     Kubernetes backend adapter for large-scale benchmark execution.
-    
+
     Generates Job manifests with configurable parallelism.
     """
 
     @staticmethod
     def generate_job_manifest(
-        jobs: List[Dict[str, Any]],
+        jobs: list[dict[str, Any]],
         parallelism: int = 100,
-        image: str = "evalforge/worker:latest"
-    ) -> Dict[str, Any]:
+        image: str = "evalforge/worker:latest",
+    ) -> dict[str, Any]:
         """
         Generate Kubernetes Job manifest for distributed execution.
 
@@ -41,10 +41,7 @@ class KubernetesAdapter:
             "kind": "Job",
             "metadata": {
                 "name": f"evalforge-{job_id}",
-                "labels": {
-                    "app": "evalforge",
-                    "job-type": "benchmark"
-                }
+                "labels": {"app": "evalforge", "job-type": "benchmark"},
             },
             "spec": {
                 "parallelism": parallelism,
@@ -66,36 +63,26 @@ class KubernetesAdapter:
                                             "fieldRef": {
                                                 "fieldPath": "metadata.annotations['batch.kubernetes.io/job-completion-index']"
                                             }
-                                        }
+                                        },
                                     }
                                 ],
                                 "resources": {
-                                    "limits": {
-                                        "cpu": "1",
-                                        "memory": "4Gi"
-                                    },
-                                    "requests": {
-                                        "cpu": "500m",
-                                        "memory": "2Gi"
-                                    }
-                                }
+                                    "limits": {"cpu": "1", "memory": "4Gi"},
+                                    "requests": {"cpu": "500m", "memory": "2Gi"},
+                                },
                             }
-                        ]
+                        ],
                     }
-                }
-            }
+                },
+            },
         }
 
     @staticmethod
-    def generate_configmap(jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def generate_configmap(jobs: list[dict[str, Any]]) -> dict[str, Any]:
         """Generate ConfigMap with job payloads."""
         return {
             "apiVersion": "v1",
             "kind": "ConfigMap",
-            "metadata": {
-                "name": f"evalforge-jobs"
-            },
-            "data": {
-                "jobs.json": json.dumps(jobs, indent=2)
-            }
+            "metadata": {"name": "evalforge-jobs"},
+            "data": {"jobs.json": json.dumps(jobs, indent=2)},
         }

@@ -1,18 +1,18 @@
 """Request ID tracing middleware for end-to-end request logging and debugging."""
+
 from __future__ import annotations
 
-import uuid
 import logging
 import time
-from typing import Callable, Awaitable, Optional
+import uuid
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-
-request_id_context: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+request_id_context: ContextVar[str | None] = ContextVar("request_id", default=None)
 logger = logging.getLogger(__name__)
 
 
@@ -92,7 +92,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
         except Exception as exc:
             # Attach request ID to exception
-            setattr(exc, "request_id", request_id)
+            exc.request_id = request_id
             logger.exception(
                 "Request failed with exception: %s",
                 str(exc),
@@ -118,6 +118,6 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             request_id_context.reset(token)
 
 
-def get_current_request_id() -> Optional[str]:
+def get_current_request_id() -> str | None:
     """Get the request ID for the current request context."""
     return request_id_context.get()

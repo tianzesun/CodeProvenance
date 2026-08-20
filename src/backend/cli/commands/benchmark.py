@@ -1,8 +1,10 @@
 """Benchmark CLI command module."""
+
 import typer
 from rich.console import Console
-from src.backend.cli.context import initialize_system
+
 from src.backend.bootstrap.plugins.plugin_registry import PluginRegistry
+from src.backend.cli.context import initialize_system
 
 app = typer.Typer()
 console = Console()

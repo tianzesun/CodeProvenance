@@ -8,9 +8,9 @@ Mismatched versions fail fast.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from .schema_registry import SchemaVersion, registry
 
@@ -25,11 +25,11 @@ class VersionManifest:
         run_id: Unique run identifier.
     """
 
-    schemas: Dict[str, SchemaVersion]
+    schemas: dict[str, SchemaVersion]
     created_at: str
     run_id: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary.
 
         Returns:
@@ -69,7 +69,7 @@ class VersionManifest:
         return cls.load_from_dict(data)
 
     @classmethod
-    def load_from_dict(cls, data: Dict[str, Any]) -> VersionManifest:
+    def load_from_dict(cls, data: dict[str, Any]) -> VersionManifest:
         """Load manifest from dictionary.
 
         Args:
@@ -136,7 +136,7 @@ def create_version_manifest(run_id: str) -> VersionManifest:
     )
 
 
-def validate_manifest(manifest: VersionManifest) -> List[str]:
+def validate_manifest(manifest: VersionManifest) -> list[str]:
     """Validate a version manifest against current registry.
 
     Args:
@@ -145,7 +145,7 @@ def validate_manifest(manifest: VersionManifest) -> List[str]:
     Returns:
         List of error messages (empty if valid).
     """
-    errors: List[str] = []
+    errors: list[str] = []
 
     for name, version_info in manifest.schemas.items():
         # Check if schema exists

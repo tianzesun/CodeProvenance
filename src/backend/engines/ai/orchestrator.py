@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict
+from typing import Any
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 from src.backend.engines.similarity.ai_detection import AIDetectionEngine
@@ -39,7 +39,7 @@ class AIDetectionOrchestrator:
 
     # Calibrated weights favoring Binoculars (Layer 1) for its published performance
     # Total weight = 1.0
-    _LAYER_WEIGHTS: Dict[str, float] = {
+    _LAYER_WEIGHTS: dict[str, float] = {
         "binoculars": 0.40,  # Zero-shot SOTA (ICML 2024)
         "pattern_library": 0.15,
         "perplexity": 0.12,
@@ -75,7 +75,7 @@ class AIDetectionOrchestrator:
                 self._ensemble = None
         return self._ensemble
 
-    def analyze(self, code: str, language: str = "python") -> Dict[str, Any]:
+    def analyze(self, code: str, language: str = "python") -> dict[str, Any]:
         """
         Run the full multi-layer detection pipeline.
 
@@ -104,7 +104,7 @@ class AIDetectionOrchestrator:
         legacy_result = self.legacy_engine.analyze(code, language=language)
 
         # Layer 4: tree-sitter AST + perplexity + (optional) ML ensemble
-        ensemble_result: Dict[str, Any] = {}
+        ensemble_result: dict[str, Any] = {}
         ensemble = self._get_ensemble()
         if ensemble is not None:
             try:
@@ -120,7 +120,7 @@ class AIDetectionOrchestrator:
                 ensemble_result = {}
 
         # Merge signals
-        signals: Dict[str, float] = legacy_result.get("signals", {}).copy()
+        signals: dict[str, float] = legacy_result.get("signals", {}).copy()
 
         if bino_result.get("available"):
             signals["binoculars"] = bino_result["ai_probability"]
@@ -223,7 +223,7 @@ class AIDetectionOrchestrator:
             "layers": layers,
         }
 
-    def _weighted_fuse(self, signals: Dict[str, float]) -> float:
+    def _weighted_fuse(self, signals: dict[str, float]) -> float:
         """Apply orchestrator weights (Binoculars gets the highest weight)."""
         total = 0.0
         weight_sum = 0.0
@@ -243,7 +243,7 @@ class AIDetectionOrchestrator:
         calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
         return calibrated
 
-    def _heuristic_fuse(self, signals: Dict[str, float]) -> float:
+    def _heuristic_fuse(self, signals: dict[str, float]) -> float:
         """Fuse the heuristic signals when Binoculars is unavailable.
 
         Uses only the signals that meaningfully separate AI from human code:

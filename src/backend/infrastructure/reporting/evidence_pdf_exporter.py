@@ -25,17 +25,17 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
 from src.backend.infrastructure.reporting.visualizations import (
-    generate_similarity_heatmap,
-    generate_code_diff_image,
     generate_ai_probability_chart,
-    generate_engine_radar_chart,
+    generate_code_diff_image,
     generate_confusion_matrix_image,
+    generate_engine_radar_chart,
     generate_qr_code,
+    generate_similarity_heatmap,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,10 +44,12 @@ logger = logging.getLogger(__name__)
 PDF_BACKEND = None
 try:
     import weasyprint
+
     PDF_BACKEND = "weasyprint"
 except ImportError:
     try:
         import pdfkit
+
         PDF_BACKEND = "pdfkit"
     except ImportError:
         PDF_BACKEND = None
@@ -55,7 +57,11 @@ except ImportError:
 
 def _minimal_pdf_bytes(title: str) -> bytes:
     """Return a tiny valid PDF when the configured backend is unavailable at runtime."""
-    safe_title = (title or "Academic Integrity Evidence Report").replace("(", "[").replace(")", "]")
+    safe_title = (
+        (title or "Academic Integrity Evidence Report")
+        .replace("(", "[")
+        .replace(")", "]")
+    )
     pdf = f"""%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
@@ -97,8 +103,8 @@ class EvidenceChainPdfExporter:
 
     def __init__(
         self,
-        template_dir: Optional[Path] = None,
-        output_dir: Optional[Path] = None,
+        template_dir: Path | None = None,
+        output_dir: Path | None = None,
     ):
         if template_dir is None:
             template_dir = Path(__file__).parent / "templates"
@@ -110,9 +116,9 @@ class EvidenceChainPdfExporter:
 
     def export(
         self,
-        case_data: Dict[str, Any],
-        output_path: Optional[Path] = None,
-    ) -> Optional[Path]:
+        case_data: dict[str, Any],
+        output_path: Path | None = None,
+    ) -> Path | None:
         """Generate a complete evidence chain PDF."""
         if PDF_BACKEND is None:
             logger.error("No PDF backend available. Install weasyprint or pdfkit.")
@@ -131,6 +137,7 @@ class EvidenceChainPdfExporter:
                 weasyprint.HTML(string=html_content).write_pdf(str(output_path))
             elif PDF_BACKEND == "pdfkit":
                 import pdfkit
+
                 options = {
                     "page-size": "A4",
                     "margin-top": "18mm",
@@ -156,9 +163,9 @@ class EvidenceChainPdfExporter:
 
     def export_html(
         self,
-        case_data: Dict[str, Any],
-        output_path: Optional[Path] = None,
-    ) -> Optional[Path]:
+        case_data: dict[str, Any],
+        output_path: Path | None = None,
+    ) -> Path | None:
         """Export as standalone HTML (no PDF conversion)."""
         context = self._build_context(case_data)
         html_content = self.template.render(**context)
@@ -170,7 +177,7 @@ class EvidenceChainPdfExporter:
         output_path.write_text(html_content, encoding="utf-8")
         return output_path
 
-    def _build_context(self, case_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_context(self, case_data: dict[str, Any]) -> dict[str, Any]:
         """Build the full Jinja2 context with visualizations."""
         now = datetime.datetime.now()
         timestamp = now.strftime("%Y-%m-%d %H:%M")
@@ -228,92 +235,107 @@ class EvidenceChainPdfExporter:
             "qr_code_image": self._generate_qr_code(case_data),
         }
 
-    def _generate_heatmap(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_heatmap(self, case_data: dict[str, Any]) -> str | None:
         matrix = case_data.get("similarity_matrix")
         labels = case_data.get("similarity_labels")
         if matrix:
             return generate_similarity_heatmap(matrix, labels)
         return None
 
-    def _generate_diff(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_diff(self, case_data: dict[str, Any]) -> str | None:
         code_a = case_data.get("code_a", "")
         code_b = case_data.get("code_b", "")
         if code_a and code_b:
             return generate_code_diff_image(
-                code_a, code_b,
+                code_a,
+                code_b,
                 case_data.get("file_a", "Submission A"),
                 case_data.get("file_b", "Submission B"),
             )
         return None
 
-    def _generate_ai_chart(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_ai_chart(self, case_data: dict[str, Any]) -> str | None:
         ai_results = case_data.get("ai_model_results")
         if ai_results:
             return generate_ai_probability_chart(ai_results)
         return None
 
-    def _generate_radar(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_radar(self, case_data: dict[str, Any]) -> str | None:
         engine_scores = case_data.get("engine_performance")
         if engine_scores:
             return generate_engine_radar_chart(engine_scores)
         return None
 
-    def _generate_confusion_matrix(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_confusion_matrix(self, case_data: dict[str, Any]) -> str | None:
         stats = case_data.get("confusion_stats", {})
         if "tp" in stats:
             return generate_confusion_matrix_image(
-                stats.get("tp", 0), stats.get("fp", 0),
-                stats.get("tn", 0), stats.get("fn", 0),
+                stats.get("tp", 0),
+                stats.get("fp", 0),
+                stats.get("tn", 0),
+                stats.get("fn", 0),
             )
         return None
 
-    def _extract_evidence_pairs(self, case_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_evidence_pairs(
+        self, case_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         pairs = case_data.get("evidence_pairs", [])
         result = []
         for p in pairs[:5]:
-            result.append({
-                "file_a": p.get("file_a", "File A"),
-                "file_b": p.get("file_b", "File B"),
-                "similarity": p.get("similarity", 0.0),
-                "engine": p.get("engine", "Unknown"),
-                "risk": self._risk_label(p.get("similarity", 0.0)),
-                "color": self._turnitin_color(p.get("similarity", 0.0)),
-                "a_lines": p.get("a_lines", "—"),
-                "b_lines": p.get("b_lines", "—"),
-                "code_a": p.get("code_a", ""),
-                "code_b": p.get("code_b", ""),
-                "match_details": p.get("match_details", []),
-            })
+            result.append(
+                {
+                    "file_a": p.get("file_a", "File A"),
+                    "file_b": p.get("file_b", "File B"),
+                    "similarity": p.get("similarity", 0.0),
+                    "engine": p.get("engine", "Unknown"),
+                    "risk": self._risk_label(p.get("similarity", 0.0)),
+                    "color": self._turnitin_color(p.get("similarity", 0.0)),
+                    "a_lines": p.get("a_lines", "—"),
+                    "b_lines": p.get("b_lines", "—"),
+                    "code_a": p.get("code_a", ""),
+                    "code_b": p.get("code_b", ""),
+                    "match_details": p.get("match_details", []),
+                }
+            )
         return result
 
-    def _extract_tool_comparison(self, case_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_tool_comparison(
+        self, case_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         tools = case_data.get("tool_comparison", [])
         result = []
         for t in tools:
             sim = t.get("similarity", 0.0)
-            result.append({
-                "name": t.get("name", "Unknown"),
-                "similarity": sim,
-                "precision": t.get("precision", 0.0),
-                "recall": t.get("recall", 0.0),
-                "f1": t.get("f1", 0.0),
-                "ci_lower": t.get("ci_lower", 0.0),
-                "ci_upper": t.get("ci_upper", 0.0),
-                "risk": self._risk_label(sim),
-                "color": self._turnitin_color(sim),
-            })
+            result.append(
+                {
+                    "name": t.get("name", "Unknown"),
+                    "similarity": sim,
+                    "precision": t.get("precision", 0.0),
+                    "recall": t.get("recall", 0.0),
+                    "f1": t.get("f1", 0.0),
+                    "ci_lower": t.get("ci_lower", 0.0),
+                    "ci_upper": t.get("ci_upper", 0.0),
+                    "risk": self._risk_label(sim),
+                    "color": self._turnitin_color(sim),
+                }
+            )
         return result
 
-    def _enrich_ai_details(self, ai_details: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _enrich_ai_details(
+        self, ai_details: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         enriched = []
         for d in ai_details:
             prob = d.get("probability", 0.0)
-            enriched.append({
-                "name": d.get("name", "Unknown"),
-                "probability": prob,
-                "confidence": d.get("confidence", 0.0),
-                "color": self._ai_color(prob),
-            })
+            enriched.append(
+                {
+                    "name": d.get("name", "Unknown"),
+                    "probability": prob,
+                    "confidence": d.get("confidence", 0.0),
+                    "color": self._ai_color(prob),
+                }
+            )
         return enriched
 
     @staticmethod
@@ -366,7 +388,7 @@ class EvidenceChainPdfExporter:
             return "orange"
         return "red"
 
-    def _generate_qr_code(self, case_data: Dict[str, Any]) -> Optional[str]:
+    def _generate_qr_code(self, case_data: dict[str, Any]) -> str | None:
         """Generate QR code linking to the web version of the report."""
         web_url = case_data.get("web_report_url")
         if web_url:

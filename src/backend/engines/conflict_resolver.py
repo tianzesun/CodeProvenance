@@ -5,8 +5,9 @@ Detects and resolves conflicts between different similarity engines
 to reduce false positives and negatives.
 """
 
-from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 
@@ -18,7 +19,7 @@ class ConflictResult:
     confidence: str
     confidence_value: float
     agreement: float
-    conflicts: List[str]
+    conflicts: list[str]
     recommended_action: str
 
 
@@ -30,7 +31,7 @@ class ConflictResolver:
     detect and resolve conflicts between AST/GST/Token/Semantic scores.
     """
 
-    def resolve(self, engine_scores: Dict[str, float]) -> ConflictResult:
+    def resolve(self, engine_scores: dict[str, float]) -> ConflictResult:
         """
         Resolve conflicts between engine scores.
 
@@ -41,20 +42,18 @@ class ConflictResolver:
         Returns:
             ConflictResult with resolved score and confidence
         """
-        scores = []
         ast = engine_scores.get("ast", 0.0)
         gst = engine_scores.get("gst", 0.0)
         token = engine_scores.get("token", 0.0)
         semantic = engine_scores.get("semantic", 0.0)
         cfg = engine_scores.get("cfg", 0.0)
 
-        core_scores = [ast, gst, token]
         all_scores = [ast, gst, token, semantic, cfg]
 
         # Calculate variance and disagreement
         mean = np.mean(all_scores)
-        variance = np.var(all_scores)
-        max_disagreement = max(all_scores) - min(all_scores)
+        np.var(all_scores)
+        max(all_scores) - min(all_scores)
 
         # Pairwise differences
         ast_gst_diff = abs(ast - gst)
@@ -182,7 +181,7 @@ class ConflictResolutionPipeline:
 
         self.calibrator = ScoreCalibrator()
 
-    def analyze(self, code_a: str, code_b: str) -> Dict[str, Any]:
+    def analyze(self, code_a: str, code_b: str) -> dict[str, Any]:
         """Full analysis with conflict resolution."""
         result = self.engine.compare({"raw": code_a}, {"raw": code_b})
         engine_scores = result.get("individual_scores", {})

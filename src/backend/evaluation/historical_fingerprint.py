@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +59,12 @@ class HistoricalFingerprint:
     """Historical fingerprint for a student's submissions."""
 
     student_id: str
-    submission_history: List[Dict[str, Any]] = field(default_factory=list)
-    style_trend: Dict[str, float] = field(default_factory=dict)
+    submission_history: list[dict[str, Any]] = field(default_factory=list)
+    style_trend: dict[str, float] = field(default_factory=dict)
     consistency_score: float = 1.0
-    anomalies: List[Dict[str, Any]] = field(default_factory=list)
+    anomalies: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "student_id": self.student_id,
             "submission_count": len(self.submission_history),
@@ -80,13 +80,13 @@ class FingerprintResult:
 
     student_id: str
     current_features: StyleFeatures
-    historical_features: Optional[StyleFeatures]
+    historical_features: StyleFeatures | None
     deviation_score: float
     is_anomaly: bool
     confidence_score: float
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "student_id": self.student_id,
             "current_features": {
@@ -123,7 +123,7 @@ class HistoricalFingerprintAnalyzer:
 
     def __init__(self) -> None:
         """Initialize the analyzer."""
-        self._cache: Dict[str, HistoricalFingerprint] = {}
+        self._cache: dict[str, HistoricalFingerprint] = {}
 
     def extract_features(self, code: str) -> StyleFeatures:
         """
@@ -220,7 +220,7 @@ class HistoricalFingerprintAnalyzer:
         student_id: str,
         code: str,
         submission_id: str,
-        timestamp: Optional[datetime] = None,
+        timestamp: datetime | None = None,
     ) -> FingerprintResult:
         """
         Analyze a submission against historical patterns.
@@ -290,7 +290,7 @@ class HistoricalFingerprintAnalyzer:
 
     def _get_last_features(
         self, historical: HistoricalFingerprint
-    ) -> Optional[StyleFeatures]:
+    ) -> StyleFeatures | None:
         """Get the most recent style features from history."""
         if not historical.submission_history:
             return None
@@ -312,7 +312,7 @@ class HistoricalFingerprintAnalyzer:
         )
 
     def _calculate_deviation(
-        self, current: StyleFeatures, historical: Optional[StyleFeatures]
+        self, current: StyleFeatures, historical: StyleFeatures | None
     ) -> float:
         """Calculate style deviation from historical patterns."""
         if historical is None:
@@ -356,7 +356,7 @@ class HistoricalFingerprintAnalyzer:
 
     def _generate_recommendations(
         self, is_anomaly: bool, deviation_score: float
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate recommendations based on analysis."""
         recommendations = []
 
@@ -385,7 +385,7 @@ def run_fingerprint_analysis(
     student_id: str,
     code: str,
     submission_id: str,
-    history: Optional[List[Dict[str, Any]]] = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> FingerprintResult:
     """
     Convenience function to run fingerprint analysis.

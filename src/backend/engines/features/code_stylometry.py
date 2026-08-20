@@ -16,14 +16,12 @@ AI Detection features:
 - Code complexity distribution
 """
 
-from typing import Dict, List, Any, Optional, Tuple
-from pathlib import Path
 import ast
 import math
 import re
-import hashlib
-from dataclasses import dataclass, field
-from collections import Counter, defaultdict
+from collections import Counter
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -84,7 +82,7 @@ class StylometryFeatures:
     f_string_ratio: float = 0.0
     type_hint_ratio: float = 0.0  # functions with type hints / total
 
-    def to_vector(self) -> List[float]:
+    def to_vector(self) -> list[float]:
         """Convert to numeric feature vector for ML."""
         return [
             self.avg_identifier_length,
@@ -119,7 +117,7 @@ class StylometryFeatures:
         ]
 
     @staticmethod
-    def feature_names() -> List[str]:
+    def feature_names() -> list[str]:
         """Names corresponding to to_vector() indices."""
         return [
             "avg_identifier_length",
@@ -168,10 +166,10 @@ class StylometryExtractor:
         self._prefix_counter: Counter = Counter()
         self._suffix_counter: Counter = Counter()
         self._char_counter: Counter = Counter()
-        self._identifier_lengths: List[int] = []
-        self._func_lengths: List[int] = []
-        self._keywords: List[str] = []
-        self._nesting_depths: List[int] = []
+        self._identifier_lengths: list[int] = []
+        self._func_lengths: list[int] = []
+        self._keywords: list[str] = []
+        self._nesting_depths: list[int] = []
         self._total_statements = 0
         self._total_loops = 0
         self._total_branches = 0
@@ -367,45 +365,8 @@ class StylometryExtractor:
         """Ratio of camelCase identifiers."""
         if not self._identifier_lengths:
             return 0.0
-        identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", "")  # Placeholder
-        python_keywords = {
-            "def",
-            "class",
-            "if",
-            "else",
-            "elif",
-            "for",
-            "while",
-            "return",
-            "import",
-            "from",
-            "try",
-            "except",
-            "finally",
-            "with",
-            "as",
-            "lambda",
-            "yield",
-            "raise",
-            "pass",
-            "break",
-            "continue",
-            "and",
-            "or",
-            "not",
-            "is",
-            "in",
-            "True",
-            "False",
-            "None",
-            "async",
-            "await",
-            "nonlocal",
-            "global",
-            "assert",
-            "del",
-        }
-        camel_count = sum(1 for l in self._identifier_lengths if l > 0)  # Placeholder
+        re.findall(r"\b[a-zA-Z_]\w*\b", "")  # Placeholder
+        sum(1 for l in self._identifier_lengths if l > 0)  # Placeholder
         return 0.0  # Computed via AST walk instead
 
     def _snake_case_ratio(self) -> float:
@@ -503,12 +464,12 @@ class StylometryExtractor:
         return _depth(func, 0)
 
     @staticmethod
-    def _avg(values: List[float]) -> float:
+    def _avg(values: list[float]) -> float:
         """Compute average of values."""
         return sum(values) / len(values) if values else 0.0
 
     @staticmethod
-    def _std(values: List[float]) -> float:
+    def _std(values: list[float]) -> float:
         """Compute standard deviation of values."""
         if len(values) < 2:
             return 0.0
@@ -557,7 +518,7 @@ class AIDetector:
             "max_nesting_depth": -0.10,  # Negative: shallow nesting = more AI
         }
 
-    def detect(self, source: str, doc_id: str = "") -> Dict[str, Any]:
+    def detect(self, source: str, doc_id: str = "") -> dict[str, Any]:
         """
         Detect if code is AI-generated.
 
@@ -612,9 +573,7 @@ class AIDetector:
             return value
         elif feature == "var_naming_entropy":
             return min(1.0, value / 4.0)  # AI uses more diverse chars
-        elif feature == "docstring_ratio":
-            return value
-        elif feature == "exception_handling_ratio":
+        elif feature == "docstring_ratio" or feature == "exception_handling_ratio":
             return value
         elif feature == "list_comprehension_ratio":
             return min(1.0, value / 0.5)
@@ -626,7 +585,7 @@ class AIDetector:
             )  # Shallower = more AI (weight is negative)
         return 0.0
 
-    def _feature_summary(self, features: StylometryFeatures) -> Dict[str, Any]:
+    def _feature_summary(self, features: StylometryFeatures) -> dict[str, Any]:
         """Create a summary of key features for reporting."""
         return {
             "comment_density": features.comment_density,
@@ -646,6 +605,6 @@ def get_stylometry_features(source: str, doc_id: str = "") -> StylometryFeatures
     return StylometryExtractor().extract(source, doc_id)
 
 
-def detect_ai_generated(source: str, threshold: float = 0.6) -> Dict[str, Any]:
+def detect_ai_generated(source: str, threshold: float = 0.6) -> dict[str, Any]:
     """Detect if code is AI-generated."""
     return AIDetector(threshold).detect(source)

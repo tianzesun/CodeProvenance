@@ -10,7 +10,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class SubmissionNode:
     code_hash: str
     language: str
     content: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,7 +38,7 @@ class SimilarityEdge:
     similarity: float
     engine: str
     confidence: float = 1.0
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -46,27 +46,27 @@ class Cluster:
     """A cluster of submissions with high mutual similarity."""
 
     cluster_id: str
-    submissions: List[str]
-    similarity_scores: Dict[str, float] = field(default_factory=dict)
+    submissions: list[str]
+    similarity_scores: dict[str, float] = field(default_factory=dict)
     max_similarity: float = 0.0
     avg_similarity: float = 0.0
     size: int = 0
     risk_level: str = "low"
-    evidence_summary: List[str] = field(default_factory=list)
+    evidence_summary: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ClusterDetectionResult:
     """Result of cluster detection analysis."""
 
-    clusters: List[Cluster] = field(default_factory=list)
-    isolated_submissions: List[str] = field(default_factory=list)
+    clusters: list[Cluster] = field(default_factory=list)
+    isolated_submissions: list[str] = field(default_factory=list)
     total_submissions: int = 0
     total_clusters: int = 0
     max_cluster_size: int = 0
     has_violations: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "clusters": [
                 {
@@ -100,9 +100,9 @@ class ClusterDetector:
             threshold: Minimum similarity score to consider for clustering.
         """
         self.threshold = threshold
-        self._parent: Dict[str, str] = {}
-        self._rank: Dict[str, int] = {}
-        self._similarities: Dict[Tuple[str, str], float] = {}
+        self._parent: dict[str, str] = {}
+        self._rank: dict[str, int] = {}
+        self._similarities: dict[tuple[str, str], float] = {}
 
     def _find(self, x: str) -> str:
         """Find root of x with path compression."""
@@ -123,8 +123,8 @@ class ClusterDetector:
 
     def detect(
         self,
-        submissions: List[SubmissionNode],
-        edges: List[SimilarityEdge],
+        submissions: list[SubmissionNode],
+        edges: list[SimilarityEdge],
     ) -> ClusterDetectionResult:
         """
         Detect clusters in the similarity graph.
@@ -149,7 +149,7 @@ class ClusterDetector:
                 self._union(edge.submission_a, edge.submission_b)
 
         # Group submissions by cluster
-        cluster_groups: Dict[str, List[str]] = defaultdict(list)
+        cluster_groups: dict[str, list[str]] = defaultdict(list)
         for sub in submissions:
             root = self._find(sub.submission_id)
             cluster_groups[root].append(sub.submission_id)
@@ -185,12 +185,12 @@ class ClusterDetector:
     def _build_cluster(
         self,
         cluster_id: str,
-        members: List[str],
-        edges: List[SimilarityEdge],
+        members: list[str],
+        edges: list[SimilarityEdge],
     ) -> Cluster:
         """Build a Cluster object from members and edges."""
         # Calculate pairwise similarities
-        similarities: Dict[str, float] = {}
+        similarities: dict[str, float] = {}
         edge_similarities = []
         evidence_summary = []
 
@@ -204,18 +204,16 @@ class ClusterDetector:
 
                 # Collect evidence
                 for edge in edges:
-                    if (edge.submission_a == a and edge.submission_b == b) or (
-                        edge.submission_a == b and edge.submission_b == a
-                    ):
-                        if edge.evidence:
-                            for ev in edge.evidence[:2]:
-                                # Convert dict to string for hashing
-                                if isinstance(ev, dict):
-                                    evidence_summary.append(
-                                        json.dumps(ev, sort_keys=True)
-                                    )
-                                else:
-                                    evidence_summary.append(str(ev))
+                    if (
+                        (edge.submission_a == a and edge.submission_b == b)
+                        or (edge.submission_a == b and edge.submission_b == a)
+                    ) and edge.evidence:
+                        for ev in edge.evidence[:2]:
+                            # Convert dict to string for hashing
+                            if isinstance(ev, dict):
+                                evidence_summary.append(json.dumps(ev, sort_keys=True))
+                            else:
+                                evidence_summary.append(str(ev))
 
         max_sim = max(edge_similarities) if edge_similarities else 0.0
         avg_sim = (
@@ -245,7 +243,7 @@ class ClusterDetector:
             evidence_summary=list(dict.fromkeys(evidence_summary))[:5],
         )
 
-    def get_cluster_stats(self, result: ClusterDetectionResult) -> Dict[str, Any]:
+    def get_cluster_stats(self, result: ClusterDetectionResult) -> dict[str, Any]:
         """Get statistics about detected clusters."""
         return {
             "total_clusters": result.total_clusters,
@@ -264,8 +262,8 @@ class ClusterDetector:
 
 
 def run_cluster_detection(
-    submissions: List[Dict[str, Any]],
-    similarity_results: List[Dict[str, Any]],
+    submissions: list[dict[str, Any]],
+    similarity_results: list[dict[str, Any]],
     threshold: float = DEFAULT_CLUSTER_THRESHOLD,
 ) -> ClusterDetectionResult:
     """

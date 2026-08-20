@@ -1,19 +1,23 @@
 from pydantic import BaseModel
-from typing import List, Optional
+
 
 class CompareRequest(BaseModel):
     code_a: str
     code_b: str
 
+
 class BatchRequest(BaseModel):
-    pairs: List[CompareRequest]
+    pairs: list[CompareRequest]
+
 
 class TaskResponse(BaseModel):
     task_id: str
 
+
 class ResultResponse(BaseModel):
     status: str
-    result: Optional[Dict] = None
+    result: Dict | None = None
+
 
 class CompareResult(BaseModel):
     score: float

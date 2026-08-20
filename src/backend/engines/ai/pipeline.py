@@ -8,7 +8,6 @@ Coordinates all components of the AI detection system:
 """
 
 import logging
-from typing import Dict, List
 
 from src.backend.engines.ai.fusion import create_detection_result
 from src.backend.engines.ai.models import AIDetectionResult, SignalScores
@@ -117,7 +116,7 @@ def annotate_evidence(
     return result
 
 
-def find_llm_pattern_lines(code: str, max_lines: int = 30) -> List[int]:
+def find_llm_pattern_lines(code: str, max_lines: int = 30) -> list[int]:
     """Find lines with LLM-specific patterns.
 
     Args:
@@ -156,7 +155,7 @@ def find_llm_pattern_lines(code: str, max_lines: int = 30) -> List[int]:
     return flagged_lines
 
 
-def get_detection_summary(result: AIDetectionResult) -> Dict:
+def get_detection_summary(result: AIDetectionResult) -> dict:
     """Get summary of detection result.
 
     Args:
@@ -178,9 +177,9 @@ def get_detection_summary(result: AIDetectionResult) -> Dict:
 
 
 def batch_detect_ai_code(
-    code_samples: Dict[str, str],
+    code_samples: dict[str, str],
     language: str = "python",
-) -> Dict[str, AIDetectionResult]:
+) -> dict[str, AIDetectionResult]:
     """Detect AI-generated code in batch.
 
     Args:
@@ -206,7 +205,7 @@ def batch_detect_ai_code(
 def compare_detection_results(
     result1: AIDetectionResult,
     result2: AIDetectionResult,
-) -> Dict:
+) -> dict:
     """Compare two detection results.
 
     Args:

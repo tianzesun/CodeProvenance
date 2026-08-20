@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from src.backend.benchmark.contracts.evaluation_result import (
     EnrichedPair,
     EvaluationResult,
 )
+
 from .schema_registry import ValidationError, registry
 
 T = TypeVar("T")
@@ -30,8 +31,8 @@ class ValidationResult:
     """
 
     is_valid: bool
-    errors: List[str]
-    warnings: List[str]
+    errors: list[str]
+    warnings: list[str]
 
     def raise_if_invalid(self) -> None:
         """Raise ValidationError if not valid.
@@ -81,8 +82,8 @@ class ValidationGate:
         Returns:
             ValidationResult with errors and warnings.
         """
-        errors: List[str] = []
-        warnings: List[str] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         # Check type
         if isinstance(data, EvaluationResult):
@@ -184,8 +185,8 @@ class ValidationGate:
         Returns:
             ValidationResult with errors and warnings.
         """
-        errors: List[str] = []
-        warnings: List[str] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         # Check type
         if isinstance(data, EnrichedPair):
@@ -243,7 +244,7 @@ class ValidationGate:
     def validate_batch(
         self,
         schema_name: str,
-        items: List[Any],
+        items: list[Any],
     ) -> ValidationResult:
         """Validate a batch of items.
 
@@ -254,8 +255,8 @@ class ValidationGate:
         Returns:
             ValidationResult with aggregated errors.
         """
-        all_errors: List[str] = []
-        all_warnings: List[str] = []
+        all_errors: list[str] = []
+        all_warnings: list[str] = []
 
         for i, item in enumerate(items):
             if schema_name == "EvaluationResult":

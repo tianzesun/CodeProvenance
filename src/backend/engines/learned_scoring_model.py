@@ -6,10 +6,11 @@ Uses gradient boosted trees to automatically learn optimal engine weighting
 from labeled data, instead of hand-tuned fixed weights.
 """
 
-from typing import List, Dict, Tuple, Any, Optional
-import numpy as np
 import pickle
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 try:
     from sklearn.ensemble import GradientBoostingRegressor
@@ -40,7 +41,7 @@ class LearnedScoringModel:
         "normalized_edit_dist",
     ]
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.model = None
         self.is_trained = False
         self._default_weights = np.array([0.45, 0.20, 0.25, 0.10, 0.0, 0.0, 0.0, 0.0])
@@ -53,7 +54,7 @@ class LearnedScoringModel:
             )
 
     def featurize(
-        self, engine_scores: Dict[str, float], metadata: Dict[str, Any]
+        self, engine_scores: dict[str, float], metadata: dict[str, Any]
     ) -> np.ndarray:
         """
         Convert engine scores and metadata into feature vector.
@@ -79,7 +80,7 @@ class LearnedScoringModel:
         return features
 
     def train(
-        self, training_data: List[Tuple[Dict[str, float], Dict[str, Any], float]]
+        self, training_data: list[tuple[dict[str, float], dict[str, Any], float]]
     ) -> None:
         """
         Train the model on labeled dataset.
@@ -105,7 +106,7 @@ class LearnedScoringModel:
         self.is_trained = True
 
     def predict(
-        self, engine_scores: Dict[str, float], metadata: Dict[str, Any]
+        self, engine_scores: dict[str, float], metadata: dict[str, Any]
     ) -> float:
         """
         Predict unified similarity score between 0 and 1.
@@ -124,7 +125,7 @@ class LearnedScoringModel:
         # Clamp to valid range
         return min(1.0, max(0.0, score))
 
-    def get_feature_importance(self) -> Dict[str, float]:
+    def get_feature_importance(self) -> dict[str, float]:
         """Return learned feature importance weights."""
         if not self.is_trained or self.model is None:
             return dict(zip(self.FEATURE_NAMES, self._default_weights))
@@ -161,7 +162,7 @@ class GatedFusionModel:
         return ex / ex.sum()
 
     def predict(
-        self, engine_scores: Dict[str, float], metadata: Dict[str, Any]
+        self, engine_scores: dict[str, float], metadata: dict[str, Any]
     ) -> float:
         """
         Gated prediction: dynamically adjusts expert weights per pair.
@@ -204,14 +205,14 @@ class ScoringPipeline:
     4. Ranking and evidence generation
     """
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.scoring_model = LearnedScoringModel(model_path)
         self.gated_model = GatedFusionModel()
         self.use_gated = False
 
     def score_pair(
         self, code_a: str, code_b: str, extract_features_fn: callable
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Full pipeline to score a single pair of code files.
         """

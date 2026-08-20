@@ -14,14 +14,13 @@ All parameters are configurable for hyperparameter optimization.
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Set, Tuple, Optional
-from dataclasses import dataclass, field
-from collections import defaultdict
 import hashlib
 import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
 
 from .base_similarity import BaseSimilarityAlgorithm
-
 
 # ============================================================================
 # Data Structures
@@ -34,16 +33,16 @@ class ASTStructuralNode:
 
     node_type: str
     value: str = ""
-    children: List["ASTStructuralNode"] = field(default_factory=list)
+    children: list[ASTStructuralNode] = field(default_factory=list)
     line_number: int = 0
     depth_level: int = 0
-    parent: Optional["ASTStructuralNode"] = field(default=None, repr=False)
+    parent: ASTStructuralNode | None = field(default=None, repr=False)
 
     def __post_init__(self):
         for child in self.children:
             child.parent = self
 
-    def to_tuple(self) -> Tuple:
+    def to_tuple(self) -> tuple:
         """Convert to tuple for hashing and comparison."""
         return (
             self.node_type,
@@ -61,9 +60,9 @@ class ASTStructuralNode:
             return 0
         return 1 + max(child.tree_depth() for child in self.children)
 
-    def get_all_subtrees(self, min_size: int = 1) -> List["ASTStructuralNode"]:
+    def get_all_subtrees(self, min_size: int = 1) -> list[ASTStructuralNode]:
         """Get all subtrees with minimum node count."""
-        subtrees: List[ASTStructuralNode] = []
+        subtrees: list[ASTStructuralNode] = []
 
         def _collect(node: ASTStructuralNode):
             if node.subtree_size() >= min_size:
@@ -78,7 +77,7 @@ class ASTStructuralNode:
         """Generate SHA256 hash of subtree structure."""
         return hashlib.sha256(repr(self.to_tuple()).encode()).hexdigest()
 
-    def normalize_identifiers(self) -> Dict[str, str]:
+    def normalize_identifiers(self) -> dict[str, str]:
         """Normalize identifier names for renaming resistance."""
         keywords = {
             "if",
@@ -127,7 +126,7 @@ class ASTStructuralNode:
         }
 
         var_counter = [0]
-        var_map: Dict[str, str] = {}
+        var_map: dict[str, str] = {}
 
         def _normalize(node: ASTStructuralNode):
             if node.node_type in ("IDENTIFIER", "NAME", "VARIABLE") and node.value:
@@ -142,11 +141,11 @@ class ASTStructuralNode:
         _normalize(self)
         return var_map
 
-    def extract_paths(self, max_length: int = 8) -> List[List[str]]:
+    def extract_paths(self, max_length: int = 8) -> list[list[str]]:
         """Extract all paths up to max_length in the AST."""
-        paths: List[List[str]] = []
+        paths: list[list[str]] = []
 
-        def _dfs(node: ASTStructuralNode, current_path: List[str]):
+        def _dfs(node: ASTStructuralNode, current_path: list[str]):
             current_path.append(f"{node.node_type}:{node.value}")
             if len(current_path) >= max_length or not node.children:
                 if len(current_path) >= 2:
@@ -164,9 +163,9 @@ class CFGNode:
     """Basic block in Control Flow Graph."""
 
     block_id: int
-    statements: List[str] = field(default_factory=list)
-    successors: List[int] = field(default_factory=list)
-    predecessors: List[int] = field(default_factory=list)
+    statements: list[str] = field(default_factory=list)
+    successors: list[int] = field(default_factory=list)
+    predecessors: list[int] = field(default_factory=list)
     block_type: str = "normal"
 
 
@@ -174,9 +173,9 @@ class CFGNode:
 class ControlFlowGraph:
     """Control Flow Graph representation."""
 
-    nodes: Dict[int, CFGNode] = field(default_factory=dict)
-    edges: List[Tuple[int, int, str]] = field(default_factory=list)
-    entry_node: Optional[int] = None
+    nodes: dict[int, CFGNode] = field(default_factory=dict)
+    edges: list[tuple[int, int, str]] = field(default_factory=list)
+    entry_node: int | None = None
 
     def add_node(self, node_id: int, block_type: str = "normal") -> CFGNode:
         node = CFGNode(block_id=node_id, block_type=block_type)
@@ -214,9 +213,9 @@ class ControlFlowGraph:
 class DataFlowGraph:
     """Data Flow Graph representation."""
 
-    definitions: Dict[str, List[int]] = field(default_factory=lambda: defaultdict(list))
-    uses: Dict[str, List[int]] = field(default_factory=lambda: defaultdict(list))
-    dependencies: List[Tuple[str, str]] = field(default_factory=list)
+    definitions: dict[str, list[int]] = field(default_factory=lambda: defaultdict(list))
+    uses: dict[str, list[int]] = field(default_factory=lambda: defaultdict(list))
+    dependencies: list[tuple[str, str]] = field(default_factory=list)
 
     def add_definition(self, variable: str, location: int):
         self.definitions[variable].append(location)
@@ -268,7 +267,7 @@ class TreeKernel:
         return min(1.0, k_ab / denominator)
 
     def _kernel_norm(
-        self, trees_a: List[ASTStructuralNode], trees_b: List[ASTStructuralNode]
+        self, trees_a: list[ASTStructuralNode], trees_b: list[ASTStructuralNode]
     ) -> float:
         """Compute kernel value K(T_a, T_b)."""
         score = 0.0
@@ -285,7 +284,7 @@ class TreeKernel:
         return score
 
     def _kernel_cross(
-        self, trees_a: List[ASTStructuralNode], trees_b: List[ASTStructuralNode]
+        self, trees_a: list[ASTStructuralNode], trees_b: list[ASTStructuralNode]
     ) -> float:
         """Compute cross kernel K(T_a, T_b)."""
         score = 0.0
@@ -305,7 +304,7 @@ class TreeKernel:
         return a.node_type == b.node_type
 
     def _children_kernel(
-        self, children_a: List[ASTStructuralNode], children_b: List[ASTStructuralNode]
+        self, children_a: list[ASTStructuralNode], children_b: list[ASTStructuralNode]
     ) -> float:
         score = 0.0
         for ca in children_a:
@@ -317,7 +316,7 @@ class TreeKernel:
         return score
 
     def _subset_kernel(
-        self, children_a: List[ASTStructuralNode], children_b: List[ASTStructuralNode]
+        self, children_a: list[ASTStructuralNode], children_b: list[ASTStructuralNode]
     ) -> float:
         if not children_a and not children_b:
             return 1.0
@@ -384,7 +383,7 @@ class WeightedTreeEditDistance:
         return self._forest_distance(forest_a, forest_b)
 
     def _forest_distance(
-        self, forest_a: List[ASTStructuralNode], forest_b: List[ASTStructuralNode]
+        self, forest_a: list[ASTStructuralNode], forest_b: list[ASTStructuralNode]
     ) -> float:
         if not forest_a and not forest_b:
             return 0.0
@@ -399,7 +398,7 @@ class WeightedTreeEditDistance:
         set_a = set(tuples_a)
         set_b = set(tuples_b)
 
-        common = len(set_a & set_b)
+        len(set_a & set_b)
         only_a = len(set_a - set_b)
         only_b = len(set_b - set_a)
 
@@ -415,8 +414,8 @@ class WeightedTreeEditDistance:
 
         return cost + depth_penalty
 
-    def _linearize_postorder(self, node: ASTStructuralNode) -> List[ASTStructuralNode]:
-        result: List[ASTStructuralNode] = []
+    def _linearize_postorder(self, node: ASTStructuralNode) -> list[ASTStructuralNode]:
+        result: list[ASTStructuralNode] = []
 
         def _postorder(n: ASTStructuralNode, depth: int):
             n.depth_level = depth
@@ -441,14 +440,14 @@ class CFGComparator:
         if cfg_a.node_count() == 0 or cfg_b.node_count() == 0:
             return 0.0
 
-        edges_a = set((s, t) for s, t, _ in cfg_a.edges)
-        edges_b = set((s, t) for s, t, _ in cfg_b.edges)
+        edges_a = {(s, t) for s, t, _ in cfg_a.edges}
+        edges_b = {(s, t) for s, t, _ in cfg_b.edges}
         edge_sim = (
             len(edges_a & edges_b) / len(edges_a | edges_b) if edges_a | edges_b else 0
         )
 
-        types_a: Dict[str, int] = defaultdict(int)
-        types_b: Dict[str, int] = defaultdict(int)
+        types_a: dict[str, int] = defaultdict(int)
+        types_b: dict[str, int] = defaultdict(int)
         for node in cfg_a.nodes.values():
             types_a[node.block_type] += 1
         for node in cfg_b.nodes.values():
@@ -575,7 +574,7 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
             variable_weight=self.dfg_variable_weight,
         )
 
-    def get_params(self) -> Dict[str, Any]:
+    def get_params(self) -> dict[str, Any]:
         return {
             "ted_weight": self.ted_weight,
             "ted_deletion_cost": self.ted_deletion_cost,
@@ -598,14 +597,14 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
             "similarity_threshold": self.similarity_threshold,
         }
 
-    def set_params(self, **params) -> "StructuralASTSimilarity":
+    def set_params(self, **params) -> StructuralASTSimilarity:
         for key, value in params.items():
             if hasattr(self, key):
                 setattr(self, key, value)
         self._init_comparators()
         return self
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> float:
         ast_a = self._extract_ast(parsed_a)
         ast_b = self._extract_ast(parsed_b)
 
@@ -646,7 +645,7 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
 
         return max(0.0, min(1.0, combined))
 
-    def _extract_ast(self, parsed: Dict[str, Any]) -> Optional[ASTStructuralNode]:
+    def _extract_ast(self, parsed: dict[str, Any]) -> ASTStructuralNode | None:
         if "ast" in parsed:
             return self._convert_to_structural_ast(parsed["ast"])
         if "tokens" in parsed:
@@ -673,7 +672,7 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
             )
         return ASTStructuralNode(node_type="LITERAL", value=str(ast_data))
 
-    def _build_ast_from_tokens(self, tokens: List[Dict]) -> ASTStructuralNode:
+    def _build_ast_from_tokens(self, tokens: list[dict]) -> ASTStructuralNode:
         root = ASTStructuralNode(node_type="ROOT")
         current = root
         for token in tokens:
@@ -685,12 +684,12 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
                 current = node
         return root
 
-    def _compute_cfg_similarity(self, parsed_a: Dict, parsed_b: Dict) -> float:
+    def _compute_cfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
         cfg_a = self._extract_cfg(parsed_a)
         cfg_b = self._extract_cfg(parsed_b)
         return self.cfg_comparator.compare(cfg_a, cfg_b)
 
-    def _extract_cfg(self, parsed: Dict) -> ControlFlowGraph:
+    def _extract_cfg(self, parsed: dict) -> ControlFlowGraph:
         cfg = ControlFlowGraph()
         block_id = 0
 
@@ -703,8 +702,8 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
         cfg.add_node(block_id, block_type="entry")
         cfg.entry_node = block_id
         current_block = block_id
-        loop_stack: List[int] = []
-        cond_stack: List[int] = []
+        loop_stack: list[int] = []
+        cond_stack: list[int] = []
 
         for token in tokens:
             if token.get("type") != "KEYWORD":
@@ -746,19 +745,19 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
 
         return cfg
 
-    def _compute_dfg_similarity(self, parsed_a: Dict, parsed_b: Dict) -> float:
+    def _compute_dfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
         dfg_a = self._extract_dfg(parsed_a)
         dfg_b = self._extract_dfg(parsed_b)
         return self.dfg_comparator.compare(dfg_a, dfg_b)
 
-    def _extract_dfg(self, parsed: Dict) -> DataFlowGraph:
+    def _extract_dfg(self, parsed: dict) -> DataFlowGraph:
         dfg = DataFlowGraph()
         if "tokens" not in parsed:
             return dfg
 
         tokens = parsed["tokens"]
-        defined_vars: Set[str] = set()
-        last_var: Optional[str] = None
+        defined_vars: set[str] = set()
+        last_var: str | None = None
 
         for i, token in enumerate(tokens):
             token_type = token.get("type", "")

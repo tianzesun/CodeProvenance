@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
 
-from sqlalchemy import select, desc
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.backend.models.database import TimelineEvent
@@ -14,6 +14,7 @@ from src.backend.models.database import TimelineEvent
 
 class TimelineEventType(str):
     """Types of timeline events."""
+
     SUBMISSION_UPLOADED = "submission_uploaded"
     SIMILARITY_ANALYSIS_COMPLETED = "similarity_analysis_completed"
     EVIDENCE_REVIEWED = "evidence_reviewed"
@@ -26,22 +27,23 @@ class TimelineEventType(str):
 
 class TimelineService:
     """Service for managing investigation timeline events."""
-    
+
     def __init__(self, db: Session) -> None:
         self.db = db
-    
+
     def create_event(
         self,
-        case_id: Optional[uuid.UUID] = None,
-        job_id: Optional[uuid.UUID] = None,
-        user_id: Optional[uuid.UUID] = None,
+        case_id: uuid.UUID | None = None,
+        job_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
         event_type: str = "",
         title: str = "",
         description: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> TimelineEvent:
         """Create a new timeline event."""
         from src.backend.models.database import TimelineEvent
+
         event = TimelineEvent(
             id=uuid.uuid4(),
             case_id=case_id,
@@ -57,8 +59,8 @@ class TimelineService:
         self.db.commit()
         self.db.refresh(event)
         return event
-    
-    def get_case_timeline(self, case_id: uuid.UUID) -> List[TimelineEvent]:
+
+    def get_case_timeline(self, case_id: uuid.UUID) -> list[TimelineEvent]:
         """Get all events for a case, ordered chronologically."""
         result = self.db.execute(
             select(TimelineEvent)
@@ -66,8 +68,8 @@ class TimelineService:
             .order_by(TimelineEvent.created_at)
         )
         return list(result.scalars())
-    
-    def get_job_timeline(self, job_id: uuid.UUID) -> List[TimelineEvent]:
+
+    def get_job_timeline(self, job_id: uuid.UUID) -> list[TimelineEvent]:
         """Get all events for a job."""
         result = self.db.execute(
             select(TimelineEvent)
@@ -75,8 +77,8 @@ class TimelineService:
             .order_by(TimelineEvent.created_at)
         )
         return list(result.scalars())
-    
-    def export_timeline(self, case_id: uuid.UUID) -> List[Dict[str, Any]]:
+
+    def export_timeline(self, case_id: uuid.UUID) -> list[dict[str, Any]]:
         """Export timeline as list of dictionaries."""
         events = self.get_case_timeline(case_id)
         return [

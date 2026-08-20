@@ -28,9 +28,9 @@ Anti-Patterns Explicitly Forbidden:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from src.backend.engines.detection.policy_engine import PolicyEngine, PolicyDecision
+from src.backend.engines.detection.policy_engine import PolicyEngine
 
 
 @dataclass
@@ -46,10 +46,10 @@ class EvidenceModel:
 
     semantic_meaning: str
     valid_range: tuple[float, float]
-    reliability_constraints: List[str]
+    reliability_constraints: list[str]
 
     @classmethod
-    def get_models(cls) -> Dict[str, "EvidenceModel"]:
+    def get_models(cls) -> dict[str, EvidenceModel]:
         """Return evidence models for all evidence types."""
         return {
             "identity": cls(
@@ -107,11 +107,11 @@ class FEDSDecision:
     verdict: str  # TRUE, PROBABLE, REVIEW, FLAG, CLEAN
     confidence: float  # Calibrated confidence score (0.0-1.0)
     reason: str  # Human-readable reason
-    decision_path: List[str]  # Exact rules triggered
-    evidence_summary: Dict[str, Any]  # Structured evidence breakdown
-    layer_values: Dict[str, float]  # L1, L2, L3 values
-    thresholds_used: Dict[str, float]  # Actual thresholds applied
-    audit_record: Dict[str, Any] = field(default_factory=dict)  # Full audit trail
+    decision_path: list[str]  # Exact rules triggered
+    evidence_summary: dict[str, Any]  # Structured evidence breakdown
+    layer_values: dict[str, float]  # L1, L2, L3 values
+    thresholds_used: dict[str, float]  # Actual thresholds applied
+    audit_record: dict[str, Any] = field(default_factory=dict)  # Full audit trail
 
 
 class FEDS:
@@ -122,7 +122,7 @@ class FEDS:
     Ensures consistent, auditable, and defensible verdicts.
     """
 
-    def __init__(self, policy_engine: Optional[PolicyEngine] = None):
+    def __init__(self, policy_engine: PolicyEngine | None = None):
         """
         Initialize FEDS with optional custom PolicyEngine.
 
@@ -136,8 +136,8 @@ class FEDS:
         layer1_value: float,
         layer2_value: float,
         layer3_value: float,
-        evidence: Dict[str, Any],
-        audit_info: Optional[Dict[str, Any]] = None,
+        evidence: dict[str, Any],
+        audit_info: dict[str, Any] | None = None,
     ) -> FEDSDecision:
         """
         Evaluate evidence and produce a deterministic verdict.

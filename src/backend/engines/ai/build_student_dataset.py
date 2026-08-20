@@ -35,7 +35,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def _coerce_label(value: Any) -> Any:
         return None
 
 
-def _records_from_csv(path: Path) -> Dict[str, Any]:
+def _records_from_csv(path: Path) -> dict[str, Any]:
     """Parse a labelled records file (CSV) into the schema list-of-dicts."""
     records = []
     with path.open(newline="", encoding="utf-8") as fh:
@@ -101,7 +101,7 @@ def _records_from_csv(path: Path) -> Dict[str, Any]:
     return {"source": path.name, "records": records}
 
 
-def _records_from_jsonl(path: Path) -> Dict[str, Any]:
+def _records_from_jsonl(path: Path) -> dict[str, Any]:
     """Parse a labelled records file (JSONL) into the schema list-of-dicts."""
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -137,7 +137,7 @@ def _problem_id_for_file(path: Path) -> str:
     return path.stem
 
 
-def _records_from_folder(path: Path) -> Dict[str, Any]:
+def _records_from_folder(path: Path) -> dict[str, Any]:
     """Ingest an ``ai/`` + ``human/`` folder layout into labelled records."""
     records = []
     label_map = {"ai": 1, "human": 0}
@@ -164,7 +164,7 @@ def _records_from_folder(path: Path) -> Dict[str, Any]:
     return {"source": f"folder:{path}", "records": records}
 
 
-def _load_records(input_path: Path) -> Dict[str, Any]:
+def _load_records(input_path: Path) -> dict[str, Any]:
     """Load records from CSV, JSONL or a folder layout."""
     if input_path.is_dir():
         return _records_from_folder(input_path)
@@ -173,7 +173,7 @@ def _load_records(input_path: Path) -> Dict[str, Any]:
     return _records_from_csv(input_path)
 
 
-def _dedupe_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop duplicate (code) rows, keeping the first occurrence."""
     seen = set()
     for row in records:
@@ -183,7 +183,7 @@ def _dedupe_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         yield row
 
 
-def materialise(input_path: Path, out_dir: Path) -> Dict[str, int]:
+def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
     """Write labelled files and a per-sample metadata index.
 
     Files go under ``<output>/data/{ai,human}/`` with ``samples.jsonl`` — the

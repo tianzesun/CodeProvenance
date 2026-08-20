@@ -2,10 +2,12 @@
 Health check endpoints.
 """
 
-from fastapi import APIRouter
 from datetime import datetime, timezone
 
+from fastapi import APIRouter
+
 router = APIRouter()
+
 
 @router.get("/")
 async def health_check():
@@ -15,8 +17,9 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "IntegrityDesk"
+        "service": "IntegrityDesk",
     }
+
 
 @router.get("/ping")
 async def ping():

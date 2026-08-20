@@ -14,7 +14,6 @@ import base64
 import difflib
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ def _save_fig_to_base64(fig) -> str:
 
 def _build_placeholder_image(
     title: str,
-    lines: Optional[List[str]] = None,
+    lines: list[str] | None = None,
     width: int = 900,
     height: int = 480,
 ) -> str:
@@ -48,7 +47,9 @@ def _build_placeholder_image(
     draw = ImageDraw.Draw(img)
 
     # Header band
-    draw.rounded_rectangle((24, 24, width - 24, 100), radius=18, fill="#f5f7fb", outline="#d7dee8", width=2)
+    draw.rounded_rectangle(
+        (24, 24, width - 24, 100), radius=18, fill="#f5f7fb", outline="#d7dee8", width=2
+    )
     draw.text((48, 48), title, fill="#1f2937")
 
     # Light chart grid
@@ -76,7 +77,9 @@ def _build_placeholder_image(
     for idx, height_ratio in enumerate(bars):
         x0 = start_x + idx * 150
         y0 = chart_bottom - int((chart_bottom - chart_top - 48) * height_ratio)
-        draw.rounded_rectangle((x0, y0, x0 + bar_width, chart_bottom - 24), radius=12, fill="#f59e0b")
+        draw.rounded_rectangle(
+            (x0, y0, x0 + bar_width, chart_bottom - 24), radius=12, fill="#f59e0b"
+        )
 
     if lines:
         y = 120
@@ -93,8 +96,8 @@ def _build_placeholder_image(
 
 
 def generate_similarity_heatmap(
-    similarity_matrix: List[List[float]],
-    labels: Optional[List[str]] = None,
+    similarity_matrix: list[list[float]],
+    labels: list[str] | None = None,
     title: str = "Similarity Heatmap",
     cmap: str = "YlOrRd",
 ) -> str:
@@ -112,12 +115,16 @@ def generate_similarity_heatmap(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
     except ModuleNotFoundError:
         label_list = labels or [f"File {i+1}" for i in range(len(similarity_matrix))]
-        lines = [f"{label}: {row[idx]:.2f}" for idx, (label, row) in enumerate(zip(label_list, similarity_matrix))]
+        lines = [
+            f"{label}: {row[idx]:.2f}"
+            for idx, (label, row) in enumerate(zip(label_list, similarity_matrix))
+        ]
         return _build_placeholder_image(title, lines)
 
     matrix = np.array(similarity_matrix)
@@ -136,8 +143,15 @@ def generate_similarity_heatmap(
     for i in range(n):
         for j in range(n):
             color = "white" if matrix[i, j] > 0.6 else "black"
-            ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
-                    fontsize=7, color=color)
+            ax.text(
+                j,
+                i,
+                f"{matrix[i, j]:.2f}",
+                ha="center",
+                va="center",
+                fontsize=7,
+                color=color,
+            )
 
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Similarity")
     ax.set_title(title, fontsize=12, fontweight="bold", pad=10)
@@ -172,9 +186,10 @@ def generate_code_diff_image(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
         import matplotlib.patches as mpatches
+        import matplotlib.pyplot as plt
     except ModuleNotFoundError:
         diff_preview = list(
             difflib.unified_diff(
@@ -186,7 +201,9 @@ def generate_code_diff_image(
             )
         )
         lines = diff_preview[:8] or ["Files are identical"]
-        return _build_placeholder_image(f"Code Diff: {file_a} vs {file_b}", lines, width=1100, height=520)
+        return _build_placeholder_image(
+            f"Code Diff: {file_a} vs {file_b}", lines, width=1100, height=520
+        )
 
     a_lines = code_a.splitlines(keepends=True)
     b_lines = code_b.splitlines(keepends=True)
@@ -194,7 +211,7 @@ def generate_code_diff_image(
     matcher = difflib.SequenceMatcher(None, a_lines, b_lines)
     opcodes = matcher.get_opcodes()
 
-    render_lines: List[Tuple[str, str, str]] = []
+    render_lines: list[tuple[str, str, str]] = []
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             for k in range(min(i2 - i1, max_lines - len(render_lines))):
@@ -202,7 +219,9 @@ def generate_code_diff_image(
                 render_lines.append(("ctx", line, line))
         elif tag == "replace":
             for k in range(min(i2 - i1, j2 - j1, max_lines - len(render_lines))):
-                render_lines.append(("rep", a_lines[i1 + k].rstrip(), b_lines[j1 + k].rstrip()))
+                render_lines.append(
+                    ("rep", a_lines[i1 + k].rstrip(), b_lines[j1 + k].rstrip())
+                )
             extra_a = (i2 - i1) - (j2 - j1)
             extra_b = (j2 - j1) - (i2 - i1)
             if extra_a > 0:
@@ -234,12 +253,38 @@ def generate_code_diff_image(
     y = n_lines
     for tag, line_a, line_b in render_lines:
         color = colors.get(tag, "#fff")
-        ax_a.axhspan(y - 1, y, facecolor=color, edgecolor=edge_colors.get(tag, "#ddd"), linewidth=0.5)
-        ax_a.text(0.02, y - 0.5, line_a[:80], fontsize=7, va="center",
-                  fontfamily="monospace", color="#333")
-        ax_b.axhspan(y - 1, y, facecolor=color, edgecolor=edge_colors.get(tag, "#ddd"), linewidth=0.5)
-        ax_b.text(0.02, y - 0.5, line_b[:80], fontsize=7, va="center",
-                  fontfamily="monospace", color="#333")
+        ax_a.axhspan(
+            y - 1,
+            y,
+            facecolor=color,
+            edgecolor=edge_colors.get(tag, "#ddd"),
+            linewidth=0.5,
+        )
+        ax_a.text(
+            0.02,
+            y - 0.5,
+            line_a[:80],
+            fontsize=7,
+            va="center",
+            fontfamily="monospace",
+            color="#333",
+        )
+        ax_b.axhspan(
+            y - 1,
+            y,
+            facecolor=color,
+            edgecolor=edge_colors.get(tag, "#ddd"),
+            linewidth=0.5,
+        )
+        ax_b.text(
+            0.02,
+            y - 0.5,
+            line_b[:80],
+            fontsize=7,
+            va="center",
+            fontfamily="monospace",
+            color="#333",
+        )
         y -= 1
 
     for ax, title in [(ax_a, file_a), (ax_b, file_b)]:
@@ -254,8 +299,15 @@ def generate_code_diff_image(
         mpatches.Patch(facecolor="#fff3cd", edgecolor="#ffc107", label="Modified"),
         mpatches.Patch(facecolor="#f8f8f8", edgecolor="#ddd", label="Unchanged"),
     ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=4, fontsize=7,
-               frameon=True, facecolor="white", edgecolor="#ddd")
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=4,
+        fontsize=7,
+        frameon=True,
+        facecolor="white",
+        edgecolor="#ddd",
+    )
 
     fig.tight_layout(rect=[0, 0.06, 1, 0.96])
     img_uri = _save_fig_to_base64(fig)
@@ -264,7 +316,7 @@ def generate_code_diff_image(
 
 
 def generate_ai_probability_chart(
-    ai_results: Dict[str, float],
+    ai_results: dict[str, float],
     title: str = "AI Generation Probability",
 ) -> str:
     """
@@ -279,6 +331,7 @@ def generate_ai_probability_chart(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
@@ -292,14 +345,30 @@ def generate_ai_probability_chart(
 
     fig, ax = plt.subplots(figsize=(6, 3.5))
 
-    colors = ["#dc3545" if p > 0.7 else "#fd7e14" if p > 0.4 else "#28a745" for p in probs]
+    colors = [
+        "#dc3545" if p > 0.7 else "#fd7e14" if p > 0.4 else "#28a745" for p in probs
+    ]
     bars = ax.bar(x, probs, color=colors, edgecolor="#333", linewidth=0.5, width=0.6)
 
     for bar, p in zip(bars, probs):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                f"{p:.1%}", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.02,
+            f"{p:.1%}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
 
-    ax.axhline(y=0.5, color="#dc3545", linestyle="--", linewidth=1, alpha=0.7, label="Threshold (0.5)")
+    ax.axhline(
+        y=0.5,
+        color="#dc3545",
+        linestyle="--",
+        linewidth=1,
+        alpha=0.7,
+        label="Threshold (0.5)",
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(models, rotation=20, ha="right", fontsize=8)
     ax.set_ylabel("AI Probability", fontsize=9)
@@ -316,7 +385,7 @@ def generate_ai_probability_chart(
 
 
 def generate_engine_radar_chart(
-    engine_scores: Dict[str, Dict[str, float]],
+    engine_scores: dict[str, dict[str, float]],
     title: str = "Engine Performance Radar",
 ) -> str:
     """
@@ -331,6 +400,7 @@ def generate_engine_radar_chart(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
@@ -347,13 +417,15 @@ def generate_engine_radar_chart(
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(6, 5), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(6, 5), subplot_kw={"polar": True})
 
     colors = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"]
     for idx, (engine, scores) in enumerate(engine_scores.items()):
         values = [scores.get(m, 0) for m in metrics]
         values += values[:1]
-        ax.plot(angles, values, color=colors[idx % len(colors)], linewidth=2, label=engine)
+        ax.plot(
+            angles, values, color=colors[idx % len(colors)], linewidth=2, label=engine
+        )
         ax.fill(angles, values, color=colors[idx % len(colors)], alpha=0.1)
 
     ax.set_xticks(angles[:-1])
@@ -370,7 +442,10 @@ def generate_engine_radar_chart(
 
 
 def generate_confusion_matrix_image(
-    tp: int, fp: int, tn: int, fn: int,
+    tp: int,
+    fp: int,
+    tn: int,
+    fn: int,
     title: str = "Confusion Matrix",
 ) -> str:
     """
@@ -381,6 +456,7 @@ def generate_confusion_matrix_image(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
@@ -394,9 +470,10 @@ def generate_confusion_matrix_image(
         return _build_placeholder_image(title, lines)
 
     matrix = np.array([[tp, fn], [fp, tn]])
-    labels = [["TP", "FN"], ["FP", "TN"]]
-    values = [[f"{tp}\n(True Positive)", f"{fn}\n(False Negative)"],
-              [f"{fp}\n(False Positive)", f"{tn}\n(True Negative)"]]
+    values = [
+        [f"{tp}\n(True Positive)", f"{fn}\n(False Negative)"],
+        [f"{fp}\n(False Positive)", f"{tn}\n(True Negative)"],
+    ]
 
     fig, ax = plt.subplots(figsize=(5, 4))
     im = ax.imshow(matrix, cmap="Blues", aspect="auto")
@@ -404,8 +481,16 @@ def generate_confusion_matrix_image(
     for i in range(2):
         for j in range(2):
             color = "white" if matrix[i, j] > matrix.max() / 2 else "black"
-            ax.text(j, i, values[i][j], ha="center", va="center",
-                    fontsize=10, color=color, fontweight="bold")
+            ax.text(
+                j,
+                i,
+                values[i][j],
+                ha="center",
+                va="center",
+                fontsize=10,
+                color=color,
+                fontweight="bold",
+            )
 
     ax.set_xticks([0, 1])
     ax.set_yticks([0, 1])
@@ -446,7 +531,9 @@ def generate_qr_code(
     qr.add_data(url)
     qr.make(fit=True)
 
-    img = qr.make_image(fill_color="black", back_color="white", image_factory=qrcode.image.pil.PilImage)
+    img = qr.make_image(
+        fill_color="black", back_color="white", image_factory=qrcode.image.pil.PilImage
+    )
     img = img.resize((size, size))
     buf = io.BytesIO()
     img.save(buf, format="PNG")

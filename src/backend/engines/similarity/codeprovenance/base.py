@@ -5,7 +5,8 @@ Defines the abstract interface for all CodeProvenance engine versions.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
+
 from src.backend.core.ir.base_ir import BaseIR
 
 
@@ -20,13 +21,11 @@ class BaseCodeProvenanceEngine(ABC):
     @abstractmethod
     def version(self) -> str:
         """Engine version identifier (e.g., 'codeprovenance:v1')."""
-        pass
 
     @property
     @abstractmethod
     def name(self) -> str:
         """Human-readable engine name."""
-        pass
 
     @property
     def description(self) -> str:
@@ -45,7 +44,6 @@ class BaseCodeProvenanceEngine(ABC):
         Returns:
             Similarity score in [0.0, 1.0]
         """
-        pass
 
     def compare_ir(self, ir_a: BaseIR, ir_b: BaseIR, **kwargs) -> float:
         """Compare two IR representations.
@@ -68,7 +66,7 @@ class BaseCodeProvenanceEngine(ABC):
             "Use compare() with source code instead."
         )
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get engine configuration.
 
         Returns:

@@ -30,16 +30,16 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from src.backend.engines.ai.ast_features import TreeSitterASTExtractor  # noqa: E402
-from src.backend.engines.ai.classifier import (  # noqa: E402
+from src.backend.engines.ai.ast_features import TreeSitterASTExtractor
+from src.backend.engines.ai.classifier import (
     AICodeClassifier,
     assemble_features,
 )
-from src.backend.engines.ai.perplexity import PerplexityScorer  # noqa: E402
+from src.backend.engines.ai.perplexity import PerplexityScorer
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("train_classifier")
@@ -82,7 +82,7 @@ def _infer_language(filename: str) -> str:
     return mapping.get(suffix, "python")
 
 
-def load_dataset(path: Path) -> Tuple[List[str], List[int], List[str]]:
+def load_dataset(path: Path) -> tuple[list[str], list[int], list[str]]:
     """Load labelled code samples and return (codes, labels, sources)."""
     if path.is_file():
         if path.suffix.lower() in (".json", ".jsonl"):
@@ -92,9 +92,9 @@ def load_dataset(path: Path) -> Tuple[List[str], List[int], List[str]]:
     if not path.is_dir():
         raise ValueError(f"Dataset path not found: {path}")
 
-    codes: List[str] = []
-    labels: List[int] = []
-    sources: List[str] = []
+    codes: list[str] = []
+    labels: list[int] = []
+    sources: list[str] = []
     for subdir, label in (("ai", 1), ("human", 0)):
         category = path / subdir
         if not category.is_dir():
@@ -113,10 +113,10 @@ def load_dataset(path: Path) -> Tuple[List[str], List[int], List[str]]:
     return codes, labels, sources
 
 
-def _load_json_dataset(path: Path) -> Tuple[List[str], List[int], List[str]]:
+def _load_json_dataset(path: Path) -> tuple[list[str], list[int], list[str]]:
     """Load samples from a JSON/JSONL dataset file."""
     lines = path.read_text(encoding="utf-8").splitlines()
-    data: List[Dict[str, Any]] = []
+    data: list[dict[str, Any]] = []
     for line in lines:
         line = line.strip()
         if not line:
@@ -132,11 +132,11 @@ def _load_json_dataset(path: Path) -> Tuple[List[str], List[int], List[str]]:
     return codes, labels, sources
 
 
-def build_feature_rows(codes: List[str], sources: List[str]) -> List[Dict[str, float]]:
+def build_feature_rows(codes: list[str], sources: list[str]) -> list[dict[str, float]]:
     """Compute the classifier feature dict for every sample."""
     ast_extractor = TreeSitterASTExtractor()
     perplexity = PerplexityScorer()
-    rows: List[Dict[str, float]] = []
+    rows: list[dict[str, float]] = []
     from src.backend.engines.features.code_stylometry import StylometryExtractor
 
     stylometry_extractor = StylometryExtractor()
@@ -208,10 +208,10 @@ def main() -> None:
 
 def evaluate(
     classifier: AICodeClassifier,
-    test_rows: List[Dict[str, float]],
-    test_labels: List[int],
-    test_idx: List[int],
-    sources: List[str],
+    test_rows: list[dict[str, float]],
+    test_labels: list[int],
+    test_idx: list[int],
+    sources: list[str],
 ) -> None:
     """Print precision/recall/F1/AUC for a trained classifier."""
     from sklearn.metrics import (

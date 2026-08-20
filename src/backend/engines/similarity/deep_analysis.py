@@ -10,10 +10,10 @@ Advanced code similarity detection using multiple techniques:
 - Pattern-based clone detection
 """
 
-from typing import List, Dict, Any, Tuple, Set, Optional
-from collections import Counter
 import hashlib
 import re
+from collections import Counter
+from typing import Any
 
 
 class DeepCodeAnalyzer:
@@ -144,7 +144,7 @@ class DeepCodeAnalyzer:
             "default": set(),
         }
 
-    def analyze(self, parsed_code: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze(self, parsed_code: dict[str, Any]) -> dict[str, Any]:
         """
         Perform comprehensive analysis on parsed code.
 
@@ -210,7 +210,7 @@ class DeepCodeAnalyzer:
             language, self.reserved_keywords["default"]
         )
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for key, value in ast.items():
             if key == "_type":
                 result[key] = value
@@ -257,7 +257,7 @@ class DeepCodeAnalyzer:
 
         return result
 
-    def _get_ast_statistics(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_ast_statistics(self, ast: dict[str, Any]) -> dict[str, Any]:
         """
         Calculate statistics about the AST.
 
@@ -279,7 +279,7 @@ class DeepCodeAnalyzer:
                 node_type = node.get("_type", "Unknown")
                 if node_type:
                     node_types.append(node_type)
-                for key, value in node.items():
+                for value in node.values():
                     traverse(value, depth + 1)
             elif isinstance(node, list):
                 for item in node:
@@ -298,7 +298,7 @@ class DeepCodeAnalyzer:
             "type_ratio": len(set(node_types)) / max(total_nodes[0], 1),
         }
 
-    def _extract_patterns(self, ast: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_patterns(self, ast: dict[str, Any]) -> list[dict[str, Any]]:
         """
         Extract common code patterns from AST.
 
@@ -362,7 +362,7 @@ class DeepCodeAnalyzer:
                         }
                     )
 
-                for key, value in node.items():
+                for value in node.values():
                     traverse(value, path + [node_type])
             elif isinstance(node, list):
                 for item in node:
@@ -371,7 +371,7 @@ class DeepCodeAnalyzer:
         traverse(ast)
         return patterns
 
-    def _get_node_signature(self, node: Dict[str, Any]) -> str:
+    def _get_node_signature(self, node: dict[str, Any]) -> str:
         """
         Generate a signature for a node based on its structure.
 
@@ -396,7 +396,7 @@ class DeepCodeAnalyzer:
 
         return f"{node_type}:{','.join(sorted(set(children_types)))}"
 
-    def _extract_subtrees(self, ast: Dict[str, Any], min_size: int = 3) -> List[str]:
+    def _extract_subtrees(self, ast: dict[str, Any], min_size: int = 3) -> list[str]:
         """
         Extract significant subtrees from AST.
 
@@ -427,7 +427,7 @@ class DeepCodeAnalyzer:
                     subtrees.append(subtree_hash)
 
                 # Traverse children
-                for key, value in node.items():
+                for value in node.values():
                     traverse(value)
             elif isinstance(node, list):
                 for item in node:
@@ -436,7 +436,7 @@ class DeepCodeAnalyzer:
         traverse(ast)
         return list(set(subtrees))  # Remove duplicates
 
-    def _serialize_subtree(self, node: Dict[str, Any]) -> Optional[str]:
+    def _serialize_subtree(self, node: dict[str, Any]) -> str | None:
         """
         Serialize a subtree to a canonical string.
 
@@ -470,7 +470,7 @@ class DeepCodeAnalyzer:
 
         return "|".join(parts) if parts else None
 
-    def _generate_fingerprint(self, ast: Dict[str, Any]) -> str:
+    def _generate_fingerprint(self, ast: dict[str, Any]) -> str:
         """
         Generate a structural fingerprint for the AST.
 
@@ -488,7 +488,7 @@ class DeepCodeAnalyzer:
                 node_type = node.get("_type", "")
                 if node_type:
                     type_counts[node_type] += 1
-                for key, value in node.items():
+                for value in node.values():
                     traverse(value)
             elif isinstance(node, list):
                 for item in node:
@@ -504,8 +504,8 @@ class DeepCodeAnalyzer:
         return hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
 
     def _calculate_complexity(
-        self, tokens: List[str], lines: List[str]
-    ) -> Dict[str, Any]:
+        self, tokens: list[str], lines: list[str]
+    ) -> dict[str, Any]:
         """
         Calculate code complexity metrics.
 
@@ -525,7 +525,7 @@ class DeepCodeAnalyzer:
             "avg_line_length": sum(len(line) for line in lines) / max(len(lines), 1),
         }
 
-    def _estimate_comment_ratio(self, lines: List[str]) -> float:
+    def _estimate_comment_ratio(self, lines: list[str]) -> float:
         """
         Estimate the ratio of comment lines.
 
@@ -578,7 +578,7 @@ class ASTTreeEditDistance:
     def __init__(self):
         self._cache = {}
 
-    def calculate_distance(self, ast_a: Dict[str, Any], ast_b: Dict[str, Any]) -> float:
+    def calculate_distance(self, ast_a: dict[str, Any], ast_b: dict[str, Any]) -> float:
         """
         Calculate normalized tree edit distance between two ASTs.
 
@@ -603,7 +603,7 @@ class ASTTreeEditDistance:
 
         return distance / max_nodes
 
-    def _ast_to_tree(self, ast: Dict[str, Any]) -> "TreeNode":
+    def _ast_to_tree(self, ast: dict[str, Any]) -> "TreeNode":
         """Convert AST dict to TreeNode structure."""
         if not isinstance(ast, dict):
             return None
@@ -646,8 +646,8 @@ class ASTTreeEditDistance:
             return self._count_nodes(tree_a)
 
         # Build tree lists (preorder with keyroots)
-        tree_a_list = self._tree_to_list(tree_a)
-        tree_b_list = self._tree_to_list(tree_b)
+        self._tree_to_list(tree_a)
+        self._tree_to_list(tree_b)
 
         # Simple tree distance using tree size difference as approximation
         # Full Zhang-Shasha is complex; this is a practical approximation
@@ -670,7 +670,7 @@ class ASTTreeEditDistance:
 
         return int((type_distance * 0.7 + size_distance * 0.3) * max(size_a, size_b))
 
-    def _tree_to_list(self, node: "TreeNode") -> List["TreeNode"]:
+    def _tree_to_list(self, node: "TreeNode") -> list["TreeNode"]:
         """Convert tree to list in preorder."""
         if node is None:
             return []
@@ -679,7 +679,7 @@ class ASTTreeEditDistance:
             result.extend(self._tree_to_list(child))
         return result
 
-    def _get_all_types(self, node: "TreeNode") -> Set[str]:
+    def _get_all_types(self, node: "TreeNode") -> set[str]:
         """Get all node types in tree."""
         if node is None:
             return set()
@@ -694,7 +694,7 @@ class TreeNode:
 
     def __init__(self, label: str):
         self.label = label
-        self.children: List["TreeNode"] = []
+        self.children: list[TreeNode] = []
 
     def add_child(self, child: "TreeNode"):
         self.children.append(child)
@@ -714,7 +714,7 @@ class TreeKernelSimilarity:
         self._cache = {}
 
     def calculate_similarity(
-        self, ast_a: Dict[str, Any], ast_b: Dict[str, Any]
+        self, ast_a: dict[str, Any], ast_b: dict[str, Any]
     ) -> float:
         """
         Calculate tree kernel similarity between two ASTs.
@@ -753,7 +753,7 @@ class TreeKernelSimilarity:
 
         return kernel_value / (norm_a**0.5 * norm_b**0.5)
 
-    def _extract_subtrees(self, ast: Dict[str, Any], max_depth: int = 4) -> List[str]:
+    def _extract_subtrees(self, ast: dict[str, Any], max_depth: int = 4) -> list[str]:
         """Extract subtree patterns from AST."""
         subtrees = []
 
@@ -792,7 +792,7 @@ class ControlFlowAnalyzer:
     Extracts control flow patterns for similarity detection.
     """
 
-    def analyze(self, ast: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze(self, ast: dict[str, Any]) -> dict[str, Any]:
         """
         Analyze control flow from AST.
 
@@ -865,7 +865,7 @@ class ControlFlowAnalyzer:
 
         return cfg
 
-    def compare_cfg(self, cfg_a: Dict[str, Any], cfg_b: Dict[str, Any]) -> float:
+    def compare_cfg(self, cfg_a: dict[str, Any], cfg_b: dict[str, Any]) -> float:
         """
         Compare two control flow graphs.
 
@@ -927,8 +927,8 @@ class PatternCloneDetector:
     ]
 
     def detect_clones(
-        self, analysis_a: Dict[str, Any], analysis_b: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, analysis_a: dict[str, Any], analysis_b: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Detect code clones between two code analyses.
 
@@ -978,8 +978,8 @@ class PatternCloneDetector:
 
 # Convenience function for full analysis
 def analyze_code_deep(
-    parsed_code: Dict[str, Any], language: str = "default"
-) -> Dict[str, Any]:
+    parsed_code: dict[str, Any], language: str = "default"
+) -> dict[str, Any]:
     """
     Perform comprehensive deep analysis on parsed code.
 
@@ -1005,8 +1005,8 @@ def analyze_code_deep(
 
 
 def compare_codes_deep(
-    parsed_a: Dict[str, Any], parsed_b: Dict[str, Any], language: str = "default"
-) -> Dict[str, Any]:
+    parsed_a: dict[str, Any], parsed_b: dict[str, Any], language: str = "default"
+) -> dict[str, Any]:
     """
     Compare two code files using deep analysis techniques.
 
@@ -1092,7 +1092,7 @@ def _dict_similarity(dict_a: Any, dict_b: Any) -> float:
             return 0.0
 
         common_keys = keys_a & keys_b
-        all_keys = keys_a | keys_b
+        keys_a | keys_b
 
         if not common_keys:
             return 0.0
@@ -1146,11 +1146,11 @@ class DeepVerify:
 
     def verify_pair(
         self,
-        parsed_a: Dict[str, Any],
-        parsed_b: Dict[str, Any],
+        parsed_a: dict[str, Any],
+        parsed_b: dict[str, Any],
         initial_score: float,
         language: str = "default",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Perform heavy verification on a single candidate pair from first pass.
 
@@ -1290,11 +1290,11 @@ class DeepVerify:
 
     def verify_top_candidates(
         self,
-        query_submission: Dict[str, Any],
-        candidates: List[Dict[str, Any]],
+        query_submission: dict[str, Any],
+        candidates: list[dict[str, Any]],
         language: str = "default",
         top_n: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Run deep verification on Top-N candidates from first pass retrieval.
 
@@ -1335,10 +1335,10 @@ class DeepVerify:
 
 # Convenience function
 def deep_verify_pair(
-    parsed_a: Dict[str, Any],
-    parsed_b: Dict[str, Any],
+    parsed_a: dict[str, Any],
+    parsed_b: dict[str, Any],
     initial_score: float,
     language: str = "default",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convenience wrapper for DeepVerify.verify_pair"""
     return DeepVerify().verify_pair(parsed_a, parsed_b, initial_score, language)

@@ -8,10 +8,9 @@ engine coefficients hidden from the normal UI.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
-
-ASSIGNMENT_TYPE_WEIGHTS: Dict[str, Dict[str, float]] = {
+ASSIGNMENT_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
     "auto_detect": {
         "token": 0.18,
         "ast": 0.24,
@@ -56,7 +55,7 @@ ASSIGNMENT_TYPE_WEIGHTS: Dict[str, Dict[str, float]] = {
     },
 }
 
-ASSIGNMENT_TYPE_ALIASES: Dict[str, str] = {
+ASSIGNMENT_TYPE_ALIASES: dict[str, str] = {
     "data_structures": "structured_logic",
     "algorithms": "structured_logic",
     "web_project": "project_multi_file",
@@ -98,15 +97,15 @@ class AppliedProfessorProfile:
     """Internal policy derived from professor settings."""
 
     profile: ProfessorProfile
-    weights: Dict[str, float]
+    weights: dict[str, float]
     threshold: float
     result_limit: int | None
-    policy: Dict[str, Any]
+    policy: dict[str, Any]
     summary: str
     recommendation: str
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the applied profile for APIs and UI."""
         return {
             "profile": self.profile.__dict__,
@@ -120,7 +119,7 @@ class AppliedProfessorProfile:
         }
 
 
-def professor_profile_catalog() -> Dict[str, Any]:
+def professor_profile_catalog() -> dict[str, Any]:
     """Return professor-facing option catalog."""
     return {
         "assignment_types": [
@@ -215,7 +214,7 @@ def professor_profile_catalog() -> Dict[str, Any]:
     }
 
 
-def apply_professor_profile(raw: Dict[str, Any] | None) -> AppliedProfessorProfile:
+def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfile:
     """Convert persisted professor settings into internal detection policy."""
     raw = raw or {}
     profile = ProfessorProfile(
@@ -305,7 +304,7 @@ def apply_professor_profile(raw: Dict[str, Any] | None) -> AppliedProfessorProfi
     )
 
 
-def infer_assignment_profile(signals: AssignmentSignals | Dict[str, Any]) -> str:
+def infer_assignment_profile(signals: AssignmentSignals | dict[str, Any]) -> str:
     """Infer the simple assignment profile from assignment-level metadata."""
     if isinstance(signals, dict):
         allowed = AssignmentSignals.__dataclass_fields__
@@ -327,7 +326,7 @@ def infer_assignment_profile(signals: AssignmentSignals | Dict[str, Any]) -> str
 
 def professor_profile_to_engine_weights(
     applied: AppliedProfessorProfile,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Map professor evidence weights to current engine-weight keys."""
     weights = applied.weights
     return _normalize_weights(
@@ -345,7 +344,7 @@ def professor_profile_to_engine_weights(
     )
 
 
-def _valid(value: Any, allowed: Dict[str, Any], fallback: str) -> str:
+def _valid(value: Any, allowed: dict[str, Any], fallback: str) -> str:
     candidate = str(value or "")
     return candidate if candidate in allowed else fallback
 
@@ -356,7 +355,7 @@ def _assignment_type(value: Any) -> str:
     return candidate if candidate in ASSIGNMENT_TYPE_WEIGHTS else "auto_detect"
 
 
-def _assignment_policy(assignment_type: str) -> Dict[str, Any]:
+def _assignment_policy(assignment_type: str) -> dict[str, Any]:
     base = {
         "starter_code_removal": "strong",
         "common_solution_discount": True,
@@ -405,7 +404,7 @@ def _assignment_policy(assignment_type: str) -> Dict[str, Any]:
     return {**base, **policies.get(assignment_type, {})}
 
 
-def _normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
+def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
     total = sum(max(0.0, float(value)) for value in weights.values())
     if total <= 0:
         return dict(weights)

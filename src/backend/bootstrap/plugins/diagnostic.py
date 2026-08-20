@@ -1,8 +1,10 @@
 """Diagnostic runner plugin."""
-from typing import Dict, Any
+
 from pathlib import Path
-from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
+from typing import Any
+
 from src.backend.bootstrap.plugins.loader import register_plugin
+from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
 
 
 @register_plugin
@@ -11,7 +13,7 @@ class DiagnosticRunner(ExecutionPlugin):
 
     name = "diagnose"
 
-    def run(self, job_id: str) -> Dict[str, Any]:
+    def run(self, job_id: str) -> dict[str, Any]:
         """Run diagnostic analysis on a job.
 
         Args:

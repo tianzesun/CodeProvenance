@@ -18,17 +18,18 @@ Example plugin (plugins/my_engine.py):
             # Your similarity logic here
             return 0.5
 """
+
 import importlib
 import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from benchmark.registry import registry
 
 
-def load_plugins(plugins_dir: str = "plugins") -> List[str]:
+def load_plugins(plugins_dir: str = "plugins") -> list[str]:
     """Load all plugins from the plugins directory.
 
     Scans the plugins directory for .py files, imports them,
@@ -52,15 +53,17 @@ def load_plugins(plugins_dir: str = "plugins") -> List[str]:
             _load_plugin(py_file)
             loaded.append(py_file.stem)
         except Exception as e:
-            print(f"Warning: Failed to load plugin {py_file.name}: {e}", file=sys.stderr)
+            print(
+                f"Warning: Failed to load plugin {py_file.name}: {e}", file=sys.stderr
+            )
 
     return loaded
 
 
 def _load_plugin(py_file: Path) -> None:
     """Load a single plugin file and register its engines."""
-    from benchmark.similarity.base_engine import BaseSimilarityEngine
     from benchmark.registry import DetectionEngine
+    from benchmark.similarity.base_engine import BaseSimilarityEngine
 
     spec = importlib.util.spec_from_file_location(py_file.stem, str(py_file))
     if spec is None or spec.loader is None:
@@ -77,11 +80,14 @@ def _load_plugin(py_file: Path) -> None:
             continue
         if attr.__module__ != module.__name__:
             continue
-        if issubclass(attr, (DetectionEngine, BaseSimilarityEngine)) and attr not in (DetectionEngine, BaseSimilarityEngine):
+        if issubclass(attr, (DetectionEngine, BaseSimilarityEngine)) and attr not in (
+            DetectionEngine,
+            BaseSimilarityEngine,
+        ):
             # Create instance to get name
             try:
                 instance = attr()
-                name = getattr(instance, 'name', lambda: attr_name)
+                name = getattr(instance, "name", lambda: attr_name)
                 engine_name = name() if callable(name) else name
                 registry.register(engine_name, attr)
             except Exception:

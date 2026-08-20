@@ -5,7 +5,8 @@ Advanced graph-based similarity with semantic understanding.
 This version adds graph-based comparison and semantic analysis.
 """
 
-from typing import Dict, Any, List, Optional, Set
+from typing import Any
+
 from .base import BaseCodeProvenanceEngine
 from .version_registry import register_engine
 
@@ -197,8 +198,8 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
     def _compare_graphs(self, graph_a, graph_b) -> float:
         """Compare two graph IRs."""
         # Compare node types
-        types_a = set(node.node_type for node in graph_a.nodes)
-        types_b = set(node.node_type for node in graph_b.nodes)
+        types_a = {node.node_type for node in graph_a.nodes}
+        types_b = {node.node_type for node in graph_b.nodes}
 
         if not types_a and not types_b:
             return 1.0
@@ -208,8 +209,8 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
         type_score = type_intersection / type_union if type_union > 0 else 0.0
 
         # Compare edge types
-        edge_types_a = set(edge.edge_type for edge in graph_a.edges)
-        edge_types_b = set(edge.edge_type for edge in graph_b.edges)
+        edge_types_a = {edge.edge_type for edge in graph_a.edges}
+        edge_types_b = {edge.edge_type for edge in graph_b.edges}
 
         if not edge_types_a and not edge_types_b:
             edge_score = 1.0
@@ -278,7 +279,7 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
         comments_b = set(re.findall(r"#.*|//.*|/\*.*?\*/", code_b, re.DOTALL))
 
         # Clean comments
-        def clean(comments: Set[str]) -> Set[str]:
+        def clean(comments: set[str]) -> set[str]:
             cleaned = set()
             for comment in comments:
                 # Remove comment markers
@@ -307,14 +308,14 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
             return "ID"
         if value.isdigit():
             return "NUM"
-        if value.startswith('"') or value.startswith("'"):
+        if value.startswith(('"', "'")):
             return "STR"
         return value
 
     def _simple_structural_similarity(self, code_a: str, code_b: str) -> float:
         """Simple structural similarity fallback."""
 
-        def count_elements(code: str) -> Dict[str, int]:
+        def count_elements(code: str) -> dict[str, int]:
             import re
 
             return {
@@ -341,7 +342,7 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
 
         return 1.0 - (total_diff / total_count)
 
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Tokenize source code."""
         import re
 
@@ -354,7 +355,7 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
 
         return [t for t in tokens if t]
 
-    def _get_ngrams(self, tokens: List[str]) -> Set[str]:
+    def _get_ngrams(self, tokens: list[str]) -> set[str]:
         """Extract n-grams from token sequence."""
         ngrams = set()
         for i in range(len(tokens) - self._ngram_size + 1):
@@ -375,7 +376,7 @@ class CodeProvenanceV3(BaseCodeProvenanceEngine):
 
         return "unknown"
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get engine configuration."""
         config = super().get_config()
         config.update(

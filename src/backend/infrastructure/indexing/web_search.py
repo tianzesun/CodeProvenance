@@ -1,9 +1,10 @@
-import requests
 import logging
 import re
 from pathlib import PurePosixPath
+from typing import Any
 from urllib.parse import urlparse
-from typing import Dict, List, Any, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,8 @@ class WebSearchService:
 
     def __init__(
         self,
-        github_token: Optional[str] = None,
-        stackoverflow_api_key: Optional[str] = None,
+        github_token: str | None = None,
+        stackoverflow_api_key: str | None = None,
     ):
         self.github_token = github_token
         self.stackoverflow_api_key = stackoverflow_api_key
@@ -58,7 +59,7 @@ class WebSearchService:
 
     def search_github(
         self, query_code: str, language: str = "python"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search GitHub for code snippets using the Code Search API."""
         if not self.github_token:
             logger.warning(
@@ -107,7 +108,7 @@ class WebSearchService:
 
     def scan_github_repo(
         self, query_code: str, repo_url: str, language: str = "python"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Scan a configured public GitHub repository for similar source files."""
         repo = self._parse_github_repo(repo_url)
         if not repo:
@@ -129,7 +130,7 @@ class WebSearchService:
             logger.error("GitHub repo tree fetch failed for %s: %s", repo_url, exc)
             return []
 
-        matches: List[Dict[str, Any]] = []
+        matches: list[dict[str, Any]] = []
         for item in tree:
             path = str(item.get("path") or "")
             if item.get("type") != "blob" or not path.endswith(suffixes):
@@ -161,10 +162,10 @@ class WebSearchService:
         return sorted(matches, key=lambda item: item["similarity"], reverse=True)[:10]
 
     def scan_configured_sources(
-        self, query_code: str, language: str, source_sites: List[str]
-    ) -> Dict[str, Any]:
+        self, query_code: str, language: str, source_sites: list[str]
+    ) -> dict[str, Any]:
         """Scan administrator-configured public source locations."""
-        all_results: List[Dict[str, Any]] = []
+        all_results: list[dict[str, Any]] = []
         configured_sources = [site.strip() for site in source_sites if site.strip()]
 
         for site in configured_sources:
@@ -179,7 +180,7 @@ class WebSearchService:
                 all_results.extend(self._scan_raw_source_url(query_code, site))
 
         all_results.sort(key=lambda item: item.get("similarity", 0), reverse=True)
-        source_counts: Dict[str, int] = {}
+        source_counts: dict[str, int] = {}
         for result in all_results:
             source = str(result.get("source") or "web")
             source_counts[source] = source_counts.get(source, 0) + 1
@@ -193,7 +194,7 @@ class WebSearchService:
 
     def _scan_raw_source_url(
         self, query_code: str, source_url: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetch and compare one configured raw source URL."""
         try:
             response = requests.get(source_url, timeout=8)
@@ -213,7 +214,7 @@ class WebSearchService:
             }
         ]
 
-    def _parse_github_repo(self, repo_url: str) -> Optional[tuple[str, str]]:
+    def _parse_github_repo(self, repo_url: str) -> tuple[str, str] | None:
         """Return owner/repo from a GitHub repository URL."""
         parsed = urlparse(repo_url if "://" in repo_url else f"https://{repo_url}")
         if not parsed.netloc.lower().endswith("github.com"):
@@ -234,7 +235,7 @@ class WebSearchService:
             "c": (".c", ".h"),
         }.get(language, (".py", ".java", ".js", ".ts", ".c", ".cpp"))
 
-    def search_stackoverflow(self, query_code: str) -> List[Dict[str, Any]]:
+    def search_stackoverflow(self, query_code: str) -> list[dict[str, Any]]:
         """Search Stack Overflow for code snippets."""
         # Simplified: Stack Overflow API search (SE API)
         url = "https://api.stackexchange.com/2.3/search/excerpts"
@@ -271,7 +272,7 @@ class WebSearchService:
             logger.error(f"Stack Overflow search failed: {e}")
             return []
 
-    def perform_full_web_scan(self, code: str, language: str) -> Dict[str, Any]:
+    def perform_full_web_scan(self, code: str, language: str) -> dict[str, Any]:
         """Perform a comprehensive web-scale scan."""
         github_results = self.search_github(code, language)
         so_results = self.search_stackoverflow(code)

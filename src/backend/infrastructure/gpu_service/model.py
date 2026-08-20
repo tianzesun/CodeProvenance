@@ -1,6 +1,8 @@
+from typing import Any
+
 import torch
-from typing import List, Dict, Any
-from .runtime_settings import DEVICE, MODEL_NAME
+
+from .runtime_settings import MODEL_NAME
 
 
 class CodeBERTModel:
@@ -9,14 +11,14 @@ class CodeBERTModel:
     def __init__(self, device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading {MODEL_NAME} on {self.device}...")
-        from transformers import AutoTokenizer, AutoModel
+        from transformers import AutoModel, AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self.model = AutoModel.from_pretrained(MODEL_NAME).to(self.device)
         self.model.eval()
         print("Model loaded!")
 
-    def encode(self, texts: List[str]) -> torch.Tensor:
+    def encode(self, texts: list[str]) -> torch.Tensor:
         """Batch embed texts."""
         inputs = self.tokenizer(
             texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
@@ -25,7 +27,7 @@ class CodeBERTModel:
             outputs = self.model(**inputs)
         return outputs.last_hidden_state.mean(dim=1)
 
-    def similarity_batch(self, pairs: List[Dict[str, Any]]) -> List[float]:
+    def similarity_batch(self, pairs: list[dict[str, Any]]) -> list[float]:
         """Batch similarity computation.
 
         Args:

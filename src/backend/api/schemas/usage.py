@@ -2,10 +2,11 @@
 Pydantic schemas for usage-related API requests and responses.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
-from datetime import datetime
 import uuid
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class UsageBase(BaseModel):
@@ -24,7 +25,7 @@ class UsageBase(BaseModel):
 
 class UsageCreate(UsageBase):
     tenant_id: uuid.UUID
-    period: str = Field(..., regex=r'^\d{4}-\d{2}$')  # YYYY-MM format
+    period: str = Field(..., regex=r"^\d{4}-\d{2}$")  # YYYY-MM format
 
 
 class UsageResponse(UsageBase):
@@ -42,5 +43,5 @@ class UsageSummary(BaseModel):
     tenant_id: uuid.UUID
     current_period: str
     usage: UsageResponse
-    limits: Dict[str, Any]
-    remaining: Dict[str, Any]
+    limits: dict[str, Any]
+    remaining: dict[str, Any]

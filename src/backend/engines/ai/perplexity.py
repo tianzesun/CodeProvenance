@@ -12,12 +12,13 @@ log-likelihoods for a more accurate signal.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 import os
 import re
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class TokenPerplexityModel:
                 context = tuple(tokens[i - self.n + 1 : i])
                 self._ngrams[context][token] += 1
 
-    def train_texts(self, texts: List[str]) -> None:
+    def train_texts(self, texts: list[str]) -> None:
         """Train on a list of source code strings."""
         for text in texts:
             self.train(text)
@@ -118,7 +119,7 @@ class TokenPerplexityModel:
                     continue
         return count
 
-    def _log_prob(self, token: str, context: Tuple[str, ...]) -> float:
+    def _log_prob(self, token: str, context: tuple[str, ...]) -> float:
         """Backoff-log-probability of a token given its context."""
         denom = sum(self._ngrams[context].values())
         if denom > 0:
@@ -131,7 +132,7 @@ class TokenPerplexityModel:
             return math.log2(prob)
         return math.log2(1.0 / 50000.0)
 
-    def average_log_prob(self, code: str) -> Optional[float]:
+    def average_log_prob(self, code: str) -> float | None:
         """Mean per-token log-probability of code under this model."""
         tokens = _tokenize(code)
         if not tokens:
@@ -147,7 +148,7 @@ class TokenPerplexityModel:
             return None
         return total / count
 
-    def perplexity(self, code: str) -> Optional[float]:
+    def perplexity(self, code: str) -> float | None:
         """Perplexity of code under the model (lower = more predictable)."""
         avg_log_prob = self.average_log_prob(code)
         if avg_log_prob is None:
@@ -155,14 +156,14 @@ class TokenPerplexityModel:
         return 2.0 ** (-avg_log_prob)
 
 
-def _tokenize(code: str) -> List[str]:
+def _tokenize(code: str) -> list[str]:
     """Tokenize source code into tokens for the language model."""
     return _TOKEN_RE.findall(code)
 
 
 def _windowed_chunks(
     code: str, window: int = 25, overlap: int = 5
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Split code into windowed line chunks with overlap.
 
     Mirrors Turnitin's overlapping sentence windows so burstiness can be
@@ -174,7 +175,7 @@ def _windowed_chunks(
     lines = code.splitlines()
     if not lines:
         return []
-    chunks: List[Dict[str, Any]] = []
+    chunks: list[dict[str, Any]] = []
     step = max(1, window - overlap)
     for start in range(0, len(lines), step):
         chunk_lines = lines[start : start + window]
@@ -202,7 +203,7 @@ class PerplexityScorer:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         window: int = 25,
         overlap: int = 5,
         transformer: bool = True,
@@ -219,7 +220,7 @@ class PerplexityScorer:
         if transformer and (model_path or os.getenv("AICODE_TRANSFORMER_MODEL", "")):
             self._try_load_transformer(model_path)
 
-    def _try_load_transformer(self, model_path: Optional[str]) -> None:
+    def _try_load_transformer(self, model_path: str | None) -> None:
         """Lazily attempt to load a cached HuggingFace code LM (no download).
 
         Only runs when a model name is explicitly configured (env var or arg),
@@ -281,11 +282,11 @@ class PerplexityScorer:
             except Exception:
                 continue
 
-    def train(self, texts: List[str]) -> None:
+    def train(self, texts: list[str]) -> None:
         """Train the statistical model on a set of code strings."""
         self.model.train_texts(texts)
 
-    def score(self, code: str) -> Dict[str, Any]:
+    def score(self, code: str) -> dict[str, Any]:
         """Compute perplexity, burstiness and chunk-level signals.
 
         Returns a dict with the raw signal values. Higher ``ai_likelihood``
@@ -303,8 +304,8 @@ class PerplexityScorer:
                 "model": "statistical",
             }
 
-        per_chunk: List[Dict[str, Any]] = []
-        chunk_scores: List[float] = []
+        per_chunk: list[dict[str, Any]] = []
+        chunk_scores: list[float] = []
         for chunk in chunks:
             if self._transformer_available:
                 perplexity, avg_log_prob = self._transformer_perplexity(chunk["lines"])
@@ -360,9 +361,7 @@ class PerplexityScorer:
             "model": model_used,
         }
 
-    def _statistical_perplexity(
-        self, code: str
-    ) -> Tuple[Optional[float], Optional[float]]:
+    def _statistical_perplexity(self, code: str) -> tuple[float | None, float | None]:
         """Return (perplexity, avg_log_prob) using the local statistical model.
 
         Falls back to a per-document mini language model when the global model
@@ -379,7 +378,7 @@ class PerplexityScorer:
         answer = 2.0 ** (-avg_log_prob)
         return answer, avg_log_prob
 
-    def _document_average_log_prob(self, code: str) -> Optional[float]:
+    def _document_average_log_prob(self, code: str) -> float | None:
         """Mean per-token log-probability from a per-document recurrence model.
 
         Measures how predictable each token is given the previous token, using
@@ -395,13 +394,13 @@ class PerplexityScorer:
 
         unigrams: Counter = Counter(tokens)
         successors: defaultdict = defaultdict(Counter)
-        for word, following in zip(tokens, tokens[1:]):
+        for word, following in itertools.pairwise(tokens):
             successors[word][following] += 1
         vocab = len(unigrams)
 
         total_log = 0.0
         count = 0
-        for word, following in zip(tokens, tokens[1:]):
+        for word, following in itertools.pairwise(tokens):
             successor_total = sum(successors[word].values())
             emp_prob = successors[word][following] / successor_total
             # Laplace-style floor keeps log probabilities finite
@@ -412,9 +411,7 @@ class PerplexityScorer:
             return None
         return total_log / count
 
-    def _transformer_perplexity(
-        self, code: str
-    ) -> Tuple[Optional[float], Optional[float]]:
+    def _transformer_perplexity(self, code: str) -> tuple[float | None, float | None]:
         """Return (perplexity, avg_log_prob) using a HuggingFace code LM.
 
         Uses a causal (autoregressive) code LM: one forward pass yields
@@ -449,7 +446,7 @@ class PerplexityScorer:
             return self._statistical_perplexity(code)
 
 
-def score_code(code: str, scorer: Optional[PerplexityScorer] = None) -> Dict[str, Any]:
+def score_code(code: str, scorer: PerplexityScorer | None = None) -> dict[str, Any]:
     """Module-level convenience: score a snippet with the default scorer."""
     if scorer is None:
         scorer = PerplexityScorer()

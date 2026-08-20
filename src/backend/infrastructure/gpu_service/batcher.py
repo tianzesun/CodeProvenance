@@ -1,5 +1,6 @@
 import time
-from typing import List, Dict, Any
+from typing import Any
+
 from .queue import dequeue_batch
 from .runtime_settings import BATCH_SIZE, BATCH_TIMEOUT
 
@@ -10,9 +11,9 @@ class Batcher:
     def __init__(self, batch_size=None, timeout=None):
         self.batch_size = batch_size or BATCH_SIZE
         self.timeout = timeout or BATCH_TIMEOUT
-        self.buffer: List[Dict[str, Any]] = []
+        self.buffer: list[dict[str, Any]] = []
 
-    def collect(self) -> List[Dict[str, Any]]:
+    def collect(self) -> list[dict[str, Any]]:
         """Collect tasks into a batch."""
         start = time.time()
 

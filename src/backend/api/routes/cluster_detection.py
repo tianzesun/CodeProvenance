@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.backend.evaluation.cluster_detection import (
     ClusterDetector,
-    ClusterDetectionResult,
-    SubmissionNode,
     SimilarityEdge,
+    SubmissionNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ class SubmissionNodeSchema(BaseModel):
     code_hash: str = ""
     language: str = "unknown"
     content: str = ""
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class SimilarityEdgeSchema(BaseModel):
@@ -38,21 +37,21 @@ class SimilarityEdgeSchema(BaseModel):
     similarity: float
     engine: str = "unknown"
     confidence: float = 1.0
-    evidence: List[Dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
 
 
 class ClusterDetectionRequest(BaseModel):
     """Request body for cluster detection."""
 
-    submissions: List[SubmissionNodeSchema]
-    edges: List[SimilarityEdgeSchema]
-    threshold: Optional[float] = 0.65
+    submissions: list[SubmissionNodeSchema]
+    edges: list[SimilarityEdgeSchema]
+    threshold: float | None = 0.65
 
 
 @router.post("/detect")
 async def detect_clusters(
     request: ClusterDetectionRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Detect plagiarism clusters from similarity data.
 
@@ -99,7 +98,7 @@ async def detect_clusters(
 @router.get("/stats")
 async def get_cluster_stats(
     threshold: float = Query(0.65, description="Similarity threshold"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get cluster detection statistics.
 
@@ -119,10 +118,10 @@ async def get_cluster_stats(
 
 @router.post("/analyze")
 async def analyze_clusters(
-    submissions: List[str],
-    similarity_matrix: Dict[str, Dict[str, float]],
+    submissions: list[str],
+    similarity_matrix: dict[str, dict[str, float]],
     threshold: float = Query(0.65, description="Similarity threshold"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Analyze clusters from a similarity matrix.
 

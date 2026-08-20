@@ -8,9 +8,9 @@ must be auditable against benchmark validation results.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
-
+from typing import Any
 
 DEFAULT_INTERNAL_ENGINE_IDS = {
     "ast",
@@ -63,7 +63,7 @@ class ScoreNormalizationRule:
 class ScoreNormalizer:
     """Normalize raw scores from internal and external engines before fusion."""
 
-    rules: Dict[str, ScoreNormalizationRule] = field(default_factory=dict)
+    rules: dict[str, ScoreNormalizationRule] = field(default_factory=dict)
     default_rule: ScoreNormalizationRule = field(default_factory=ScoreNormalizationRule)
 
     def normalize(self, engine_id: str, value: Any) -> float:
@@ -71,7 +71,7 @@ class ScoreNormalizer:
         rule = self.rules.get(engine_id, self.default_rule)
         return rule.normalize(value)
 
-    def normalize_many(self, scores: Dict[str, Any]) -> Dict[str, float]:
+    def normalize_many(self, scores: dict[str, Any]) -> dict[str, float]:
         """Normalize a mapping of engine IDs to raw score values."""
         return {
             engine_id: self.normalize(engine_id, score)
@@ -86,12 +86,12 @@ class FusionPreset:
     preset_id: str
     name: str
     description: str
-    weights: Dict[str, float]
-    evidence_surfaces: List[str]
-    pipelines: List[str] = field(default_factory=lambda: ["code"])
+    weights: dict[str, float]
+    evidence_surfaces: list[str]
+    pipelines: list[str] = field(default_factory=lambda: ["code"])
     present_results_separately: bool = False
 
-    def normalized_weights(self) -> Dict[str, float]:
+    def normalized_weights(self) -> dict[str, float]:
         """Return preset weights normalized to sum to 1.0."""
         positive_weights = {
             key: max(0.0, float(value)) for key, value in self.weights.items()
@@ -101,7 +101,7 @@ class FusionPreset:
             return positive_weights
         return {key: round(value / total, 4) for key, value in positive_weights.items()}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the preset for API and config payloads."""
         return {
             "id": self.preset_id,
@@ -120,10 +120,10 @@ class WeightGovernanceResult:
 
     allowed: bool
     requires_validation: bool
-    changed_engines: List[str]
-    warnings: List[str]
+    changed_engines: list[str]
+    warnings: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the governance result for API responses."""
         return {
             "allowed": self.allowed,
@@ -152,7 +152,7 @@ def default_score_normalizer() -> ScoreNormalizer:
     return ScoreNormalizer(rules=rules, default_rule=unit_rule)
 
 
-def default_normalization_config() -> Dict[str, Any]:
+def default_normalization_config() -> dict[str, Any]:
     """Return a config-friendly description of default normalization rules."""
     return {
         "common_scale": "similarity_probability_0_to_1",
@@ -172,7 +172,7 @@ def default_normalization_config() -> Dict[str, Any]:
     }
 
 
-def get_fusion_presets() -> Dict[str, FusionPreset]:
+def get_fusion_presets() -> dict[str, FusionPreset]:
     """Return assignment-type presets for code, text, and mixed submissions."""
     presets = [
         FusionPreset(
@@ -281,7 +281,7 @@ def get_fusion_presets() -> Dict[str, FusionPreset]:
     return {preset.preset_id: preset for preset in presets}
 
 
-def fusion_presets_payload() -> Dict[str, Any]:
+def fusion_presets_payload() -> dict[str, Any]:
     """Return all fusion presets as a serializable payload."""
     return {
         preset_id: preset.to_dict()
@@ -289,7 +289,7 @@ def fusion_presets_payload() -> Dict[str, Any]:
     }
 
 
-def default_weight_governance_policy() -> Dict[str, Any]:
+def default_weight_governance_policy() -> dict[str, Any]:
     """Return the default governance rule for shipping preset/default weights."""
     return {
         "default_weight_changes_require_validation": True,
@@ -306,9 +306,9 @@ def default_weight_governance_policy() -> Dict[str, Any]:
 
 
 def evaluate_weight_change_governance(
-    current_weights: Dict[str, float],
-    proposed_weights: Dict[str, float],
-    evidence: Optional[Dict[str, Any]] = None,
+    current_weights: dict[str, float],
+    proposed_weights: dict[str, float],
+    evidence: dict[str, Any] | None = None,
 ) -> WeightGovernanceResult:
     """Check whether default engine-weight changes have validation evidence."""
     evidence = evidence or {}
@@ -354,10 +354,10 @@ def evaluate_weight_change_governance(
 
 
 def _changed_weight_keys(
-    current_weights: Dict[str, float],
-    proposed_weights: Dict[str, float],
+    current_weights: dict[str, float],
+    proposed_weights: dict[str, float],
     tolerance: float = 0.0001,
-) -> List[str]:
+) -> list[str]:
     """Return sorted engine names whose proposed weights differ from current weights."""
     keys: Iterable[str] = set(current_weights) | set(proposed_weights)
     return sorted(

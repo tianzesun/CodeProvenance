@@ -11,10 +11,11 @@ Reliability factors:
 """
 
 import re
-from typing import Dict
 
 
-def assess_signal_reliability(signal_name: str, code: str, language: str = "python") -> float:
+def assess_signal_reliability(
+    signal_name: str, code: str, language: str = "python"
+) -> float:
     """Assess the reliability of a signal for given code.
 
     Args:
@@ -149,7 +150,9 @@ def _assess_pattern_library_reliability(code: str) -> float:
         return 1.0
 
 
-def _assess_structural_entropy_reliability(code: str, language: str = "python") -> float:
+def _assess_structural_entropy_reliability(
+    code: str, language: str = "python"
+) -> float:
     """Assess structural entropy signal reliability.
 
     Structural entropy is reliable for Python code with functions.
@@ -265,7 +268,9 @@ def _assess_docstring_density_reliability(code: str) -> float:
         return 1.0
 
 
-def assess_all_signal_reliabilities(code: str, language: str = "python") -> Dict[str, float]:
+def assess_all_signal_reliabilities(
+    code: str, language: str = "python"
+) -> dict[str, float]:
     """Assess reliability of all signals for given code.
 
     Args:
@@ -286,4 +291,7 @@ def assess_all_signal_reliabilities(code: str, language: str = "python") -> Dict
         "docstring_density",
     ]
 
-    return {signal: assess_signal_reliability(signal, code, language) for signal in signal_names}
+    return {
+        signal: assess_signal_reliability(signal, code, language)
+        for signal in signal_names
+    }

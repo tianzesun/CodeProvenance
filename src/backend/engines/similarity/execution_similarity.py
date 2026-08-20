@@ -12,16 +12,16 @@ Features:
 - Multi-language support
 """
 
-from typing import List, Dict, Any, Optional, Tuple
-from .base_similarity import BaseSimilarityAlgorithm
-from collections import Counter
 import hashlib
+import os
+import re
 import subprocess
 import tempfile
-import os
-import json
 import time
-import re
+from collections import Counter
+from typing import Any
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 
 class ExecutionResult:
@@ -252,7 +252,7 @@ class DockerSandbox:
             except OSError:
                 pass
 
-    def _get_docker_image(self, language: str) -> Optional[str]:
+    def _get_docker_image(self, language: str) -> str | None:
         """Get Docker image for language."""
         images = {
             "python": "python:3.12-slim",
@@ -269,7 +269,7 @@ class DockerSandbox:
         }
         return images.get(language.lower())
 
-    def _get_interpreter(self, language: str) -> Optional[str]:
+    def _get_interpreter(self, language: str) -> str | None:
         """Get local interpreter for language."""
         interpreters = {
             "python": "python3",
@@ -307,7 +307,7 @@ class DockerSandbox:
         }
         return extensions.get(language.lower(), "solution.txt")
 
-    def _get_run_command(self, language: str, filename: str) -> List[str]:
+    def _get_run_command(self, language: str, filename: str) -> list[str]:
         """Get command to run code in Docker."""
         commands = {
             "python": ["python3", filename],
@@ -336,9 +336,9 @@ class TestCaseGenerator:
     """
 
     def __init__(self):
-        self.test_cases: List[TestCase] = []
+        self.test_cases: list[TestCase] = []
 
-    def generate_test_cases(self, code: str, language: str) -> List[TestCase]:
+    def generate_test_cases(self, code: str, language: str) -> list[TestCase]:
         """
         Generate test cases based on code analysis.
 
@@ -367,7 +367,7 @@ class TestCaseGenerator:
 
         return test_cases[:10]  # Limit to 10 test cases
 
-    def _analyze_code(self, code: str) -> Dict[str, Any]:
+    def _analyze_code(self, code: str) -> dict[str, Any]:
         """Analyze code structure."""
         result = {"type": "unknown", "functions": []}
 
@@ -407,9 +407,8 @@ class TestCaseGenerator:
 
         return result
 
-    def _generate_io_tests(self, code: str) -> List[TestCase]:
+    def _generate_io_tests(self, code: str) -> list[TestCase]:
         """Generate I/O test cases."""
-        test_cases = []
 
         # Common test inputs
         common_inputs = [
@@ -428,9 +427,8 @@ class TestCaseGenerator:
 
         return common_inputs[:5]
 
-    def _generate_function_tests(self, code: str) -> List[TestCase]:
+    def _generate_function_tests(self, code: str) -> list[TestCase]:
         """Generate function test cases."""
-        test_cases = []
 
         # For function-based problems, generate input variations
         inputs = [
@@ -442,7 +440,7 @@ class TestCaseGenerator:
 
         return inputs
 
-    def _generate_edge_cases(self) -> List[TestCase]:
+    def _generate_edge_cases(self) -> list[TestCase]:
         """Generate edge case test cases."""
         return [
             TestCase("", "", "empty", "Empty input"),
@@ -476,7 +474,7 @@ class ExecutionSimilarity(BaseSimilarityAlgorithm):
         self.test_generator = TestCaseGenerator()
         self.max_test_cases = max_test_cases
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """
         Compare two code samples by executing and comparing outputs.
 
@@ -557,7 +555,7 @@ class ExecutionSimilarity(BaseSimilarityAlgorithm):
             methodology="Black-box execution comparison using sandbox isolation.",
         )
 
-    def _extract_code(self, parsed: Dict[str, Any]) -> str:
+    def _extract_code(self, parsed: dict[str, Any]) -> str:
         """Extract source code from parsed representation."""
         if "raw" in parsed:
             return parsed["raw"]

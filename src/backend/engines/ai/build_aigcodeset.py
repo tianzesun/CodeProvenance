@@ -88,7 +88,9 @@ def materialise() -> dict:
     """Write labelled files and a per-sample metadata index."""
     records = _load_raw()
     if not records:
-        raise RuntimeError("No records found — run data/datasets/aigcodeset/download.sh first")
+        raise RuntimeError(
+            "No records found — run data/datasets/aigcodeset/download.sh first"
+        )
 
     ai_dir = OUT_DIR / "ai"
     human_dir = OUT_DIR / "human"
@@ -100,7 +102,9 @@ def materialise() -> dict:
     for idx, row in enumerate(records):
         label_dir = ai_dir if row["label"] == 1 else human_dir
         counts["ai" if row["label"] == 1 else "human"] += 1
-        filename = f"{_safe_stem(row['problem_id'])}__{_safe_stem(row['llm'])}__{idx:05d}.py"
+        filename = (
+            f"{_safe_stem(row['problem_id'])}__{_safe_stem(row['llm'])}__{idx:05d}.py"
+        )
         (label_dir / filename).write_text(row["code"] + "\n", encoding="utf-8")
         meta_lines.append(
             {

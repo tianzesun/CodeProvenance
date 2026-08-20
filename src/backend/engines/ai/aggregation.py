@@ -10,12 +10,10 @@ Algorithm:
 4. Normalize: final = final / Σ(reliability * weight)
 """
 
-from typing import Dict
-
 from src.backend.engines.ai.models import SignalScores
 
 
-def aggregate_signals(signals: SignalScores, reliabilities: Dict[str, float]) -> float:
+def aggregate_signals(signals: SignalScores, reliabilities: dict[str, float]) -> float:
     """Aggregate signals with weights and reliability adjustments.
 
     Args:
@@ -57,8 +55,8 @@ def aggregate_signals(signals: SignalScores, reliabilities: Dict[str, float]) ->
 
 def aggregate_signals_with_agreement(
     signals: SignalScores,
-    reliabilities: Dict[str, float],
-    agreement: Dict,
+    reliabilities: dict[str, float],
+    agreement: dict,
 ) -> float:
     """Aggregate signals with agreement-based adjustments.
 
@@ -125,8 +123,8 @@ def get_signal_contribution(
 
 
 def get_all_signal_contributions(
-    signals: SignalScores, reliabilities: Dict[str, float]
-) -> Dict[str, float]:
+    signals: SignalScores, reliabilities: dict[str, float]
+) -> dict[str, float]:
     """Calculate contributions of all signals.
 
     Args:
@@ -148,7 +146,7 @@ def get_all_signal_contributions(
 
 
 def get_most_influential_signals(
-    signals: SignalScores, reliabilities: Dict[str, float], top_n: int = 3
+    signals: SignalScores, reliabilities: dict[str, float], top_n: int = 3
 ) -> list:
     """Get the most influential signals in the aggregation.
 
@@ -163,6 +161,8 @@ def get_most_influential_signals(
     contributions = get_all_signal_contributions(signals, reliabilities)
 
     # Sort by absolute contribution
-    sorted_signals = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
+    sorted_signals = sorted(
+        contributions.items(), key=lambda x: abs(x[1]), reverse=True
+    )
 
     return sorted_signals[:top_n]

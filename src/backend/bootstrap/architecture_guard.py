@@ -2,32 +2,70 @@
 
 This module provides the canonical architecture guard for the bootstrap layer.
 """
-import sys
+
 from pathlib import Path
-from typing import Dict, List, Any
+
 
 class ArchitectureGuard:
     """Prevents forbidden layer access with AST-based validation."""
+
     _enabled = False
     _ALLOWED = {
-        "domain": {"allow": ["domain"], "deny": ["api", "application", "infrastructure", "engines", "web", "workers", "ml", "evaluation"]},
-        "core": {"allow": ["domain", "core"], "deny": ["api", "application", "infrastructure", "web", "workers"]},
-        "engines": {"allow": ["domain", "core", "engines"], "deny": ["api", "web", "workers"]},
+        "domain": {
+            "allow": ["domain"],
+            "deny": [
+                "api",
+                "application",
+                "infrastructure",
+                "engines",
+                "web",
+                "workers",
+                "ml",
+                "evaluation",
+            ],
+        },
+        "core": {
+            "allow": ["domain", "core"],
+            "deny": ["api", "application", "infrastructure", "web", "workers"],
+        },
+        "engines": {
+            "allow": ["domain", "core", "engines"],
+            "deny": ["api", "web", "workers"],
+        },
         "ml": {"allow": ["domain", "core", "ml"], "deny": ["api", "web", "workers"]},
-        "evaluation": {"allow": ["domain", "core", "engines", "evaluation"], "deny": ["api", "web", "infrastructure", "workers"]},
-        "application": {"allow": ["domain", "core", "engines", "application"], "deny": ["infrastructure"]},
-        "api": {"allow": ["api", "application", "domain"], "deny": ["engines", "infrastructure", "core"]},
-        "web": {"allow": ["web", "application"], "deny": ["domain", "core", "engines", "infrastructure"]},
-        "workers": {"allow": ["workers", "application"], "deny": ["domain", "core", "engines", "infrastructure"]},
+        "evaluation": {
+            "allow": ["domain", "core", "engines", "evaluation"],
+            "deny": ["api", "web", "infrastructure", "workers"],
+        },
+        "application": {
+            "allow": ["domain", "core", "engines", "application"],
+            "deny": ["infrastructure"],
+        },
+        "api": {
+            "allow": ["api", "application", "domain"],
+            "deny": ["engines", "infrastructure", "core"],
+        },
+        "web": {
+            "allow": ["web", "application"],
+            "deny": ["domain", "core", "engines", "infrastructure"],
+        },
+        "workers": {
+            "allow": ["workers", "application"],
+            "deny": ["domain", "core", "engines", "infrastructure"],
+        },
         "infrastructure": {"allow": ["*"], "deny": []},
         "cli": {"allow": ["cli", "engines"], "deny": ["runners"]},
     }
     LAYER_ORDER = {
-        "api": 1, "web": 1, "workers": 1,
+        "api": 1,
+        "web": 1,
+        "workers": 1,
         "application": 2,
         "domain": 3,
         "core": 4,
-        "engines": 5, "ml": 5, "evaluation": 5,
+        "engines": 5,
+        "ml": 5,
+        "evaluation": 5,
         "infrastructure": 6,
     }
 
@@ -46,8 +84,16 @@ class ArchitectureGuard:
         import ast
 
         base_dir = Path(__file__).parent.parent.parent.parent
-        skip_dirs = {"venv", ".venv", "__pycache__", ".git", "node_modules", ".tox", "tools"}
-        violations: List[Dict] = []
+        skip_dirs = {
+            "venv",
+            ".venv",
+            "__pycache__",
+            ".git",
+            "node_modules",
+            ".tox",
+            "tools",
+        }
+        violations: list[dict] = []
         files_checked = 0
 
         for py_file in base_dir.rglob("*.py"):
@@ -72,14 +118,21 @@ class ArchitectureGuard:
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         import_name = alias.name
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        import_name = node.module
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    import_name = node.module
 
                 if import_name:
                     imp_layer = cls._detect_layer(import_name)
-                    if imp_layer and imp_layer in cls._ALLOWED.get(layer, {}).get("deny", []):
-                        violations.append({"file": str(py_file), "layer": layer, "import": import_name})
+                    if imp_layer and imp_layer in cls._ALLOWED.get(layer, {}).get(
+                        "deny", []
+                    ):
+                        violations.append(
+                            {
+                                "file": str(py_file),
+                                "layer": layer,
+                                "import": import_name,
+                            }
+                        )
 
         if violations:
             print(f"❌ Architecture violations: {len(violations)}")

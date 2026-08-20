@@ -13,24 +13,21 @@ Key improvements over v1:
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
+from src.backend.engines.detection.ehe import (
+    EvidenceHierarchyEngine,
+)
+from src.backend.engines.detection.evidence_report import EvidenceReport, Verdict
 from src.backend.engines.detection.layer1_deterministic import Layer1Result
 from src.backend.engines.detection.layer2_statistical import Layer2Result
 from src.backend.engines.detection.layer3_semantic import Layer3Result
 from src.backend.engines.detection.layer4_explainability import ExplanationReport
-from src.backend.engines.detection.evidence_report import EvidenceReport, Verdict
-from src.backend.engines.detection.ehe import (
-    EvidenceHierarchyEngine,
-    Verdict as EVErdit,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +66,7 @@ class DecisionThresholds:
     essay_semantic_weight: float = 1.5  # Essays: semantic matters more
     math_structure_weight: float = 1.3  # Math: formula structure
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return {
             "hard_match_threshold": self.hard_match_threshold,
             "high_confidence_l1": self.high_confidence_l1,
@@ -88,7 +85,7 @@ class DecisionThresholds:
         }
 
 
-def _load_policy_config() -> Dict[str, Any]:
+def _load_policy_config() -> dict[str, Any]:
     """Load detection policy from YAML config file."""
     if not DETECTION_POLICY_CONFIG_PATH.exists():
         return {}
@@ -236,7 +233,7 @@ def _explain_decision_path(
                 f"Layer 2 = {l2_val:.0%} ≥ {thresholds.strong_structural_l2:.0%}. "
                 f"Structural and statistical evidence confirms plagiarism."
             )
-        return f"TRUE by combined evidence across all three layers."
+        return "TRUE by combined evidence across all three layers."
 
     elif verdict == Verdict.PROBABLE:
         return (
@@ -275,7 +272,7 @@ class DetectionPolicy:
 
     def __init__(
         self,
-        thresholds: Optional[DecisionThresholds] = None,
+        thresholds: DecisionThresholds | None = None,
         domain: str = "code",
     ):
         config = _load_policy_config()
@@ -299,8 +296,8 @@ class DetectionPolicy:
         l1_result: Layer1Result,
         l2_result: Layer2Result,
         l3_result: Layer3Result,
-        course_type: Optional[str] = None,
-        explanation_report: Optional[ExplanationReport] = None,
+        course_type: str | None = None,
+        explanation_report: ExplanationReport | None = None,
     ) -> EvidenceReport:
         """Run the decision tree using Evidence Hierarchy Engine.
 
@@ -334,7 +331,7 @@ class DetectionPolicy:
         }
 
         # Build evidence dict for EHE
-        evidence = {
+        {
             "layer1": l1_result.to_dict(),
             "layer2": l2_result.to_dict(),
             "layer3": l3_result.to_dict(),
@@ -398,12 +395,12 @@ class DetectionPolicy:
         else:
             return f"No significant similarity detected (L1={l1_val:.0%}, L2={l2_val:.0%})."
 
-    def get_thresholds(self) -> Dict[str, float]:
+    def get_thresholds(self) -> dict[str, float]:
         """Return current decision thresholds (for display/settings)."""
         return self.thresholds.to_dict()
 
     @classmethod
-    def available_domains(cls) -> Dict[str, str]:
+    def available_domains(cls) -> dict[str, str]:
         """Return available domain presets."""
         return {
             "code": "General code plagiarism detection (balanced)",

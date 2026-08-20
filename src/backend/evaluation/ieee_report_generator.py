@@ -15,19 +15,20 @@ Contains:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
-import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from src.backend.evaluation.comparison_engine import ToolRanking, ToolMetrics, SignificanceMatrix
+from src.backend.evaluation.comparison_engine import ToolRanking
 
 
 @dataclass
 class BenchmarkReport:
     """Complete benchmark report."""
+
     report_id: str
     timestamp: str
     dataset_name: str
@@ -35,23 +36,26 @@ class BenchmarkReport:
     num_tools: int
     threshold: float
     ranking: ToolRanking
-    tool_scores: Dict[str, List[float]]
-    labels: List[int]
+    tool_scores: dict[str, list[float]]
+    labels: list[int]
     reproducibility_hash: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.reproducibility_hash:
             self.reproducibility_hash = self._compute_hash()
 
     def _compute_hash(self) -> str:
-        data = json.dumps({
-            "dataset": self.dataset_name,
-            "size": self.dataset_size,
-            "num_tools": self.num_tools,
-            "threshold": self.threshold,
-            "rankings": [r.to_dict() for r in self.ranking.rankings],
-        }, sort_keys=True)
+        data = json.dumps(
+            {
+                "dataset": self.dataset_name,
+                "size": self.dataset_size,
+                "num_tools": self.num_tools,
+                "threshold": self.threshold,
+                "rankings": [r.to_dict() for r in self.ranking.rankings],
+            },
+            sort_keys=True,
+        )
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
@@ -93,10 +97,12 @@ class IEEEStyleReportGenerator:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             import weasyprint
+
             weasyprint.HTML(string=html).write_pdf(str(output_path))
         except ImportError:
             try:
                 import pdfkit
+
                 pdfkit.from_string(html, str(output_path))
             except ImportError:
                 output_path.with_suffix(".html").write_text(html)
@@ -107,7 +113,7 @@ class IEEEStyleReportGenerator:
 
         rows = ""
         for i, m in enumerate(ranking.rankings):
-            cls = " class=\"best\"" if i == 0 else ""
+            cls = ' class="best"' if i == 0 else ""
             ci_str = ""
             if m.f1_ci:
                 ci_str = f"\u00b1{(m.f1_ci['ci_upper'] - m.f1_ci['ci_lower'])/2:.3f}"
@@ -181,7 +187,7 @@ Reproducibility Hash: {report.reproducibility_hash}
 </html>"""
         return html
 
-    def _build_json(self, report: BenchmarkReport) -> Dict[str, Any]:
+    def _build_json(self, report: BenchmarkReport) -> dict[str, Any]:
         return {
             "report_id": report.report_id,
             "timestamp": report.timestamp,
@@ -197,11 +203,11 @@ Reproducibility Hash: {report.reproducibility_hash}
 
 
 def generate_benchmark_report(
-    tool_scores: Dict[str, List[float]],
-    labels: List[int],
+    tool_scores: dict[str, list[float]],
+    labels: list[int],
     dataset_name: str = "benchmark",
     threshold: float = 0.5,
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
     ci_level: float = 0.95,
     n_bootstrap: int = 1000,
 ) -> BenchmarkReport:

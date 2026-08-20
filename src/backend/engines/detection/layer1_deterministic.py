@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ class Layer1Result:
     ngram_overlap: float = 0.0
     ast_subtree_overlap: float = 0.0
     ast_node_match: float = 0.0
-    rule_violation_flags: List[str] = field(default_factory=list)
+    rule_violation_flags: list[str] = field(default_factory=list)
     rule_violation_count: int = 0
     matching_line_count: int = 0
     total_line_count_a: int = 0
     total_line_count_b: int = 0
     has_exact_file_match: bool = False
-    engine_scores: Dict[str, float] = field(default_factory=dict)
+    engine_scores: dict[str, float] = field(default_factory=dict)
 
     @property
     def max_signal(self) -> float:
@@ -55,7 +55,7 @@ class Layer1Result:
         ]
         return sum(values) / len(values) if values else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "exact_match_score": round(self.exact_match_score, 4),
             "structural_similarity": round(self.structural_similarity, 4),
@@ -81,7 +81,7 @@ class Layer1Deterministic:
     similarity engines into a single layer with interpretable outputs.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self._ast_threshold = float(self.config.get("ast_subtree_threshold", 0.30))
         self._token_threshold = float(self.config.get("token_overlap_threshold", 0.25))
@@ -94,8 +94,8 @@ class Layer1Deterministic:
         self,
         code_a: str,
         code_b: str,
-        engine_scores: Optional[Dict[str, float]] = None,
-        engine_details: Optional[Dict[str, Any]] = None,
+        engine_scores: dict[str, float] | None = None,
+        engine_details: dict[str, Any] | None = None,
     ) -> Layer1Result:
         """Run deterministic detection on a pair of code files.
 

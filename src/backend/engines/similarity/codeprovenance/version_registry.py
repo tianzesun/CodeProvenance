@@ -3,11 +3,10 @@
 Provides versioned engine registration for reproducible evaluations.
 """
 
-from typing import Dict, Type, List, Optional
 from src.backend.engines.similarity.codeprovenance.base import BaseCodeProvenanceEngine
 
 # Global engine registry
-ENGINE_REGISTRY: Dict[str, Type[BaseCodeProvenanceEngine]] = {}
+ENGINE_REGISTRY: dict[str, type[BaseCodeProvenanceEngine]] = {}
 
 
 def register_engine(version: str):
@@ -26,8 +25,8 @@ def register_engine(version: str):
     """
 
     def decorator(
-        cls: Type[BaseCodeProvenanceEngine],
-    ) -> Type[BaseCodeProvenanceEngine]:
+        cls: type[BaseCodeProvenanceEngine],
+    ) -> type[BaseCodeProvenanceEngine]:
         if version in ENGINE_REGISTRY:
             raise ValueError(f"Engine version '{version}' already registered")
 
@@ -66,7 +65,7 @@ def get_engine(version: str) -> BaseCodeProvenanceEngine:
     return engine_class()
 
 
-def list_engines() -> List[str]:
+def list_engines() -> list[str]:
     """List all registered engine versions.
 
     Returns:
@@ -75,7 +74,7 @@ def list_engines() -> List[str]:
     return sorted(ENGINE_REGISTRY.keys())
 
 
-def get_engine_class(version: str) -> Type[BaseCodeProvenanceEngine]:
+def get_engine_class(version: str) -> type[BaseCodeProvenanceEngine]:
     """Get engine class by version.
 
     Args:
@@ -108,7 +107,7 @@ def is_registered(version: str) -> bool:
     return version in ENGINE_REGISTRY
 
 
-def get_registry_info() -> Dict[str, Dict[str, str]]:
+def get_registry_info() -> dict[str, dict[str, str]]:
     """Get information about all registered engines.
 
     Returns:
@@ -129,7 +128,7 @@ def get_registry_info() -> Dict[str, Dict[str, str]]:
             info[version] = {
                 "version": version,
                 "name": "Unknown",
-                "description": f"Error: {str(e)}",
+                "description": f"Error: {e!s}",
                 "class": engine_class.__name__,
             }
 

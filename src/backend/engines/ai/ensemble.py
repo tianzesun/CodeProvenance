@@ -12,7 +12,7 @@ import logging
 import math
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Optional
+from typing import Any
 
 import yaml
 
@@ -32,10 +32,10 @@ class AIEnsembleConfig:
     fallback to defaults when the file is missing.
     """
 
-    _instance: Optional[AIEnsembleConfig] = None
+    _instance: AIEnsembleConfig | None = None
     _lock = Lock()
 
-    DEFAULTS: Dict[str, Any] = {
+    DEFAULTS: dict[str, Any] = {
         "ensemble": {
             "heuristic": {
                 "ast": 0.20,
@@ -73,14 +73,14 @@ class AIEnsembleConfig:
                 cls._instance = AIEnsembleConfig()
             return cls._instance
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
-        self._config: Dict[str, Any] = self._deep_copy(self.DEFAULTS)
+        self._config: dict[str, Any] = self._deep_copy(self.DEFAULTS)
         self._reload()
 
     def _reload(self) -> None:
         """(Re)load configuration from the YAML file with validation."""
-        config: Dict[str, Any] = self._deep_copy(self.DEFAULTS)
+        config: dict[str, Any] = self._deep_copy(self.DEFAULTS)
         if self.config_path.exists():
             try:
                 loaded = (
@@ -101,7 +101,7 @@ class AIEnsembleConfig:
         return copy.deepcopy(value)
 
     @staticmethod
-    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         result = dict(base)
         for key, value in override.items():
             if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -110,7 +110,7 @@ class AIEnsembleConfig:
                 result[key] = value
         return result
 
-    def weights(self, mode: str = "heuristic") -> Dict[str, float]:
+    def weights(self, mode: str = "heuristic") -> dict[str, float]:
         """Return weighting factors for the given scoring mode."""
         return self._config["ensemble"].get(mode, self.DEFAULTS["ensemble"][mode])
 
@@ -124,12 +124,12 @@ class AIEnsembleConfig:
         return bool(self._config["classification"].get("enabled", False))
 
     @property
-    def model_dir(self) -> Optional[Path]:
+    def model_dir(self) -> Path | None:
         """Configured model directory override."""
         raw = self._config["classification"].get("model_dir")
         return Path(raw) if raw else None
 
-    def perplexity_config(self) -> Dict[str, Any]:
+    def perplexity_config(self) -> dict[str, Any]:
         """Return the perplexity scorer settings."""
         return self._config.get("perplexity", self.DEFAULTS["perplexity"])
 
@@ -149,13 +149,13 @@ class AIEnsembleScorer:
 
     def __init__(
         self,
-        config: Optional[AIEnsembleConfig] = None,
-        model_dir: Optional[Path] = None,
+        config: AIEnsembleConfig | None = None,
+        model_dir: Path | None = None,
     ) -> None:
         self.config = config or AIEnsembleConfig.get_instance()
         self._ast_extractor = TreeSitterASTExtractor()
-        self._perplexity_scorer: Optional[PerplexityScorer] = None
-        self._classifier: Optional[AICodeClassifier] = None
+        self._perplexity_scorer: PerplexityScorer | None = None
+        self._classifier: AICodeClassifier | None = None
         self._model_dir = model_dir
         self._init_optional_components()
 
@@ -188,8 +188,8 @@ class AIEnsembleScorer:
         self,
         code: str,
         language: str = "python",
-        pattern_library: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        pattern_library: float | None = None,
+    ) -> dict[str, Any]:
         """Compute the fused AI-likelihood score and per-signal breakdown.
 
         Args:
@@ -242,7 +242,7 @@ class AIEnsembleScorer:
 
         # 4. ML classifier (optional)
         classifier_result = None
-        classifier_probability: Optional[float] = None
+        classifier_probability: float | None = None
         if self.classifier_available:
             features = assemble_features(ast_vector, stylometry, perp_result)
             classifier_result = self._classifier.predict(features)
@@ -279,9 +279,9 @@ class AIEnsembleScorer:
 
     def _fuse(
         self,
-        signals: Dict[str, float],
-        weights: Dict[str, float],
-        classifier_probability: Optional[float],
+        signals: dict[str, float],
+        weights: dict[str, float],
+        classifier_probability: float | None,
         mode: str,
     ) -> float:
         """Weighted combination of signals plus sigmoid calibration."""
@@ -310,7 +310,7 @@ class AIEnsembleScorer:
             logger.info("Stylometry extraction failed: %s", exc)
             return None
 
-    def _ratio_signals(self, vector: Any) -> Dict[str, float]:
+    def _ratio_signals(self, vector: Any) -> dict[str, float]:
         """Turn an ASTFeatureVector into [0,1] AI-likeness signals.
 
         Higher values indicate AI-like structure: uniform node distribution,
@@ -334,7 +334,7 @@ class AIEnsembleScorer:
             ),
         }
 
-    def _stylometry_signals(self, stylometry: Any) -> Dict[str, float]:
+    def _stylometry_signals(self, stylometry: Any) -> dict[str, float]:
         """Convert stylometry features to AI-likeness signals."""
         if stylometry is None:
             return {}
@@ -356,7 +356,7 @@ class AIEnsembleScorer:
         }
 
     def _flag_regions(
-        self, code: str, perp_result: Dict[str, Any], ast_vector: Any
+        self, code: str, perp_result: dict[str, Any], ast_vector: Any
     ) -> list:
         """Identify regions worth flagging (low perplexity / high uniformity).
 
@@ -399,19 +399,19 @@ def _ratio(value: Any, scale: float = 1.0) -> float:
     return max(0.0, min(scale, numeric)) / scale
 
 
-def _mean_signals(signals: Dict[str, float]) -> float:
+def _mean_signals(signals: dict[str, float]) -> float:
     """Mean of signal values, 0.0 for empty."""
     if not signals:
         return 0.0
     return round(sum(signals.values()) / len(signals), 3)
 
 
-def _prob_sources(fused: float) -> Dict[str, float]:
+def _prob_sources(fused: float) -> dict[str, float]:
     """Return a simple source breakdown for UI display."""
     return {"fusion": round(fused, 3)}
 
 
-def _confidence_from_signals(signals: Dict[str, float], ai_prob: float) -> float:
+def _confidence_from_signals(signals: dict[str, float], ai_prob: float) -> float:
     """Derive a confidence value from signal agreement and extremity."""
     values = [value for value in signals.values() if 0.0 <= value <= 1.0]
     if not values:

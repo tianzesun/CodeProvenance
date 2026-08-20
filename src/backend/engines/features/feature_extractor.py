@@ -6,13 +6,13 @@ import logging
 import math
 import re
 from collections import Counter
-from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional
-
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+from typing import Any
+
 from src.backend.config.settings import settings
-from src.backend.engines.file_type_classifier import FileType
 from src.backend.engines.ast_multi_layer import compute_ast_layer_scores
+from src.backend.engines.file_type_classifier import FileType
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class FeatureVector:
     # File type classification (added for file-type aware detection)
     file_type: FileType = FileType.CODE
     file_type_confidence: float = 0.0
-    file_type_domain: Optional[str] = None
+    file_type_domain: str | None = None
 
     # Function matching evidence
     function_match_count: int = 0
@@ -70,9 +70,9 @@ class FeatureVector:
     coverage: float = 0.0  # Fraction of lines matched by CodeHighlighter (0.0-1.0)
 
     # Evidence fields for rule-based decisions
-    ast_evidence: Dict[str, Any] = field(default_factory=dict)
+    ast_evidence: dict[str, Any] = field(default_factory=dict)
 
-    def as_dict(self) -> Dict[str, float]:
+    def as_dict(self) -> dict[str, float]:
         """Convert FeatureVector to a dictionary."""
         return {
             "ast": self.ast,
@@ -109,7 +109,7 @@ class FeatureExtractor:
     affect the engines that need them.
     """
 
-    FEATURE_ORDER: List[str] = [
+    FEATURE_ORDER: list[str] = [
         "fingerprint",
         "winnowing",
         "string_tiling",
@@ -163,7 +163,7 @@ class FeatureExtractor:
             self._control_flow_visualizer = ControlFlowVisualizer()
         return self._control_flow_visualizer
 
-    def _resolve_embedding_base_url(self) -> Optional[str]:
+    def _resolve_embedding_base_url(self) -> str | None:
         if settings.EMBEDDING_SERVER_URL:
             return settings.EMBEDDING_SERVER_URL
 
@@ -179,8 +179,8 @@ class FeatureExtractor:
         self,
         code_a: str,
         code_b: str,
-        filename_a: Optional[str] = None,
-        filename_b: Optional[str] = None,
+        filename_a: str | None = None,
+        filename_b: str | None = None,
     ) -> FeatureVector:
         """Run all enabled engines and collect scores.
 
@@ -299,7 +299,7 @@ class FeatureExtractor:
             coverage=coverage,
         )
 
-    def to_features(self, fv: FeatureVector) -> List[float]:
+    def to_features(self, fv: FeatureVector) -> list[float]:
         """Flatten a FeatureVector into a list of floats.
 
         Returns:
@@ -307,7 +307,7 @@ class FeatureExtractor:
         """
         return [getattr(fv, name) for name in self.FEATURE_ORDER]
 
-    def _coerce_score(self, result: Any, engine_name: str) -> Optional[float]:
+    def _coerce_score(self, result: Any, engine_name: str) -> float | None:
         """Normalize engine outputs to a plain numeric score.
 
         Similarity engines are not perfectly consistent today:
@@ -334,7 +334,7 @@ class FeatureExtractor:
 
     # ── Private engine helpers ──────────────────────────────────
 
-    def _run_ast(self, a: str, b: str) -> Optional[float]:
+    def _run_ast(self, a: str, b: str) -> float | None:
         try:
             if self._ast_engine is None:
                 from src.backend.engines.similarity.ast_similarity import ASTSimilarity
@@ -346,7 +346,7 @@ class FeatureExtractor:
             logger.debug("AST engine unavailable: %s", exc)
             return None
 
-    def _run_fingerprint(self, a: str, b: str) -> Optional[float]:
+    def _run_fingerprint(self, a: str, b: str) -> float | None:
         try:
             if self._token_engine is None:
                 from src.backend.engines.similarity.token_similarity import (
@@ -360,7 +360,7 @@ class FeatureExtractor:
             logger.debug("Token/Fingerprint engine unavailable: %s", exc)
             return None
 
-    def _run_embedding(self, a: str, b: str) -> Optional[float]:
+    def _run_embedding(self, a: str, b: str) -> float | None:
         runtime = (settings.EMBEDDING_RUNTIME or "local_unixcoder").lower()
 
         if runtime in {"local", "local_unixcoder", "unixcoder"}:
@@ -402,7 +402,7 @@ class FeatureExtractor:
             logger.debug("Embedding API fallback also failed: %s", exc)
             return None
 
-    def _run_ngram(self, a: str, b: str) -> Optional[float]:
+    def _run_ngram(self, a: str, b: str) -> float | None:
         try:
             if self._ngram_engine is None:
                 from src.backend.engines.similarity.ngram_similarity import (
@@ -416,7 +416,7 @@ class FeatureExtractor:
             logger.debug("N-gram engine unavailable: %s", exc)
             return None
 
-    def _run_winnowing(self, a: str, b: str) -> Optional[float]:
+    def _run_winnowing(self, a: str, b: str) -> float | None:
         try:
             if self._winnowing_engine is None:
                 from src.backend.engines.similarity.winnowing_similarity import (
@@ -430,7 +430,7 @@ class FeatureExtractor:
             logger.debug("Winnowing engine unavailable: %s", exc)
             return None
 
-    def _run_string_tiling(self, a: str, b: str) -> Optional[float]:
+    def _run_string_tiling(self, a: str, b: str) -> float | None:
         """Score normalized greedy string-tiling overlap between token streams."""
         tokens_a = self._normalized_tokens(a)
         tokens_b = self._normalized_tokens(b)
@@ -448,7 +448,7 @@ class FeatureExtractor:
 
         return min(1.0, (2.0 * matched_tokens) / (len(tokens_a) + len(tokens_b)))
 
-    def _run_graph(self, a: str, b: str) -> Optional[float]:
+    def _run_graph(self, a: str, b: str) -> float | None:
         """Run CFG/DFG graph similarity when the graph backend supports the input."""
         try:
             if self._graph_engine is None:
@@ -463,7 +463,7 @@ class FeatureExtractor:
             logger.debug("Graph engine unavailable: %s", exc)
             return None
 
-    def _run_ast_cfg_pdg(self, a: str, b: str) -> Dict[str, float]:
+    def _run_ast_cfg_pdg(self, a: str, b: str) -> dict[str, float]:
         """Run normalized AST plus CFG/PDG comparison for Python code."""
         try:
             from src.backend.engines.features.ast_normalizer import compare_robust
@@ -480,7 +480,7 @@ class FeatureExtractor:
             "pdg_sim": float(result.get("pdg_sim", 0.0)),
         }
 
-    def _run_static_rules(self, a: str, b: str) -> Optional[float]:
+    def _run_static_rules(self, a: str, b: str) -> float | None:
         """Compare PMD-like static rule fingerprints without external tools."""
         features_a = self._static_rule_features(a)
         features_b = self._static_rule_features(b)
@@ -490,7 +490,7 @@ class FeatureExtractor:
             return 0.0
         return self._counter_cosine(features_a, features_b)
 
-    def _run_sklearn(self, a: str, b: str) -> Optional[float]:
+    def _run_sklearn(self, a: str, b: str) -> float | None:
         try:
             from sklearn.feature_extraction.text import TfidfVectorizer
             from sklearn.metrics.pairwise import cosine_similarity
@@ -513,7 +513,7 @@ class FeatureExtractor:
             logger.debug("sklearn_cosine engine failed: %s", exc)
             return None
 
-    def _normalized_tokens(self, source: str) -> List[str]:
+    def _normalized_tokens(self, source: str) -> list[str]:
         """Tokenize source while normalizing identifiers and literals."""
         raw_tokens = re.findall(
             r"[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|==|!=|<=|>=|[-+*/%<>=(){}\[\],.:;]",
@@ -540,7 +540,7 @@ class FeatureExtractor:
             "try",
             "while",
         }
-        normalized: List[str] = []
+        normalized: list[str] = []
         for token in raw_tokens:
             lower = token.lower()
             if re.fullmatch(r"\d+(?:\.\d+)?", token):
@@ -634,7 +634,7 @@ class FeatureExtractor:
             logger.debug("CodeHighlighter coverage computation failed: %s", exc)
             return 0.0
 
-    def _non_noise_normalized_lines(self, code: str, highlighter: Any) -> List[str]:
+    def _non_noise_normalized_lines(self, code: str, highlighter: Any) -> list[str]:
         """Return normalized code lines, skipping blank and comment-only lines.
 
         Coverage is measured over these lines so clones that are renamed or
@@ -647,11 +647,7 @@ class FeatureExtractor:
             compact = normalized_line.replace(" ", "").replace("\t", "")
             if not compact:
                 continue
-            if (
-                compact.startswith("//")
-                or compact.startswith("/*")
-                or compact.startswith("*")
-            ):
+            if compact.startswith(("//", "/*", "*")):
                 continue
             normalized.append(normalized_line)
         return normalized

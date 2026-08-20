@@ -11,22 +11,22 @@ Usage:
     spans = engine.build_heatmap(matches)
 """
 
-from .models import (
-    TokenSpan,
-    HeatmapResult,
-    HeatIntensity,
-)
-from .extractor import ASTTokenExtractor
-from .mapper import CharacterOffsetMapper
-from .intensity import HeatIntensityCalculator
 from .engine import TokenHeatmapEngine
+from .extractor import ASTTokenExtractor
+from .intensity import HeatIntensityCalculator
+from .mapper import CharacterOffsetMapper
+from .models import (
+    HeatIntensity,
+    HeatmapResult,
+    TokenSpan,
+)
 
 __all__ = [
-    "TokenSpan",
-    "HeatmapResult",
-    "HeatIntensity",
     "ASTTokenExtractor",
     "CharacterOffsetMapper",
+    "HeatIntensity",
     "HeatIntensityCalculator",
+    "HeatmapResult",
     "TokenHeatmapEngine",
+    "TokenSpan",
 ]

@@ -24,7 +24,7 @@ class LoadTestConfig:
     spawn_rate: int = 10
     run_time: str = "1m"
     hatch_rate: int = 1
-    thresholds: Dict[str, str] = None
+    thresholds: dict[str, str] = None
 
     def __post_init__(self):
         if self.thresholds is None:
@@ -42,7 +42,7 @@ class PlagiarismDetectionLoadTest:
     def __init__(self, config: LoadTestConfig):
         self.config = config
 
-    def get_test_payload(self, scenario: str = "small") -> Dict[str, Any]:
+    def get_test_payload(self, scenario: str = "small") -> dict[str, Any]:
         """Generate test payload for different scenarios."""
 
         code_samples = {
@@ -186,7 +186,7 @@ class AdminUser(HttpUser):
 
 
 # k6 test script
-K6_SCRIPT = """
+K6_SCRIPT = r"""
 import http from "k6/http";
 import { check, sleep } from "k6";
 import { Counter, Trend } from "k6/metrics";

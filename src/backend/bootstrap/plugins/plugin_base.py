@@ -1,4 +1,5 @@
 """Plugin base contract for all execution modules."""
+
 from abc import ABC, abstractmethod
 
 
@@ -11,4 +12,3 @@ class ExecutionPlugin(ABC):
     @abstractmethod
     def run(self, **kwargs):
         """Execute the plugin with given parameters."""
-        pass

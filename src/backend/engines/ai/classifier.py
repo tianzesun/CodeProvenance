@@ -14,7 +14,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import joblib
 
@@ -28,7 +28,7 @@ class ClassifierResult:
     """Output of a classifier prediction."""
 
     ai_probability: float
-    evidence: Dict[str, Any]
+    evidence: dict[str, Any]
     model_version: str
 
 
@@ -74,12 +74,12 @@ class AICodeClassifier:
         "avg_log_prob",
     ]
 
-    def __init__(self, model_dir: Optional[Path] = None) -> None:
+    def __init__(self, model_dir: Path | None = None) -> None:
         self.model_dir = Path(model_dir) if model_dir else DEFAULT_MODEL_DIR
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self._model = None
-        self._version: Optional[str] = None
-        self._feature_names: List[str] = list(self.FEATURE_KEYS)
+        self._version: str | None = None
+        self._feature_names: list[str] = list(self.FEATURE_KEYS)
 
     @property
     def is_trained(self) -> bool:
@@ -87,15 +87,15 @@ class AICodeClassifier:
         return self._model is not None
 
     @property
-    def version(self) -> Optional[str]:
+    def version(self) -> str | None:
         """Version of the loaded model."""
         return self._version
 
     def train(
         self,
-        feature_rows: List[Dict[str, float]],
-        labels: List[int],
-        feature_names: Optional[List[str]] = None,
+        feature_rows: list[dict[str, float]],
+        labels: list[int],
+        feature_names: list[str] | None = None,
     ) -> str:
         """Train the gradient-boosting classifier.
 
@@ -133,7 +133,7 @@ class AICodeClassifier:
         return self._version
 
     def _compute_version(
-        self, feature_rows: List[Dict[str, float]], labels: List[int]
+        self, feature_rows: list[dict[str, float]], labels: list[int]
     ) -> str:
         """Compute a short content-derived version fingerprint."""
         digest = hashlib.sha256()
@@ -145,7 +145,7 @@ class AICodeClassifier:
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
         return f"{timestamp}-{digest.hexdigest()[:8]}"
 
-    def predict(self, features: Dict[str, float]) -> ClassifierResult:
+    def predict(self, features: dict[str, float]) -> ClassifierResult:
         """Predict AI-probability from a feature dict.
 
         Missing features are filled with sensible defaults so partial vectors
@@ -174,7 +174,7 @@ class AICodeClassifier:
             model_version=self._version or "unknown",
         )
 
-    def save(self, name: Optional[str] = None) -> Path:
+    def save(self, name: str | None = None) -> Path:
         """Persist the trained model to disk with its version."""
         if self._model is None:
             raise RuntimeError("Cannot save an untrained model")
@@ -191,7 +191,7 @@ class AICodeClassifier:
         logger.info("Saved AI code classifier to %s", path)
         return path
 
-    def load(self, path: Optional[Path] = None) -> bool:
+    def load(self, path: Path | None = None) -> bool:
         """Load a trained model. Returns True on success."""
         candidate = path
         if candidate is None:
@@ -210,7 +210,7 @@ class AICodeClassifier:
         logger.info("Loaded AI code classifier %s (%s)", candidate, self._version)
         return True
 
-    def latest_model_path(self) -> Optional[Path]:
+    def latest_model_path(self) -> Path | None:
         """Return the path of the most recently saved model, if any."""
         candidates = sorted(
             self.model_dir.glob("ai_code_classifier_*.joblib"), reverse=True
@@ -219,8 +219,8 @@ class AICodeClassifier:
 
 
 def _feature_matrix(
-    rows: List[Dict[str, float]], names: List[str]
-) -> List[List[float]]:
+    rows: list[dict[str, float]], names: list[str]
+) -> list[list[float]]:
     """Convert rows of dicts to a numeric matrix aligned to names."""
     default_features = _default_feature_values()
     matrix = []
@@ -231,7 +231,7 @@ def _feature_matrix(
     return matrix
 
 
-def _default_feature_values() -> Dict[str, float]:
+def _default_feature_values() -> dict[str, float]:
     """Provide neutral defaults for missing feature values."""
     return {
         # AST entropy-ish neutral midpoint
@@ -263,16 +263,16 @@ def _default_feature_values() -> Dict[str, float]:
 
 def assemble_features(
     ast_vector: Any,
-    stylometry: Optional[Any] = None,
-    perplexity: Optional[Dict[str, Any]] = None,
-) -> Dict[str, float]:
+    stylometry: Any | None = None,
+    perplexity: dict[str, Any] | None = None,
+) -> dict[str, float]:
     """Assemble the classifier feature dict from the three signal sources.
 
     Accepts an ``ASTFeatureVector``, an optional stylometry object/features and
     an optional perplexity result dict. Missing sources fall back to defaults
     so the classifier can still run without all modules.
     """
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     if ast_vector is not None:
         for name in ast_vector.feature_names():
@@ -303,7 +303,7 @@ def assemble_features(
     return features
 
 
-def _coerce(value: Optional[Any]) -> float:
+def _coerce(value: Any | None) -> float:
     """Safely coerce a value to float, 0.0 when missing/uncoercible."""
     try:
         return float(value)

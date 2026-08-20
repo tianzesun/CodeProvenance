@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from src.backend.config.database import get_db
 from src.backend.application.services.case_service import (
     CaseService,
-    CaseStatus,
-    CasePriority,
 )
-from src.backend.models.database import User, Case, CaseComment
+from src.backend.config.database import get_db
+from src.backend.models.database import Case, CaseComment, User
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -28,19 +26,17 @@ class CaseCreate(BaseModel):
     """Schema for creating a case."""
 
     title: str = Field(..., min_length=1, max_length=255)
-    assignment_id: Optional[uuid.UUID] = None
+    assignment_id: uuid.UUID | None = None
     priority: str = Field(default="MEDIUM", pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
 
 
 class CaseUpdate(BaseModel):
     """Schema for updating a case."""
 
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
-    status: Optional[str] = Field(
-        None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"
-    )
-    priority: Optional[str] = Field(None, pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
-    investigator_id: Optional[uuid.UUID] = None
+    title: str | None = Field(None, min_length=1, max_length=255)
+    status: str | None = Field(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$")
+    priority: str | None = Field(None, pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
+    investigator_id: uuid.UUID | None = None
 
 
 class CaseAssign(BaseModel):
@@ -66,15 +62,15 @@ class CaseResponse(BaseModel):
 
     id: str
     organization_id: str
-    assignment_id: Optional[str] = None
+    assignment_id: str | None = None
     title: str
     status: str
     priority: str
-    investigator_id: Optional[str] = None
-    created_by_id: Optional[str] = None
+    investigator_id: str | None = None
+    created_by_id: str | None = None
     created_at: str
     updated_at: str
-    closed_at: Optional[str] = None
+    closed_at: str | None = None
 
     class Config:
         from_attributes = True
@@ -217,12 +213,10 @@ def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
     return {"id": uuid.UUID("2bde87ba-3ad4-4282-b199-02243991150e")}
 
 
-@router.get("/cases", response_model=List[dict])
+@router.get("/cases", response_model=list[dict])
 async def list_cases(
     request: Request,
-    status: Optional[str] = Query(
-        None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"
-    ),
+    status: str | None = Query(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
@@ -345,7 +339,7 @@ async def add_comment(
     return _serialize_comment(comment)
 
 
-@router.get("/cases/{case_id}/timeline", response_model=List[dict])
+@router.get("/cases/{case_id}/timeline", response_model=list[dict])
 async def get_timeline(
     case_id: uuid.UUID,
     user=Depends(get_current_user),

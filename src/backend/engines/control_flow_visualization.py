@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -17,9 +16,9 @@ class ControlFlowNode:
 
     node_type: str
     line_number: int
-    children: List["ControlFlowNode"] = field(default_factory=list)
+    children: list[ControlFlowNode] = field(default_factory=list)
 
-    def add_child(self, child: "ControlFlowNode") -> None:
+    def add_child(self, child: ControlFlowNode) -> None:
         self.children.append(child)
 
     def to_string(self, indent: int = 0) -> str:
@@ -40,17 +39,17 @@ class ControlFlowNode:
 class ControlFlowTree:
     """Control flow tree for a code file."""
 
-    root: Optional[ControlFlowNode] = None
+    root: ControlFlowNode | None = None
     total_nodes: int = 0
     depth: int = 0
 
-    def get_structure_signature(self) -> List[str]:
+    def get_structure_signature(self) -> list[str]:
         """Get a signature of the control flow structure."""
         if not self.root:
             return []
         return self._collect_structure(self.root)
 
-    def _collect_structure(self, node: ControlFlowNode) -> List[str]:
+    def _collect_structure(self, node: ControlFlowNode) -> list[str]:
         """Recursively collect structure signature."""
         result = [node.node_type]
         for child in node.children:
@@ -64,7 +63,7 @@ class ControlFlowVisualizer:
     CONTROL_STRUCTURES = {"If", "For", "While", "With", "Try", "IfExp"}
 
     def __init__(self) -> None:
-        self._cache: Dict[str, ControlFlowTree] = {}
+        self._cache: dict[str, ControlFlowTree] = {}
 
     def analyze(self, code: str, filename: str = "") -> ControlFlowTree:
         """Analyze control flow of source code.
@@ -95,8 +94,8 @@ class ControlFlowVisualizer:
             return ControlFlowTree()
 
     def _build_tree(
-        self, tree: ast.AST, parent: Optional[ControlFlowNode] = None
-    ) -> Optional[ControlFlowNode]:
+        self, tree: ast.AST, parent: ControlFlowNode | None = None
+    ) -> ControlFlowNode | None:
         """Build control flow tree from AST."""
         root = None
 
@@ -128,7 +127,7 @@ class ControlFlowVisualizer:
                 parent.add_child(child_node)
                 self._process_children(child, child_node)
 
-    def _count_nodes(self, node: Optional[ControlFlowNode]) -> int:
+    def _count_nodes(self, node: ControlFlowNode | None) -> int:
         """Count total nodes in tree."""
         if not node:
             return 0
@@ -138,7 +137,7 @@ class ControlFlowVisualizer:
         return count
 
     def _compute_depth(
-        self, node: Optional[ControlFlowNode], current_depth: int = 0
+        self, node: ControlFlowNode | None, current_depth: int = 0
     ) -> int:
         """Compute maximum depth of tree."""
         if not node:
@@ -151,7 +150,7 @@ class ControlFlowVisualizer:
 
     def compare_structures(
         self, tree_a: ControlFlowTree, tree_b: ControlFlowTree
-    ) -> Dict:
+    ) -> dict:
         """Compare two control flow trees.
 
         Returns:

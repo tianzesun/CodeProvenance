@@ -11,13 +11,13 @@ Approach:
 4. Return similarity scores based on cosine distance
 """
 
-from typing import Dict, List, Any, Optional, Tuple
-from pathlib import Path
-import re
-import numpy as np
-from dataclasses import dataclass, field
-from collections import Counter
 import math
+import re
+from collections import Counter
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
 
 
 @dataclass
@@ -25,8 +25,8 @@ class CodeFeatures:
     """Extracted features from a code snippet."""
 
     filename: str
-    tokens: List[str]
-    ngrams: List[str]
+    tokens: list[str]
+    ngrams: list[str]
     ast_hash: str = ""
     token_count: int = 0
     unique_tokens: int = 0
@@ -112,7 +112,7 @@ class CodeTokenizer:
             else self.JAVA_KEYWORDS if self.language == "java" else set()
         )
 
-    def tokenize(self, code: str) -> List[str]:
+    def tokenize(self, code: str) -> list[str]:
         """Tokenize code into cleaned tokens."""
         # Remove comments
         code = self._remove_comments(code)
@@ -140,7 +140,7 @@ class CodeTokenizer:
 
         return result
 
-    def extract_ngrams(self, tokens: List[str]) -> List[str]:
+    def extract_ngrams(self, tokens: list[str]) -> list[str]:
         """Extract n-grams from token sequence."""
         if len(tokens) < self.ngram_size:
             return [" ".join(tokens)]
@@ -181,11 +181,11 @@ class TFIDFVector:
     """Handles TF-IDF vector computation."""
 
     def __init__(self):
-        self.idf: Dict[str, float] = {}
-        self.vocabulary: List[str] = []
+        self.idf: dict[str, float] = {}
+        self.vocabulary: list[str] = []
         self.is_fitted = False
 
-    def fit(self, documents: List[List[str]]) -> None:
+    def fit(self, documents: list[list[str]]) -> None:
         """
         Compute IDF values from a corpus of token lists.
 
@@ -193,7 +193,7 @@ class TFIDFVector:
             documents: List of token lists (each is one document)
         """
         # Build vocabulary
-        word_freq: Dict[str, int] = Counter()
+        word_freq: dict[str, int] = Counter()
         total_docs = len(documents)
 
         for tokens in documents:
@@ -212,7 +212,7 @@ class TFIDFVector:
 
         self.is_fitted = True
 
-    def transform(self, documents: List[List[str]]) -> np.ndarray:
+    def transform(self, documents: list[list[str]]) -> np.ndarray:
         """
         Transform documents to TF-IDF matrix.
 
@@ -249,7 +249,7 @@ class TFIDFVector:
 
         return matrix
 
-    def fit_transform(self, documents: List[List[str]]) -> np.ndarray:
+    def fit_transform(self, documents: list[list[str]]) -> np.ndarray:
         """Fit and transform in one step."""
         self.fit(documents)
         return self.transform(documents)
@@ -273,11 +273,11 @@ class TFIDFSimilarityDetector:
         self.threshold = threshold
         self.tokenizer = CodeTokenizer(language, ngram_size)
         self.tfidf = TFIDFVector()
-        self._features: Dict[str, List[str]] = {}
-        self._matrix: Optional[np.ndarray] = None
-        self._filenames: List[str] = []
+        self._features: dict[str, list[str]] = {}
+        self._matrix: np.ndarray | None = None
+        self._filenames: list[str] = []
 
-    def index_documents(self, documents: List[Tuple[str, str]]) -> None:
+    def index_documents(self, documents: list[tuple[str, str]]) -> None:
         """
         Index a set of code documents.
 
@@ -322,7 +322,7 @@ class TFIDFSimilarityDetector:
         similarity = np.dot(matrix[0], matrix[1])
         return float(max(0.0, min(1.0, similarity)))
 
-    def score_all_pairs(self) -> List[Dict[str, Any]]:
+    def score_all_pairs(self) -> list[dict[str, Any]]:
         """
         Compute similarity scores for all indexed pairs.
 
@@ -348,7 +348,7 @@ class TFIDFSimilarityDetector:
 
         return predictions
 
-    def predict(self, code1: str, code2: str) -> Tuple[bool, float]:
+    def predict(self, code1: str, code2: str) -> tuple[bool, float]:
         """
         Predict whether two code snippets are similar/clones.
 
@@ -362,7 +362,7 @@ class TFIDFSimilarityDetector:
         score = self.score_pair(code1, code2)
         return score >= self.threshold, score
 
-    def find_similar_pairs(self, min_similarity: float = 0.3) -> List[Dict[str, Any]]:
+    def find_similar_pairs(self, min_similarity: float = 0.3) -> list[dict[str, Any]]:
         """
         Find all pairs with similarity above threshold.
 
@@ -379,7 +379,7 @@ class TFIDFSimilarityDetector:
 # Convenience function for quick use
 def detect_similarity(
     code1: str, code2: str, language: str = "python", threshold: float = 0.5
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Quick similarity detection between two code snippets.
 

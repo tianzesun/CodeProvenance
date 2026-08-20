@@ -2,11 +2,11 @@
 
 Provides commands for running certification reports with statistical analysis.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -19,8 +19,10 @@ console = Console()
 @app.command()
 def run(
     dataset: str = typer.Option(..., help="Dataset name or path to records JSON"),
-    engines: Optional[str] = typer.Option(None, help="Comma-separated list of engines to evaluate"),
-    baseline: Optional[str] = typer.Option(None, help="Baseline engine for comparisons"),
+    engines: str | None = typer.Option(
+        None, help="Comma-separated list of engines to evaluate"
+    ),
+    baseline: str | None = typer.Option(None, help="Baseline engine for comparisons"),
     output: str = typer.Option("reports/certification", help="Output directory"),
     n_bootstrap: int = typer.Option(2000, help="Number of bootstrap samples"),
     confidence_level: float = typer.Option(0.95, help="Confidence level for intervals"),
@@ -39,10 +41,11 @@ def run(
     """
     from src.backend.benchmark.certification import (
         CertificationReportBuilder,
-        BenchmarkRecord,
     )
 
-    console.print(f"[bold blue]Running certification for dataset: {dataset}[/bold blue]")
+    console.print(
+        f"[bold blue]Running certification for dataset: {dataset}[/bold blue]"
+    )
 
     # Load records
     records = _load_records(dataset, engines)
@@ -51,7 +54,9 @@ def run(
         console.print("[bold red]Error: No records found[/bold red]")
         raise typer.Exit(1)
 
-    console.print(f"Loaded {len(records)} records from {len(set(r.engine for r in records))} engine(s)")
+    console.print(
+        f"Loaded {len(records)} records from {len({r.engine for r in records})} engine(s)"
+    )
 
     # Build report
     builder = CertificationReportBuilder(
@@ -109,7 +114,6 @@ def compare(
     """Compare two engines and generate certification report."""
     from src.backend.benchmark.certification import (
         CertificationReportBuilder,
-        BenchmarkRecord,
     )
 
     console.print(f"[bold blue]Comparing {name_a} vs {name_b}[/bold blue]")
@@ -149,8 +153,12 @@ def compare(
     # Show comparison details
     for comp_name, comparison in report.comparisons.items():
         console.print(f"\n[bold]{comp_name}[/bold]")
-        console.print(f"  McNemar p-value: {comparison.mcnemar_pvalue:.6f} {'✓' if comparison.mcnemar_significant else '✗'}")
-        console.print(f"  Wilcoxon p-value: {comparison.wilcoxon_pvalue:.6f} {'✓' if comparison.wilcoxon_significant else '✗'}")
+        console.print(
+            f"  McNemar p-value: {comparison.mcnemar_pvalue:.6f} {'✓' if comparison.mcnemar_significant else '✗'}"
+        )
+        console.print(
+            f"  Wilcoxon p-value: {comparison.wilcoxon_pvalue:.6f} {'✓' if comparison.wilcoxon_significant else '✗'}"
+        )
         console.print(f"  Cohen's d: {comparison.cohens_d:.4f}")
         console.print(f"  Cliff's δ: {comparison.cliffs_delta:.4f}")
         console.print(f"  F1 difference: {comparison.f1_diff:+.4f}")
@@ -168,7 +176,7 @@ def compare(
     console.print(f"[green]✓ HTML report saved: {html_path}[/green]")
 
 
-def _load_records(dataset: str, engines: Optional[str] = None) -> List:
+def _load_records(dataset: str, engines: str | None = None) -> list:
     """Load benchmark records from dataset.
 
     Args:
@@ -178,7 +186,6 @@ def _load_records(dataset: str, engines: Optional[str] = None) -> List:
     Returns:
         List of BenchmarkRecord objects.
     """
-    from src.backend.benchmark.certification import BenchmarkRecord
 
     # Check if it's a file path
     if "/" in dataset or dataset.endswith(".json"):
@@ -193,7 +200,7 @@ def _load_records(dataset: str, engines: Optional[str] = None) -> List:
     return []
 
 
-def _load_records_from_file(file_path: str, engine_name: Optional[str] = None) -> List:
+def _load_records_from_file(file_path: str, engine_name: str | None = None) -> list:
     """Load records from a JSON file.
 
     Args:

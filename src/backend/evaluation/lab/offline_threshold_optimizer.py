@@ -1,8 +1,9 @@
 """Threshold Optimization - single authority for threshold selection."""
-from typing import List, Dict, Any
+
 from dataclasses import dataclass
 
-@dataclass 
+
+@dataclass
 class ThresholdOptimum:
     threshold: float
     method: str
@@ -10,9 +11,13 @@ class ThresholdOptimum:
     recall: float
     f1: float
 
-def select_optimal(predictions: List[Dict], truth: List[Dict], method: str = "f2") -> ThresholdOptimum:
+
+def select_optimal(
+    predictions: list[dict], truth: list[dict], method: str = "f2"
+) -> ThresholdOptimum:
     """Select optimal threshold from predictions."""
     from src.backend.evaluation.pr_curve import compute_pr_curve, optimal_threshold
+
     curve = compute_pr_curve(predictions, truth)
     best = optimal_threshold(curve, method)
     return ThresholdOptimum(

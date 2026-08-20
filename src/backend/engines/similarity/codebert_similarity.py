@@ -8,7 +8,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class CodeBERTSimilarity:
         if self._model is not None:
             return
         try:
-            from transformers import AutoTokenizer, AutoModel
+            from transformers import AutoModel, AutoTokenizer
 
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModel.from_pretrained(self.model_name).to(self.device)

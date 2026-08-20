@@ -5,7 +5,8 @@ Basic token-based similarity using Jaccard similarity and n-gram overlap.
 This is the foundational version with simple, fast comparison.
 """
 
-from typing import Dict, Any, List, Set
+from typing import Any
+
 from .base import BaseCodeProvenanceEngine
 from .version_registry import register_engine
 
@@ -78,7 +79,7 @@ class CodeProvenanceV1(BaseCodeProvenanceEngine):
         # Weighted combination
         return 0.6 * jaccard_score + 0.4 * ngram_score
 
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Tokenize source code.
 
         Simple tokenization: split on whitespace and punctuation.
@@ -98,7 +99,7 @@ class CodeProvenanceV1(BaseCodeProvenanceEngine):
 
         return [t for t in tokens if t]
 
-    def _jaccard_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _jaccard_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """Calculate Jaccard similarity of token sets."""
         set_a = set(tokens_a)
         set_b = set(tokens_b)
@@ -111,7 +112,7 @@ class CodeProvenanceV1(BaseCodeProvenanceEngine):
 
         return intersection / union if union > 0 else 0.0
 
-    def _ngram_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _ngram_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """Calculate n-gram overlap similarity."""
         if len(tokens_a) < self._ngram_size or len(tokens_b) < self._ngram_size:
             return self._jaccard_similarity(tokens_a, tokens_b)
@@ -127,15 +128,15 @@ class CodeProvenanceV1(BaseCodeProvenanceEngine):
 
         return intersection / union if union > 0 else 0.0
 
-    def _get_ngrams(self, tokens: List[str]) -> Set[str]:
+    def _get_ngrams(self, tokens: list[str]) -> set[str]:
         """Extract n-grams from token sequence."""
-        ngrams: Set[str] = set()
+        ngrams: set[str] = set()
         for i in range(len(tokens) - self._ngram_size + 1):
             ngram = " ".join(tokens[i : i + self._ngram_size])
             ngrams.add(ngram)
         return ngrams
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get engine configuration."""
         config = super().get_config()
         config.update(

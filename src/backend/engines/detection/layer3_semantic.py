@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class Layer3Result:
     transformer_score: float = 0.0
     concept_overlap_score: float = 0.0
     semantic_similarity_score: float = 0.0
-    engine_scores: Dict[str, float] = field(default_factory=dict)
+    engine_scores: dict[str, float] = field(default_factory=dict)
 
     @property
     def max_signal(self) -> float:
@@ -43,7 +43,7 @@ class Layer3Result:
         ]
         return sum(values) / len(values) if values else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "embedding_similarity": round(self.embedding_similarity, 4),
             "transformer_score": round(self.transformer_score, 4),
@@ -67,7 +67,7 @@ class Layer3Semantic:
     EMBEDDING_BASELINE: float = 0.70
     TRANSFORMER_BASELINE: float = 0.65
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self._embedding_cap = float(self.config.get("embedding_max_cap", 0.90))
         self._baseline_correction = bool(
@@ -78,8 +78,8 @@ class Layer3Semantic:
         self,
         code_a: str,
         code_b: str,
-        engine_scores: Optional[Dict[str, float]] = None,
-        engine_details: Optional[Dict[str, Any]] = None,
+        engine_scores: dict[str, float] | None = None,
+        engine_details: dict[str, Any] | None = None,
     ) -> Layer3Result:
         """Run semantic detection on a pair of code files.
 
@@ -93,7 +93,6 @@ class Layer3Semantic:
             Layer3Result with semantic signals.
         """
         scores = engine_scores or {}
-        details = engine_details or {}
 
         # --- Embedding similarity ---
         embedding_raw = float(scores.get("embedding", scores.get("semantic", 0.0)))

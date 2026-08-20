@@ -12,7 +12,7 @@ Similarity is computed at multiple levels:
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from src.backend.core.graph.combined_builder import (
     CFGDFGBuilder,
@@ -23,9 +23,9 @@ from src.backend.core.graph.models import (
     CFGNode,
     ControlFlowGraph,
     DataFlowGraph,
-    DFEdge,
     EdgeType,
 )
+
 from .base_similarity import BaseSimilarityAlgorithm
 
 
@@ -40,8 +40,8 @@ class GraphSimilarityResult:
     complexity_diff: float = 0.0
     node_diff: int = 0
     edge_diff: int = 0
-    common_patterns: List[str] = field(default_factory=list)
-    differences: List[str] = field(default_factory=list)
+    common_patterns: list[str] = field(default_factory=list)
+    differences: list[str] = field(default_factory=list)
 
 
 class GraphSimilarity(BaseSimilarityAlgorithm):
@@ -66,7 +66,7 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
 
     # ── BaseSimilarityAlgorithm interface ──────────────────────────
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> float:
         """Compare two parsed code representations.
 
         Args:
@@ -140,7 +140,7 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         code_b: str,
         func_a: str,
         func_b: str,
-    ) -> Optional[GraphSimilarityResult]:
+    ) -> GraphSimilarityResult | None:
         """Compare specific functions from two files."""
         g_a = self._builder.build_for_function(code_a, func_a)
         g_b = self._builder.build_for_function(code_b, func_b)
@@ -182,8 +182,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         )
 
     def _node_type_sim(self, a: ControlFlowGraph, b: ControlFlowGraph) -> float:
-        ta: Dict[str, int] = {}
-        tb: Dict[str, int] = {}
+        ta: dict[str, int] = {}
+        tb: dict[str, int] = {}
         for n in a.nodes.values():
             ta[n.node_type] = ta.get(n.node_type, 0) + 1
         for n in b.nodes.values():
@@ -191,8 +191,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         return self._cosine(ta, tb)
 
     def _edge_type_sim(self, a: ControlFlowGraph, b: ControlFlowGraph) -> float:
-        ta: Dict[str, int] = {}
-        tb: Dict[str, int] = {}
+        ta: dict[str, int] = {}
+        tb: dict[str, int] = {}
         for e in a.edges:
             ta[e.edge_type.value] = ta.get(e.edge_type.value, 0) + 1
         for e in b.edges:
@@ -260,8 +260,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
             return 1.0
         if a.edge_count == 0 or b.edge_count == 0:
             return 0.0
-        da: Dict[int, int] = {}
-        db: Dict[int, int] = {}
+        da: dict[int, int] = {}
+        db: dict[int, int] = {}
         for e in a.edges:
             da[e.source] = da.get(e.source, 0) + 1
         for e in b.edges:
@@ -288,8 +288,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
             return 0.0
         return self._dist_sim(ca, cb)
 
-    def _chain_lengths(self, dfg: DataFlowGraph) -> List[int]:
-        groups: Dict[str, int] = {}
+    def _chain_lengths(self, dfg: DataFlowGraph) -> list[int]:
+        groups: dict[str, int] = {}
         for e in dfg.edges:
             groups[e.variable] = groups.get(e.variable, 0) + 1
         return list(groups.values())
@@ -308,8 +308,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
             return 0.0
         return self._cosine(self._bigrams(na), self._bigrams(nb))
 
-    def _bigrams(self, nodes: List[CFGNode]) -> Dict[str, int]:
-        result: Dict[str, int] = {}
+    def _bigrams(self, nodes: list[CFGNode]) -> dict[str, int]:
+        result: dict[str, int] = {}
         for i in range(len(nodes) - 1):
             key = f"{nodes[i].node_type}->{nodes[i + 1].node_type}"
             result[key] = result.get(key, 0) + 1
@@ -324,8 +324,8 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
             return 0.0
         return len(pa & pb) / len(pa | pb)
 
-    def _patterns(self, g: CombinedGraph) -> Set[str]:
-        p: Set[str] = set()
+    def _patterns(self, g: CombinedGraph) -> set[str]:
+        p: set[str] = set()
         types = {n.node_type for n in g.cfg.nodes.values()}
         if "ForHeader" in types:
             p.add("for_loop")
@@ -351,11 +351,11 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
 
     # ── Diagnostics ────────────────────────────────────────────────
 
-    def _common_patterns(self, a: CombinedGraph, b: CombinedGraph) -> List[str]:
+    def _common_patterns(self, a: CombinedGraph, b: CombinedGraph) -> list[str]:
         return list(self._patterns(a) & self._patterns(b))
 
-    def _differences(self, a: CombinedGraph, b: CombinedGraph) -> List[str]:
-        diffs: List[str] = []
+    def _differences(self, a: CombinedGraph, b: CombinedGraph) -> list[str]:
+        diffs: list[str] = []
         nd = abs(a.cfg.node_count - b.cfg.node_count)
         if nd > max(1, a.cfg.node_count * 0.3):
             diffs.append(
@@ -376,7 +376,7 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
     # ── Helpers ────────────────────────────────────────────────────
 
     @staticmethod
-    def _cosine(a: Dict[str, int], b: Dict[str, int]) -> float:
+    def _cosine(a: dict[str, int], b: dict[str, int]) -> float:
         keys = set(a) | set(b)
         if not keys:
             return 1.0
@@ -388,7 +388,7 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         return dot / (na * nb)
 
     @staticmethod
-    def _dist_sim(a: List[int], b: List[int]) -> float:
+    def _dist_sim(a: list[int], b: list[int]) -> float:
         if not a or not b:
             return 0.0
         ma = sum(a) / len(a)

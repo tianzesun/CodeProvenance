@@ -5,9 +5,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any
 
 
 class ReportGenerator:
@@ -52,10 +53,12 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
     def _generate_html_summary(
         self,
         job_data: Mapping[str, Any],
-        suspicious_pairs: List[Mapping[str, Any]],
+        suspicious_pairs: list[Mapping[str, Any]],
         threshold: float,
     ) -> str:
-        high_severity = sum(1 for item in suspicious_pairs if item.get("overall_score", 0.0) >= 0.9)
+        high_severity = sum(
+            1 for item in suspicious_pairs if item.get("overall_score", 0.0) >= 0.9
+        )
         return f"""
 <div class="card">
 <h2>Analysis Summary</h2>
@@ -67,7 +70,9 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
 </div>
 """
 
-    def _generate_html_submissions_table(self, submissions: Mapping[str, Mapping[str, Any]]) -> str:
+    def _generate_html_submissions_table(
+        self, submissions: Mapping[str, Mapping[str, Any]]
+    ) -> str:
         rows = []
         for submission_id, info in submissions.items():
             rows.append(
@@ -88,7 +93,7 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
 
     def _generate_html_similarity_matrix(
         self,
-        comparison_results: List[Mapping[str, Any]],
+        comparison_results: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
         threshold: float,
     ) -> str:
@@ -111,7 +116,7 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
 
     def _generate_html_suspicious_pairs(
         self,
-        suspicious_pairs: List[Mapping[str, Any]],
+        suspicious_pairs: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
     ) -> str:
         if not suspicious_pairs:
@@ -157,17 +162,23 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
     def generate_html(
         self,
         job_data: Mapping[str, Any],
-        comparison_results: List[Mapping[str, Any]],
+        comparison_results: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
         *,
         threshold: float,
     ) -> str:
-        suspicious_pairs = [result for result in comparison_results if result.get("overall_score", 0.0) >= threshold]
+        suspicious_pairs = [
+            result
+            for result in comparison_results
+            if result.get("overall_score", 0.0) >= threshold
+        ]
         return (
             self._generate_html_header()
             + self._generate_html_summary(job_data, suspicious_pairs, threshold)
             + self._generate_html_submissions_table(submissions)
-            + self._generate_html_similarity_matrix(comparison_results, submissions, threshold)
+            + self._generate_html_similarity_matrix(
+                comparison_results, submissions, threshold
+            )
             + self._generate_html_suspicious_pairs(suspicious_pairs, submissions)
             + self._generate_html_footer()
         )
@@ -175,20 +186,28 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
     def generate_json(
         self,
         job_data: Mapping[str, Any],
-        comparison_results: List[Mapping[str, Any]],
+        comparison_results: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
         *,
         threshold: float,
     ) -> str:
-        suspicious_pairs = [result for result in comparison_results if result.get("overall_score", 0.0) >= threshold]
+        suspicious_pairs = [
+            result
+            for result in comparison_results
+            if result.get("overall_score", 0.0) >= threshold
+        ]
         payload = {
             "metadata": {
                 "title": self.title,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             },
             "summary": {
-                "total_comparisons": job_data.get("total_comparisons", len(comparison_results)),
-                "total_submissions": job_data.get("total_submissions", len(submissions)),
+                "total_comparisons": job_data.get(
+                    "total_comparisons", len(comparison_results)
+                ),
+                "total_submissions": job_data.get(
+                    "total_submissions", len(submissions)
+                ),
                 "flagged_pairs": len(suspicious_pairs),
             },
             "job": dict(job_data),
@@ -200,7 +219,7 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
 
     def generate_csv(
         self,
-        comparison_results: List[Mapping[str, Any]],
+        comparison_results: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
     ) -> str:
         buffer = io.StringIO()
@@ -226,14 +245,14 @@ th, td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left
 class PDFReportGenerator:
     """Generate PDF reports from HTML content."""
 
-    def __init__(self, html_generator: Optional[ReportGenerator] = None) -> None:
+    def __init__(self, html_generator: ReportGenerator | None = None) -> None:
         self.html_generator = html_generator or ReportGenerator()
 
     def generate_pdf(
         self,
         *,
         job_data: Mapping[str, Any],
-        comparison_results: List[Mapping[str, Any]],
+        comparison_results: list[Mapping[str, Any]],
         submissions: Mapping[str, Mapping[str, Any]],
         output_path: str,
         threshold: float,
@@ -260,29 +279,33 @@ class PDFReportGenerator:
 def generate_full_report(
     *,
     job_data: Mapping[str, Any],
-    comparison_results: List[Mapping[str, Any]],
+    comparison_results: list[Mapping[str, Any]],
     submissions: Mapping[str, Mapping[str, Any]],
     output_dir: str,
     threshold: float,
     formats: Iterable[str],
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Generate one or more report files and return their paths."""
     generator = ReportGenerator()
     pdf_generator = PDFReportGenerator(html_generator=generator)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    saved: Dict[str, str] = {}
+    saved: dict[str, str] = {}
     for format_name in formats:
         if format_name == "html":
             saved["html"] = generator.save_report(
-                generator.generate_html(job_data, comparison_results, submissions, threshold=threshold),
+                generator.generate_html(
+                    job_data, comparison_results, submissions, threshold=threshold
+                ),
                 str(output_path / "report.html"),
                 format="html",
             )
         elif format_name == "json":
             saved["json"] = generator.save_report(
-                generator.generate_json(job_data, comparison_results, submissions, threshold=threshold),
+                generator.generate_json(
+                    job_data, comparison_results, submissions, threshold=threshold
+                ),
                 str(output_path / "report.json"),
                 format="json",
             )

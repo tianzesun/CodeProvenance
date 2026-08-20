@@ -5,6 +5,7 @@ Good for detecting small edits and typos.
 
 Auto-registered as: levenshtein
 """
+
 from benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
@@ -36,9 +37,9 @@ class LevenshteinEngine(BaseSimilarityEngine):
             for j in range(1, len2 + 1):
                 cost = 0 if code1[i - 1] == code2[j - 1] else 1
                 curr[j] = min(
-                    curr[j - 1] + 1,      # insertion
-                    prev[j] + 1,           # deletion
-                    prev[j - 1] + cost,    # substitution
+                    curr[j - 1] + 1,  # insertion
+                    prev[j] + 1,  # deletion
+                    prev[j - 1] + cost,  # substitution
                 )
             prev, curr = curr, prev
 

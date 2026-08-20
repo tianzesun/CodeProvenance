@@ -40,12 +40,12 @@ Output format:
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 from difflib import SequenceMatcher
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,8 @@ class FunctionOverlap:
     name_a: str
     name_b: str
     similarity: float  # [0, 1]
-    lines_a: Tuple[int, int]  # start, end line
-    lines_b: Tuple[int, int]
+    lines_a: tuple[int, int]  # start, end line
+    lines_b: tuple[int, int]
     type: str  # "identical", "renamed_variables", "restructured", "different_names"
 
 
@@ -76,8 +76,8 @@ class FunctionOverlap:
 class BlockMatch:
     """Evidence for one matched code block."""
 
-    lines_a: Tuple[int, int]
-    lines_b: Tuple[int, int]
+    lines_a: tuple[int, int]
+    lines_b: tuple[int, int]
     score: float
     type: str  # "loop_pattern", "conditional_block", "function_body", "import_section"
 
@@ -96,8 +96,8 @@ class ControlFlowEvidence:
     """Control flow comparison evidence."""
 
     identical: bool
-    sequence_a: List[str]
-    sequence_b: List[str]
+    sequence_a: list[str]
+    sequence_b: list[str]
     similarity: float
 
 
@@ -105,12 +105,12 @@ class ControlFlowEvidence:
 class ExplanationReport:
     """Complete explainability evidence report."""
 
-    function_overlap: List[FunctionOverlap] = field(default_factory=list)
+    function_overlap: list[FunctionOverlap] = field(default_factory=list)
     function_count_a: int = 0
     function_count_b: int = 0
     avg_function_similarity: float = 0.0
 
-    block_matches: List[BlockMatch] = field(default_factory=list)
+    block_matches: list[BlockMatch] = field(default_factory=list)
     block_match_count: int = 0
 
     ast_function_count_a: int = 0
@@ -119,14 +119,14 @@ class ExplanationReport:
     ast_class_count_b: int = 0
     ast_shared_structure: float = 0.0
 
-    control_flow: Optional[ControlFlowEvidence] = None
+    control_flow: ControlFlowEvidence | None = None
 
-    variable_renames: List[VariableRename] = field(default_factory=list)
+    variable_renames: list[VariableRename] = field(default_factory=list)
     renaming_pattern: str = "none"
     plagiarism_type: str = "not_plagiarized"
     plagiarism_description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         return {
             "function_overlap": {
@@ -306,12 +306,11 @@ COMMON_PYTHON_BUILTINS = {
 }
 
 
-def _extract_functions(code: str) -> List[Dict[str, Any]]:
+def _extract_functions(code: str) -> list[dict[str, Any]]:
     """Extract function definitions from Python code."""
     lines = code.split("\n")
     functions = []
     current_func = None
-    indent_level = 0
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -352,7 +351,7 @@ def _extract_functions(code: str) -> List[Dict[str, Any]]:
     return functions
 
 
-def _extract_control_flow(code: str) -> List[str]:
+def _extract_control_flow(code: str) -> list[str]:
     """Extract control flow keywords sequence from code."""
     tokens = re.findall(r"[A-Za-z_]\w*|\S", code)
     flow_tokens = []
@@ -380,11 +379,11 @@ def _extract_control_flow(code: str) -> List[str]:
 
 
 def _detect_renames(
-    params_a: List[str],
-    params_b: List[str],
+    params_a: list[str],
+    params_b: list[str],
     body_a: str,
     body_b: str,
-) -> List[VariableRename]:
+) -> list[VariableRename]:
     """Detect variable renaming between two function bodies."""
     renames = []
 
@@ -397,7 +396,7 @@ def _detect_renames(
 
     # Identifier-only renaming check
     # Remove all strings, numbers, and keywords, compare remaining identifiers
-    def extract_identifiers(code: str) -> List[str]:
+    def extract_identifiers(code: str) -> list[str]:
         tokens = re.findall(r"[A-Za-z_]\w*", code)
         return [
             t
@@ -408,8 +407,8 @@ def _detect_renames(
     ids_a = extract_identifiers(body_a)
     ids_b = extract_identifiers(body_b)
 
-    counter_a = Counter(ids_a)
-    counter_b = Counter(ids_b)
+    Counter(ids_a)
+    Counter(ids_b)
 
     # Try to find a mapping between identifiers
     unique_a = set(ids_a)
@@ -446,8 +445,8 @@ class Layer4Explainability:
         self,
         code_a: str,
         code_b: str,
-        engine_scores: Optional[Dict[str, float]] = None,
-        engine_details: Optional[Dict[str, Any]] = None,
+        engine_scores: dict[str, float] | None = None,
+        engine_details: dict[str, Any] | None = None,
     ) -> ExplanationReport:
         """Run explainability analysis on a pair of code files.
 
@@ -465,7 +464,7 @@ class Layer4Explainability:
         funcs_b = _extract_functions(code_b)
 
         # ── Compare functions ──
-        function_overlap: List[FunctionOverlap] = []
+        function_overlap: list[FunctionOverlap] = []
         func_sims = []
 
         for fa in funcs_a:
@@ -589,7 +588,7 @@ class Layer4Explainability:
         )
 
         # ── Variable renaming detection ──
-        all_renames: List[VariableRename] = []
+        all_renames: list[VariableRename] = []
         for fa in funcs_a:
             for fb in funcs_b:
                 renames = _detect_renames(
@@ -648,11 +647,11 @@ class Layer4Explainability:
 
     def _classify_type(
         self,
-        function_overlap: List[FunctionOverlap],
-        block_matches: List[BlockMatch],
-        variable_renames: List[VariableRename],
+        function_overlap: list[FunctionOverlap],
+        block_matches: list[BlockMatch],
+        variable_renames: list[VariableRename],
         control_flow_sim: float,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Classify the plagiarism type based on evidence.
 
         Returns:
@@ -678,8 +677,10 @@ class Layer4Explainability:
         elif has_renamed_funcs and variable_renames:
             return (
                 "type_2_renamed",
-                f"Identifier renaming detected — {len(variable_renames)} variables renamed. "
-                f"Function bodies remain structurally similar.",
+                (
+                    f"Identifier renaming detected — {len(variable_renames)} variables renamed. "
+                    f"Function bodies remain structurally similar."
+                ),
             )
         elif has_restructured and control_flow_sim > 0.5:
             return (
@@ -689,14 +690,18 @@ class Layer4Explainability:
         elif avg_func_sim > 0.5 and not variable_renames:
             return (
                 "type_4_semantic",
-                "Similar functionality with different implementation — "
-                "may indicate code generation from same requirements.",
+                (
+                    "Similar functionality with different implementation — "
+                    "may indicate code generation from same requirements."
+                ),
             )
         elif high_block_match and avg_func_sim < 0.3:
             return (
                 "type_5_template",
-                "Shared code blocks (template/starter code) — "
-                "check if assignment template matches.",
+                (
+                    "Shared code blocks (template/starter code) — "
+                    "check if assignment template matches."
+                ),
             )
         return (
             "not_plagiarized",

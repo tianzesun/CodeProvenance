@@ -5,6 +5,7 @@ Good for detecting code that shares structural patterns.
 
 Auto-registered as: lcs
 """
+
 from benchmark.similarity.base_engine import BaseSimilarityEngine
 
 

@@ -9,14 +9,12 @@ Coordinates all components of the fusion layer:
 6. Risk categorization
 """
 
-from typing import Dict
-
-from src.backend.engines.ai.agreement import analyze_signal_agreement
 from src.backend.engines.ai.aggregation import (
     aggregate_signals_with_agreement,
     get_all_signal_contributions,
     get_most_influential_signals,
 )
+from src.backend.engines.ai.agreement import analyze_signal_agreement
 from src.backend.engines.ai.confidence import calibrate_confidence
 from src.backend.engines.ai.false_positive_reduction import (
     apply_false_positive_reduction,
@@ -30,7 +28,7 @@ def fuse_signals(
     signals: SignalScores,
     code: str,
     language: str = "python",
-) -> Dict:
+) -> dict:
     """Fuse all signals into final detection result.
 
     Args:
@@ -112,7 +110,7 @@ def create_detection_result(
     signals: SignalScores,
     code: str,
     language: str = "python",
-    flagged_lines: list = None,
+    flagged_lines: list | None = None,
 ) -> AIDetectionResult:
     """Create a complete detection result from signals.
 
@@ -150,7 +148,9 @@ def create_detection_result(
     indicators = []
     for signal_name, contribution in influential_signals:
         if contribution > 0.01:
-            indicators.append(f"{signal_labels.get(signal_name, signal_name)}: {contribution:.1%}")
+            indicators.append(
+                f"{signal_labels.get(signal_name, signal_name)}: {contribution:.1%}"
+            )
 
     # Add agreement indicator
     if agreement["agreement_level"] == "high":
@@ -172,7 +172,7 @@ def create_detection_result(
     return result
 
 
-def get_fusion_summary(fusion_result: Dict) -> str:
+def get_fusion_summary(fusion_result: dict) -> str:
     """Get human-readable summary of fusion result.
 
     Args:

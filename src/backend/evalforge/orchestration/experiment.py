@@ -6,31 +6,32 @@ for distributed execution.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from uuid import uuid4
 from datetime import datetime
+from typing import Any
+from uuid import uuid4
 
 
 @dataclass
 class Experiment:
     """
     Complete experimental definition.
-    
+
     Experiment = Dataset × Transform × Tool × Task × Repetition
-    
+
     This is the single source of truth for an entire benchmark run.
     """
+
     name: str
     dataset: str
-    tools: List[str]
-    transforms: List[str]
-    tasks: List[str]
+    tools: list[str]
+    transforms: list[str]
+    tasks: list[str]
     n_runs: int = 30
     experiment_id: str = field(default_factory=lambda: str(uuid4())[:8])
     created_at: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "experiment_id": self.experiment_id,
             "name": self.name,
@@ -40,11 +41,11 @@ class Experiment:
             "tasks": self.tasks,
             "n_runs": self.n_runs,
             "created_at": self.created_at.isoformat(),
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Experiment':
+    def from_dict(cls, data: dict[str, Any]) -> "Experiment":
         return cls(
             name=data["name"],
             dataset=data["dataset"],
@@ -53,6 +54,8 @@ class Experiment:
             tasks=data["tasks"],
             n_runs=data.get("n_runs", 30),
             experiment_id=data.get("experiment_id", str(uuid4())[:8]),
-            created_at=datetime.fromisoformat(data.get("created_at", datetime.now().isoformat())),
-            metadata=data.get("metadata", {})
+            created_at=datetime.fromisoformat(
+                data.get("created_at", datetime.now().isoformat())
+            ),
+            metadata=data.get("metadata", {}),
         )

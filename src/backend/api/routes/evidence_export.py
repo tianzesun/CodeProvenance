@@ -4,24 +4,22 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     EvidenceChainPdfExporter,
-    PDF_BACKEND,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
 
-_exporter: Optional[EvidenceChainPdfExporter] = None
+_exporter: EvidenceChainPdfExporter | None = None
 
 
-def get_exporter(output_dir: Optional[Path] = None) -> EvidenceChainPdfExporter:
+def get_exporter(output_dir: Path | None = None) -> EvidenceChainPdfExporter:
     global _exporter
     if _exporter is None:
         _exporter = EvidenceChainPdfExporter(output_dir=output_dir)
@@ -46,7 +44,6 @@ async def export_evidence_pdf(
     - Digital signature (SHA-256)
     """
 
-
     # Fetch case data from database (placeholder — replace with actual query)
     case_data = _fetch_case_data(case_id)
     if case_data is None:
@@ -57,7 +54,9 @@ async def export_evidence_pdf(
     if format == "html":
         html_path = exporter.export_html(case_data)
         if html_path is None:
-            raise HTTPException(status_code=500, detail="Failed to generate HTML report")
+            raise HTTPException(
+                status_code=500, detail="Failed to generate HTML report"
+            )
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
     pdf_path = exporter.export(case_data)
@@ -86,7 +85,7 @@ async def export_evidence_html(case_id: str):
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
-def _fetch_case_data(case_id: str) -> Optional[dict]:
+def _fetch_case_data(case_id: str) -> dict | None:
     """
     Fetch case data from the database.
 

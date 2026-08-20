@@ -5,6 +5,7 @@ based on character 3-gram Jaccard index.
 
 To use: the engine will be auto-registered as "jaccard_ngram".
 """
+
 from benchmark.similarity.base_engine import BaseSimilarityEngine
 
 
@@ -24,7 +25,7 @@ class JaccardNGramEngine(BaseSimilarityEngine):
             return 0.0
 
         def ngrams(s):
-            return set(s[i:i + n] for i in range(len(s) - n + 1))
+            return {s[i : i + n] for i in range(len(s) - n + 1)}
 
         g1 = ngrams(code1)
         g2 = ngrams(code2)

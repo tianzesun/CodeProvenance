@@ -1,7 +1,7 @@
 """Unified CLI entrypoint for CodeProvenance benchmark and evaluation system."""
 
-import sys
 import os
+import sys
 
 # Add both project root and src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -9,7 +9,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import typer
 from rich.console import Console
-from src.backend.cli.commands import benchmark, comparative, diagnostic, dataset, certify
+
+from src.backend.cli.commands import (
+    benchmark,
+    certify,
+    comparative,
+    dataset,
+    diagnostic,
+)
 from src.backend.cli.commands.threshold import app as threshold_app
 from src.backend.cli.context import initialize_system
 

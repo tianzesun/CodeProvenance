@@ -40,14 +40,14 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from src.backend.engines.ai.ast_features import TreeSitterASTExtractor  # noqa: E402
-from src.backend.engines.ai.classifier import (  # noqa: E402
+from src.backend.engines.ai.ast_features import TreeSitterASTExtractor
+from src.backend.engines.ai.classifier import (
     AICodeClassifier,
     assemble_features,
 )
-from src.backend.engines.ai.perplexity import PerplexityScorer  # noqa: E402
+from src.backend.engines.ai.perplexity import PerplexityScorer
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def set_dataset_dir(dataset_dir: Path) -> None:
     REPORT_PATH = dataset_dir / "benchmark_report.json"
 
 
-def _load_meta() -> List[Dict[str, Any]]:
+def _load_meta() -> list[dict[str, Any]]:
     """Read the per-sample metadata index created by build_aigcodeset."""
     records = []
     for line in (DATA_DIR / "samples.jsonl").read_text(encoding="utf-8").splitlines():
@@ -80,12 +80,12 @@ def _load_meta() -> List[Dict[str, Any]]:
     return records
 
 
-def load_dataset() -> Tuple[List[str], List[int], List[str], List[str]]:
+def load_dataset() -> tuple[list[str], list[int], list[str], list[str]]:
     """Load codes, labels, problem_ids and LLMs from the materialised dataset."""
-    codes: List[str] = []
-    labels: List[int] = []
-    problems: List[str] = []
-    llms: List[str] = []
+    codes: list[str] = []
+    labels: list[int] = []
+    problems: list[str] = []
+    llms: list[str] = []
     for record in _load_meta():
         label_dir = "ai" if record["label"] == 1 else "human"
         code = (DATA_DIR / label_dir / record["file"]).read_text(encoding="utf-8")
@@ -98,14 +98,14 @@ def load_dataset() -> Tuple[List[str], List[int], List[str], List[str]]:
     return codes, labels, problems, llms
 
 
-def build_feature_rows(codes: List[str]) -> List[Dict[str, float]]:
+def build_feature_rows(codes: list[str]) -> list[dict[str, float]]:
     """Compute classifier features for every sample (AST + stylometry + perplexity)."""
     ast_extractor = TreeSitterASTExtractor()
     perplexity = PerplexityScorer()
     from src.backend.engines.features.code_stylometry import StylometryExtractor
 
     stylometry_extractor = StylometryExtractor()
-    rows: List[Dict[str, float]] = []
+    rows: list[dict[str, float]] = []
     for code in codes:
         ast_vector = ast_extractor.extract(code, "python")
         stylometry = stylometry_extractor.extract(code, doc_id="")
@@ -115,8 +115,8 @@ def build_feature_rows(codes: List[str]) -> List[Dict[str, float]]:
 
 
 def _metrics(
-    y_true: List[int], y_prob: List[float], threshold: float
-) -> Dict[str, Any]:
+    y_true: list[int], y_prob: list[float], threshold: float
+) -> dict[str, Any]:
     """Precision/recall/F1/accuracy/AUC at a given probability threshold."""
     from sklearn.metrics import (
         accuracy_score,
@@ -151,11 +151,11 @@ def _heuristic_score(code: str) -> float:
 
 
 def _train_grouped(
-    rows: List[Dict[str, float]],
-    labels: List[int],
-    problems: List[str],
+    rows: list[dict[str, float]],
+    labels: list[int],
+    problems: list[str],
     test_problems: set,
-) -> Tuple[AICodeClassifier, List[float], List[int], List[int]]:
+) -> tuple[AICodeClassifier, list[float], list[int], list[int]]:
     """Train on non-test problems, evaluate on test problems (no leakage).
 
     Returns (classifier, test_probabilities, test_labels, test_indices).
@@ -176,8 +176,8 @@ def _train_grouped(
 
 
 def _threshold_metrics(
-    test_labels: List[int], test_probs: List[float]
-) -> Dict[str, Any]:
+    test_labels: list[int], test_probs: list[float]
+) -> dict[str, Any]:
     """Metrics at the canonical 0.5 plus server thresholds 0.40 and 0.70."""
     return {
         "metrics": _metrics(test_labels, test_probs, 0.5),
@@ -211,7 +211,7 @@ def main() -> None:
     if args.limit:
         idx = list(range(len(codes)))
         random.Random(1).shuffle(idx)
-        taken: List[int] = []
+        taken: list[int] = []
         for i in idx:
             if len(taken) >= args.limit:
                 break
@@ -235,13 +235,13 @@ def main() -> None:
 
     from sklearn.model_selection import GroupShuffleSplit
 
-    report: Dict[str, Any] = {"n_samples": len(codes), "n_ai": n_ai}
+    report: dict[str, Any] = {"n_samples": len(codes), "n_ai": n_ai}
 
     # 1. Grouped holdout (leakage-free): 20% of problems held out.
     split = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
     _, test_idx = next(iter(split.split(rows, labels, problems)))
     test_problems = {problems[i] for i in test_idx}
-    classifier, test_probs, test_labels, test_idx_out = _train_grouped(
+    _classifier, test_probs, test_labels, test_idx_out = _train_grouped(
         rows, labels, problems, test_problems
     )
     report["grouped_holdout"] = {
@@ -251,7 +251,7 @@ def main() -> None:
     }
 
     # 2. Per-generator sensitivity on the same unseen fold.
-    per_llm: Dict[str, Any] = {}
+    per_llm: dict[str, Any] = {}
     for generator in ["GEMINI", "LLAMA", "CODESTRAL"]:
         gen_idx = [i for i in test_idx_out if labels[i] == 1 and llms[i] == generator]
         if not gen_idx:
@@ -277,7 +277,7 @@ def main() -> None:
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     logger.info("Report written to %s", report_path)
 
-    def _fmt(m: Dict[str, Any]) -> str:
+    def _fmt(m: dict[str, Any]) -> str:
         auc = m.get("auc")
         auc_s = "n/a" if auc is None else f"{auc:.3f}"
         return (

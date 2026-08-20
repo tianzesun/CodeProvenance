@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Iterable, List
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class ShadowModeSummary:
     feedback_count: int
     worth_reviewing_rate: float
     median_review_time_seconds: float
-    decision_counts: Dict[str, int]
+    decision_counts: dict[str, int]
 
 
 class ShadowModeFeedbackStore:
@@ -38,7 +38,7 @@ class ShadowModeFeedbackStore:
     """
 
     def __init__(self) -> None:
-        self._feedback: List[ShadowFeedback] = []
+        self._feedback: list[ShadowFeedback] = []
 
     def add(self, feedback: ShadowFeedback) -> None:
         """Record one shadow-mode reviewer judgment."""
@@ -48,7 +48,7 @@ class ShadowModeFeedbackStore:
         """Record multiple shadow-mode reviewer judgments."""
         self._feedback.extend(feedback_items)
 
-    def list_feedback(self) -> List[ShadowFeedback]:
+    def list_feedback(self) -> list[ShadowFeedback]:
         """Return all feedback records."""
         return list(self._feedback)
 
@@ -70,7 +70,7 @@ class ShadowModeFeedbackStore:
         else:
             median = (times[midpoint - 1] + times[midpoint]) / 2
 
-        decision_counts: Dict[str, int] = {}
+        decision_counts: dict[str, int] = {}
         for item in self._feedback:
             decision_counts[item.decision] = decision_counts.get(item.decision, 0) + 1
 

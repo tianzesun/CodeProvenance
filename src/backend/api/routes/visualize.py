@@ -5,18 +5,18 @@ Returns structured JSON for AST visualization, GST block matches,
 heatmaps, and auto-generated explanations.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from typing import Dict, Any
-import ast
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.backend.config.database import get_db
 from src.backend.engines.explainable_report_generator import ReportGenerator
 from src.backend.engines.similarity.ast_similarity import ASTSimilarity
-from src.backend.engines.similarity.token_similarity import TokenSimilarity
 from src.backend.engines.similarity.base_similarity import (
     SimilarityEngine,
     register_builtin_algorithms,
 )
+from src.backend.engines.similarity.token_similarity import TokenSimilarity
 
 router = APIRouter()
 report_generator = ReportGenerator()
@@ -24,8 +24,8 @@ ast_engine = ASTSimilarity()
 token_engine = TokenSimilarity()
 
 
-@router.post("/v1/visualize", response_model=Dict[str, Any])
-async def visualize_pair(request: Request, data: Dict[str, Any], db=Depends(get_db)):
+@router.post("/v1/visualize", response_model=dict[str, Any])
+async def visualize_pair(request: Request, data: dict[str, Any], db=Depends(get_db)):
     """
     Generate structured visualization data for a pair of code files.
 

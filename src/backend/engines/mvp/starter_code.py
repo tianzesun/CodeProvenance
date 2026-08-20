@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Set
 
 from src.backend.engines.mvp.normalization import CodeNormalizer
 
@@ -35,7 +35,7 @@ class StarterCodeRemover:
         if not lines:
             return StarterRemovalResult("", 0, 0, 0.0)
 
-        kept_lines: List[str] = []
+        kept_lines: list[str] = []
         removed = 0
         for line in lines:
             line_hash = self._line_hash(line)
@@ -55,9 +55,9 @@ class StarterCodeRemover:
         """Return the fraction of source lines matching starter code."""
         return self.remove(source).starter_overlap
 
-    def _build_starter_line_hashes(self, starter_sources: Iterable[str]) -> Set[str]:
+    def _build_starter_line_hashes(self, starter_sources: Iterable[str]) -> set[str]:
         """Hash non-empty normalized starter lines."""
-        hashes: Set[str] = set()
+        hashes: set[str] = set()
         for source in starter_sources:
             for line in (source or "").splitlines():
                 line_hash = self._line_hash(line)

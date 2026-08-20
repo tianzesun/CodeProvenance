@@ -6,21 +6,22 @@ all experimental parameters. This generates the full set of micro-jobs
 for distributed execution.
 """
 
-from typing import List, Dict, Any
+from typing import Any
 from uuid import uuid4
+
 from .experiment import Experiment
 
 
 class ExperimentPlanner:
     """
     Builds the complete job matrix from an experiment definition.
-    
+
     Generates the full Cartesian product:
     Dataset × Transform × Tool × Task × Repetition
     """
 
     @staticmethod
-    def build_job_matrix(experiment: Experiment) -> List[Dict[str, Any]]:
+    def build_job_matrix(experiment: Experiment) -> list[dict[str, Any]]:
         """
         Build complete job matrix for distributed execution.
 
@@ -48,7 +49,7 @@ class ExperimentPlanner:
                             "status": "pending",
                             "attempt": 0,
                             "created_at": None,
-                            "completed_at": None
+                            "completed_at": None,
                         }
 
                         jobs.append(job)
@@ -56,12 +57,14 @@ class ExperimentPlanner:
         return jobs
 
     @staticmethod
-    def estimate_runtime(jobs: List[Dict[str, Any]], seconds_per_job: float = 15.0) -> Dict[str, float]:
+    def estimate_runtime(
+        jobs: list[dict[str, Any]], seconds_per_job: float = 15.0
+    ) -> dict[str, float]:
         """Estimate total runtime for given job count."""
         total_jobs = len(jobs)
         return {
             "total_jobs": total_jobs,
             "sequential_runtime_hours": (total_jobs * seconds_per_job) / 3600,
             "parallel_10_runtime_hours": (total_jobs * seconds_per_job) / 3600 / 10,
-            "parallel_100_runtime_hours": (total_jobs * seconds_per_job) / 3600 / 100
+            "parallel_100_runtime_hours": (total_jobs * seconds_per_job) / 3600 / 100,
         }

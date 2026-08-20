@@ -3,14 +3,13 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Callable, List, Tuple
 
 import numpy as np
-
 
 # =========================
 # Data Structures
 # =========================
+
 
 @dataclass(frozen=True)
 class ConfidenceInterval:
@@ -33,7 +32,8 @@ class SignificanceResult:
 # Utility Functions
 # =========================
 
-def _validate_scores(scores: List[float]) -> None:
+
+def _validate_scores(scores: list[float]) -> None:
     if not scores:
         raise ValueError("Scores list cannot be empty")
     for s in scores:
@@ -50,8 +50,9 @@ def _set_seed(seed: int) -> None:
 # Bootstrap Confidence Interval
 # =========================
 
+
 def bootstrap_confidence_interval(
-    scores: List[float],
+    scores: list[float],
     num_samples: int = 1000,
     confidence: float = 0.95,
     seed: int = 42,
@@ -92,9 +93,10 @@ def bootstrap_confidence_interval(
 # Paired Bootstrap Test
 # =========================
 
+
 def paired_bootstrap_test(
-    scores_a: List[float],
-    scores_b: List[float],
+    scores_a: list[float],
+    scores_b: list[float],
     num_samples: int = 1000,
     seed: int = 42,
     confidence: float = 0.95,
@@ -139,10 +141,11 @@ def paired_bootstrap_test(
 # McNemar’s Test
 # =========================
 
+
 def mcnemar_test(
-    y_true: List[int],
-    y_pred_a: List[int],
-    y_pred_b: List[int],
+    y_true: list[int],
+    y_pred_a: list[int],
+    y_pred_b: list[int],
     continuity_correction: bool = True,
     alpha: float = 0.05,
 ) -> SignificanceResult:
@@ -156,8 +159,8 @@ def mcnemar_test(
     n10 = 0  # A correct, B wrong
 
     for yt, a, b in zip(y_true, y_pred_a, y_pred_b):
-        correct_a = (a == yt)
-        correct_b = (b == yt)
+        correct_a = a == yt
+        correct_b = b == yt
 
         if correct_a and not correct_b:
             n10 += 1
@@ -193,12 +196,13 @@ def mcnemar_test(
 # Convenience API (Recommended)
 # =========================
 
+
 def compare_systems(
-    scores_a: List[float],
-    scores_b: List[float],
-    y_true: List[int] | None = None,
-    y_pred_a: List[int] | None = None,
-    y_pred_b: List[int] | None = None,
+    scores_a: list[float],
+    scores_b: list[float],
+    y_true: list[int] | None = None,
+    y_pred_a: list[int] | None = None,
+    y_pred_b: list[int] | None = None,
 ) -> dict:
     """
     Unified comparison interface.

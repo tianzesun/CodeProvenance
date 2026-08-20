@@ -6,14 +6,13 @@ import ast
 import hashlib
 from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 
 @dataclass(frozen=True)
 class ASTSubtreeHashResult:
     """Subtree hash multiset and parse status."""
 
-    hashes: List[str]
+    hashes: list[str]
     parse_error: str = ""
 
 
@@ -21,7 +20,7 @@ class _ASTNormalizer(ast.NodeTransformer):
     """Normalize identifiers and literals inside a Python AST."""
 
     def __init__(self) -> None:
-        self.identifier_map: Dict[str, str] = {}
+        self.identifier_map: dict[str, str] = {}
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         """Normalize variable names."""
@@ -79,7 +78,7 @@ class ASTSubtreeHasher:
         tree = _ASTNormalizer().visit(tree)
         ast.fix_missing_locations(tree)
 
-        hashes: List[str] = []
+        hashes: list[str] = []
         self._hash_node(tree, hashes)
         return ASTSubtreeHashResult(hashes)
 
@@ -99,7 +98,7 @@ class ASTSubtreeHasher:
         union = sum(max(counts_a[item], counts_b[item]) for item in all_hashes)
         return intersection / union if union else 0.0
 
-    def _hash_node(self, node: ast.AST, output: List[str]) -> Tuple[str, int]:
+    def _hash_node(self, node: ast.AST, output: list[str]) -> tuple[str, int]:
         """Return hash and subtree size for one AST node."""
         child_results = [
             self._hash_node(child, output) for child in ast.iter_child_nodes(node)

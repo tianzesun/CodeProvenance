@@ -7,10 +7,10 @@ Combines 4 complementary representations:
 4. 🔢 Fingerprinting (MinHash / Winnowing)
 """
 
-from typing import Dict, Set, Tuple, List, Any, Optional
-import random
 import ast
+import random
 from collections import defaultdict
+from typing import Any
 
 
 class MultiRepresentationDetector:
@@ -32,9 +32,9 @@ class MultiRepresentationDetector:
         # 🧵 Sequence matching
         self.gst_matcher = GreedyStringTiler()
 
-        self._feature_cache: Dict[str, Any] = {}
+        self._feature_cache: dict[str, Any] = {}
 
-    def extract_features(self, code: str) -> Dict[str, Any]:
+    def extract_features(self, code: str) -> dict[str, Any]:
         """Extract all 4 representation features from code."""
         return {
             "graph": self.graph_extractor.extract(code),
@@ -55,7 +55,7 @@ class MultiRepresentationDetector:
 
     def query(
         self, code: str, threshold: float = 0.5
-    ) -> List[Tuple[str, float, Dict[str, float]]]:
+    ) -> list[tuple[str, float, dict[str, float]]]:
         """
         Query for similar code using multi-representation comparison.
 
@@ -111,12 +111,12 @@ class MultiRepresentationDetector:
 
         return sorted(results, key=lambda x: x[1], reverse=True)
 
-    def _jaccard_set(self, a: Set[int], b: Set[int]) -> float:
+    def _jaccard_set(self, a: set[int], b: set[int]) -> float:
         if not a and not b:
             return 1.0
         return len(a & b) / len(a | b)
 
-    def _extract_winnowed_fingerprints(self, code: str) -> Set[int]:
+    def _extract_winnowed_fingerprints(self, code: str) -> set[int]:
         """Extract winnowed AST subtree fingerprints."""
         try:
             tree = ast.parse(code)
@@ -152,7 +152,9 @@ class MultiRepresentationDetector:
         ast.fix_missing_locations(tree)
 
         # Bottom-up subtree hashing
-        def hash_node(n, memo={}):
+        def hash_node(n, memo=None):
+            if memo is None:
+                memo = {}
             nid = id(n)
             if nid in memo:
                 return memo[nid]
@@ -176,7 +178,7 @@ class MultiRepresentationDetector:
 
         return self._winnow(seq, 5)
 
-    def _winnow(self, hashes: List[int], window_size: int) -> Set[int]:
+    def _winnow(self, hashes: list[int], window_size: int) -> set[int]:
         if len(hashes) < window_size:
             return set(hashes)
         fps = set()
@@ -204,13 +206,12 @@ class MinHash:
         self.num_perm = num_perm
         self.seeds = [random.randint(1, 10**9) for _ in range(num_perm)]
 
-    def hash_set(self, items: Set[int]) -> Tuple[int, ...]:
+    def hash_set(self, items: set[int]) -> tuple[int, ...]:
         sig = [float("inf")] * self.num_perm
         for item in items:
             for i, seed in enumerate(self.seeds):
                 h = hash((item, seed))
-                if h < sig[i]:
-                    sig[i] = h
+                sig[i] = min(sig[i], h)
         return tuple(sig)
 
 
@@ -223,7 +224,7 @@ class LSHIndex:
         self.bands = bands
 
     def add(
-        self, file_id: str, signature: Tuple[int, ...], features: Any = None
+        self, file_id: str, signature: tuple[int, ...], features: Any = None
     ) -> None:
         rows = len(signature) // self.bands
         for i in range(self.bands):
@@ -232,7 +233,7 @@ class LSHIndex:
         if features:
             self._features[file_id] = features
 
-    def query(self, signature: Tuple[int, ...]) -> Set[str]:
+    def query(self, signature: tuple[int, ...]) -> set[str]:
         rows = len(signature) // self.bands
         candidates = set()
         for i in range(self.bands):
@@ -247,7 +248,7 @@ class LSHIndex:
 class GraphFeatureExtractor:
     """Extract graph-based structural features (AST/CFG/PDG)."""
 
-    def extract(self, code: str) -> Dict[str, Any]:
+    def extract(self, code: str) -> dict[str, Any]:
         try:
             tree = ast.parse(code)
         except SyntaxError:
@@ -292,7 +293,7 @@ class GraphFeatureExtractor:
 class GreedyStringTiler:
     """Greedy String Tiling algorithm for sequence similarity matching."""
 
-    def tokenize(self, code: str) -> List[int]:
+    def tokenize(self, code: str) -> list[int]:
         """Convert code to normalized token sequence."""
         try:
             tree = ast.parse(code)
@@ -305,7 +306,7 @@ class GreedyStringTiler:
         return tokens
 
     def similarity(
-        self, seq_a: List[int], seq_b: List[int], min_match: int = 3
+        self, seq_a: list[int], seq_b: list[int], min_match: int = 3
     ) -> float:
         """GST similarity score between two sequences."""
         if not seq_a or not seq_b:

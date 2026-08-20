@@ -8,9 +8,7 @@ all students using the same base code provided by instructors.
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Set, Optional
-from collections import Counter
-import hashlib
+from typing import Any
 
 from .deep_analysis import DeepCodeAnalyzer
 
@@ -26,9 +24,9 @@ class BoilerplateFilter:
     """
 
     def __init__(self):
-        self.template_subtrees: Set[str] = set()
-        self.template_patterns: Set[str] = set()
-        self.template_fingerprints: Set[str] = set()
+        self.template_subtrees: set[str] = set()
+        self.template_patterns: set[str] = set()
+        self.template_fingerprints: set[str] = set()
         self.analyzer = DeepCodeAnalyzer()
         self.enabled = True
 
@@ -79,7 +77,7 @@ class BoilerplateFilter:
             "contributing.md",
         }
 
-    def add_template(self, parsed_code: Dict[str, Any]) -> None:
+    def add_template(self, parsed_code: dict[str, Any]) -> None:
         """
         Add an instructor-provided template/starter code to be filtered out.
 
@@ -199,14 +197,12 @@ class BoilerplateFilter:
             return "changelog"
         elif "contributing" in filename:
             return "contributing"
-        elif "gitignore" in filename:
-            return "git"
-        elif "gitattributes" in filename:
+        elif "gitignore" in filename or "gitattributes" in filename:
             return "git"
 
         return None
 
-    def calculate_boilerplate_ratio(self, parsed_code: Dict[str, Any]) -> float:
+    def calculate_boilerplate_ratio(self, parsed_code: dict[str, Any]) -> float:
         """
         Calculate what percentage of code is template/boilerplate.
 
@@ -222,7 +218,7 @@ class BoilerplateFilter:
         analysis = self.analyzer.analyze(parsed_code)
 
         subtrees = set(analysis.get("subtrees", []))
-        patterns = set(p["signature"] for p in analysis.get("patterns", []))
+        patterns = {p["signature"] for p in analysis.get("patterns", [])}
 
         if not subtrees and not patterns:
             return 0.0
@@ -236,7 +232,7 @@ class BoilerplateFilter:
         return subtree_ratio * 0.7 + pattern_ratio * 0.3
 
     def adjust_similarity_score(
-        self, raw_score: float, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]
+        self, raw_score: float, parsed_a: dict[str, Any], parsed_b: dict[str, Any]
     ) -> float:
         """
         Adjust similarity score by subtracting boilerplate overlap.
@@ -267,7 +263,7 @@ class BoilerplateFilter:
         return max(adjusted_score, 0.0)
 
     def is_boilerplate_match(
-        self, matching_subtrees: List[str], matching_patterns: List[str]
+        self, matching_subtrees: list[str], matching_patterns: list[str]
     ) -> bool:
         """
         Check if a match consists primarily of boilerplate code.

@@ -4,7 +4,8 @@ Provides typed clients for GPTZero and Grammarly APIs
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,8 +16,8 @@ class AISettings(BaseSettings):
         env_file=Path(__file__).parent.parent / ".env.local", extra="ignore"
     )
 
-    GPTZERO_API_KEY: Optional[str] = None
-    GRAMMARLY_API_KEY: Optional[str] = None
+    GPTZERO_API_KEY: str | None = None
+    GRAMMARLY_API_KEY: str | None = None
 
 
 settings = AISettings()
@@ -30,7 +31,7 @@ class AIDetectionResult(BaseModel):
     )
     probability: float = Field(..., ge=0.0, le=1.0, description="Probability score 0-1")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence score")
-    sentences: Optional[List[Dict[str, Any]]] = Field(
+    sentences: list[dict[str, Any]] | None = Field(
         None, description="Per-sentence analysis"
     )
     provider: str = Field(..., description="API provider name (gptzero/grammarly)")
@@ -44,7 +45,7 @@ class GPTZeroClient:
 
     BASE_URL = "https://api.gptzero.me/v2"
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.GPTZERO_API_KEY
         if not self.api_key:
             raise ValueError("GPTZero API key not configured")
@@ -82,7 +83,7 @@ class GrammarlyClient:
 
     BASE_URL = "https://api.grammarly.com/v1"
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.GRAMMARLY_API_KEY
         if not self.api_key:
             raise ValueError("Grammarly API key not configured")
@@ -96,7 +97,7 @@ class GrammarlyClient:
             timeout=30.0,
         )
 
-    async def analyze_text(self, text: str) -> Dict[str, Any]:
+    async def analyze_text(self, text: str) -> dict[str, Any]:
         """Analyze text with Grammarly for grammar, tone, and plagiarism"""
         response = await self.client.post(
             "/text/check",

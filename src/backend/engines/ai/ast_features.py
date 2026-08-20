@@ -16,7 +16,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class ASTFeatureVector:
     function_count: int = 0
     class_count: int = 0
     parse_success: bool = True
-    extra: Dict[str, float] = field(default_factory=dict)
+    extra: dict[str, float] = field(default_factory=dict)
 
     FEATURE_MEANINGFUL = (
         "node_type_entropy",
@@ -60,7 +60,7 @@ class ASTFeatureVector:
         "whitespace_entropy",
     )
 
-    def to_vector(self) -> List[float]:
+    def to_vector(self) -> list[float]:
         """Return a fixed-length numeric vector for ML consumption."""
         values = [
             min(1.0, self.node_type_entropy / 9.0),
@@ -77,7 +77,7 @@ class ASTFeatureVector:
         ]
         return [round(float(v), 6) for v in values]
 
-    def feature_names(self) -> List[str]:
+    def feature_names(self) -> list[str]:
         """Ordered feature names matching ``to_vector``."""
         return [
             "node_type_entropy",
@@ -93,7 +93,7 @@ class ASTFeatureVector:
             "whitespace_entropy",
         ]
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Serialisable representation including derived stats."""
         return {
             "node_type_entropy": round(self.node_type_entropy, 4),
@@ -129,7 +129,7 @@ def _safe_entropy(counter: Counter) -> float:
     return entropy / math.log2(len(counter))
 
 
-def _uniq_preserving(items: List[str]) -> List[str]:
+def _uniq_preserving(items: list[str]) -> list[str]:
     """Deduplicate items preserving order."""
     seen = set()
     result = []
@@ -147,7 +147,7 @@ class TreeSitterASTExtractor:
     Falls back to lexical features for unsupported languages.
     """
 
-    _NODE_TYPES: Dict[str, Optional[List[str]]] = {
+    _NODE_TYPES: dict[str, list[str] | None] = {
         "python": [
             "function_definition",
             "class_definition",
@@ -232,10 +232,10 @@ class TreeSitterASTExtractor:
     )
 
     def __init__(self) -> None:
-        self._loaded: Dict[str, Any] = {}
+        self._loaded: dict[str, Any] = {}
         self._attempted: set = set()
 
-    def _language_module_name(self, language: str) -> Optional[str]:
+    def _language_module_name(self, language: str) -> str | None:
         """Return the tree-sitter language package name for a language.
 
         Maps each supported language to its tree-sitter package. The package
@@ -257,7 +257,7 @@ class TreeSitterASTExtractor:
         }
         return mapping.get(language)
 
-    def _language_symbol_candidates(self, language: str) -> List[str]:
+    def _language_symbol_candidates(self, language: str) -> list[str]:
         """Ordered attribute names to try when building a Language object."""
         return [
             "language",
@@ -266,7 +266,7 @@ class TreeSitterASTExtractor:
             "language_tsx",
         ]
 
-    def _load_language(self, language: str) -> Optional[Any]:
+    def _load_language(self, language: str) -> Any | None:
         """Lazily load a tree-sitter Language object or None on failure."""
         if language in self._loaded:
             return self._loaded[language]
@@ -391,7 +391,7 @@ class TreeSitterASTExtractor:
             for child in current.children:
                 stack.append(child)
 
-    def _count_node_types(self, node: Any, types: Tuple[str, ...]) -> Tuple[int, int]:
+    def _count_node_types(self, node: Any, types: tuple[str, ...]) -> tuple[int, int]:
         """Count function and class node occurrences."""
         function_count = 0
         class_count = 0
@@ -405,12 +405,12 @@ class TreeSitterASTExtractor:
     def _structure_lengths(
         self,
         node: Any,
-        func_types: Tuple[str, ...],
-        class_types: Tuple[str, ...],
-    ) -> Tuple[List[float], List[float]]:
+        func_types: tuple[str, ...],
+        class_types: tuple[str, ...],
+    ) -> tuple[list[float], list[float]]:
         """Approximate average function and class length (lines)."""
-        func_lengths: List[float] = []
-        class_lengths: List[float] = []
+        func_lengths: list[float] = []
+        class_lengths: list[float] = []
         func_type = func_types[0] if func_types else ""
         class_type = class_types[0] if class_types else ""
         for current in self._walk(node):
@@ -424,9 +424,9 @@ class TreeSitterASTExtractor:
                 class_lengths.append(max(1, end - start + 1))
         return func_lengths, class_lengths
 
-    def _collect_identifiers(self, node: Any, language: str) -> List[str]:
+    def _collect_identifiers(self, node: Any, language: str) -> list[str]:
         """Collect identifier text from identifier nodes in the AST."""
-        identifiers: List[str] = []
+        identifiers: list[str] = []
         for current in self._walk(node):
             if current.type in ("identifier", "property_identifier", "object", "field"):
                 text = current.text.decode("utf-8", errors="replace").strip()
@@ -434,7 +434,7 @@ class TreeSitterASTExtractor:
                     identifiers.append(text)
         return identifiers
 
-    def _identifier_stats(self, identifiers: List[str]) -> Dict[str, float]:
+    def _identifier_stats(self, identifiers: list[str]) -> dict[str, float]:
         """Compute average length, std dev, and naming-style entropy."""
         if not identifiers:
             return {"avg_length": 0.0, "length_std": 0.0, "naming_entropy": 0.0}
@@ -482,7 +482,7 @@ class TreeSitterASTExtractor:
         non_blank = [line for line in lines if line.strip()]
         return round(comment_count / max(1, len(non_blank)), 4)
 
-    def _whitespace_features(self, code: str) -> Tuple[float, float, float]:
+    def _whitespace_features(self, code: str) -> tuple[float, float, float]:
         """Compute blank-line ratio, indentation consistency, and whitespace entropy."""
         lines = code.splitlines()
         if not lines:
@@ -550,7 +550,7 @@ class TreeSitterASTExtractor:
         )
 
 
-def _mean(values: List[float]) -> float:
+def _mean(values: list[float]) -> float:
     """Mean of a list, 0.0 for empty input."""
     if not values:
         return 0.0

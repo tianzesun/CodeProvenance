@@ -8,7 +8,7 @@ import hmac
 import json
 import random
 import time
-from typing import Any, Dict
+from typing import Any
 
 from src.backend.api.schemas.webhook import WebhookDeliveryConfig
 
@@ -26,7 +26,7 @@ class WebhookDeliveryService:
             hashlib.sha256,
         ).hexdigest()
 
-    def _prepare_headers(self, payload: str, secret: str) -> Dict[str, str]:
+    def _prepare_headers(self, payload: str, secret: str) -> dict[str, str]:
         return {
             "Content-Type": "application/json",
             "X-Webhook-Signature": self._generate_signature(payload, secret),

@@ -4,14 +4,17 @@ Embedding-based similarity algorithm using LLM embeddings.
 Compares code based on semantic similarity using vector embeddings.
 """
 
-from typing import List, Dict, Any, Optional
-from .base_similarity import BaseSimilarityAlgorithm
-import numpy as np
-import os
 import hashlib
+import os
 import pickle
 from pathlib import Path
-from src.backend.domain.models import Finding, EvidenceBlock
+from typing import Any
+
+import numpy as np
+
+from src.backend.domain.models import EvidenceBlock, Finding
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 
 class EmbeddingSimilarity(BaseSimilarityAlgorithm):
@@ -25,8 +28,8 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
     def __init__(
         self,
         model_name: str = "text-embedding-3-small",
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
     ):
         """
         Initialize the embedding similarity algorithm.
@@ -86,7 +89,7 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{text_hash}.pkl"
 
-    def _get_embedding(self, text: str) -> Optional[np.ndarray]:
+    def _get_embedding(self, text: str) -> np.ndarray | None:
         """
         Get embedding for text, using cache if available.
 
@@ -124,11 +127,11 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
                 pass
 
             return embedding
-        except Exception as e:
+        except Exception:
             # In a production system, you'd log this error
             return None
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """
         Compare two parsed code representations based on embedding similarity.
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
 
 
 @dataclass(frozen=True)
@@ -12,7 +12,7 @@ class RuntimeOutcome:
 
     test_id: str
     output: str = ""
-    expected_output: Optional[str] = None
+    expected_output: str | None = None
     exception_type: str = ""
     timed_out: bool = False
 
@@ -22,10 +22,10 @@ class SameBugFinding:
     """Same-bug detection result."""
 
     score: float
-    same_wrong_outputs: List[str]
-    same_exceptions: List[str]
-    same_timeouts: List[str]
-    evidence: List[str]
+    same_wrong_outputs: list[str]
+    same_exceptions: list[str]
+    same_timeouts: list[str]
+    evidence: list[str]
 
 
 class SameBugDetector:
@@ -41,9 +41,9 @@ class SameBugDetector:
         by_id_b = {outcome.test_id: outcome for outcome in outcomes_b}
         shared_ids = sorted(set(by_id_a) & set(by_id_b))
 
-        same_wrong_outputs: List[str] = []
-        same_exceptions: List[str] = []
-        same_timeouts: List[str] = []
+        same_wrong_outputs: list[str] = []
+        same_exceptions: list[str] = []
+        same_timeouts: list[str] = []
 
         for test_id in shared_ids:
             left = by_id_a[test_id]

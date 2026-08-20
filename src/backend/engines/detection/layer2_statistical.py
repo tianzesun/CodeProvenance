@@ -16,7 +16,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class Layer2Result:
     sentence_structure_similarity: float = 0.0
     control_flow_match: float = 0.0
     data_flow_match: float = 0.0
-    engine_scores: Dict[str, float] = field(default_factory=dict)
+    engine_scores: dict[str, float] = field(default_factory=dict)
 
     @property
     def max_signal(self) -> float:
@@ -47,7 +47,7 @@ class Layer2Result:
         ]
         return sum(values) / len(values) if values else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "graph_similarity": round(self.graph_similarity, 4),
             "logic_flow_similarity": round(self.logic_flow_similarity, 4),
@@ -114,7 +114,7 @@ OPERATOR_PATTERNS = {
 }
 
 
-def _extract_logic_flow_tokens(code: str) -> List[str]:
+def _extract_logic_flow_tokens(code: str) -> list[str]:
     """Extract control-flow and operator tokens from code, ignoring identifiers."""
     tokens = re.findall(
         r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\+=|-=|\*=|/=|%=|\+\+|--|\S",
@@ -133,7 +133,7 @@ def _extract_logic_flow_tokens(code: str) -> List[str]:
     return result
 
 
-def _compute_stylometric_features(code: str) -> Dict[str, float]:
+def _compute_stylometric_features(code: str) -> dict[str, float]:
     """Extract writing-style features from source code."""
     lines = code.split("\n") if code else []
     if not lines:
@@ -160,7 +160,7 @@ def _jaccard_similarity(set_a: set, set_b: set) -> float:
     return len(set_a & set_b) / union if union > 0 else 0.0
 
 
-def _cosine_similarity(vec_a: Dict[str, float], vec_b: Dict[str, float]) -> float:
+def _cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> float:
     all_keys = set(vec_a) | set(vec_b)
     dot = sum(vec_a.get(k, 0.0) * vec_b.get(k, 0.0) for k in all_keys)
     norm_a = sum(v * v for v in vec_a.values()) ** 0.5
@@ -175,7 +175,7 @@ class Layer2Statistical:
     to detect rewritten code without relying on semantic interpretation.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self._graph_threshold = float(self.config.get("graph_threshold", 0.25))
         self._logic_flow_threshold = float(
@@ -186,8 +186,8 @@ class Layer2Statistical:
         self,
         code_a: str,
         code_b: str,
-        engine_scores: Optional[Dict[str, float]] = None,
-        engine_details: Optional[Dict[str, Any]] = None,
+        engine_scores: dict[str, float] | None = None,
+        engine_details: dict[str, Any] | None = None,
     ) -> Layer2Result:
         """Run statistical detection on a pair of code files.
 

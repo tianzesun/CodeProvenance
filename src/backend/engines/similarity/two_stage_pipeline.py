@@ -11,14 +11,13 @@ by only running expensive algorithms on a tiny subset of candidates.
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Tuple
-import time
 import logging
+import time
+from typing import Any
 
-from .codeprovenance.v3 import CodeProvenanceV3
-from .winnowing_similarity import WinnowingSimilarity
-from .deep_analysis import DeepVerify
 from .boilerplate_filter import global_boilerplate_filter
+from .deep_analysis import DeepVerify
+from .winnowing_similarity import WinnowingSimilarity
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +44,10 @@ class TwoStageSimilarityPipeline:
 
     def analyze_submission(
         self,
-        query_submission: Dict[str, Any],
-        corpus: List[Dict[str, Any]],
+        query_submission: dict[str, Any],
+        corpus: list[dict[str, Any]],
         language: str = "default",
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """
         Run full two-stage analysis pipeline.
 
@@ -171,10 +170,10 @@ class TwoStageSimilarityPipeline:
 
     def compare_pair(
         self,
-        submission_a: Dict[str, Any],
-        submission_b: Dict[str, Any],
+        submission_a: dict[str, Any],
+        submission_b: dict[str, Any],
         language: str = "default",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Compare a single pair using full two stage verification.
 

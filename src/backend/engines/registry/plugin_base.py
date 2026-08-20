@@ -12,4 +12,3 @@ class ExecutionPlugin(ABC):
     @abstractmethod
     def run(self, **kwargs):
         """Execute the plugin with given parameters."""
-        pass

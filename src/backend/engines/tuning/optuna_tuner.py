@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-import time
 import logging
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Callable
+import time
 from dataclasses import dataclass
+from typing import Any
 
 import optuna
-from optuna.samplers import TPESampler, CmaEsSampler
 from optuna.pruners import MedianPruner
+from optuna.samplers import CmaEsSampler, TPESampler
+from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
+from src.backend.evaluation.metrics import calculate_accuracy_metrics
 
 from src.backend.engines.scoring.fusion_engine import (
     FusionEngine,
     load_engine_config,
     save_engine_config,
 )
-from src.backend.benchmark.datasets.ir_plag import IRPlagDataset
-from src.backend.evaluation.metrics import calculate_accuracy_metrics
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +26,18 @@ logger = logging.getLogger(__name__)
 class TuningResult:
     """Result from hyperparameter tuning run."""
 
-    best_params: Dict[str, float]
+    best_params: dict[str, float]
     best_score: float
     n_trials: int
     duration_ms: int
     method: str
-    study_summary: Dict[str, Any]
+    study_summary: dict[str, Any]
 
 
 class EngineTuner:
     """Optuna based hyperparameter tuner for fusion engine configuration."""
 
-    def __init__(self, dataset: Optional[Any] = None) -> None:
+    def __init__(self, dataset: Any | None = None) -> None:
         """Initialize tuner with optional custom dataset."""
         self.dataset = dataset if dataset is not None else IRPlagDataset()
         self.config = load_engine_config()
@@ -94,7 +92,7 @@ class EngineTuner:
 
         # Tune baseline correction values
         baselines = {}
-        for engine in self.config["baseline_correction"]["baselines"].keys():
+        for engine in self.config["baseline_correction"]["baselines"]:
             baselines[engine] = trial.suggest_float(
                 f"baseline_{engine}", 0.0, 0.5, step=0.01
             )
@@ -253,6 +251,6 @@ class EngineTuner:
         )
 
     @staticmethod
-    def get_available_samplers() -> List[str]:
+    def get_available_samplers() -> list[str]:
         """Return list of available optimization samplers."""
         return ["tpe", "cmaes"]

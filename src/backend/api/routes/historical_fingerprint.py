@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.backend.evaluation.historical_fingerprint import (
     HistoricalFingerprintAnalyzer,
-    StyleFeatures,
     run_fingerprint_analysis,
 )
 
@@ -28,7 +27,7 @@ class FingerprintRequest(BaseModel):
     student_id: str
     code: str
     submission_id: str
-    timestamp: Optional[str] = None
+    timestamp: str | None = None
 
 
 class HistoricalAnalysisRequest(BaseModel):
@@ -42,7 +41,7 @@ class HistoricalAnalysisRequest(BaseModel):
 @router.post("/analyze")
 async def analyze_fingerprint(
     request: FingerprintRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Analyze a submission against historical patterns.
 
@@ -77,7 +76,7 @@ async def quick_analyze(
     student_id: str = Query(..., description="Student identifier"),
     code: str = Query(..., description="Source code to analyze"),
     submission_id: str = Query(..., description="Submission identifier"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Quick fingerprint analysis endpoint.
 
@@ -105,7 +104,7 @@ async def quick_analyze(
 @router.get("/consistency/{student_id}")
 async def get_consistency(
     student_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get historical consistency score for a student.
 
@@ -136,7 +135,7 @@ async def get_consistency(
 @router.get("/extract-features")
 async def extract_features(
     code: str = Query(..., description="Source code to analyze"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Extract style features from code.
 

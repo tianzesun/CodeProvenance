@@ -1,5 +1,7 @@
 """Root endpoint for the API."""
+
 from fastapi import APIRouter
+
 from src.backend.engines.scoring.fusion_engine import load_engine_config
 
 router = APIRouter()
@@ -25,7 +27,7 @@ async def get_engine_config():
         "thresholds": config.get("thresholds", {}),
         "decision": config.get("decision", {}),
         "auto_calibrated": config.get("advanced", {}).get("auto_calibrate", False),
-        "last_updated": config.get("advanced", {}).get("last_calibration_time", None)
+        "last_updated": config.get("advanced", {}).get("last_calibration_time", None),
     }
 
 
@@ -42,7 +44,15 @@ async def update_config(config: dict):
     from src.backend.engines.scoring.fusion_engine import save_engine_config
 
     # Validate config structure
-    required_sections = ["weights", "baseline_correction", "thresholds", "decision", "toggles", "performance", "advanced"]
+    required_sections = [
+        "weights",
+        "baseline_correction",
+        "thresholds",
+        "decision",
+        "toggles",
+        "performance",
+        "advanced",
+    ]
     for section in required_sections:
         if section not in config:
             return {"error": f"Missing required section: {section}"}

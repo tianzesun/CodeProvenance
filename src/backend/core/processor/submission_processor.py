@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-import time
-from typing import Dict, Iterable, Mapping
 
-from src.backend.core.processor.code_processor import CodeProcessingResult, CodeProcessor
+from src.backend.core.processor.code_processor import (
+    CodeProcessingResult,
+    CodeProcessor,
+)
 
 
 @dataclass
@@ -20,7 +23,7 @@ class SubmissionProcessingResult:
     language: str
     fingerprint: str
     processing_time: float
-    metadata: Dict[str, str]
+    metadata: dict[str, str]
     processing_result: CodeProcessingResult
 
 
@@ -39,7 +42,9 @@ class SubmissionProcessor:
     ) -> SubmissionProcessingResult:
         start = time.perf_counter()
         processing_result = self.code_processor.process(code, language)
-        fingerprint = sha256(processing_result.processed_code.encode("utf-8")).hexdigest()
+        fingerprint = sha256(
+            processing_result.processed_code.encode("utf-8")
+        ).hexdigest()
         return SubmissionProcessingResult(
             submission_id=submission_id,
             file_path=file_path,
@@ -57,8 +62,8 @@ class SubmissionProcessor:
     def process_submissions(
         self,
         submissions: Mapping[str, object],
-    ) -> Dict[str, SubmissionProcessingResult]:
-        results: Dict[str, SubmissionProcessingResult] = {}
+    ) -> dict[str, SubmissionProcessingResult]:
+        results: dict[str, SubmissionProcessingResult] = {}
         for submission_id, payload in submissions.items():
             if isinstance(payload, dict):
                 file_path = str(payload.get("file_path", submission_id))
@@ -77,7 +82,9 @@ class SubmissionProcessor:
             )
         return results
 
-    def process_directory(self, directory: str, pattern: str = "*") -> Dict[str, SubmissionProcessingResult]:
+    def process_directory(
+        self, directory: str, pattern: str = "*"
+    ) -> dict[str, SubmissionProcessingResult]:
         path = Path(directory)
         submissions = {
             file_path.name: {
@@ -93,8 +100,8 @@ class SubmissionProcessor:
     def compare_fingerprints(
         self,
         results: Mapping[str, SubmissionProcessingResult],
-    ) -> list[Dict[str, object]]:
-        groups: Dict[str, list[str]] = {}
+    ) -> list[dict[str, object]]:
+        groups: dict[str, list[str]] = {}
         for submission_id, result in results.items():
             groups.setdefault(result.fingerprint, []).append(submission_id)
 
@@ -118,7 +125,9 @@ def process_submission(
     language: str,
 ) -> SubmissionProcessingResult:
     """Process one submission using default settings."""
-    return SubmissionProcessor().process_submission(submission_id, file_path, code, language)
+    return SubmissionProcessor().process_submission(
+        submission_id, file_path, code, language
+    )
 
 
 def _detect_language(file_path: str) -> str:

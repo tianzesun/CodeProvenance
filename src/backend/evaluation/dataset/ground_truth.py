@@ -12,44 +12,49 @@ Provides:
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
 class GroundTruthPair:
     """A single pair with ground truth label."""
+
     file1: str
     file2: str
     label: int
-    clone_type: Optional[int] = None
-    difficulty: Optional[str] = None
-    language: Optional[str] = None
+    clone_type: int | None = None
+    difficulty: str | None = None
+    language: str | None = None
     code_a: str = ""
     code_b: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class EvaluationProtocol:
     """Defines how evaluation should be conducted."""
+
     name: str
     description: str
     threshold: float = 0.5
     ci_level: float = 0.95
     n_bootstrap: int = 1000
     min_pairs: int = 100
-    clone_types: List[int] = field(default_factory=lambda: [1, 2, 3, 4])
-    metrics: List[str] = field(default_factory=lambda: ["precision", "recall", "f1", "auc_roc"])
-    significance_tests: List[str] = field(default_factory=lambda: ["mcnemar", "bootstrap_ci"])
+    clone_types: list[int] = field(default_factory=lambda: [1, 2, 3, 4])
+    metrics: list[str] = field(
+        default_factory=lambda: ["precision", "recall", "f1", "auc_roc"]
+    )
+    significance_tests: list[str] = field(
+        default_factory=lambda: ["mcnemar", "bootstrap_ci"]
+    )
     seed: int = 42
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
@@ -78,7 +83,7 @@ class GroundTruthLoader(ABC):
     """Abstract base for loading ground truth datasets."""
 
     @abstractmethod
-    def load(self, path: Path) -> List[GroundTruthPair]:
+    def load(self, path: Path) -> list[GroundTruthPair]:
         pass
 
 
@@ -96,21 +101,23 @@ class JSONGroundTruthLoader(GroundTruthLoader):
     }
     """
 
-    def load(self, path: Path) -> List[GroundTruthPair]:
+    def load(self, path: Path) -> list[GroundTruthPair]:
         data = json.loads(path.read_text())
         pairs = []
         for p in data.get("pairs", []):
-            pairs.append(GroundTruthPair(
-                file1=p["file1"],
-                file2=p["file2"],
-                label=int(p["label"]),
-                clone_type=p.get("clone_type"),
-                difficulty=p.get("difficulty"),
-                language=p.get("language", data.get("language")),
-                code_a=p.get("code_a", ""),
-                code_b=p.get("code_b", ""),
-                metadata=p.get("metadata", {}),
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=p["file1"],
+                    file2=p["file2"],
+                    label=int(p["label"]),
+                    clone_type=p.get("clone_type"),
+                    difficulty=p.get("difficulty"),
+                    language=p.get("language", data.get("language")),
+                    code_a=p.get("code_a", ""),
+                    code_b=p.get("code_b", ""),
+                    metadata=p.get("metadata", {}),
+                )
+            )
         return pairs
 
 
@@ -120,20 +127,24 @@ class CSVGroundTruthLoader(GroundTruthLoader):
     Expected columns: file1, file2, label, clone_type (optional), difficulty (optional)
     """
 
-    def load(self, path: Path) -> List[GroundTruthPair]:
+    def load(self, path: Path) -> list[GroundTruthPair]:
         pairs = []
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                pairs.append(GroundTruthPair(
-                    file1=row["file1"],
-                    file2=row["file2"],
-                    label=int(row["label"]),
-                    clone_type=int(row["clone_type"]) if "clone_type" in row and row["clone_type"] else None,
-                    difficulty=row.get("difficulty"),
-                    code_a=row.get("code_a", ""),
-                    code_b=row.get("code_b", ""),
-                ))
+                pairs.append(
+                    GroundTruthPair(
+                        file1=row["file1"],
+                        file2=row["file2"],
+                        label=int(row["label"]),
+                        clone_type=(
+                            int(row["clone_type"]) if row.get("clone_type") else None
+                        ),
+                        difficulty=row.get("difficulty"),
+                        code_a=row.get("code_a", ""),
+                        code_b=row.get("code_b", ""),
+                    )
+                )
         return pairs
 
 
@@ -152,7 +163,7 @@ class BigCloneBenchLoader(GroundTruthLoader):
         "Type-IV": 4,
     }
 
-    def load(self, path: Path) -> List[GroundTruthPair]:
+    def load(self, path: Path) -> list[GroundTruthPair]:
         pairs = []
         bcb_pairs = path / "pairs.csv"
         if bcb_pairs.exists():
@@ -166,25 +177,29 @@ class BigCloneBenchLoader(GroundTruthLoader):
                             clone_type = int(clone_type_str)
                         except (ValueError, TypeError):
                             clone_type = None
-                    pairs.append(GroundTruthPair(
-                        file1=row.get("func1", ""),
-                        file2=row.get("func2", ""),
-                        label=1,
-                        clone_type=clone_type,
-                        language="java",
-                    ))
+                    pairs.append(
+                        GroundTruthPair(
+                            file1=row.get("func1", ""),
+                            file2=row.get("func2", ""),
+                            label=1,
+                            clone_type=clone_type,
+                            language="java",
+                        )
+                    )
 
         non_clones_file = path / "non_clones.csv"
         if non_clones_file.exists():
             with open(non_clones_file, "r") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    pairs.append(GroundTruthPair(
-                        file1=row.get("func1", ""),
-                        file2=row.get("func2", ""),
-                        label=0,
-                        language="java",
-                    ))
+                    pairs.append(
+                        GroundTruthPair(
+                            file1=row.get("func1", ""),
+                            file2=row.get("func2", ""),
+                            label=0,
+                            language="java",
+                        )
+                    )
 
         return pairs
 
@@ -197,7 +212,7 @@ class POJ104Loader(GroundTruthLoader):
     grouped by problem. Programs in the same group are clones.
     """
 
-    def load(self, path: Path) -> List[GroundTruthPair]:
+    def load(self, path: Path) -> list[GroundTruthPair]:
         pairs = []
         groups = {}
         for f in sorted(path.iterdir()):
@@ -208,15 +223,17 @@ class POJ104Loader(GroundTruthLoader):
         for problem_id, files in groups.items():
             for i in range(len(files)):
                 for j in range(i + 1, len(files)):
-                    pairs.append(GroundTruthPair(
-                        file1=str(files[i].name),
-                        file2=str(files[j].name),
-                        label=1,
-                        clone_type=3,
-                        language="c",
-                        code_a=files[i].read_text(errors="ignore"),
-                        code_b=files[j].read_text(errors="ignore"),
-                    ))
+                    pairs.append(
+                        GroundTruthPair(
+                            file1=str(files[i].name),
+                            file2=str(files[j].name),
+                            label=1,
+                            clone_type=3,
+                            language="c",
+                            code_a=files[i].read_text(errors="ignore"),
+                            code_b=files[j].read_text(errors="ignore"),
+                        )
+                    )
 
         cross_problem = list(groups.values())
         rng = random.Random(42)
@@ -224,12 +241,14 @@ class POJ104Loader(GroundTruthLoader):
             for j in range(i + 1, min(i + 5, len(cross_problem))):
                 f1 = rng.choice(cross_problem[i])
                 f2 = rng.choice(cross_problem[j])
-                pairs.append(GroundTruthPair(
-                    file1=str(f1.name),
-                    file2=str(f2.name),
-                    label=0,
-                    language="c",
-                ))
+                pairs.append(
+                    GroundTruthPair(
+                        file1=str(f1.name),
+                        file2=str(f2.name),
+                        label=0,
+                        language="c",
+                    )
+                )
 
         return pairs
 
@@ -252,7 +271,7 @@ class SyntheticDatasetGenerator:
         num_type4: int = 10,
         num_non_clone: int = 50,
         language: str = "python",
-    ) -> List[GroundTruthPair]:
+    ) -> list[GroundTruthPair]:
         pairs = []
         pairs.extend(self._generate_type1(num_type1, language))
         pairs.extend(self._generate_type2(num_type2, language))
@@ -261,87 +280,97 @@ class SyntheticDatasetGenerator:
         pairs.extend(self._generate_non_clones(num_non_clone, language))
         return pairs
 
-    def _generate_type1(self, n: int, lang: str) -> List[GroundTruthPair]:
+    def _generate_type1(self, n: int, lang: str) -> list[GroundTruthPair]:
         pairs = []
         for i in range(n):
             code = self._random_function(lang)
-            pairs.append(GroundTruthPair(
-                file1=f"type1_a_{i}.{lang[:2]}",
-                file2=f"type1_b_{i}.{lang[:2]}",
-                label=1,
-                clone_type=1,
-                difficulty="easy",
-                language=lang,
-                code_a=code,
-                code_b=code,
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=f"type1_a_{i}.{lang[:2]}",
+                    file2=f"type1_b_{i}.{lang[:2]}",
+                    label=1,
+                    clone_type=1,
+                    difficulty="easy",
+                    language=lang,
+                    code_a=code,
+                    code_b=code,
+                )
+            )
         return pairs
 
-    def _generate_type2(self, n: int, lang: str) -> List[GroundTruthPair]:
+    def _generate_type2(self, n: int, lang: str) -> list[GroundTruthPair]:
         pairs = []
         for i in range(n):
             code_a = self._random_function(lang)
             code_b = self._rename_variables(code_a)
-            pairs.append(GroundTruthPair(
-                file1=f"type2_a_{i}.{lang[:2]}",
-                file2=f"type2_b_{i}.{lang[:2]}",
-                label=1,
-                clone_type=2,
-                difficulty="medium",
-                language=lang,
-                code_a=code_a,
-                code_b=code_b,
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=f"type2_a_{i}.{lang[:2]}",
+                    file2=f"type2_b_{i}.{lang[:2]}",
+                    label=1,
+                    clone_type=2,
+                    difficulty="medium",
+                    language=lang,
+                    code_a=code_a,
+                    code_b=code_b,
+                )
+            )
         return pairs
 
-    def _generate_type3(self, n: int, lang: str) -> List[GroundTruthPair]:
+    def _generate_type3(self, n: int, lang: str) -> list[GroundTruthPair]:
         pairs = []
         for i in range(n):
             code_a = self._random_function(lang)
             code_b = self._modify_statements(code_a)
-            pairs.append(GroundTruthPair(
-                file1=f"type3_a_{i}.{lang[:2]}",
-                file2=f"type3_b_{i}.{lang[:2]}",
-                label=1,
-                clone_type=3,
-                difficulty="hard",
-                language=lang,
-                code_a=code_a,
-                code_b=code_b,
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=f"type3_a_{i}.{lang[:2]}",
+                    file2=f"type3_b_{i}.{lang[:2]}",
+                    label=1,
+                    clone_type=3,
+                    difficulty="hard",
+                    language=lang,
+                    code_a=code_a,
+                    code_b=code_b,
+                )
+            )
         return pairs
 
-    def _generate_type4(self, n: int, lang: str) -> List[GroundTruthPair]:
+    def _generate_type4(self, n: int, lang: str) -> list[GroundTruthPair]:
         pairs = []
         for i in range(n):
             code_a, code_b = self._semantic_equivalent_pair(lang)
-            pairs.append(GroundTruthPair(
-                file1=f"type4_a_{i}.{lang[:2]}",
-                file2=f"type4_b_{i}.{lang[:2]}",
-                label=1,
-                clone_type=4,
-                difficulty="very_hard",
-                language=lang,
-                code_a=code_a,
-                code_b=code_b,
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=f"type4_a_{i}.{lang[:2]}",
+                    file2=f"type4_b_{i}.{lang[:2]}",
+                    label=1,
+                    clone_type=4,
+                    difficulty="very_hard",
+                    language=lang,
+                    code_a=code_a,
+                    code_b=code_b,
+                )
+            )
         return pairs
 
-    def _generate_non_clones(self, n: int, lang: str) -> List[GroundTruthPair]:
+    def _generate_non_clones(self, n: int, lang: str) -> list[GroundTruthPair]:
         pairs = []
         for i in range(n):
             code_a = self._random_function(lang)
             code_b = self._random_function(lang)
             while self._similarity(code_a, code_b) > 0.3:
                 code_b = self._random_function(lang)
-            pairs.append(GroundTruthPair(
-                file1=f"nonclone_a_{i}.{lang[:2]}",
-                file2=f"nonclone_b_{i}.{lang[:2]}",
-                label=0,
-                language=lang,
-                code_a=code_a,
-                code_b=code_b,
-            ))
+            pairs.append(
+                GroundTruthPair(
+                    file1=f"nonclone_a_{i}.{lang[:2]}",
+                    file2=f"nonclone_b_{i}.{lang[:2]}",
+                    label=0,
+                    language=lang,
+                    code_a=code_a,
+                    code_b=code_b,
+                )
+            )
         return pairs
 
     def _random_function(self, lang: str) -> str:
@@ -373,20 +402,47 @@ class SyntheticDatasetGenerator:
 
     def _rename_variables(self, code: str) -> str:
         import re
+
         reserved = {
-            'def', 'return', 'if', 'for', 'in', 'while', 'import',
-            'from', 'class', 'self', 'True', 'False', 'None',
-            'int', 'float', 'str', 'list', 'dict', 'set', 'tuple',
-            'range', 'len', 'print', 'sorted', 'reversed', 'join',
-            'split', 'public', 'static', 'void', 'else',
+            "def",
+            "return",
+            "if",
+            "for",
+            "in",
+            "while",
+            "import",
+            "from",
+            "class",
+            "self",
+            "True",
+            "False",
+            "None",
+            "int",
+            "float",
+            "str",
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "range",
+            "len",
+            "print",
+            "sorted",
+            "reversed",
+            "join",
+            "split",
+            "public",
+            "static",
+            "void",
+            "else",
         }
         var_map = {}
-        for match in re.findall(r'\b([a-z_]\w*)\b', code):
+        for match in re.findall(r"\b([a-z_]\w*)\b", code):
             if match not in reserved and match not in var_map:
                 var_map[match] = f"var_{self.rng.randint(100, 999)}"
         result = code
         for old, new in var_map.items():
-            result = re.sub(r'\b' + re.escape(old) + r'\b', new, result)
+            result = re.sub(r"\b" + re.escape(old) + r"\b", new, result)
         return result
 
     def _modify_statements(self, code: str) -> str:
@@ -404,7 +460,7 @@ class SyntheticDatasetGenerator:
             modified.insert(idx, "    # optimization")
         return "\n".join(modified)
 
-    def _semantic_equivalent_pair(self, lang: str) -> Tuple[str, str]:
+    def _semantic_equivalent_pair(self, lang: str) -> tuple[str, str]:
         if lang == "python":
             a = "def func(n):\n    result = 0\n    for i in range(n):\n        result += i\n    return result"
             b = "def func(n):\n    return n * (n - 1) // 2"
@@ -426,8 +482,8 @@ class SyntheticDatasetGenerator:
 
 def load_ground_truth(
     path: Path,
-    format: Optional[str] = None,
-) -> List[GroundTruthPair]:
+    format: str | None = None,
+) -> list[GroundTruthPair]:
     """
     Auto-detect and load ground truth dataset.
 
@@ -468,9 +524,9 @@ def load_ground_truth(
 
 
 def build_score_label_arrays(
-    tool_findings: Dict[str, List[Dict[str, Any]]],
-    ground_truth: Dict[Tuple[str, str], int],
-) -> Tuple[Dict[str, List[float]], List[int]]:
+    tool_findings: dict[str, list[dict[str, Any]]],
+    ground_truth: dict[tuple[str, str], int],
+) -> tuple[dict[str, list[float]], list[int]]:
     """
     Build aligned score and label arrays for evaluation.
 
@@ -487,7 +543,7 @@ def build_score_label_arrays(
             key = tuple(sorted([f.get("file1", ""), f.get("file2", "")]))
             all_pairs.add(key)
 
-    for pair in ground_truth.keys():
+    for pair in ground_truth:
         all_pairs.add(tuple(sorted(pair)))
 
     all_pairs = sorted(all_pairs)
@@ -495,8 +551,12 @@ def build_score_label_arrays(
 
     tool_scores = {}
     for tool_name, findings in tool_findings.items():
-        pair_scores = {tuple(sorted([f.get("file1", ""), f.get("file2", "")])): f.get("similarity", 0.0)
-                       for f in findings}
+        pair_scores = {
+            tuple(sorted([f.get("file1", ""), f.get("file2", "")])): f.get(
+                "similarity", 0.0
+            )
+            for f in findings
+        }
         tool_scores[tool_name] = [pair_scores.get(p, 0.0) for p in all_pairs]
 
     return tool_scores, labels

@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Set
 
 
 class FileType(str, Enum):
@@ -29,8 +28,8 @@ class FileTypeClassification:
 
     file_type: FileType
     confidence: float  # 0.0-1.0
-    domain: Optional[str] = None  # e.g., "tailwind", "react", "next"
-    reasons: List[str] = None
+    domain: str | None = None  # e.g., "tailwind", "react", "next"
+    reasons: list[str] = None
 
     def __post_init__(self):
         if self.reasons is None:
@@ -38,7 +37,7 @@ class FileTypeClassification:
 
 
 # File extension to type mapping
-EXTENSION_MAP: Dict[str, FileType] = {
+EXTENSION_MAP: dict[str, FileType] = {
     # Config files
     ".json": FileType.CONFIG,
     ".yaml": FileType.CONFIG,
@@ -82,7 +81,7 @@ EXTENSION_MAP: Dict[str, FileType] = {
 }
 
 # Domain-specific config file patterns
-CONFIG_DOMAIN_PATTERNS: Dict[str, Set[str]] = {
+CONFIG_DOMAIN_PATTERNS: dict[str, set[str]] = {
     "tailwind": {"tailwind.config.js", "tailwind.config.ts"},
     "postcss": {"postcss.config.js", "postcss.config.ts"},
     "babel": {
@@ -144,10 +143,10 @@ class FileTypeClassifier:
     def __init__(self) -> None:
         self._config_file_names = self._build_config_file_set()
 
-    def _build_config_file_set(self) -> Set[str]:
+    def _build_config_file_set(self) -> set[str]:
         """Build set of known config file names."""
         config_files = set()
-        for domain, patterns in CONFIG_DOMAIN_PATTERNS.items():
+        for patterns in CONFIG_DOMAIN_PATTERNS.values():
             for pattern in patterns:
                 config_files.add(pattern.lower())
         return config_files
@@ -155,7 +154,7 @@ class FileTypeClassifier:
     def classify(
         self,
         filename: str,
-        content: Optional[str] = None,
+        content: str | None = None,
     ) -> FileTypeClassification:
         """Classify a file into a semantic category.
 
@@ -221,7 +220,7 @@ class FileTypeClassifier:
             return "." + filename.rsplit(".", 1)[-1]
         return ""
 
-    def _classify_by_extension(self, filename: str) -> Optional[FileType]:
+    def _classify_by_extension(self, filename: str) -> FileType | None:
         """Classify by file extension."""
         ext = self._get_extension(filename)
 
@@ -238,7 +237,7 @@ class FileTypeClassifier:
 
         return None
 
-    def _identify_config_domain(self, filename: str) -> Optional[str]:
+    def _identify_config_domain(self, filename: str) -> str | None:
         """Identify the config domain for a config file."""
         name_lower = filename.lower()
 
@@ -309,7 +308,7 @@ class FileTypeClassifier:
     def _looks_like_config_json(self, content: str) -> bool:
         """Check if content looks like a JSON config file."""
         content = content.strip()
-        if not (content.startswith("{") or content.startswith("[")):
+        if not (content.startswith(("{", "["))):
             return False
 
         # Common config keys
@@ -383,7 +382,7 @@ class FileTypeClassifier:
 
 
 # Singleton instance
-_classifier: Optional[FileTypeClassifier] = None
+_classifier: FileTypeClassifier | None = None
 
 
 def get_file_type_classifier() -> FileTypeClassifier:
@@ -394,8 +393,6 @@ def get_file_type_classifier() -> FileTypeClassifier:
     return _classifier
 
 
-def classify_file(
-    filename: str, content: Optional[str] = None
-) -> FileTypeClassification:
+def classify_file(filename: str, content: str | None = None) -> FileTypeClassification:
     """Convenience function to classify a file."""
     return get_file_type_classifier().classify(filename, content)

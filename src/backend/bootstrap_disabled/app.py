@@ -7,26 +7,25 @@ All initialization flows through here to ensure consistency.
 
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backend.config.database import DatabaseConfig
-from src.backend.infrastructure.db import DatabaseManager
-from src.backend.domain.models import Base
 from src.backend.application.pipeline.detection_pipeline import DetectionPipeline
-from src.backend.engines.engine_registry import registry
+from src.backend.config.database import DatabaseConfig
+from src.backend.domain.models import Base
+from src.backend.infrastructure.db import DatabaseManager
 
 
 class Application:
     """Single execution lifecycle manager."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
-        self.db_manager: Optional[DatabaseManager] = None
-        self.pipeline: Optional[DetectionPipeline] = None
+        self.db_manager: DatabaseManager | None = None
+        self.pipeline: DetectionPipeline | None = None
         self._initialized = False
 
     def initialize(self) -> None:
@@ -53,7 +52,6 @@ class Application:
 
     def _init_config(self) -> None:
         """Initialize configuration."""
-        from src.backend.config.database import DatabaseConfig
 
         self.db_config = DatabaseConfig()
 
@@ -70,7 +68,6 @@ class Application:
     def _init_engines(self) -> None:
         """Initialize detection engines."""
         # Engines are auto-registered via decorators
-        pass
 
     def _init_pipeline(self) -> None:
         """Initialize detection pipeline."""
@@ -94,10 +91,10 @@ class Application:
 
 
 # Global application instance
-_app_instance: Optional[Application] = None
+_app_instance: Application | None = None
 
 
-def get_application(config: Optional[Dict[str, Any]] = None) -> Application:
+def get_application(config: dict[str, Any] | None = None) -> Application:
     """Get the global application instance (singleton)."""
     global _app_instance
 

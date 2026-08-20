@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from functools import lru_cache
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +130,8 @@ class TokenCache:
 
 # ── Global singleton instances ───────────────────────────────────────
 
-_embedding_cache: Optional[EmbeddingCache] = None
-_token_cache: Optional[TokenCache] = None
+_embedding_cache: EmbeddingCache | None = None
+_token_cache: TokenCache | None = None
 
 
 def get_embedding_cache(maxsize: int = 4096) -> EmbeddingCache:

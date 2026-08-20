@@ -11,13 +11,12 @@ This becomes what competitors usually lack.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.backend.benchmark.contracts.evaluation_result import (
     EnrichedPair,
     EvaluationResult,
 )
-from evaluation.core.metrics import compute_metrics
 
 
 @dataclass
@@ -48,7 +47,7 @@ class StratifiedMetrics:
     fn: int
     tn: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "stratum_name": self.stratum_name,
@@ -77,12 +76,12 @@ class StratifiedMatrix:
     """
 
     engine_name: str
-    by_clone_type: Dict[str, StratifiedMetrics] = field(default_factory=dict)
-    by_difficulty: Dict[str, StratifiedMetrics] = field(default_factory=dict)
-    by_language: Dict[str, StratifiedMetrics] = field(default_factory=dict)
-    overall: Optional[StratifiedMetrics] = None
+    by_clone_type: dict[str, StratifiedMetrics] = field(default_factory=dict)
+    by_difficulty: dict[str, StratifiedMetrics] = field(default_factory=dict)
+    by_language: dict[str, StratifiedMetrics] = field(default_factory=dict)
+    overall: StratifiedMetrics | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_name": self.engine_name,
@@ -128,8 +127,8 @@ class StratifiedMatrix:
 
 
 def _compute_stratum_metrics(
-    results: List[EvaluationResult],
-    pairs: List[EnrichedPair],
+    results: list[EvaluationResult],
+    pairs: list[EnrichedPair],
     threshold: float,
 ) -> StratifiedMetrics:
     """Compute metrics for a single stratum.
@@ -182,8 +181,8 @@ def _compute_stratum_metrics(
 
 
 def compute_stratified_matrix(
-    results: List[EvaluationResult],
-    pairs: List[EnrichedPair],
+    results: list[EvaluationResult],
+    pairs: list[EnrichedPair],
     threshold: float = 0.5,
 ) -> StratifiedMatrix:
     """Compute stratified evaluation matrix.
@@ -211,7 +210,7 @@ def compute_stratified_matrix(
     }
 
     # Group by clone type
-    by_clone_type: Dict[str, Tuple[List[EvaluationResult], List[EnrichedPair]]] = {}
+    by_clone_type: dict[str, tuple[list[EvaluationResult], list[EnrichedPair]]] = {}
     for result, pair in zip(results, pairs):
         ct_name = clone_type_names.get(pair.clone_type, f"type-{pair.clone_type}")
         if ct_name not in by_clone_type:
@@ -220,7 +219,7 @@ def compute_stratified_matrix(
         by_clone_type[ct_name][1].append(pair)
 
     # Group by difficulty
-    by_difficulty: Dict[str, Tuple[List[EvaluationResult], List[EnrichedPair]]] = {}
+    by_difficulty: dict[str, tuple[list[EvaluationResult], list[EnrichedPair]]] = {}
     for result, pair in zip(results, pairs):
         diff = pair.difficulty
         if diff not in by_difficulty:
@@ -229,7 +228,7 @@ def compute_stratified_matrix(
         by_difficulty[diff][1].append(pair)
 
     # Group by language
-    by_language: Dict[str, Tuple[List[EvaluationResult], List[EnrichedPair]]] = {}
+    by_language: dict[str, tuple[list[EvaluationResult], list[EnrichedPair]]] = {}
     for result, pair in zip(results, pairs):
         lang = pair.language
         if lang not in by_language:

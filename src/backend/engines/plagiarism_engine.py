@@ -6,13 +6,13 @@ Layer 2: Hybrid Similarity Engine (AST + token fingerprints)
 Layer 3: Optional alignment refinement
 """
 
-import random
 import ast
-from collections import defaultdict, Counter
-from typing import Dict, Set, Tuple, List, Any
+import random
+from collections import defaultdict
+from typing import Any
 
-from src.backend.engines.similarity.token_similarity import TokenSimilarity
 from src.backend.engines.features.ast_normalizer import ASTNormalizer
+from src.backend.engines.similarity.token_similarity import TokenSimilarity
 
 
 class MinHash:
@@ -22,15 +22,14 @@ class MinHash:
         self.num_perm = num_perm
         self.seeds = [random.randint(1, 10**9) for _ in range(num_perm)]
 
-    def hash_set(self, items: Set[int]) -> Tuple[int, ...]:
+    def hash_set(self, items: set[int]) -> tuple[int, ...]:
         """Generate MinHash signature for a set of items."""
         signatures = [float("inf")] * self.num_perm
 
         for item in items:
             for i, seed in enumerate(self.seeds):
                 h = hash((item, seed))
-                if h < signatures[i]:
-                    signatures[i] = h
+                signatures[i] = min(signatures[i], h)
 
         return tuple(signatures)
 
@@ -40,12 +39,12 @@ class LSHIndex:
 
     def __init__(self) -> None:
         self.buckets = defaultdict(list)
-        self._feature_store: Dict[str, Any] = {}
+        self._feature_store: dict[str, Any] = {}
 
     def add(
         self,
         file_id: str,
-        signature: Tuple[int, ...],
+        signature: tuple[int, ...],
         features: Any = None,
         bands: int = 8,
     ) -> None:
@@ -59,7 +58,7 @@ class LSHIndex:
         if features is not None:
             self._feature_store[file_id] = features
 
-    def query(self, signature: Tuple[int, ...], bands: int = 8) -> Set[str]:
+    def query(self, signature: tuple[int, ...], bands: int = 8) -> set[str]:
         """Query for candidate files similar to the given signature."""
         rows = len(signature) // bands
         candidates = set()
@@ -88,8 +87,8 @@ class UnifiedFeatureExtractor:
         self.token_sim = TokenSimilarity()
 
     def _hash_node(
-        self, node: ast.AST, memo: Dict[int, Tuple[int, int]] = None
-    ) -> Tuple[int, int]:
+        self, node: ast.AST, memo: dict[int, tuple[int, int]] | None = None
+    ) -> tuple[int, int]:
         """Bottom-up subtree hashing with memoization."""
         if memo is None:
             memo = {}
@@ -120,7 +119,7 @@ class UnifiedFeatureExtractor:
         memo[node_id] = result
         return result
 
-    def _collect_hash_sequence(self, node: ast.AST) -> List[int]:
+    def _collect_hash_sequence(self, node: ast.AST) -> list[int]:
         """Collect subtree hashes in pre-order traversal."""
         sequence = []
 
@@ -134,7 +133,7 @@ class UnifiedFeatureExtractor:
         dfs(node)
         return sequence
 
-    def _winnow(self, hashes: List[int], window_size: int) -> Set[int]:
+    def _winnow(self, hashes: list[int], window_size: int) -> set[int]:
         """Winnowing algorithm to select representative fingerprints."""
         if len(hashes) < window_size:
             return set(hashes)
@@ -159,7 +158,7 @@ class UnifiedFeatureExtractor:
 
         return fingerprints
 
-    def extract_ast_fingerprints(self, code: str) -> Set[int]:
+    def extract_ast_fingerprints(self, code: str) -> set[int]:
         """Extract winnowed AST subtree fingerprints."""
         try:
             tree = ast.parse(code)
@@ -204,7 +203,7 @@ class UnifiedFeatureExtractor:
         seq = self._collect_hash_sequence(tree)
         return self._winnow(seq, self.ast_window)
 
-    def extract_token_fingerprints(self, code: str) -> Set[int]:
+    def extract_token_fingerprints(self, code: str) -> set[int]:
         """Extract winnowed normalized token fingerprints."""
         tokens = self.token_sim._extract_tokens({"raw": code})
         norm_tokens = self.token_sim._normalize_identifiers(tokens)
@@ -218,7 +217,7 @@ class UnifiedFeatureExtractor:
 
         return self._winnow(kgram_hashes, self.token_window)
 
-    def extract_features(self, code: str) -> Dict[str, Set[int]]:
+    def extract_features(self, code: str) -> dict[str, set[int]]:
         """Extract unified feature set: AST + token fingerprints."""
         return {
             "ast": self.extract_ast_fingerprints(code),
@@ -226,14 +225,14 @@ class UnifiedFeatureExtractor:
         }
 
 
-def jaccard_set(a: Set[int], b: Set[int]) -> float:
+def jaccard_set(a: set[int], b: set[int]) -> float:
     """Jaccard similarity between two sets."""
     if not a and not b:
         return 1.0
     return len(a & b) / len(a | b)
 
 
-def hybrid_similarity(featA: Dict[str, Set[int]], featB: Dict[str, Set[int]]) -> float:
+def hybrid_similarity(featA: dict[str, set[int]], featB: dict[str, set[int]]) -> float:
     """Hybrid similarity score combining AST and token fingerprints."""
     ast_sim = jaccard_set(featA["ast"], featB["ast"])
     tok_sim = jaccard_set(featA["tok"], featB["tok"])
@@ -258,11 +257,11 @@ class PlagiarismEngine:
         self.minhash = MinHash(num_perm=num_perm)
         self.lsh = LSHIndex()
         self.feature_extractor = UnifiedFeatureExtractor()
-        self._files: Dict[str, str] = {}
+        self._files: dict[str, str] = {}
 
     def index_file(
         self, file_id: str, code: str
-    ) -> Tuple[Dict[str, Set[int]], Tuple[int, ...]]:
+    ) -> tuple[dict[str, set[int]], tuple[int, ...]]:
         """Index a single file into the system."""
         feats = self.feature_extractor.extract_features(code)
         all_features = feats["ast"] | feats["tok"]
@@ -273,7 +272,9 @@ class PlagiarismEngine:
 
         return feats, signature
 
-    def query_file(self, file_id: str, code: str = None) -> List[Tuple[str, float]]:
+    def query_file(
+        self, file_id: str, code: str | None = None
+    ) -> list[tuple[str, float]]:
         """Query for similar files, returns sorted list of (file_id, score)."""
         if code is None:
             code = self._files.get(file_id, "")
@@ -297,13 +298,13 @@ class PlagiarismEngine:
 
         return sorted(results, key=lambda x: x[1], reverse=True)
 
-    def batch_index(self, files: List[Tuple[str, str]], num_workers: int = 8) -> None:
+    def batch_index(self, files: list[tuple[str, str]], num_workers: int = 8) -> None:
         """Batch index multiple files (uses multiprocessing for speed)."""
         from multiprocessing import Pool
 
         def process_task(
-            args: Tuple[str, str]
-        ) -> Tuple[str, Dict[str, Set[int]], Tuple[int, ...]]:
+            args: tuple[str, str]
+        ) -> tuple[str, dict[str, set[int]], tuple[int, ...]]:
             fid, code = args
             feats = self.feature_extractor.extract_features(code)
             all_features = feats["ast"] | feats["tok"]

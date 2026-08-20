@@ -1,8 +1,10 @@
 """Comparative runner plugin."""
-from typing import Dict, Any
+
 from pathlib import Path
-from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
+from typing import Any
+
 from src.backend.bootstrap.plugins.loader import register_plugin
+from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
 
 
 @register_plugin
@@ -11,7 +13,7 @@ class ComparativeRunner(ExecutionPlugin):
 
     name = "compare"
 
-    def run(self, baseline: str, candidate: str) -> Dict[str, Any]:
+    def run(self, baseline: str, candidate: str) -> dict[str, Any]:
         """Run comparative analysis between two datasets.
 
         Args:

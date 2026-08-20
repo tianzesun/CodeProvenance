@@ -1,15 +1,15 @@
 """Base engine class for all similarity detection engines."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
 class EngineResult:
     score: float
-    details: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     confidence: float = 1.0
 
 
@@ -36,5 +36,5 @@ class BaseEngine(ABC):
     def supports_language(self, language: str) -> bool:
         return True
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         return {"name": self.name, "weight": self.weight}

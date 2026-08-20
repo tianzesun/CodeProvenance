@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
-from itertools import combinations
 import keyword
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from difflib import SequenceMatcher
+from hashlib import sha256
+from itertools import combinations
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
-
 
 PYTHON_KEYWORDS = set(keyword.kwlist)
 GENERIC_KEYWORDS = {
@@ -44,8 +43,8 @@ class CodeAnalysisResult:
     line_count: int
     token_count: int
     code_hash: str
-    ai_detection: Dict[str, float | bool]
-    complexity_metrics: Dict[str, int | float]
+    ai_detection: dict[str, float | bool]
+    complexity_metrics: dict[str, int | float]
 
 
 @dataclass
@@ -55,7 +54,7 @@ class CodeComparisonResult:
     file_a: str
     file_b: str
     overall_score: float
-    individual_scores: Dict[str, float]
+    individual_scores: dict[str, float]
     is_suspicious: bool
     language_a: str
     language_b: str
@@ -72,7 +71,7 @@ class CodeAnalyzer:
         self,
         code: str,
         language: str,
-        file_path: Optional[str] = None,
+        file_path: str | None = None,
     ) -> CodeAnalysisResult:
         tokens = _lexical_tokens(code)
         line_count = (
@@ -106,8 +105,8 @@ class CodeAnalyzer:
         code_b: str,
         language_a: str,
         language_b: str,
-        file_a: Optional[str] = None,
-        file_b: Optional[str] = None,
+        file_a: str | None = None,
+        file_b: str | None = None,
     ) -> CodeComparisonResult:
         normalized_a = _normalized_tokens(code_a, language_a)
         normalized_b = _normalized_tokens(code_b, language_b)
@@ -165,9 +164,9 @@ class CodeAnalyzer:
         )
 
     def analyze_pairwise(
-        self, submissions: Dict[str, str]
-    ) -> List[CodeComparisonResult]:
-        results: List[CodeComparisonResult] = []
+        self, submissions: dict[str, str]
+    ) -> list[CodeComparisonResult]:
+        results: list[CodeComparisonResult] = []
         for file_a, file_b in combinations(sorted(submissions.keys()), 2):
             language_a = _detect_language(file_a, submissions[file_a])
             language_b = _detect_language(file_b, submissions[file_b])
@@ -185,9 +184,9 @@ class CodeAnalyzer:
 
     def find_suspicious_pairs(
         self,
-        submissions: Dict[str, str],
-        threshold: Optional[float] = None,
-    ) -> List[CodeComparisonResult]:
+        submissions: dict[str, str],
+        threshold: float | None = None,
+    ) -> list[CodeComparisonResult]:
         effective_threshold = self.threshold if threshold is None else threshold
         results = [
             result
@@ -196,7 +195,7 @@ class CodeAnalyzer:
         ]
         return sorted(results, key=lambda result: result.overall_score, reverse=True)
 
-    def _detect_ai(self, code: str) -> Dict[str, float | bool]:
+    def _detect_ai(self, code: str) -> dict[str, float | bool]:
         if not self.enable_ai_detection:
             return {"is_likely_ai": False, "ai_score": 0.0}
 
@@ -230,7 +229,7 @@ class CodeAnalyzer:
 def analyze_single_code(
     code: str,
     language: str,
-    file_path: Optional[str] = None,
+    file_path: str | None = None,
 ) -> CodeAnalysisResult:
     """Analyze a single snippet using default settings."""
     return CodeAnalyzer().analyze_code(code, language, file_path=file_path)
@@ -241,8 +240,8 @@ def compare_two_codes(
     code_b: str,
     language: str,
     *,
-    file_a: Optional[str] = None,
-    file_b: Optional[str] = None,
+    file_a: str | None = None,
+    file_b: str | None = None,
 ) -> CodeComparisonResult:
     """Compare two snippets using the same language for both sides."""
     return CodeAnalyzer().compare_codes(
@@ -277,12 +276,12 @@ def _strip_comments(code: str) -> str:
     return code
 
 
-def _lexical_tokens(code: str) -> List[str]:
+def _lexical_tokens(code: str) -> list[str]:
     return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|[^\s]", _strip_comments(code))
 
 
-def _normalized_tokens(code: str, language: str) -> List[str]:
-    normalized: List[str] = []
+def _normalized_tokens(code: str, language: str) -> list[str]:
+    normalized: list[str] = []
     tokens = _lexical_tokens(code)
     keyword_set = GENERIC_KEYWORDS | (
         PYTHON_KEYWORDS if language == "python" else set()
@@ -301,7 +300,7 @@ def _normalized_tokens(code: str, language: str) -> List[str]:
     return normalized
 
 
-def _normalization_graph_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _normalization_graph_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Compare normalized token transition graphs for obfuscation-resistant similarity."""
     nodes_a, edges_a = _token_normalization_graph(tokens_a)
     nodes_b, edges_b = _token_normalization_graph(tokens_b)
@@ -314,8 +313,8 @@ def _normalization_graph_similarity(tokens_a: List[str], tokens_b: List[str]) ->
 
 
 def _token_normalization_graph(
-    tokens: List[str],
-) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+    tokens: list[str],
+) -> tuple[set[str], set[tuple[str, str]]]:
     """Build a compact graph from canonical token categories and local transitions."""
     canonical = [_canonical_graph_token(token) for token in tokens]
     nodes = set(canonical)
@@ -338,7 +337,7 @@ def _canonical_graph_token(token: str) -> str:
     return token
 
 
-def _merged_subsequence_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _merged_subsequence_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Score copied subsequences after merging matches split by small obfuscating edits."""
     if not tokens_a and not tokens_b:
         return 1.0
@@ -355,7 +354,7 @@ def _merged_subsequence_similarity(tokens_a: List[str], tokens_b: List[str]) -> 
     if not blocks:
         return 0.0
 
-    merged: List[Tuple[int, int, int]] = []
+    merged: list[tuple[int, int, int]] = []
     for start_a, start_b, size in blocks:
         if not merged:
             merged.append((start_a, start_b, size))
@@ -378,14 +377,14 @@ def _merged_subsequence_similarity(tokens_a: List[str], tokens_b: List[str]) -> 
     return 2 * coverage_a * coverage_b / (coverage_a + coverage_b)
 
 
-def _set_similarity(items_a: Set[object], items_b: Set[object]) -> float:
+def _set_similarity(items_a: set[object], items_b: set[object]) -> float:
     """Return Jaccard similarity for two sets, treating two empty sets as identical."""
     if not items_a and not items_b:
         return 1.0
     return len(items_a & items_b) / len(items_a | items_b)
 
 
-def _model_ai_detection(code: str) -> Dict[str, float | bool]:
+def _model_ai_detection(code: str) -> dict[str, float | bool]:
     """Run the existing model-backed AI detector when its dependencies are available."""
     try:
         from src.backend.engines.similarity.ai_detection import AIDetectionEngine
@@ -401,7 +400,7 @@ def _model_ai_detection(code: str) -> Dict[str, float | bool]:
 
 def _ast_cfg_pdg_similarity(
     code_a: str, code_b: str, language: str
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compare normalized AST, CFG, and PDG structure for Python code."""
     if language != "python":
         return {"similarity": 0.0, "ast_sim": 0.0, "cfg_sim": 0.0, "pdg_sim": 0.0}
@@ -432,7 +431,7 @@ def _tfidf_similarity(code_a: str, code_b: str, language: str) -> float:
         return _cosine_similarity(_lexical_tokens(code_a), _lexical_tokens(code_b))
 
 
-def _cosine_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _cosine_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Return cosine similarity over simple token-frequency vectors."""
     counts_a = _token_counts(tokens_a)
     counts_b = _token_counts(tokens_b)
@@ -450,9 +449,9 @@ def _cosine_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
     return max(0.0, min(1.0, dot_product / (magnitude_a * magnitude_b)))
 
 
-def _token_counts(tokens: List[str]) -> Dict[str, int]:
+def _token_counts(tokens: list[str]) -> dict[str, int]:
     """Count tokens without importing heavier collection helpers."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for token in tokens:
         counts[token] = counts.get(token, 0) + 1
     return counts
@@ -466,7 +465,7 @@ def _jaccard(tokens_a: Iterable[str], tokens_b: Iterable[str]) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
-def _ngrams(tokens: List[str], size: int) -> set[tuple[str, ...]]:
+def _ngrams(tokens: list[str], size: int) -> set[tuple[str, ...]]:
     if len(tokens) < size:
         return set()
     return {
@@ -474,7 +473,7 @@ def _ngrams(tokens: List[str], size: int) -> set[tuple[str, ...]]:
     }
 
 
-def _ngram_similarity(tokens_a: List[str], tokens_b: List[str], size: int) -> float:
+def _ngram_similarity(tokens_a: list[str], tokens_b: list[str], size: int) -> float:
     ngrams_a = _ngrams(tokens_a, size)
     ngrams_b = _ngrams(tokens_b, size)
     if not ngrams_a and not ngrams_b:
@@ -483,7 +482,7 @@ def _ngram_similarity(tokens_a: List[str], tokens_b: List[str], size: int) -> fl
 
 
 def _winnowing_similarity(
-    tokens_a: List[str], tokens_b: List[str], window: int = 4
+    tokens_a: list[str], tokens_b: list[str], window: int = 4
 ) -> float:
     fingerprints_a = _winnow(tokens_a, window)
     fingerprints_b = _winnow(tokens_b, window)
@@ -492,7 +491,7 @@ def _winnowing_similarity(
     return len(fingerprints_a & fingerprints_b) / len(fingerprints_a | fingerprints_b)
 
 
-def _winnow(tokens: List[str], window: int) -> set[tuple[str, ...]]:
+def _winnow(tokens: list[str], window: int) -> set[tuple[str, ...]]:
     fingerprints: set[tuple[str, ...]] = set()
     size = min(3, len(tokens)) if tokens else 0
     grams = list(_ngrams(tokens, size)) if size else []
@@ -504,7 +503,7 @@ def _winnow(tokens: List[str], window: int) -> set[tuple[str, ...]]:
 
 
 def _structure_similarity(code_a: str, code_b: str) -> float:
-    def counts(code: str) -> Dict[str, int]:
+    def counts(code: str) -> dict[str, int]:
         lowered = code.lower()
         return {
             "functions": len(re.findall(r"\b(def|function)\b", lowered)),
@@ -524,5 +523,5 @@ def _structure_similarity(code_a: str, code_b: str) -> float:
     return total / len(counts_a)
 
 
-def _sequence_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _sequence_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
     return SequenceMatcher(a=tokens_a, b=tokens_b).ratio()

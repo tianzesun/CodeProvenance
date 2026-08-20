@@ -15,10 +15,8 @@ Provides:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
-import platform
 import shutil
 import subprocess
 import tempfile
@@ -26,7 +24,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +39,11 @@ class ExecutionResult:
     stdout: str
     stderr: str
     execution_time: float
-    output_path: Optional[Path] = None
-    parsed_pairs: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    output_path: Path | None = None
+    parsed_pairs: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "success": self.success,
@@ -63,7 +61,7 @@ class DeterministicEnv:
         self.seed = seed
         self.clean_env = clean_env
 
-    def build_env(self) -> Dict[str, str]:
+    def build_env(self) -> dict[str, str]:
         env = {}
         if self.clean_env:
             env = {
@@ -72,7 +70,7 @@ class DeterministicEnv:
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
                 "PYTHONHASHSEED": str(self.seed),
-                "JAVA_TOOL_OPTIONS": f"-Dfile.encoding=UTF-8 -Duser.language=en -Duser.region=US",
+                "JAVA_TOOL_OPTIONS": "-Dfile.encoding=UTF-8 -Duser.language=en -Duser.region=US",
             }
         else:
             env = dict(os.environ)
@@ -119,10 +117,10 @@ class SandboxExecutor:
     def run_in_sandbox(
         self,
         image: str,
-        command: List[str],
-        volumes: Optional[Dict[str, str]] = None,
-        workdir: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
+        command: list[str],
+        volumes: dict[str, str] | None = None,
+        workdir: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         if not self._docker_available:
             return ExecutionResult(
@@ -193,8 +191,8 @@ class BaseToolRunner(ABC):
     def __init__(
         self,
         timeout: int = 300,
-        sandbox: Optional[SandboxExecutor] = None,
-        deterministic_env: Optional[DeterministicEnv] = None,
+        sandbox: SandboxExecutor | None = None,
+        deterministic_env: DeterministicEnv | None = None,
     ):
         self.timeout = timeout
         self.sandbox = sandbox
@@ -210,11 +208,11 @@ class BaseToolRunner(ABC):
         self,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         pass
 
-    def _ensure_output_dir(self, output_dir: Optional[Path]) -> Path:
+    def _ensure_output_dir(self, output_dir: Path | None) -> Path:
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix=f"{self.tool_name}_"))
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,9 +224,9 @@ class BaseToolRunner(ABC):
 
     def _run_subprocess(
         self,
-        cmd: List[str],
-        env: Optional[Dict[str, str]] = None,
-        cwd: Optional[Path] = None,
+        cmd: list[str],
+        env: dict[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> subprocess.CompletedProcess:
         run_env = env or self.det_env.build_env()
         return subprocess.run(
@@ -267,10 +265,10 @@ class MossRunner(BaseToolRunner):
 
     def __init__(
         self,
-        moss_user_id: Optional[str] = None,
-        moss_script: Optional[Path] = None,
+        moss_user_id: str | None = None,
+        moss_script: Path | None = None,
         timeout: int = 300,
-        deterministic_env: Optional[DeterministicEnv] = None,
+        deterministic_env: DeterministicEnv | None = None,
     ):
         super().__init__(timeout=timeout, deterministic_env=deterministic_env)
         self.moss_user_id = moss_user_id or os.environ.get("MOSS_USER_ID")
@@ -292,7 +290,7 @@ class MossRunner(BaseToolRunner):
         self,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         output_dir = self._ensure_output_dir(output_dir)
 
@@ -394,11 +392,11 @@ class JPlagRunner(BaseToolRunner):
 
     def __init__(
         self,
-        jplag_jar: Optional[Path] = None,
+        jplag_jar: Path | None = None,
         use_docker: bool = True,
         timeout: int = 300,
-        sandbox: Optional[SandboxExecutor] = None,
-        deterministic_env: Optional[DeterministicEnv] = None,
+        sandbox: SandboxExecutor | None = None,
+        deterministic_env: DeterministicEnv | None = None,
     ):
         super().__init__(
             timeout=timeout,
@@ -423,7 +421,7 @@ class JPlagRunner(BaseToolRunner):
         self,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         output_dir = self._ensure_output_dir(output_dir)
         jplag_lang = self.JPLAG_LANG_MAP.get(language.lower(), "text")
@@ -557,8 +555,8 @@ class DolosRunner(BaseToolRunner):
     def __init__(
         self,
         timeout: int = 300,
-        sandbox: Optional[SandboxExecutor] = None,
-        deterministic_env: Optional[DeterministicEnv] = None,
+        sandbox: SandboxExecutor | None = None,
+        deterministic_env: DeterministicEnv | None = None,
     ):
         super().__init__(
             timeout=timeout,
@@ -577,7 +575,7 @@ class DolosRunner(BaseToolRunner):
         self,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         output_dir = self._ensure_output_dir(output_dir)
         dolos_cmd = shutil.which("dolos")
@@ -642,9 +640,9 @@ class NiCadRunner(BaseToolRunner):
 
     def __init__(
         self,
-        nicad_path: Optional[Path] = None,
+        nicad_path: Path | None = None,
         timeout: int = 300,
-        deterministic_env: Optional[DeterministicEnv] = None,
+        deterministic_env: DeterministicEnv | None = None,
     ):
         super().__init__(timeout=timeout, deterministic_env=deterministic_env)
         self.nicad_path = nicad_path
@@ -662,7 +660,7 @@ class NiCadRunner(BaseToolRunner):
         self,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         output_dir = self._ensure_output_dir(output_dir)
 
@@ -741,14 +739,14 @@ class ExecutionEngine:
         timeout: int = 300,
         use_sandbox: bool = True,
         seed: int = 42,
-        tool_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        tool_configs: dict[str, dict[str, Any]] | None = None,
     ):
         self.timeout = timeout
         self.use_sandbox = use_sandbox
         self.det_env = DeterministicEnv(seed=seed)
         self.sandbox = SandboxExecutor(timeout=timeout) if use_sandbox else None
         self.tool_configs = tool_configs or {}
-        self._runners: Dict[str, BaseToolRunner] = {}
+        self._runners: dict[str, BaseToolRunner] = {}
 
     def get_runner(self, tool_name: str) -> BaseToolRunner:
         if tool_name not in self._runners:
@@ -770,7 +768,7 @@ class ExecutionEngine:
         tool_name: str,
         code_dir: Path,
         language: str,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> ExecutionResult:
         runner = self.get_runner(tool_name)
         return runner.run(code_dir, language, output_dir)
@@ -779,9 +777,9 @@ class ExecutionEngine:
         self,
         code_dir: Path,
         language: str,
-        tools: Optional[List[str]] = None,
-        output_base: Optional[Path] = None,
-    ) -> Dict[str, ExecutionResult]:
+        tools: list[str] | None = None,
+        output_base: Path | None = None,
+    ) -> dict[str, ExecutionResult]:
         tools = tools or list(self.TOOL_REGISTRY.keys())
         results = {}
         for tool in tools:
@@ -789,7 +787,7 @@ class ExecutionEngine:
             results[tool] = self.run_tool(tool, code_dir, language, output_dir)
         return results
 
-    def available_tools(self) -> List[str]:
+    def available_tools(self) -> list[str]:
         available = []
         for tool_name in self.TOOL_REGISTRY:
             try:

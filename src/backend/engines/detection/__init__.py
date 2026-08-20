@@ -10,19 +10,19 @@ Pipeline:
   Layer 4 (Explainability): Function/block/AST/control-flow evidence — audit trail
 """
 
+from src.backend.engines.detection.detection_policy import DetectionPolicy
+from src.backend.engines.detection.evidence_report import EvidenceReport, Verdict
 from src.backend.engines.detection.layer1_deterministic import Layer1Deterministic
 from src.backend.engines.detection.layer2_statistical import Layer2Statistical
 from src.backend.engines.detection.layer3_semantic import Layer3Semantic
 from src.backend.engines.detection.layer4_explainability import Layer4Explainability
-from src.backend.engines.detection.detection_policy import DetectionPolicy
-from src.backend.engines.detection.evidence_report import EvidenceReport, Verdict
 
 __all__ = [
+    "DetectionPolicy",
+    "EvidenceReport",
     "Layer1Deterministic",
     "Layer2Statistical",
     "Layer3Semantic",
     "Layer4Explainability",
-    "DetectionPolicy",
-    "EvidenceReport",
     "Verdict",
 ]

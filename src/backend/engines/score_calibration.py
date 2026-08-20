@@ -5,10 +5,11 @@ Uses Isotonic Regression (Platt scaling) to ensure:
 0.93 → 93% actual likelihood of plagiarism
 """
 
-from typing import List, Tuple, Dict, Any, Optional
-import numpy as np
-from pathlib import Path
 import pickle
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 try:
     from sklearn.isotonic import IsotonicRegression
@@ -27,7 +28,7 @@ class ScoreCalibrator:
     - Internal consistency → meaningful plagiarism likelihood
     """
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.calibrator = None
         self.is_fitted = False
         self.sample_count = 0
@@ -43,7 +44,7 @@ class ScoreCalibrator:
         if model_path and Path(model_path).exists():
             self.load(model_path)
 
-    def fit(self, raw_scores: List[float], labels: List[float]) -> None:
+    def fit(self, raw_scores: list[float], labels: list[float]) -> None:
         """
         Fit calibrator on labeled data.
 
@@ -64,7 +65,7 @@ class ScoreCalibrator:
 
         self.calibrator.fit(X, y)  # type: ignore
         self.is_fitted = True
-        self.sample_count = int(len(raw_scores)) if raw_scores else 0
+        self.sample_count = len(raw_scores) if raw_scores else 0
 
     def calibrate(self, score: float) -> float:
         """Convert raw score to calibrated plagiarism probability."""
@@ -81,7 +82,7 @@ class ScoreCalibrator:
             # Fallback: identity function
             return float(score)
 
-    def calibrate_batch(self, scores: List[float]) -> List[float]:
+    def calibrate_batch(self, scores: list[float]) -> list[float]:
         """Calibrate a batch of scores."""
         if not self.is_fitted:
             return [float(s) for s in scores]
@@ -127,7 +128,7 @@ class CalibratedScoringPipeline:
     3. Confidence estimation
     """
 
-    def __init__(self, calibrator_path: Optional[str] = None):
+    def __init__(self, calibrator_path: str | None = None):
         self.calibrator = ScoreCalibrator(calibrator_path)
 
         # Load base scoring engine
@@ -139,7 +140,7 @@ class CalibratedScoringPipeline:
         self.engine = SimilarityEngine()
         register_builtin_algorithms(self.engine)
 
-    def score(self, code_a: str, code_b: str) -> Dict[str, Any]:
+    def score(self, code_a: str, code_b: str) -> dict[str, Any]:
         """
         Full calibrated similarity scoring with probability calibration.
 

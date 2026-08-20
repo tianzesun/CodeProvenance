@@ -10,13 +10,14 @@ Compares code based on token sequences using:
 """
 
 import logging
-import re
-from typing import List, Dict, Any, Set, Tuple
-from .base_similarity import BaseSimilarityAlgorithm
-from collections import Counter
 import math
+import re
 from difflib import SequenceMatcher
+from typing import Any
+
 from src.backend.domain.models import EvidenceBlock, Finding
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         self._token_cache = TokenCache(maxsize=8192)
 
         # Programming language keywords
-        self.keywords: Set[str] = {
+        self.keywords: set[str] = {
             "if",
             "else",
             "elif",
@@ -130,7 +131,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             "with",
         }
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """Compare two parsed code representations based on token similarity.
 
         Returns:
@@ -211,7 +212,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             methodology="N-gram overlap and token distribution analysis with boilerplate filtering.",
         )
 
-    def _filter_boilerplate(self, tokens: List[str]) -> List[str]:
+    def _filter_boilerplate(self, tokens: list[str]) -> list[str]:
         """Filter out common boilerplate tokens."""
         boilerplate = {
             "import",
@@ -229,7 +230,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
     # ── Token extraction (cached) ──────────────────────────────────────
 
-    def _extract_tokens(self, parsed: Dict[str, Any]) -> List[str]:
+    def _extract_tokens(self, parsed: dict[str, Any]) -> list[str]:
         """Extract token values from parsed representation."""
         if "tokens" in parsed:
             tokens = parsed["tokens"]
@@ -241,7 +242,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             return self._token_cache.get_or_compute(raw, self._tokenize_cached)
         return []
 
-    def _tokenize_cached(self, text: str) -> List[str]:
+    def _tokenize_cached(self, text: str) -> list[str]:
         """Tokenize source code text (called by cache on misses)."""
         # Remove strings and comments
         text = re.sub(r'["\'].*?["\']', "STR", text, flags=re.DOTALL)
@@ -253,7 +254,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         tokens = re.findall(r"[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]", text)
         return [t for t in tokens if t]
 
-    def _normalize_identifiers(self, tokens: List[str]) -> List[str]:
+    def _normalize_identifiers(self, tokens: list[str]) -> list[str]:
         """Normalize identifiers by replacing them with sequential placeholders (var1, var2, etc.)"""
         identifier_map = {}
         counter = 1
@@ -277,7 +278,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
     # ── Metrics ─────────────────────────────────────────────────────────
 
-    def _jaccard_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _jaccard_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """Calculate Jaccard similarity of token sets."""
         set_a = set(tokens_a)
         set_b = set(tokens_b)
@@ -290,7 +291,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         return intersection / union if union > 0 else 0.0
 
-    def _ngram_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _ngram_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """Calculate n-gram overlap similarity."""
         if len(tokens_a) < self.ngram_size or len(tokens_b) < self.ngram_size:
             return self._jaccard_similarity(tokens_a, tokens_b)
@@ -306,16 +307,16 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         return intersection / union if union > 0 else 0.0
 
-    def _get_ngrams(self, tokens: List[str]) -> Set[str]:
+    def _get_ngrams(self, tokens: list[str]) -> set[str]:
         """Extract n-grams from token sequence."""
-        ngrams: Set[str] = set()
+        ngrams: set[str] = set()
         for i in range(len(tokens) - self.ngram_size + 1):
             ngram = " ".join(tokens[i : i + self.ngram_size])
             ngrams.add(ngram)
         return ngrams
 
     def _distribution_similarity(
-        self, tokens_a: List[str], tokens_b: List[str]
+        self, tokens_a: list[str], tokens_b: list[str]
     ) -> float:
         """Calculate similarity based on token type distributions."""
         dist_a = self._get_token_distribution(tokens_a)
@@ -335,9 +336,9 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         return dot_product / (norm_a * norm_b)
 
-    def _get_token_distribution(self, tokens: List[str]) -> Dict[str, float]:
+    def _get_token_distribution(self, tokens: list[str]) -> dict[str, float]:
         """Get distribution of token types."""
-        categories: Dict[str, int] = {
+        categories: dict[str, int] = {
             "identifier": 0,
             "keyword": 0,
             "literal": 0,
@@ -346,7 +347,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         }
 
         operators = set("+-*/%=<>&|^~!")
-        punctuation = set("()[]{}:;,.")
+        set("()[]{}:;,.")
 
         for token in tokens:
             if token in self.keywords:
@@ -366,7 +367,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         return {k: v / total for k, v in categories.items()}
 
-    def _keyword_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _keyword_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """Calculate similarity based on keyword overlap."""
         keywords_a = {t.lower() for t in tokens_a if t.lower() in self.keywords}
         keywords_b = {t.lower() for t in tokens_b if t.lower() in self.keywords}
@@ -379,7 +380,7 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         return intersection / union if union > 0 else 0.0
 
-    def _lcs_similarity(self, tokens_a: List[str], tokens_b: List[str]) -> float:
+    def _lcs_similarity(self, tokens_a: list[str], tokens_b: list[str]) -> float:
         """
         Calculate Longest Common Subsequence similarity for token sequences.
         Optimized O(nm) time with O(min(n,m)) space implementation.

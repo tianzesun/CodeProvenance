@@ -1,7 +1,8 @@
 """Dashboard Service - Generates teacher-ready case list with risk levels and evidence."""
+
 import logging
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -9,12 +10,12 @@ logger = logging.getLogger(__name__)
 # These represent investigation priority rather than absolute risk assessment
 RISK_LEVELS: list[tuple[float, str]] = [
     (0.85, "CRITICAL"),  # Requires corroborating evidence
-    (0.65, "HIGH"),      # High review priority
-    (0.35, "MEDIUM"),    # Moderate review priority
-    (0.0, "LOW"),        # Low review priority
+    (0.65, "HIGH"),  # High review priority
+    (0.35, "MEDIUM"),  # Moderate review priority
+    (0.0, "LOW"),  # Low review priority
 ]
 
-EXPLANATION_LABELS: Dict[str, str] = {
+EXPLANATION_LABELS: dict[str, str] = {
     "ast": "Code structure",
     "fingerprint": "Token patterns",
     "embedding": "Semantic meaning",
@@ -31,7 +32,7 @@ def _risk_level(score: float) -> str:
     return "LOW"
 
 
-def _top_features(features: Dict[str, float], top_n: int = 5) -> List[Dict[str, Any]]:
+def _top_features(features: dict[str, float], top_n: int = 5) -> list[dict[str, Any]]:
     """Return the top-N features sorted by value descending."""
     ranked = sorted(
         [
@@ -56,13 +57,13 @@ class DetectionCase:
     submission_b: str
     score: float
     risk_level: str
-    top_features: List[Dict[str, Any]] = field(default_factory=list)
-    explanation: List[Dict[str, Any]] = field(default_factory=list)
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-    decision: Optional[str] = None  # None | "plagiarism" | "clean" | "review"
+    top_features: list[dict[str, Any]] = field(default_factory=list)
+    explanation: list[dict[str, Any]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    decision: str | None = None  # None | "plagiarism" | "clean" | "review"
     timestamp: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "submission_a": self.submission_a,
             "submission_b": self.submission_b,
@@ -80,14 +81,16 @@ class DashboardService:
     """Generates dashboard case list sorted by risk level."""
 
     def __init__(self, threshold: float = 0.5) -> None:
+        from src.backend.application.services.behavioral_analysis import (
+            KeystrokeAnalysisService,
+        )
+        from src.backend.domain.decision import DecisionEngine
+        from src.backend.engines.ai.transformer_detector import AIDetectionLayer
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
-        from src.backend.domain.decision import DecisionEngine
         from src.backend.evaluation.arbitration import BayesianArbitrator
-        from src.backend.ml.fusion_model import HybridFusionModel
-        from src.backend.engines.ai.transformer_detector import AIDetectionLayer
-        from src.backend.application.services.behavioral_analysis import KeystrokeAnalysisService
         from src.backend.infrastructure.indexing.web_search import WebSearchService
+        from src.backend.ml.fusion_model import HybridFusionModel
 
         self._feature_extractor = FeatureExtractor()
         self._fusion_engine = FusionEngine()
@@ -98,9 +101,13 @@ class DashboardService:
         self._behavioral_service = KeystrokeAnalysisService()
         self._web_search = WebSearchService()
 
-    def analyze_batch(self, submissions: Dict[str, str], keystrokes: Optional[Dict[str, List[Any]]] = None) -> List[DetectionCase]:
+    def analyze_batch(
+        self,
+        submissions: dict[str, str],
+        keystrokes: dict[str, list[Any]] | None = None,
+    ) -> list[DetectionCase]:
         """Analyze all pairs and return sorted case list."""
-        cases: List[DetectionCase] = []
+        cases: list[DetectionCase] = []
 
         files = list(submissions.keys())
         for i, fa in enumerate(files):
@@ -108,31 +115,33 @@ class DashboardService:
             behavioral_a = {}
             if keystrokes and fa in keystrokes:
                 behavioral_a = self._behavioral_service.analyze_session(keystrokes[fa])
-                
+
             # 2. Web-Scale Search (Individual)
-            web_results_a = self._web_search.perform_full_web_scan(submissions[fa], "python")
-            
+            web_results_a = self._web_search.perform_full_web_scan(
+                submissions[fa], "python"
+            )
+
             for fb in files[i + 1 :]:
                 ca, cb = submissions[fa], submissions[fb]
 
                 # Run similarity detection
                 features = self._feature_extractor.extract(ca, cb)
                 feature_dict = features.as_dict()
-                
+
                 # AI & Stylometry Analysis (New Forensic Tier)
                 ai_a = self._ai_layer.analyze(ca)
                 ai_b = self._ai_layer.analyze(cb)
-                
+
                 # Hybrid ML Fusion
                 ml_score = self._hybrid_model.predict_similarity(feature_dict)
                 explanations = self._hybrid_model.explain_prediction(feature_dict)
-                
+
                 # Statistical Arbitration
                 arbitration = self._arbitrator.arbitrate(feature_dict)
-                
+
                 # Final Score
                 final_score = (ml_score + arbitration.fused_score) / 2
-                
+
                 case = DetectionCase(
                     submission_a=fa,
                     submission_b=fb,
@@ -143,18 +152,43 @@ class DashboardService:
                         {
                             "engine": name,
                             "score": round(value, 3),
-                            "contribution": round(arbitration.engine_contributions.get(name, 0.0), 3)
+                            "contribution": round(
+                                arbitration.engine_contributions.get(name, 0.0), 3
+                            ),
                         }
                         for name, value in feature_dict.items()
                     ],
                     evidence=[
-                        {"name": "Agreement Index", "value": round(arbitration.agreement_index, 3)},
-                        {"name": "Uncertainty", "value": round(arbitration.uncertainty, 3)},
-                        {"name": "ML Insights", "value": " | ".join(explanations) if explanations else "None"},
-                        {"name": "AI Prob (A/B)", "value": f"{round(ai_a['ai_probability'], 2)} / {round(ai_b['ai_probability'], 2)}"},
-                        {"name": "Detection Decision", "value": f"{ai_a['decision']} / {ai_b['decision']}"},
-                        {"name": "Behavioral Anomaly (A)", "value": f"{behavioral_a.get('behavioral_anomaly_score', 0.0):.2f}"},
-                        {"name": "Web Max Similarity (A)", "value": f"{web_results_a.get('max_web_similarity', 0.0):.2f}"}
+                        {
+                            "name": "Agreement Index",
+                            "value": round(arbitration.agreement_index, 3),
+                        },
+                        {
+                            "name": "Uncertainty",
+                            "value": round(arbitration.uncertainty, 3),
+                        },
+                        {
+                            "name": "ML Insights",
+                            "value": (
+                                " | ".join(explanations) if explanations else "None"
+                            ),
+                        },
+                        {
+                            "name": "AI Prob (A/B)",
+                            "value": f"{round(ai_a['ai_probability'], 2)} / {round(ai_b['ai_probability'], 2)}",
+                        },
+                        {
+                            "name": "Detection Decision",
+                            "value": f"{ai_a['decision']} / {ai_b['decision']}",
+                        },
+                        {
+                            "name": "Behavioral Anomaly (A)",
+                            "value": f"{behavioral_a.get('behavioral_anomaly_score', 0.0):.2f}",
+                        },
+                        {
+                            "name": "Web Max Similarity (A)",
+                            "value": f"{web_results_a.get('max_web_similarity', 0.0):.2f}",
+                        },
                     ],
                 )
                 cases.append(case)
@@ -168,13 +202,13 @@ class DashboardService:
 # ---------------------------------------------------------------------------
 
 
-def _extract_features(code_a: str, code_b: str) -> Dict[str, float]:
+def _extract_features(code_a: str, code_b: str) -> dict[str, float]:
     """Extract feature similarities from a code pair.
 
     Each engine is loaded lazily so a missing model or dependency only
     affects that single feature and is logged for debugging.
     """
-    feats: Dict[str, float] = {}
+    feats: dict[str, float] = {}
     for feature, module_name in [
         ("ast", "ast_similarity"),
         ("fingerprint", "token_similarity"),
@@ -183,17 +217,22 @@ def _extract_features(code_a: str, code_b: str) -> Dict[str, float]:
         ("winnowing", "winnowing_similarity"),
     ]:
         try:
-            module = __import__(
-                f"src.engines.similarity.{module_name}", fromlist=[""]
+            module = __import__(f"src.engines.similarity.{module_name}", fromlist=[""])
+            cls_name = _ENGINE_CLASS_NAMES.get(
+                feature, f"{feature.capitalize()}Similarity"
             )
-            cls_name = _ENGINE_CLASS_NAMES.get(feature, f"{feature.capitalize()}Similarity")
             sim_cls = getattr(module, cls_name)
             feats[feature] = sim_cls().compare({"raw": code_a}, {"raw": code_b})
         except ImportError as exc:
             logger.debug("Feature '%s' skipped (import error): %s", feature, exc)
             feats[feature] = 0.0
         except AttributeError as exc:
-            logger.debug("Feature '%s' skipped (missing class %s): %s", feature, _ENGINE_CLASS_NAMES.get(feature, ""), exc)
+            logger.debug(
+                "Feature '%s' skipped (missing class %s): %s",
+                feature,
+                _ENGINE_CLASS_NAMES.get(feature, ""),
+                exc,
+            )
             feats[feature] = 0.0
         except Exception as exc:
             logger.warning("Feature '%s' failed unexpectedly: %s", feature, exc)
@@ -201,9 +240,9 @@ def _extract_features(code_a: str, code_b: str) -> Dict[str, float]:
     return feats
 
 
-def _fuse_score(features: Dict[str, float]) -> float:
+def _fuse_score(features: dict[str, float]) -> float:
     """Simple weighted fusion of feature scores."""
-    weights: Dict[str, float] = {
+    weights: dict[str, float] = {
         "ast": 0.35,
         "fingerprint": 0.40,
         "embedding": 0.25,

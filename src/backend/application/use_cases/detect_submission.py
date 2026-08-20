@@ -1,20 +1,22 @@
 """Detect Submission Use Case - orchestrates the submission detection flow."""
-from typing import Dict, List, Any, Optional
+
+from typing import Any
+
+from src.backend.domain.decision import DecisionEngine
 from src.backend.engines.features.feature_extractor import FeatureExtractor
 from src.backend.engines.scoring.fusion_engine import FusionEngine
-from src.backend.domain.decision import DecisionEngine
 
 
 class DetectSubmission:
     """Application use case for detecting code similarity in submissions."""
 
-    def __init__(self, weights: Optional[Dict[str, float]] = None, threshold: float = 0.5):
+    def __init__(self, weights: dict[str, float] | None = None, threshold: float = 0.5):
         self.feature_extractor = FeatureExtractor()
         self.fusion_engine = FusionEngine(weights)
         self.decision_engine = DecisionEngine(threshold)
         self.threshold = threshold
 
-    def execute(self, code_a: str, code_b: str) -> Dict[str, Any]:
+    def execute(self, code_a: str, code_b: str) -> dict[str, Any]:
         """Execute similarity detection for a pair of code submissions.
 
         Args:
@@ -42,7 +44,7 @@ class DetectSubmission:
             },
         }
 
-    def batch_execute(self, submissions: Dict[str, str]) -> List[Dict[str, Any]]:
+    def batch_execute(self, submissions: dict[str, str]) -> list[dict[str, Any]]:
         """Execute similarity detection for all pairs of submissions.
 
         Args:
@@ -55,7 +57,7 @@ class DetectSubmission:
         filenames = list(submissions.keys())
 
         for i, name_a in enumerate(filenames):
-            for name_b in filenames[i + 1:]:
+            for name_b in filenames[i + 1 :]:
                 code_a = submissions[name_a]
                 code_b = submissions[name_b]
                 result = self.execute(code_a, code_b)

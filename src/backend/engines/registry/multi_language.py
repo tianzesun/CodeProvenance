@@ -1,6 +1,5 @@
 import logging
-from typing import Dict, List, Type, Any, Optional
-from src.backend.engines.similarity.base_similarity import BaseSimilarityAlgorithm
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +13,16 @@ class MultiLanguageRegistry:
 
     def __init__(self):
         # Maps language extensions/names to their configurations
-        self.language_configs: Dict[str, Dict[str, Any]] = {}
+        self.language_configs: dict[str, dict[str, Any]] = {}
         # Pre-populate with standard languages
         self._bootstrap_languages()
 
     def register_language(
         self,
         name: str,
-        extensions: List[str],
-        normalizer_cls: Optional[Type] = None,
-        ast_parser: Optional[Any] = None,
+        extensions: list[str],
+        normalizer_cls: type | None = None,
+        ast_parser: Any | None = None,
     ):
         """Register a new programming language and its support tools."""
         self.language_configs[name.lower()] = {
@@ -68,11 +67,11 @@ class MultiLanguageRegistry:
         self.register_language("Julia", [".jl"])
         self.register_language("Shell", [".sh", ".bash"])
 
-    def get_config_for_file(self, filename: str) -> Optional[Dict[str, Any]]:
+    def get_config_for_file(self, filename: str) -> dict[str, Any] | None:
         """Determine language from filename extension."""
         ext = f".{filename.split('.')[-1].lower()}"
         return self.language_configs.get(ext)
 
-    def get_supported_languages(self) -> List[str]:
+    def get_supported_languages(self) -> list[str]:
         """Returns a unique list of supported language names."""
-        return sorted(list(set(cfg["name"] for cfg in self.language_configs.values())))
+        return sorted({cfg["name"] for cfg in self.language_configs.values()})

@@ -6,17 +6,18 @@ Architecture:
 Usage:
     CUDA_VISIBLE_DEVICES=0 python workers/gpu_worker.py
 """
-import os
+
+import logging
+import signal
 import sys
 import time
-import signal
-import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [GPU] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [GPU] %(message)s")
 logger = logging.getLogger("gpu_worker")
+
 
 class GPUWorker:
     """GPU worker with persistent model and OOM protection."""
@@ -29,8 +30,10 @@ class GPUWorker:
         if device == "auto":
             try:
                 import torch
+
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-            except: device = "cpu"
+            except:
+                device = "cpu"
         self.device = device
 
         self._model = None
@@ -43,14 +46,18 @@ class GPUWorker:
         """Clear CUDA cache on OOM."""
         try:
             import torch
+
             torch.cuda.empty_cache()
-        except: pass
+        except:
+            pass
 
     def _load_model(self, model_name="microsoft/codebert-base"):
         """Lazy-load model (keeps it in memory for all tasks)."""
-        if self._loaded: return
+        if self._loaded:
+            return
         try:
-            from transformers import AutoTokenizer, AutoModel
+            from transformers import AutoModel, AutoTokenizer
+
             logger.info(f"Loading model: {model_name}")
             self._tokenizer = AutoTokenizer.from_pretrained(model_name)
             self._model = AutoModel.from_pretrained(model_name).to(self.device)
@@ -76,10 +83,15 @@ class GPUWorker:
         texts_a = [a or "" for a, b in pairs]
         texts_b = [b or "" for a, b in pairs]
 
-        tok_a = self._tokenizer(texts_a, padding=True, truncation=True, max_length=512, return_tensors="pt").to(self.device)
-        tok_b = self._tokenizer(texts_b, padding=True, truncation=True, max_length=512, return_tensors="pt").to(self.device)
+        tok_a = self._tokenizer(
+            texts_a, padding=True, truncation=True, max_length=512, return_tensors="pt"
+        ).to(self.device)
+        tok_b = self._tokenizer(
+            texts_b, padding=True, truncation=True, max_length=512, return_tensors="pt"
+        ).to(self.device)
 
         import torch
+
         with torch.no_grad():
             out_a = self._model(**tok_a)
             out_b = self._model(**tok_b)
@@ -91,13 +103,14 @@ class GPUWorker:
         norm_a = emb_a.norm(dim=-1, keepdim=True)
         norm_b = emb_b.norm(dim=-1, keepdim=True)
         sims = (emb_a * emb_b).sum(dim=-1) / (norm_a * norm_b).clamp(min=1e-8)
-        
+
         # Clamp and convert to list
         sims = sims.clamp(0, 1).cpu().tolist()
-        
+
         # Handle single value
-        if isinstance(sims, float): sims = [sims]
-        
+        if isinstance(sims, float):
+            sims = [sims]
+
         return sims
 
     def compare(self, code_a, code_b):
@@ -113,7 +126,7 @@ class GPUWorker:
         """Main worker loop - processes from queue."""
         logger.info("GPU Worker started")
         self._load_model()
-        
+
         while self.running:
             task = self._get_task()
             if not task:
@@ -141,11 +154,10 @@ class GPUWorker:
     def _get_task(self):
         """Get next task from queue. Override for production use."""
         # TODO: Connect to Redis/RabbitMQ
-        return None
+        return
 
     def _save_result(self, result):
         """Save result. Override for production."""
-        pass
 
 
 if __name__ == "__main__":
@@ -155,7 +167,7 @@ if __name__ == "__main__":
         worker._load_model()
         scores = worker._infer_batch(
             ["def foo(x): return x + 1", "a = 1; b = 2"],
-            ["def bar(y): return y + 1", "c = 3; d = 4"]
+            ["def bar(y): return y + 1", "c = 3; d = 4"],
         )
         print(f"Batch scores: {scores}")
     else:

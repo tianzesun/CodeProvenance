@@ -5,30 +5,23 @@ This module provides high-level database operations and helper functions
 for common database tasks.
 """
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
-import uuid
+from typing import Any
 
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+from src.backend.config.settings import settings
 from src.backend.models.database import (
-    Tenant,
-    ApiKey,
-    Job,
-    Submission,
-    SimilarityResult,
-    WebhookEvent,
-    UsageMetric,
+    Assignment,
     AuditLog,
     Course,
-    Assignment,
-)
-from src.backend.config.settings import settings
-from src.backend.config.database import (
-    get_db,
-    set_tenant_context,
-    clear_tenant_context,
-    SessionLocal,
+    Job,
+    SimilarityResult,
+    Submission,
+    Tenant,
+    UsageMetric,
+    WebhookEvent,
 )
 
 
@@ -60,7 +53,7 @@ class TenantService:
         return tenant
 
     @staticmethod
-    def get_tenant_by_api_key(db: Session, api_key_hash: str) -> Optional[Tenant]:
+    def get_tenant_by_api_key(db: Session, api_key_hash: str) -> Tenant | None:
         """
         Get tenant by API key hash.
 
@@ -74,7 +67,7 @@ class TenantService:
         return db.query(Tenant).filter(Tenant.api_key_hash == api_key_hash).first()
 
     @staticmethod
-    def get_tenant_by_id(db: Session, tenant_id: str) -> Optional[Tenant]:
+    def get_tenant_by_id(db: Session, tenant_id: str) -> Tenant | None:
         """
         Get tenant by ID.
 
@@ -98,14 +91,14 @@ class JobService:
         db: Session,
         tenant_id: str,
         name: str,
-        assignment_id: Optional[str] = None,  # NEW: link to normalized Assignment
+        assignment_id: str | None = None,  # NEW: link to normalized Assignment
         threshold: float = 0.7,
-        webhook_url: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
-        detection_modes: List[str] = None,
-        language_filters: Optional[List[str]] = None,
-        exclude_patterns: Optional[List[str]] = None,
-        template_files: Optional[List[Dict[str, Any]]] = None,
+        webhook_url: str | None = None,
+        idempotency_key: str | None = None,
+        detection_modes: list[str] | None = None,
+        language_filters: list[str] | None = None,
+        exclude_patterns: list[str] | None = None,
+        template_files: list[dict[str, Any]] | None = None,
         retention_days: int = 90,
     ) -> Job:
         """
@@ -147,7 +140,7 @@ class JobService:
         return job
 
     @staticmethod
-    def get_job_by_id(db: Session, job_id: str, tenant_id: str) -> Optional[Job]:
+    def get_job_by_id(db: Session, job_id: str, tenant_id: str) -> Job | None:
         """
         Get job by ID with tenant isolation.
 
@@ -169,10 +162,10 @@ class JobService:
     def get_jobs_by_tenant(
         db: Session,
         tenant_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Job]:
+    ) -> list[Job]:
         """
         Get jobs for a tenant with optional status filter.
 
@@ -195,8 +188,8 @@ class JobService:
 
     @staticmethod
     def update_job_status(
-        db: Session, job_id: str, status: str, error_message: Optional[str] = None
-    ) -> Optional[Job]:
+        db: Session, job_id: str, status: str, error_message: str | None = None
+    ) -> Job | None:
         """
         Update job status.
 
@@ -232,7 +225,7 @@ class JobService:
         return job
 
     @staticmethod
-    def check_idempotency_key(db: Session, idempotency_key: str) -> Optional[Job]:
+    def check_idempotency_key(db: Session, idempotency_key: str) -> Job | None:
         """
         Check if an idempotency key already exists.
 
@@ -256,12 +249,12 @@ class SubmissionService:
         db: Session,
         job_id: str,
         name: str,
-        file_paths: List[str],
-        external_id: Optional[str] = None,
-        language_detected: Optional[str] = None,
-        languages_detected: Optional[List[str]] = None,
-        storage_path: Optional[str] = None,
-        checksum: Optional[str] = None,
+        file_paths: list[str],
+        external_id: str | None = None,
+        language_detected: str | None = None,
+        languages_detected: list[str] | None = None,
+        storage_path: str | None = None,
+        checksum: str | None = None,
     ) -> Submission:
         """
         Create a new submission.
@@ -297,7 +290,7 @@ class SubmissionService:
         return submission
 
     @staticmethod
-    def get_submissions_by_job(db: Session, job_id: str) -> List[Submission]:
+    def get_submissions_by_job(db: Session, job_id: str) -> list[Submission]:
         """
         Get all submissions for a job.
 
@@ -325,10 +318,10 @@ class SimilarityResultService:
         similarity_score: float,
         confidence_lower: float,
         confidence_upper: float,
-        matching_blocks: List[Dict[str, Any]],
-        excluded_matches: Optional[List[Dict[str, Any]]] = None,
-        algorithm_scores: Optional[Dict[str, float]] = None,
-        verdict: Optional[str] = None,
+        matching_blocks: list[dict[str, Any]],
+        excluded_matches: list[dict[str, Any]] | None = None,
+        algorithm_scores: dict[str, float] | None = None,
+        verdict: str | None = None,
     ) -> SimilarityResult:
         """
         Create a new similarity result.
@@ -374,10 +367,10 @@ class SimilarityResultService:
     def get_results_by_job(
         db: Session,
         job_id: str,
-        threshold: Optional[float] = None,
+        threshold: float | None = None,
         limit: int = 1000,
         offset: int = 0,
-    ) -> List[SimilarityResult]:
+    ) -> list[SimilarityResult]:
         """
         Get similarity results for a job.
 
@@ -414,8 +407,8 @@ class WebhookEventService:
         db: Session,
         job_id: str,
         event_type: str,
-        payload: Dict[str, Any],
-        signature: Optional[str] = None,
+        payload: dict[str, Any],
+        signature: str | None = None,
     ) -> WebhookEvent:
         """
         Create a new webhook event.
@@ -439,7 +432,7 @@ class WebhookEventService:
         return event
 
     @staticmethod
-    def get_pending_webhook_events(db: Session, limit: int = 100) -> List[WebhookEvent]:
+    def get_pending_webhook_events(db: Session, limit: int = 100) -> list[WebhookEvent]:
         """
         Get pending webhook events for delivery.
 
@@ -472,8 +465,8 @@ class WebhookEventService:
 
     @staticmethod
     def update_webhook_event_status(
-        db: Session, event_id: str, status: str, error_message: Optional[str] = None
-    ) -> Optional[WebhookEvent]:
+        db: Session, event_id: str, status: str, error_message: str | None = None
+    ) -> WebhookEvent | None:
         """
         Update webhook event status.
 
@@ -604,14 +597,14 @@ class AuditLogService:
     def create_audit_log(
         db: Session,
         action: str,
-        tenant_id: Optional[str] = None,
-        job_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        changes: Optional[Dict[str, Any]] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        tenant_id: str | None = None,
+        job_id: str | None = None,
+        user_id: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        changes: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> AuditLog:
         """
         Create a new audit log entry.
@@ -661,7 +654,7 @@ class AcademicService:
         tenant_id: str,
         course_name: str,
         assignment_name: str,
-        assignment_mode: Optional[str] = None,
+        assignment_mode: str | None = None,
     ) -> Assignment:
         """
         Get or create a Course + Assignment for the given tenant based on names.

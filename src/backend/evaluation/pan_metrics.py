@@ -8,16 +8,17 @@ Implements the standard evaluation metrics from the PAN workshop series:
 
 Based on the official reference implementation from PAN@CLEF 2014.
 """
+
 from __future__ import annotations
 
 import math
-from typing import List, Tuple, Set, Dict, Any
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class TextSpan:
     """Represents a span of text with start offset and length."""
+
     offset: int
     length: int
 
@@ -35,6 +36,7 @@ class TextSpan:
 @dataclass(frozen=True)
 class Detection:
     """A detected plagiarism alignment between suspicious and source document."""
+
     suspicious_span: TextSpan
     source_span: TextSpan
 
@@ -42,26 +44,26 @@ class Detection:
 @dataclass
 class PANMetrics:
     """PAN standard evaluation metrics result."""
+
     precision: float
     recall: float
     f1_score: float
     granularity: float
     plagdet: float
 
-    def as_dict(self) -> Dict[str, float]:
+    def as_dict(self) -> dict[str, float]:
         """Return metrics as dictionary for serialization."""
         return {
             "precision": round(self.precision, 6),
             "recall": round(self.recall, 6),
             "f1_score": round(self.f1_score, 6),
             "granularity": round(self.granularity, 6),
-            "plagdet": round(self.plagdet, 6)
+            "plagdet": round(self.plagdet, 6),
         }
 
 
 def calculate_pan_metrics(
-    ground_truth: List[Detection],
-    predictions: List[Detection]
+    ground_truth: list[Detection], predictions: list[Detection]
 ) -> PANMetrics:
     """Calculate official PAN plagiarism detection metrics.
 
@@ -81,16 +83,12 @@ def calculate_pan_metrics(
             recall=1.0,
             f1_score=1.0 if not predictions else 0.0,
             granularity=1.0,
-            plagdet=1.0 if not predictions else 0.0
+            plagdet=1.0 if not predictions else 0.0,
         )
 
     if not predictions:
         return PANMetrics(
-            precision=1.0,
-            recall=0.0,
-            f1_score=0.0,
-            granularity=1.0,
-            plagdet=0.0
+            precision=1.0, recall=0.0, f1_score=0.0, granularity=1.0, plagdet=0.0
         )
 
     # Calculate Precision
@@ -108,8 +106,8 @@ def calculate_pan_metrics(
 
     # Calculate Recall
     recall_sum = 0.0
-    detected_ground_truth: Set[int] = set()
-    detection_count_per_gt: Dict[int, int] = {i: 0 for i in range(len(ground_truth))}
+    detected_ground_truth: set[int] = set()
+    detection_count_per_gt: dict[int, int] = {i: 0 for i in range(len(ground_truth))}
 
     for gt_idx, gt in enumerate(ground_truth):
         max_overlap = 0
@@ -132,7 +130,9 @@ def calculate_pan_metrics(
 
     # Calculate Granularity
     if detected_ground_truth:
-        total_detections = sum(detection_count_per_gt[gt_idx] for gt_idx in detected_ground_truth)
+        total_detections = sum(
+            detection_count_per_gt[gt_idx] for gt_idx in detected_ground_truth
+        )
         granularity = total_detections / len(detected_ground_truth)
     else:
         granularity = 1.0
@@ -149,11 +149,11 @@ def calculate_pan_metrics(
         recall=recall,
         f1_score=f1_score,
         granularity=granularity,
-        plagdet=plagdet
+        plagdet=plagdet,
     )
 
 
-def pan_macro_average(metrics_list: List[PANMetrics]) -> PANMetrics:
+def pan_macro_average(metrics_list: list[PANMetrics]) -> PANMetrics:
     """Calculate macro average across multiple document pairs.
 
     Args:
@@ -172,13 +172,12 @@ def pan_macro_average(metrics_list: List[PANMetrics]) -> PANMetrics:
         recall=sum(m.recall for m in metrics_list) / count,
         f1_score=sum(m.f1_score for m in metrics_list) / count,
         granularity=sum(m.granularity for m in metrics_list) / count,
-        plagdet=sum(m.plagdet for m in metrics_list) / count
+        plagdet=sum(m.plagdet for m in metrics_list) / count,
     )
 
 
 def pan_micro_average(
-    all_ground_truth: List[List[Detection]],
-    all_predictions: List[List[Detection]]
+    all_ground_truth: list[list[Detection]], all_predictions: list[list[Detection]]
 ) -> PANMetrics:
     """Calculate micro average across all detections.
 

@@ -26,21 +26,19 @@ Usage:
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
+from src.backend.evaluation.comparison_engine import rank_tools
 from src.backend.evaluation.dataset.ground_truth import (
-    GroundTruthPair,
-    EvaluationProtocol,
     DEFAULT_PROTOCOL,
-    load_ground_truth,
-    build_score_label_arrays,
+    EvaluationProtocol,
     SyntheticDatasetGenerator,
+    build_score_label_arrays,
+    load_ground_truth,
 )
-from src.backend.evaluation.comparison_engine import rank_tools, ToolRanking
 from src.backend.evaluation.ieee_report_generator import (
     BenchmarkReport,
     IEEEStyleReportGenerator,
@@ -52,15 +50,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TribunalResult:
     """Complete result from a tribunal run."""
+
     report: BenchmarkReport
-    execution_results: Dict[str, Any] = field(default_factory=dict)
-    tool_findings: Dict[str, List] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    execution_results: dict[str, Any] = field(default_factory=dict)
+    tool_findings: dict[str, list] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [
             "=" * 80,
-            f"BENCHMARK TRIBUNAL RESULT",
+            "BENCHMARK TRIBUNAL RESULT",
             f"Dataset: {self.report.dataset_name} ({self.report.dataset_size} pairs)",
             f"Tools evaluated: {self.report.num_tools}",
             f"Best tool: {self.report.ranking.best_tool}",
@@ -88,14 +87,14 @@ class BenchmarkTribunal:
 
     def __init__(
         self,
-        dataset_path: Optional[Path] = None,
-        code_dir: Optional[Path] = None,
+        dataset_path: Path | None = None,
+        code_dir: Path | None = None,
         language: str = "python",
-        tools: Optional[List[str]] = None,
-        protocol: Optional[EvaluationProtocol] = None,
-        output_dir: Optional[Path] = None,
+        tools: list[str] | None = None,
+        protocol: EvaluationProtocol | None = None,
+        output_dir: Path | None = None,
         generate_synthetic: bool = False,
-        synthetic_config: Optional[Dict[str, int]] = None,
+        synthetic_config: dict[str, int] | None = None,
         seed: int = 42,
     ):
         self.dataset_path = dataset_path
@@ -108,9 +107,9 @@ class BenchmarkTribunal:
         self.synthetic_config = synthetic_config or {}
         self.seed = seed
         self.rng = __import__("random").Random(seed)
-        self._ground_truth: Optional[Dict[Tuple[str, str], int]] = None
-        self._tool_scores: Optional[Dict[str, List[float]]] = None
-        self._labels: Optional[List[int]] = None
+        self._ground_truth: dict[tuple[str, str], int] | None = None
+        self._tool_scores: dict[str, list[float]] | None = None
+        self._labels: list[int] | None = None
 
     def run(self) -> TribunalResult:
         """Execute the full tribunal pipeline."""
@@ -121,7 +120,9 @@ class BenchmarkTribunal:
         logger.info("[1/5] Loading ground truth...")
         self._load_ground_truth()
         if not self._ground_truth:
-            raise RuntimeError("No ground truth loaded. Provide dataset_path or enable synthetic generation.")
+            raise RuntimeError(
+                "No ground truth loaded. Provide dataset_path or enable synthetic generation."
+            )
 
         # Step 2: Execute tools
         logger.info("[2/5] Executing tools...")
@@ -130,7 +131,8 @@ class BenchmarkTribunal:
         # Step 3: Build score/label arrays
         logger.info("[3/5] Building evaluation arrays...")
         self._tool_scores, self._labels = build_score_label_arrays(
-            tool_findings, self._ground_truth,
+            tool_findings,
+            self._ground_truth,
         )
 
         if len(self._labels) < self.protocol.min_pairs:
@@ -210,13 +212,15 @@ class BenchmarkTribunal:
             for p in pairs:
                 key = tuple(sorted([p.file1, p.file2]))
                 self._ground_truth[key] = p.label
-            logger.info(f"Loaded ground truth: {len(pairs)} pairs from {self.dataset_path}")
+            logger.info(
+                f"Loaded ground truth: {len(pairs)} pairs from {self.dataset_path}"
+            )
 
     def _execute_tools(
         self,
-        execution_results: Dict[str, Any],
-        warnings: List[str],
-    ) -> Dict[str, List[Dict[str, Any]]]:
+        execution_results: dict[str, Any],
+        warnings: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
         """
         Execute all tools and adapt their output to unified findings.
 
@@ -233,7 +237,9 @@ class BenchmarkTribunal:
                         tool_findings[tool] = findings
                         execution_results[tool] = "executed"
                     else:
-                        warnings.append(f"{tool}: no output produced (tool not available)")
+                        warnings.append(
+                            f"{tool}: no output produced (tool not available)"
+                        )
                         execution_results[tool] = "skipped"
                 elif tool == "ours":
                     findings = self._run_our_system()
@@ -252,7 +258,7 @@ class BenchmarkTribunal:
 
         return tool_findings
 
-    def _run_external_tool(self, tool: str) -> List[Dict[str, Any]]:
+    def _run_external_tool(self, tool: str) -> list[dict[str, Any]]:
         """Run an external tool and adapt output."""
         from src.backend.engines.execution import ExecutionEngine, adapt_tool_output
 
@@ -263,11 +269,13 @@ class BenchmarkTribunal:
         try:
             result = engine.run_tool(tool, self.code_dir, self.language)
             if result.success and result.output_path:
-                findings = adapt_tool_output(tool, result.output_path, self._ground_truth)
+                findings = adapt_tool_output(
+                    tool, result.output_path, self._ground_truth
+                )
                 return [
                     {
-                        "file1": f.file1 if hasattr(f, 'file1') else "",
-                        "file2": f.file2 if hasattr(f, 'file2') else "",
+                        "file1": f.file1 if hasattr(f, "file1") else "",
+                        "file2": f.file2 if hasattr(f, "file2") else "",
                         "similarity": f.score,
                         "confidence": f.confidence,
                     }
@@ -278,7 +286,7 @@ class BenchmarkTribunal:
 
         return []
 
-    def _run_our_system(self) -> List[Dict[str, Any]]:
+    def _run_our_system(self) -> list[dict[str, Any]]:
         """Run our system's detection pipeline."""
         if not self._ground_truth:
             return []
@@ -286,12 +294,14 @@ class BenchmarkTribunal:
         findings = []
         for (f1, f2), label in self._ground_truth.items():
             score = self._compute_our_score(f1, f2, label)
-            findings.append({
-                "file1": f1,
-                "file2": f2,
-                "similarity": score,
-                "confidence": 0.85,
-            })
+            findings.append(
+                {
+                    "file1": f1,
+                    "file2": f2,
+                    "similarity": score,
+                    "confidence": 0.85,
+                }
+            )
         return findings
 
     def _compute_our_score(self, f1: str, f2: str, label: int) -> float:
@@ -329,8 +339,8 @@ class BenchmarkTribunal:
 
     def run_with_precomputed_scores(
         self,
-        tool_scores: Dict[str, List[float]],
-        labels: List[int],
+        tool_scores: dict[str, list[float]],
+        labels: list[int],
         dataset_name: str = "precomputed",
     ) -> TribunalResult:
         """
@@ -347,7 +357,8 @@ class BenchmarkTribunal:
         self._labels = labels
 
         ranking = rank_tools(
-            tool_scores, labels,
+            tool_scores,
+            labels,
             threshold=self.protocol.threshold,
             ci_level=self.protocol.ci_level,
             n_bootstrap=self.protocol.n_bootstrap,

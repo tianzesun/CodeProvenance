@@ -38,7 +38,6 @@ This system converges to:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 from src.backend.engines.evidence_aggregator import EvidenceVector
 
@@ -49,7 +48,7 @@ class Decision:
 
     verdict: str  # CLEAN, REVIEW, PROBABLE, TRUE
     confidence: float  # Rule-based confidence (0.0-1.0)
-    evidence: Dict[str, float]
+    evidence: dict[str, float]
     reason: str = ""
     triggered_layer: str = ""
 

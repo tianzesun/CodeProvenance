@@ -5,17 +5,16 @@ Instead of showing 200+ matches, extracts only the top 3-8 most explanatory
 evidence bundles to keep reports concise and actionable.
 """
 
-from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
-import numpy as np
+from typing import Any
 
 
 @dataclass
 class EvidenceBundle:
     """Single evidence bundle combining GST and AST support."""
 
-    gst_block: Dict[str, Any]
-    ast_support: List[Tuple[str, str]]
+    gst_block: dict[str, Any]
+    ast_support: list[tuple[str, str]]
     score: float
     confidence: float
     explanation: str
@@ -34,10 +33,10 @@ class EvidenceCompressor:
 
     def compress(
         self,
-        ast_matches: List[Tuple[str, str]],
-        gst_blocks: List[Dict[str, Any]],
-        engine_scores: Dict[str, float],
-    ) -> List[EvidenceBundle]:
+        ast_matches: list[tuple[str, str]],
+        gst_blocks: list[dict[str, Any]],
+        engine_scores: dict[str, float],
+    ) -> list[EvidenceBundle]:
         """
         Compress raw evidence into minimal proof set.
 
@@ -101,8 +100,8 @@ class EvidenceCompressor:
         return self._deduplicate(selected)
 
     def _find_ast_support(
-        self, gst_block: Dict[str, Any], ast_matches: List[Tuple[str, str]]
-    ) -> List[Tuple[str, str]]:
+        self, gst_block: dict[str, Any], ast_matches: list[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
         """Find AST matches that provide supporting evidence for a GST block."""
         support = []
 
@@ -125,7 +124,7 @@ class EvidenceCompressor:
         return support[:3]  # Max 3 AST matches per bundle
 
     def _generate_explanation(
-        self, gst: Dict[str, Any], support: List[Tuple[str, str]], strength: float
+        self, gst: dict[str, Any], support: list[tuple[str, str]], strength: float
     ) -> str:
         """Generate human-readable explanation for evidence bundle."""
         if strength >= 0.95:
@@ -147,7 +146,7 @@ class EvidenceCompressor:
 
         return " ".join(parts)
 
-    def _deduplicate(self, bundles: List[EvidenceBundle]) -> List[EvidenceBundle]:
+    def _deduplicate(self, bundles: list[EvidenceBundle]) -> list[EvidenceBundle]:
         """Remove similar overlapping bundles."""
         seen = set()
         unique = []
@@ -166,7 +165,7 @@ class EvidenceCompressor:
 
         return unique
 
-    def format_report(self, bundles: List[EvidenceBundle]) -> str:
+    def format_report(self, bundles: list[EvidenceBundle]) -> str:
         """Format compressed evidence into concise human-readable report."""
         if not bundles:
             return "No strong evidence detected."
@@ -208,8 +207,8 @@ class CompressedReportGenerator:
     """
 
     def __init__(self):
-        from src.backend.engines.explainable_report_generator import ReportGenerator
         from src.backend.engines.conflict_resolver import ConflictResolutionPipeline
+        from src.backend.engines.explainable_report_generator import ReportGenerator
         from src.backend.engines.score_calibration import CalibratedScoringPipeline
 
         self.base_report = ReportGenerator()
@@ -217,7 +216,7 @@ class CompressedReportGenerator:
         self.scorer = CalibratedScoringPipeline()
         self.compressor = EvidenceCompressor(max_bundles=5)
 
-    def generate(self, code_a: str, code_b: str) -> Dict[str, Any]:
+    def generate(self, code_a: str, code_b: str) -> dict[str, Any]:
         """Generate full compressed report."""
         # Base analysis
         score_result = self.scorer.score(code_a, code_b)

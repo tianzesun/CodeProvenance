@@ -49,7 +49,9 @@ def get_primary_artifact(run_id: str):
         raise HTTPException(status_code=404, detail="Artifact file not found")
 
     if not is_subpath(artifact_path, repo_root):
-        raise HTTPException(status_code=403, detail="Artifact path is outside allowed root")
+        raise HTTPException(
+            status_code=403, detail="Artifact path is outside allowed root"
+        )
 
     if artifact_path.is_dir():
         raise HTTPException(
@@ -68,7 +70,9 @@ def get_primary_artifact(run_id: str):
 @router.get("/{run_id}/file")
 def get_named_artifact_file(
     run_id: str,
-    path: str = Query(..., description="Absolute artifact path returned from results endpoint"),
+    path: str = Query(
+        ..., description="Absolute artifact path returned from results endpoint"
+    ),
 ):
     loader = BenchmarkResultsLoader(repo_root=discover_repo_root())
 
@@ -88,7 +92,9 @@ def get_named_artifact_file(
         raise HTTPException(status_code=404, detail="Artifact file missing on disk")
 
     if not is_subpath(requested_path, repo_root):
-        raise HTTPException(status_code=403, detail="Artifact path is outside allowed root")
+        raise HTTPException(
+            status_code=403, detail="Artifact path is outside allowed root"
+        )
 
     media_type, _ = mimetypes.guess_type(str(requested_path))
     return FileResponse(

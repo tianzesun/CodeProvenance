@@ -7,10 +7,11 @@ All other modules must be feature providers, not decision makers.
 Responsibility: Final similarity score computation, ensemble fusion, threshold application
 """
 
-from typing import Dict, Any, List, Optional, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 
@@ -32,7 +33,7 @@ class SimilarityScore:
     value: float  # 0.0 to 1.0
     score_type: ScoreType
     confidence: float  # 0.0 to 1.0
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
     def __post_init__(self):
         """Validate score."""
@@ -49,25 +50,24 @@ class FusionResult:
     """Result of ensemble fusion."""
 
     final_score: float
-    component_scores: List[SimilarityScore]
+    component_scores: list[SimilarityScore]
     fusion_method: str
-    weights: Dict[str, float]
-    metadata: Dict[str, Any]
+    weights: dict[str, float]
+    metadata: dict[str, Any]
 
 
 class ScoreFusionStrategy(ABC):
     """Base class for score fusion strategies."""
 
     @abstractmethod
-    def fuse(self, scores: List[SimilarityScore]) -> FusionResult:
+    def fuse(self, scores: list[SimilarityScore]) -> FusionResult:
         """Fuse multiple scores into a final score."""
-        pass
 
 
 class WeightedAverageFusion(ScoreFusionStrategy):
     """Weighted average fusion strategy."""
 
-    def __init__(self, weights: Optional[Dict[str, float]] = None):
+    def __init__(self, weights: dict[str, float] | None = None):
         self.weights = weights or {
             ScoreType.TOKEN.value: 0.2,
             ScoreType.AST.value: 0.3,
@@ -76,7 +76,7 @@ class WeightedAverageFusion(ScoreFusionStrategy):
             ScoreType.EXECUTION.value: 0.1,
         }
 
-    def fuse(self, scores: List[SimilarityScore]) -> FusionResult:
+    def fuse(self, scores: list[SimilarityScore]) -> FusionResult:
         """Fuse scores using weighted average."""
         if not scores:
             raise ValueError("No scores to fuse")
@@ -114,7 +114,7 @@ class WeightedAverageFusion(ScoreFusionStrategy):
 class MaxConfidenceFusion(ScoreFusionStrategy):
     """Select score with highest confidence."""
 
-    def fuse(self, scores: List[SimilarityScore]) -> FusionResult:
+    def fuse(self, scores: list[SimilarityScore]) -> FusionResult:
         """Select score with highest confidence."""
         if not scores:
             raise ValueError("No scores to fuse")
@@ -141,7 +141,7 @@ class ScoringEngine:
     All other modules must provide features, not make decisions.
     """
 
-    def __init__(self, fusion_strategy: Optional[ScoreFusionStrategy] = None):
+    def __init__(self, fusion_strategy: ScoreFusionStrategy | None = None):
         self.fusion_strategy = fusion_strategy or WeightedAverageFusion()
         self._thresholds = {
             "identical": 1.0,
@@ -154,12 +154,12 @@ class ScoringEngine:
 
     def compute_similarity(
         self,
-        token_score: Optional[float] = None,
-        ast_score: Optional[float] = None,
-        graph_score: Optional[float] = None,
-        embedding_score: Optional[float] = None,
-        execution_score: Optional[float] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        token_score: float | None = None,
+        ast_score: float | None = None,
+        graph_score: float | None = None,
+        embedding_score: float | None = None,
+        execution_score: float | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> FusionResult:
         """
         Compute final similarity score from component scores.
@@ -232,17 +232,17 @@ class ScoringEngine:
                 return category
         return "very_different"
 
-    def set_thresholds(self, thresholds: Dict[str, float]) -> None:
+    def set_thresholds(self, thresholds: dict[str, float]) -> None:
         """Update thresholds."""
         self._thresholds = thresholds
 
-    def get_thresholds(self) -> Dict[str, float]:
+    def get_thresholds(self) -> dict[str, float]:
         """Get current thresholds."""
         return self._thresholds.copy()
 
 
 # Global scoring engine instance
-_engine: Optional[ScoringEngine] = None
+_engine: ScoringEngine | None = None
 
 
 def get_scoring_engine() -> ScoringEngine:
@@ -256,12 +256,12 @@ def get_scoring_engine() -> ScoringEngine:
 
 
 def compute_final_similarity(
-    token_score: Optional[float] = None,
-    ast_score: Optional[float] = None,
-    graph_score: Optional[float] = None,
-    embedding_score: Optional[float] = None,
-    execution_score: Optional[float] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    token_score: float | None = None,
+    ast_score: float | None = None,
+    graph_score: float | None = None,
+    embedding_score: float | None = None,
+    execution_score: float | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> FusionResult:
     """
     Compute final similarity score.

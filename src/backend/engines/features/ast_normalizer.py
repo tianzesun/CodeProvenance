@@ -21,13 +21,12 @@ This approach is robust because obfuscation that changes surface text
 will NOT change the CFG/PDG structure.
 """
 
-from typing import Dict, List, Any, Optional, Tuple, Set
-from pathlib import Path
 import ast
-import re
 import hashlib
-from dataclasses import dataclass, field
+import re
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -37,8 +36,8 @@ class CFGNode:
     node_id: int
     node_type: str
     stmt_hash: str  # Hash of normalized statement
-    predecessors: List[int] = field(default_factory=list)
-    successors: List[int] = field(default_factory=list)
+    predecessors: list[int] = field(default_factory=list)
+    successors: list[int] = field(default_factory=list)
     is_entry: bool = False
     is_exit: bool = False
 
@@ -50,8 +49,8 @@ class PDGNode:
     node_id: int
     variable: str
     definition_line: int
-    uses: List[int] = field(default_factory=list)  # CFGNode IDs
-    dep_from: List[int] = field(default_factory=list)  # PDGNode IDs (data deps)
+    uses: list[int] = field(default_factory=list)  # CFGNode IDs
+    dep_from: list[int] = field(default_factory=list)  # PDGNode IDs (data deps)
 
 
 @dataclass
@@ -59,12 +58,12 @@ class NormalizedProgram:
     """Fully normalized program representation."""
 
     ast_structure_hash: str
-    cfg_nodes: List[CFGNode]
-    cfg_edges: List[Tuple[int, int]]
-    pdg_nodes: List[PDGNode]
-    token_sequence: List[str]
-    function_signatures: List[str]
-    complexity_scores: Dict[str, float]
+    cfg_nodes: list[CFGNode]
+    cfg_edges: list[tuple[int, int]]
+    pdg_nodes: list[PDGNode]
+    token_sequence: list[str]
+    function_signatures: list[str]
+    complexity_scores: dict[str, float]
 
     @property
     def structural_fingerprint(self) -> str:
@@ -92,7 +91,6 @@ class DeadCodeRemover:
 
     def visit(self, node: ast.AST) -> None:
         """Mark dead code nodes."""
-        pass
 
     @staticmethod
     def remove_dead_code(tree: ast.AST) -> ast.AST:
@@ -112,7 +110,7 @@ class DeadCodeRemoverVisitor(ast.NodeTransformer):
             return False  # These are the terminating statements, not dead
         return self._in_dead_code
 
-    def _mark_dead_after(self, body: List[ast.AST]) -> List[ast.AST]:
+    def _mark_dead_after(self, body: list[ast.AST]) -> list[ast.AST]:
         """Remove statements after a return/raise/continue/break."""
         result = []
         for stmt in body:
@@ -190,7 +188,7 @@ class CFGBuilder:
     CFG nodes represent basic blocks; edges represent possible control flow.
     """
 
-    def build(self, tree: ast.AST) -> Tuple[List[CFGNode], List[Tuple[int, int]]]:
+    def build(self, tree: ast.AST) -> tuple[list[CFGNode], list[tuple[int, int]]]:
         """
         Build CFG from AST.
 
@@ -198,8 +196,8 @@ class CFGBuilder:
             (nodes, edges) where edges are (from_id, to_id) tuples
         """
         self._node_counter = 0
-        self._nodes: List[CFGNode] = []
-        self._edges: List[Tuple[int, int]] = []
+        self._nodes: list[CFGNode] = []
+        self._edges: list[tuple[int, int]] = []
 
         entry = self._make_node("Entry", is_entry=True)
         exit_node = self._make_node("Exit", is_exit=True)
@@ -254,12 +252,10 @@ class CFGBuilder:
         if (from_id, to_id) not in self._edges:
             self._edges.append((from_id, to_id))
             for n in self._nodes:
-                if n.node_id == from_id:
-                    if to_id not in n.successors:
-                        n.successors.append(to_id)
-                if n.node_id == to_id:
-                    if from_id not in n.predecessors:
-                        n.predecessors.append(from_id)
+                if n.node_id == from_id and to_id not in n.successors:
+                    n.successors.append(to_id)
+                if n.node_id == to_id and from_id not in n.predecessors:
+                    n.predecessors.append(from_id)
 
     def _build_function_cfg(
         self, func: ast.FunctionDef, entry: CFGNode, exit_node: CFGNode
@@ -292,7 +288,7 @@ class CFGBuilder:
             last_id = exits[-1] if exits else last_id
         self._add_edge(last_id, exit_node.node_id)
 
-    def _build_stmt_cfg(self, stmt: ast.AST, entry_id: int, exit_id: int) -> List[int]:
+    def _build_stmt_cfg(self, stmt: ast.AST, entry_id: int, exit_id: int) -> list[int]:
         """Build CFG for a single statement. Returns list of exit node IDs."""
         if isinstance(stmt, ast.Assign):
             node = self._make_node("Assign", stmt)
@@ -444,15 +440,15 @@ class PDGBuilder:
     which other statement's input).
     """
 
-    def build(self, tree: ast.AST) -> List[PDGNode]:
+    def build(self, tree: ast.AST) -> list[PDGNode]:
         """
         Build PDG from AST.
 
         Returns:
             List of PDGNode with dependency relationships
         """
-        self._pdg_nodes: List[PDGNode] = []
-        self._definitions: Dict[str, List[int]] = defaultdict(
+        self._pdg_nodes: list[PDGNode] = []
+        self._definitions: dict[str, list[int]] = defaultdict(
             list
         )  # var → [PDG node IDs]
         self._node_counter = 0
@@ -527,7 +523,7 @@ class ASTNormalizer:
         self.cfg_builder = CFGBuilder()
         self.pdg_builder = PDGBuilder()
 
-    def normalize(self, source: str) -> Optional[NormalizedProgram]:
+    def normalize(self, source: str) -> NormalizedProgram | None:
         """
         Normalize Python source code.
 
@@ -597,7 +593,7 @@ class ASTNormalizer:
         normalized = Normalizer().visit(ast.parse(ast.dump(tree)))
         return hashlib.sha256(ast.dump(normalized).encode()).hexdigest()
 
-    def _extract_tokens(self, tree: ast.AST) -> List[str]:
+    def _extract_tokens(self, tree: ast.AST) -> list[str]:
         """Extract normalized token sequence."""
         tokens = []
         for node in ast.walk(tree):
@@ -610,7 +606,7 @@ class ASTNormalizer:
                 tokens.append("__STR__")
         return tokens
 
-    def _extract_function_signatures(self, tree: ast.AST) -> List[str]:
+    def _extract_function_signatures(self, tree: ast.AST) -> list[str]:
         """Extract function signatures with normalized names."""
         sigs = []
         for node in ast.walk(tree):
@@ -621,7 +617,7 @@ class ASTNormalizer:
                 sigs.append(f"def({len(arg_types)}args)")
         return sigs
 
-    def _compute_complexity(self, tree: ast.AST) -> Dict[str, float]:
+    def _compute_complexity(self, tree: ast.AST) -> dict[str, float]:
         """Compute cyclomatic and other complexity metrics."""
         counts = {
             "branches": 0,
@@ -676,8 +672,8 @@ class CFGComparator:
             return 0.0
 
         # 1. Node type distribution similarity
-        types1 = set(n.node_type for n in cfg1.cfg_nodes)
-        types2 = set(n.node_type for n in cfg2.cfg_nodes)
+        types1 = {n.node_type for n in cfg1.cfg_nodes}
+        types2 = {n.node_type for n in cfg2.cfg_nodes}
         type_sim = (
             len(types1 & types2) / len(types1 | types2) if (types1 | types2) else 0
         )
@@ -711,7 +707,7 @@ class PDGComparator:
     """Compares two PDGs for data dependency similarity."""
 
     @staticmethod
-    def compare(pdgs1: List[PDGNode], pdgs2: List[PDGNode]) -> float:
+    def compare(pdgs1: list[PDGNode], pdgs2: list[PDGNode]) -> float:
         """
         Compare two PDGs.
 
@@ -739,7 +735,7 @@ class PDGComparator:
 
 
 # Module-level convenience function
-def compare_robust(code1: str, code2: str) -> Dict[str, float]:
+def compare_robust(code1: str, code2: str) -> dict[str, float]:
     """
     Robust code comparison resistant to advanced obfuscation.
 

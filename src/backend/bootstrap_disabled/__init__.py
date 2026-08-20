@@ -16,29 +16,29 @@ Blocked use:
 
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.backend.config.database import DatabaseConfig
-from src.backend.infrastructure.db import DatabaseManager
 from src.backend.domain.models import Base
+from src.backend.infrastructure.db import DatabaseManager
 
 
 class DependencyContainer:
     """Simple dependency injection container."""
 
     def __init__(self):
-        self._services: Dict[str, Any] = {}
+        self._services: dict[str, Any] = {}
         self._initialized = False
 
     def register(self, name: str, service: Any) -> None:
         """Register a service."""
         self._services[name] = service
 
-    def get(self, name: str) -> Optional[Any]:
+    def get(self, name: str) -> Any | None:
         """Get a service by name."""
         return self._services.get(name)
 
@@ -63,7 +63,6 @@ class DependencyContainer:
 
     def _init_config(self) -> None:
         """Initialize configuration."""
-        from src.backend.config.database import DatabaseConfig
 
         self.register("db_config", DatabaseConfig())
 
@@ -77,22 +76,18 @@ class DependencyContainer:
     def _init_repositories(self) -> None:
         """Initialize repositories."""
         # Register repository implementations
-        pass
 
     def _init_services(self) -> None:
         """Initialize application services."""
         # Register service implementations
-        pass
 
     def _init_engines(self) -> None:
         """Initialize detection engines."""
         # Engines are auto-registered via decorators
-        pass
 
     def _init_pipeline(self) -> None:
         """Initialize processing pipeline."""
         # Register pipeline components
-        pass
 
     def shutdown(self) -> None:
         """Shutdown all services."""
@@ -104,7 +99,7 @@ class DependencyContainer:
 
 
 # Global container instance
-_container: Optional[DependencyContainer] = None
+_container: DependencyContainer | None = None
 
 
 def get_container() -> DependencyContainer:
@@ -118,7 +113,7 @@ def get_container() -> DependencyContainer:
     return _container
 
 
-def get_service(name: str) -> Optional[Any]:
+def get_service(name: str) -> Any | None:
     """Get a service from the container."""
     container = get_container()
     return container.get(name)

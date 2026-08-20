@@ -8,13 +8,14 @@ All weights and thresholds are fully configurable from this single source.
 
 from __future__ import annotations
 
-import yaml
-import os
 import logging
-from typing import Dict, Any, Optional, List, Set
+import os
+import time
 from pathlib import Path
 from threading import Lock
-import time
+from typing import Any
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class EngineWeightConfig:
     All hardcoded weights and thresholds have been moved here.
     """
 
-    _instance: Optional[EngineWeightConfig] = None
+    _instance: EngineWeightConfig | None = None
     _lock = Lock()
 
     DEFAULT_CONFIG_PATH = Path(__file__).parent / "engine_weights.yaml"
@@ -42,14 +43,14 @@ class EngineWeightConfig:
                 cls._instance = EngineWeightConfig()
             return cls._instance
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         self.config_path = config_path or self.DEFAULT_CONFIG_PATH
-        self._config: Dict[str, Any] = {}
+        self._config: dict[str, Any] = {}
         self._last_load_time = 0.0
         self._last_modified_time = 0.0
 
         # Valid engine names for validation
-        self.valid_engines: Set[str] = {
+        self.valid_engines: set[str] = {
             "ast",
             "token",
             "winnowing",
@@ -203,7 +204,7 @@ class EngineWeightConfig:
         self._normalize_weights()
 
     @property
-    def weights(self) -> Dict[str, float]:
+    def weights(self) -> dict[str, float]:
         """Get normalized engine weights."""
         self.reload_if_changed()
         return self._config["weights"].copy()
@@ -214,36 +215,36 @@ class EngineWeightConfig:
         return self._config["weights"].get(engine, default)
 
     @property
-    def deep_verify_thresholds(self) -> Dict[str, Any]:
+    def deep_verify_thresholds(self) -> dict[str, Any]:
         """Get DeepVerify thresholds configuration."""
         self.reload_if_changed()
         return self._config.get("deep_verify", {})
 
     @property
-    def precision_guard(self) -> Dict[str, Any]:
+    def precision_guard(self) -> dict[str, Any]:
         """Get precision guard configuration."""
         self.reload_if_changed()
         return self._config.get("precision_guard", {})
 
     @property
-    def baselines(self) -> Dict[str, float]:
+    def baselines(self) -> dict[str, float]:
         """Get baseline correction values."""
         self.reload_if_changed()
         return self._config.get("baseline_correction", {}).get("baselines", {})
 
     @property
-    def decision_thresholds(self) -> Dict[str, Any]:
+    def decision_thresholds(self) -> dict[str, Any]:
         """Get decision thresholds."""
         self.reload_if_changed()
         return self._config.get("decision", {})
 
     @property
-    def classification_thresholds(self) -> Dict[str, float]:
+    def classification_thresholds(self) -> dict[str, float]:
         """Get similarity classification thresholds."""
         self.reload_if_changed()
         return self._config.get("thresholds", {})
 
-    def update_weights(self, new_weights: Dict[str, float]) -> None:
+    def update_weights(self, new_weights: dict[str, float]) -> None:
         """
         Update engine weights at runtime and persist to config file.
 
@@ -263,13 +264,13 @@ class EngineWeightConfig:
 
             logger.info("Engine weights updated and persisted")
 
-    def get_enabled_engines(self) -> List[str]:
+    def get_enabled_engines(self) -> list[str]:
         """Get list of engines with non-zero weight."""
         return [engine for engine, weight in self.weights.items() if weight > 0.001]
 
 
 # Convenience accessors
-def get_engine_weights() -> Dict[str, float]:
+def get_engine_weights() -> dict[str, float]:
     """Get current normalized engine weights."""
     return EngineWeightConfig.get_instance().weights
 
@@ -279,6 +280,6 @@ def get_engine_weight(engine: str, default: float = 0.0) -> float:
     return EngineWeightConfig.get_instance().get_weight(engine, default)
 
 
-def get_deep_verify_config() -> Dict[str, Any]:
+def get_deep_verify_config() -> dict[str, Any]:
     """Get DeepVerify configuration."""
     return EngineWeightConfig.get_instance().deep_verify_thresholds

@@ -16,15 +16,17 @@ Usage:
     report = analyzer.analyze(results, ground_truth, dataset)
     print(report.summary())
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 @dataclass
 class FailureCase:
     """A single failure case with details."""
+
     id: str
     code_a: str
     code_b: str
@@ -41,15 +43,17 @@ class FailureCase:
 @dataclass
 class FailureCategory:
     """Aggregated statistics for a failure category."""
+
     name: str
     count: int = 0
     avg_score: float = 0.0
-    examples: List[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
 
 
 @dataclass
 class FailureReport:
     """Complete failure analysis report."""
+
     engine_name: str
     dataset_name: str
     threshold: float
@@ -61,28 +65,28 @@ class FailureReport:
     precision: float = 0.0
     recall: float = 0.0
     f1: float = 0.0
-    
+
     # Failure breakdown by clone type
-    failures_by_type: Dict[str, FailureCategory] = field(default_factory=dict)
-    
+    failures_by_type: dict[str, FailureCategory] = field(default_factory=dict)
+
     # Failure breakdown by characteristic
-    failures_by_characteristic: Dict[str, FailureCategory] = field(default_factory=dict)
-    
+    failures_by_characteristic: dict[str, FailureCategory] = field(default_factory=dict)
+
     # Detailed failure cases
-    failure_cases: List[FailureCase] = field(default_factory=list)
-    
+    failure_cases: list[FailureCase] = field(default_factory=list)
+
     # Recommendations
-    recommendations: List[str] = field(default_factory=list)
-    
+    recommendations: list[str] = field(default_factory=list)
+
     def summary(self) -> str:
         """Generate human-readable summary.
-        
+
         Returns:
             Summary string.
         """
         lines = [
             "=" * 70,
-            f"FAILURE ANALYSIS REPORT",
+            "FAILURE ANALYSIS REPORT",
             f"Engine: {self.engine_name}",
             f"Dataset: {self.dataset_name}",
             f"Threshold: {self.threshold:.2f}",
@@ -100,20 +104,22 @@ class FailureReport:
             "",
             "FAILURE RATE BREAKDOWN:",
         ]
-        
+
         total_errors = self.false_positives + self.false_negatives
         if total_errors > 0:
             fp_pct = self.false_positives / total_errors * 100
             fn_pct = self.false_negatives / total_errors * 100
-            lines.extend([
-                f"  False Positives: {self.false_positives} ({fp_pct:.1f}%)",
-                f"  False Negatives: {self.false_negatives} ({fn_pct:.1f}%)",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"  False Positives: {self.false_positives} ({fp_pct:.1f}%)",
+                    f"  False Negatives: {self.false_negatives} ({fn_pct:.1f}%)",
+                    "",
+                ]
+            )
         else:
             lines.append("  No errors found!")
             lines.append("")
-        
+
         if self.failures_by_type:
             lines.append("FAILURES BY CLONE TYPE:")
             for name, cat in self.failures_by_type.items():
@@ -121,7 +127,7 @@ class FailureReport:
                     f"  {name}: {cat.count} cases (avg score: {cat.avg_score:.4f})"
                 )
             lines.append("")
-        
+
         if self.failures_by_characteristic:
             lines.append("FAILURES BY CHARACTERISTIC:")
             for name, cat in self.failures_by_characteristic.items():
@@ -129,20 +135,20 @@ class FailureReport:
                     f"  {name}: {cat.count} cases (avg score: {cat.avg_score:.4f})"
                 )
             lines.append("")
-        
+
         if self.recommendations:
             lines.append("RECOMMENDATIONS:")
             for i, rec in enumerate(self.recommendations, 1):
                 lines.append(f"  {i}. {rec}")
             lines.append("")
-        
+
         lines.append("=" * 70)
         return "\n".join(lines)
 
 
 class FailureAnalyzer:
     """Analyze benchmark failures to guide detector improvement.
-    
+
     Usage:
         analyzer = FailureAnalyzer()
         report = analyzer.analyze(
@@ -153,22 +159,22 @@ class FailureAnalyzer:
         )
         print(report.summary())
     """
-    
+
     def analyze(
         self,
         engine_name: str,
         dataset_name: str,
-        results: List[Tuple[float, int, int, str, str]],
+        results: list[tuple[float, int, int, str, str]],
         threshold: float = 0.5,
     ) -> FailureReport:
         """Analyze failures from benchmark results.
-        
+
         Args:
             engine_name: Name of the engine being analyzed.
             dataset_name: Name of the dataset.
             results: List of (score, label, clone_type, code_a, code_b).
             threshold: Decision threshold used.
-            
+
         Returns:
             FailureReport with analysis.
         """
@@ -177,19 +183,19 @@ class FailureAnalyzer:
             dataset_name=dataset_name,
             threshold=threshold,
         )
-        
+
         total = len(results)
         report.total_cases = total
-        
+
         tp = fp = tn = fn = 0
-        failure_cases: List[FailureCase] = []
-        tp_by_type: Dict[int, int] = {}
-        fn_by_type: Dict[int, int] = {}
-        fp_by_type: Dict[int, int] = {}
-        
+        failure_cases: list[FailureCase] = []
+        tp_by_type: dict[int, int] = {}
+        fn_by_type: dict[int, int] = {}
+        fp_by_type: dict[int, int] = {}
+
         for i, (score, label, clone_type, code_a, code_b) in enumerate(results):
             predicted = 1 if score >= threshold else 0
-            
+
             if predicted == 1 and label == 1:
                 tp += 1
                 tp_by_type[clone_type] = tp_by_type.get(clone_type, 0) + 1
@@ -198,51 +204,54 @@ class FailureAnalyzer:
             elif predicted == 1 and label == 0:
                 fp += 1
                 fp_by_type[clone_type] = fp_by_type.get(clone_type, 0) + 1
-                failure_cases.append(FailureCase(
-                    id=f"case_{i:05d}",
-                    code_a=code_a,
-                    code_b=code_b,
-                    true_label=label,
-                    predicted_label=predicted,
-                    score=score,
-                    threshold=threshold,
-                    clone_type=clone_type,
-                    engine_name=engine_name,
-                    failure_mode="false_positive",
-                    category=self._classify_fp(score),
-                ))
+                failure_cases.append(
+                    FailureCase(
+                        id=f"case_{i:05d}",
+                        code_a=code_a,
+                        code_b=code_b,
+                        true_label=label,
+                        predicted_label=predicted,
+                        score=score,
+                        threshold=threshold,
+                        clone_type=clone_type,
+                        engine_name=engine_name,
+                        failure_mode="false_positive",
+                        category=self._classify_fp(score),
+                    )
+                )
             else:  # predicted == 0 and label == 1
                 fn += 1
                 fn_by_type[clone_type] = fn_by_type.get(clone_type, 0) + 1
-                failure_cases.append(FailureCase(
-                    id=f"case_{i:05d}",
-                    code_a=code_a,
-                    code_b=code_b,
-                    true_label=label,
-                    predicted_label=predicted,
-                    score=score,
-                    threshold=threshold,
-                    clone_type=clone_type,
-                    engine_name=engine_name,
-                    failure_mode="false_negative",
-                    category=self._classify_fn(clone_type),
-                ))
-        
+                failure_cases.append(
+                    FailureCase(
+                        id=f"case_{i:05d}",
+                        code_a=code_a,
+                        code_b=code_b,
+                        true_label=label,
+                        predicted_label=predicted,
+                        score=score,
+                        threshold=threshold,
+                        clone_type=clone_type,
+                        engine_name=engine_name,
+                        failure_mode="false_negative",
+                        category=self._classify_fn(clone_type),
+                    )
+                )
+
         report.true_positives = tp
         report.true_negatives = tn
         report.false_positives = fp
         report.false_negatives = fn
-        
+
         # Calculate metrics
         report.precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         report.recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         report.f1 = (
-            2 * report.precision * report.recall
-            / (report.precision + report.recall)
+            2 * report.precision * report.recall / (report.precision + report.recall)
             if (report.precision + report.recall) > 0
             else 0.0
         )
-        
+
         # Build failure breakdown by clone type
         clone_type_names = {
             0: "non_clone",
@@ -251,7 +260,7 @@ class FailureAnalyzer:
             3: "type3_restructured",
             4: "type4_semantic",
         }
-        
+
         for ctype in range(5):
             fn_count = fn_by_type.get(ctype, 0)
             fp_count = fp_by_type.get(ctype, 0)
@@ -262,11 +271,11 @@ class FailureAnalyzer:
                     count=fn_count + fp_count,
                     avg_score=0.0,  # Would need to compute from cases
                 )
-        
+
         # Build failure breakdown by characteristic
         fp_cases = [c for c in failure_cases if c.failure_mode == "false_positive"]
         fn_cases = [c for c in failure_cases if c.failure_mode == "false_negative"]
-        
+
         if fp_cases:
             report.failures_by_characteristic["structural_sim_no_clone"] = (
                 FailureCategory(
@@ -274,24 +283,24 @@ class FailureAnalyzer:
                     count=len(fp_cases),
                     avg_score=(
                         sum(c.score for c in fp_cases) / len(fp_cases)
-                        if fp_cases else 0.0
+                        if fp_cases
+                        else 0.0
                     ),
                 )
             )
-        
+
         if fn_cases:
             t2_fn = [c for c in fn_cases if c.clone_type == 2]
             t3_fn = [c for c in fn_cases if c.clone_type == 3]
             t4_fn = [c for c in fn_cases if c.clone_type == 4]
-            
+
             if t2_fn:
                 report.failures_by_characteristic["rename_not_detected"] = (
                     FailureCategory(
                         name="rename_not_detected",
                         count=len(t2_fn),
                         avg_score=(
-                            sum(c.score for c in t2_fn) / len(t2_fn)
-                            if t2_fn else 0.0
+                            sum(c.score for c in t2_fn) / len(t2_fn) if t2_fn else 0.0
                         ),
                     )
                 )
@@ -301,8 +310,7 @@ class FailureAnalyzer:
                         name="restructure_not_detected",
                         count=len(t3_fn),
                         avg_score=(
-                            sum(c.score for c in t3_fn) / len(t3_fn)
-                            if t3_fn else 0.0
+                            sum(c.score for c in t3_fn) / len(t3_fn) if t3_fn else 0.0
                         ),
                     )
                 )
@@ -312,23 +320,22 @@ class FailureAnalyzer:
                         name="semantic_not_detected",
                         count=len(t4_fn),
                         avg_score=(
-                            sum(c.score for c in t4_fn) / len(t4_fn)
-                            if t4_fn else 0.0
+                            sum(c.score for c in t4_fn) / len(t4_fn) if t4_fn else 0.0
                         ),
                     )
                 )
-        
+
         report.failure_cases = failure_cases
         report.recommendations = self._generate_recommendations(report)
-        
+
         return report
-    
+
     def _classify_fp(self, score: float) -> str:
         """Classify false positive by score characteristics.
-        
+
         Args:
             score: Similarity score.
-            
+
         Returns:
             Classification string.
         """
@@ -338,13 +345,13 @@ class FailureAnalyzer:
             return "moderate_structural_overlap"
         else:
             return "minimal_overlap_false_alarm"
-    
+
     def _classify_fn(self, clone_type: int) -> str:
         """Classify false negative by clone type.
-        
+
         Args:
             clone_type: Clone type (1-4).
-            
+
         Returns:
             Classification string.
         """
@@ -355,18 +362,18 @@ class FailureAnalyzer:
             4: "failed_semantic_detection",
         }
         return classification.get(clone_type, "unknown_failure")
-    
-    def _generate_recommendations(self, report: FailureReport) -> List[str]:
+
+    def _generate_recommendations(self, report: FailureReport) -> list[str]:
         """Generate improvement recommendations based on analysis.
-        
+
         Args:
             report: FailureReport to analyze.
-            
+
         Returns:
             List of recommendation strings.
         """
-        recommendations: List[str] = []
-        
+        recommendations: list[str] = []
+
         # Type-specific recommendations
         for name, cat in report.failures_by_characteristic.items():
             if "rename" in name and cat.count > 0:
@@ -384,7 +391,7 @@ class FailureAnalyzer:
                     f"Improve semantic detection: {cat.count} semantic clones missed. "
                     f"Consider using ML-based embeddings or data flow analysis."
                 )
-        
+
         # General recommendations
         if report.false_positives > report.false_negatives:
             recommendations.append(
@@ -396,7 +403,7 @@ class FailureAnalyzer:
                 f"High false negative rate ({report.false_negatives}). "
                 f"Consider lowering the similarity threshold or adding more lenient matching."
             )
-        
+
         # Engine-specific recommendations
         if report.engine_name.startswith("token"):
             recommendations.append(
@@ -408,34 +415,34 @@ class FailureAnalyzer:
                 "AST-based engines may miss non-structural similarities. "
                 "Consider enriching with token-based features."
             )
-        
+
         if not recommendations:
             recommendations.append(
                 "No specific recommendations. The detector is performing well."
             )
-        
+
         return recommendations
 
 
-def failure_to_improvement_map(report: FailureReport) -> Dict[str, Any]:
+def failure_to_improvement_map(report: FailureReport) -> dict[str, Any]:
     """Map failure patterns to specific engine improvement targets.
-    
+
     This function translates failure analysis into concrete action items.
-    
+
     Args:
         report: Failure report from analysis.
-        
+
     Returns:
         Dictionary mapping improvement target to details.
     """
-    improvements: Dict[str, Any] = {
+    improvements: dict[str, Any] = {
         "engine": report.engine_name,
-        "priority": "high" if report.f1 < 0.7 else (
-            "medium" if report.f1 < 0.85 else "low"
+        "priority": (
+            "high" if report.f1 < 0.7 else ("medium" if report.f1 < 0.85 else "low")
         ),
         "targets": [],
     }
-    
+
     # Map failure types to engine components
     failure_target_map = {
         "rename_not_detected": {
@@ -455,15 +462,17 @@ def failure_to_improvement_map(report: FailureReport) -> Dict[str, Any]:
             "action": "remove_common_patterns",
         },
     }
-    
+
     for fail_name, cat in report.failures_by_characteristic.items():
         if cat.count > 0:
             target = failure_target_map.get(fail_name, {})
             if target:
-                improvements["targets"].append({
-                    **target,
-                    "failure_count": cat.count,
-                    "avg_score": cat.avg_score,
-                })
-    
+                improvements["targets"].append(
+                    {
+                        **target,
+                        "failure_count": cat.count,
+                        "avg_score": cat.avg_score,
+                    }
+                )
+
     return improvements

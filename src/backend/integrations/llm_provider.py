@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 import httpx
 
@@ -59,7 +60,7 @@ class LLMProvider:
         api_key: str,
         model: str,
         base_url: str,
-        transport: Optional[httpx.AsyncBaseTransport] = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 60.0,
     ) -> None:
         normalized = str(provider or "").strip().lower()
@@ -85,7 +86,7 @@ class LLMProvider:
     async def complete(
         self,
         prompt: str,
-        system: Optional[str] = None,
+        system: str | None = None,
         max_tokens: int = 500,
         temperature: float = 0.2,
     ) -> str:
@@ -104,7 +105,7 @@ class LLMProvider:
         except httpx.HTTPError as exc:
             raise LLMError(f"{self.provider} API request failed: {exc}") from exc
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self) -> dict[str, Any]:
         """Verify the configured key/model actually work with a trivial prompt."""
         started = time.monotonic()
         try:
@@ -130,15 +131,15 @@ class LLMProvider:
     async def _openai_chat(
         self,
         prompt: str,
-        system: Optional[str],
+        system: str | None,
         max_tokens: int,
         temperature: float,
     ) -> str:
-        messages: list[Dict[str, str]] = []
+        messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
@@ -162,11 +163,11 @@ class LLMProvider:
     async def _anthropic_messages(
         self,
         prompt: str,
-        system: Optional[str],
+        system: str | None,
         max_tokens: int,
         temperature: float,
     ) -> str:
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -193,7 +194,7 @@ class LLMProvider:
             raise LLMError(f"Unexpected Anthropic response: {str(data)[:200]}")
         return text.strip()
 
-    def _client(self, headers: Dict[str, str]) -> httpx.AsyncClient:
+    def _client(self, headers: dict[str, str]) -> httpx.AsyncClient:
         """Build an async client; transport is only used to mock in tests."""
         return httpx.AsyncClient(
             headers=headers,
@@ -273,7 +274,7 @@ def _heuristic_summary(features: Mapping[str, float]) -> str:
 
 def resolve_provider_config(
     provider: str = "openai",
-    api_key_override: Optional[str] = None,
+    api_key_override: str | None = None,
 ) -> LLMProviderConfig:
     """Resolve a provider config from settings (optionally overriding the key).
 
@@ -308,9 +309,9 @@ def resolve_provider_config(
 
 async def test_provider_connection(
     provider: str = "openai",
-    api_key_override: Optional[str] = None,
-    transport: Optional[httpx.AsyncBaseTransport] = None,
-) -> Dict[str, Any]:
+    api_key_override: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
     """Test a configured provider and return a professor-facing result."""
     try:
         config = resolve_provider_config(provider, api_key_override)
@@ -341,12 +342,12 @@ async def summarize_pair_evidence(
     code_b: str,
     features: Mapping[str, float],
     provider: str = "openai",
-    api_key_override: Optional[str] = None,
+    api_key_override: str | None = None,
     file_a: str = "file_a",
     file_b: str = "file_b",
     task: str = "evidence",
-    transport: Optional[httpx.AsyncBaseTransport] = None,
-) -> Dict[str, Any]:
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
     """Summarize a pair with the LLM, or fall back to a heuristic summary.
 
     Args:

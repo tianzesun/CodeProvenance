@@ -11,11 +11,10 @@ Key Design Principles:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import yaml
 
@@ -30,16 +29,16 @@ class PolicyRule:
 
     id: str
     priority: int
-    condition: Dict[str, Any]
+    condition: dict[str, Any]
     verdict: str
     confidence: float
     reason: str
 
-    def matches(self, evidence: Dict[str, Any]) -> bool:
+    def matches(self, evidence: dict[str, Any]) -> bool:
         """Check if this rule's condition matches the evidence."""
         return self._evaluate_condition(self.condition, evidence)
 
-    def _evaluate_condition(self, condition: Any, evidence: Dict[str, Any]) -> bool:
+    def _evaluate_condition(self, condition: Any, evidence: dict[str, Any]) -> bool:
         """Recursively evaluate a condition against evidence."""
         if isinstance(condition, bool):
             return condition
@@ -74,14 +73,12 @@ class PolicyRule:
                 elif isinstance(value, str) and value.startswith("<="):
                     threshold = float(value[2:])
                     return evidence_value <= threshold
-                elif isinstance(value, bool):
-                    return evidence_value == value
-                elif isinstance(value, (int, float)):
+                elif isinstance(value, (bool, int, float)):
                     return evidence_value == value
 
         return False
 
-    def _get_evidence_value(self, key: str, evidence: Dict[str, Any]) -> float:
+    def _get_evidence_value(self, key: str, evidence: dict[str, Any]) -> float:
         """Get evidence value for a key, with fallbacks for aliases."""
         # Direct lookup
         if key in evidence:
@@ -117,11 +114,11 @@ class PolicyDecision:
     verdict: str
     confidence: float
     reason: str
-    decision_path: List[str] = field(default_factory=list)
-    matched_rule: Optional[str] = None
-    raw_evidence: Dict[str, Any] = field(default_factory=dict)
+    decision_path: list[str] = field(default_factory=list)
+    matched_rule: str | None = None
+    raw_evidence: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "verdict": self.verdict,
@@ -140,7 +137,7 @@ class PolicyEngine:
     First matching rule wins.
     """
 
-    def __init__(self, policy_path: Optional[Path] = None):
+    def __init__(self, policy_path: Path | None = None):
         """
         Initialize PolicyEngine with optional custom policy path.
 
@@ -152,7 +149,7 @@ class PolicyEngine:
         self.rules = self._parse_rules()
         self.version = self.config.get("version", "1.0")
 
-    def _load_policy(self) -> Dict[str, Any]:
+    def _load_policy(self) -> dict[str, Any]:
         """Load policy configuration from YAML file."""
         if not self.policy_path.exists():
             logger.warning(f"Policy file not found: {self.policy_path}, using defaults")
@@ -165,7 +162,7 @@ class PolicyEngine:
             logger.error(f"Failed to load policy: {e}")
             return self._default_policy()
 
-    def _default_policy(self) -> Dict[str, Any]:
+    def _default_policy(self) -> dict[str, Any]:
         """Return default policy configuration."""
         return {
             "version": "1.0",
@@ -201,7 +198,7 @@ class PolicyEngine:
             },
         }
 
-    def _parse_rules(self) -> List[PolicyRule]:
+    def _parse_rules(self) -> list[PolicyRule]:
         """Parse rules from configuration."""
         rules = []
         raw_rules = self.config.get("rules", {})
@@ -226,8 +223,8 @@ class PolicyEngine:
         layer1_value: float,
         layer2_value: float,
         layer3_value: float,
-        evidence: Dict[str, Any],
-        audit_info: Optional[Dict[str, Any]] = None,
+        evidence: dict[str, Any],
+        audit_info: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         """
         Evaluate evidence against policy rules.
@@ -280,7 +277,7 @@ class PolicyEngine:
             **evidence,
         }
 
-        decision_path: List[str] = []
+        decision_path: list[str] = []
 
         for rule in self.rules:
             if rule.matches(evaluation_evidence):
@@ -306,8 +303,8 @@ class PolicyEngine:
         )
 
     def get_audit_record(
-        self, decision: PolicyDecision, audit_info: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, decision: PolicyDecision, audit_info: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """
         Generate a complete audit record for the decision.
 

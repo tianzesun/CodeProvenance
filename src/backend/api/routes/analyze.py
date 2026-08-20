@@ -5,23 +5,24 @@ Provides REST API for submitting code for plagiarism analysis,
 retrieving results, and managing webhook notifications.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
-import uuid
-import time
-from datetime import datetime, timezone
 
+from src.backend.api.middleware.auth import get_current_tenant
+from src.backend.api.middleware.rate_limit import RateLimiter
 from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import Job, SimilarityResult
 from src.backend.utils.database import (
     JobService,
-    SubmissionService,
     SimilarityResultService,
+    SubmissionService,
 )
-from src.backend.api.middleware.rate_limit import RateLimiter
-from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
@@ -30,11 +31,11 @@ rate_limiter = RateLimiter()
 
 
 @router.post(
-    "/v1/analyze", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED
+    "/v1/analyze", response_model=dict[str, Any], status_code=status.HTTP_201_CREATED
 )
 async def analyze_submissions(
     request: Request,
-    analysis_data: Dict[str, Any],
+    analysis_data: dict[str, Any],
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -148,7 +149,7 @@ async def analyze_submissions(
     }
 
 
-@router.get("/v1/jobs/{job_id}", response_model=Dict[str, Any])
+@router.get("/v1/jobs/{job_id}", response_model=dict[str, Any])
 async def get_job_status(
     job_id: uuid.UUID, request: Request, db: Session = Depends(get_db)
 ):
@@ -215,11 +216,11 @@ async def get_job_status(
     }
 
 
-@router.get("/v1/jobs/{job_id}/results", response_model=List[Dict[str, Any]])
+@router.get("/v1/jobs/{job_id}/results", response_model=list[dict[str, Any]])
 async def get_job_results(
     job_id: uuid.UUID,
     request: Request,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     limit: int = 1000,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -287,7 +288,7 @@ async def get_job_results(
     return formatted_results
 
 
-@router.get("/v1/jobs/{job_id}/report", response_model=Dict[str, Any])
+@router.get("/v1/jobs/{job_id}/report", response_model=dict[str, Any])
 async def get_job_report(
     job_id: uuid.UUID,
     request: Request,
@@ -335,7 +336,7 @@ async def get_job_report(
     }
 
 
-@router.get("/v1/usage", response_model=Dict[str, Any])
+@router.get("/v1/usage", response_model=dict[str, Any])
 async def get_api_usage(request: Request, db: Session = Depends(get_db)):
     """
     Get API usage statistics for the current tenant.

@@ -1,13 +1,12 @@
 """Plugin registry - single source of truth for execution plugins."""
 
-from typing import Dict
 from engines.registry.plugin_base import ExecutionPlugin
 
 
 class PluginRegistry:
     """Registry for execution plugins."""
 
-    _plugins: Dict[str, ExecutionPlugin] = {}
+    _plugins: dict[str, ExecutionPlugin] = {}
 
     @classmethod
     def register(cls, plugin: ExecutionPlugin) -> None:

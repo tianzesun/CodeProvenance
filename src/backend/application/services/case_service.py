@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
 
-from sqlalchemy import select, desc, or_
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from src.backend.models.database import Case, CaseResultLink, CaseComment
 from src.backend.application.services.timeline_service import (
-    TimelineService,
     TimelineEventType,
+    TimelineService,
 )
+from src.backend.models.database import Case, CaseComment, CaseResultLink
 
 
 class CaseStatus(str):
@@ -45,8 +45,8 @@ class CaseService:
         self,
         organization_id: uuid.UUID,
         title: str,
-        assignment_id: Optional[uuid.UUID] = None,
-        created_by_id: Optional[uuid.UUID] = None,
+        assignment_id: uuid.UUID | None = None,
+        created_by_id: uuid.UUID | None = None,
         priority: str = "MEDIUM",
     ) -> Case:
         """Create a new investigation case."""
@@ -76,7 +76,7 @@ class CaseService:
 
         return case
 
-    def get_case(self, case_id: uuid.UUID) -> Optional[Case]:
+    def get_case(self, case_id: uuid.UUID) -> Case | None:
         """Get a case by ID."""
         result = self.db.execute(select(Case).where(Case.id == case_id))
         return result.scalar_one_or_none()
@@ -84,9 +84,9 @@ class CaseService:
     def get_cases_by_organization(
         self,
         organization_id: uuid.UUID,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 100,
-    ) -> List[Case]:
+    ) -> list[Case]:
         """Get cases for an organization, optionally filtered by status."""
         query = select(Case).where(Case.organization_id == organization_id)
         if status:
@@ -167,7 +167,7 @@ class CaseService:
         self,
         case_id: uuid.UUID,
         status: str,
-        user_id: Optional[uuid.UUID] = None,
+        user_id: uuid.UUID | None = None,
     ) -> Case:
         """Update case status."""
         case = self.get_case(case_id)
@@ -188,7 +188,7 @@ class CaseService:
             )
         return case
 
-    def get_case_with_results(self, case_id: uuid.UUID) -> Dict[str, Any]:
+    def get_case_with_results(self, case_id: uuid.UUID) -> dict[str, Any]:
         """Get a case with all linked results and comments."""
         case = self.get_case(case_id)
         if not case:

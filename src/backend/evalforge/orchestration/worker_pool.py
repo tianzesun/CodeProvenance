@@ -5,10 +5,10 @@ Manages pool of worker processes for local parallel execution.
 Supports process isolation for safe tool execution.
 """
 
-from typing import List, Dict, Any, Callable
+import logging
 import multiprocessing
 import queue
-import logging
+from collections.abc import Callable
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -17,14 +17,14 @@ logger = logging.getLogger(__name__)
 class WorkerPool:
     """
     Local process pool executor for benchmark jobs.
-    
+
     Each worker runs in an isolated process to prevent cross-contamination
     between tool executions.
     """
 
     def __init__(self, num_workers: int = 8):
         self.num_workers = num_workers
-        self.workers: List[multiprocessing.Process] = []
+        self.workers: list[multiprocessing.Process] = []
         self._running = False
 
     def start(self, job_queue: queue.Queue, result_callback: Callable) -> None:
@@ -35,7 +35,7 @@ class WorkerPool:
             worker = multiprocessing.Process(
                 target=self._worker_loop,
                 args=(i, job_queue, result_callback),
-                daemon=True
+                daemon=True,
             )
             worker.start()
             self.workers.append(worker)
@@ -50,9 +50,7 @@ class WorkerPool:
 
     @staticmethod
     def _worker_loop(
-        worker_id: int,
-        job_queue: queue.Queue,
-        result_callback: Callable
+        worker_id: int, job_queue: queue.Queue, result_callback: Callable
     ) -> None:
         """Main worker execution loop."""
         while True:
@@ -68,6 +66,7 @@ class WorkerPool:
 
                 # Import executor dynamically to avoid circular imports
                 from .executor import JobExecutor
+
                 result = JobExecutor.execute(job)
 
                 job["result"] = result

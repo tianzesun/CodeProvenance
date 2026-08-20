@@ -7,13 +7,13 @@ Phase 1 features:
 - Basic report (which pairs scored above threshold)
 """
 
+import json
 import logging
 import re
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,11 @@ class ComparisonResult:
     file_b: str
     score: float
     risk_level: str
-    features: Dict[str, float] = field(default_factory=dict)
-    contributions: Dict[str, float] = field(default_factory=dict)
-    matching_blocks: List[Dict[str, Any]] = field(default_factory=list)
-    code_a: Optional[str] = None
-    code_b: Optional[str] = None
+    features: dict[str, float] = field(default_factory=dict)
+    contributions: dict[str, float] = field(default_factory=dict)
+    matching_blocks: list[dict[str, Any]] = field(default_factory=list)
+    code_a: str | None = None
+    code_b: str | None = None
 
 
 def _risk_level(score: float) -> str:
@@ -52,7 +52,7 @@ def _risk_level(score: float) -> str:
     return "LOW"
 
 
-def _logic_flow_tokens(code: str) -> List[str]:
+def _logic_flow_tokens(code: str) -> list[str]:
     """Extract identifier-insensitive control and operator tokens from source code."""
     code = _strip_comments(code)
     raw_tokens = re.findall(
@@ -105,7 +105,7 @@ def _strip_comments(code: str) -> str:
     return code
 
 
-def _multiset_jaccard(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _multiset_jaccard(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Calculate multiset Jaccard similarity for two token streams."""
     if not tokens_a and not tokens_b:
         return 1.0
@@ -126,7 +126,7 @@ def _logic_flow_similarity(code_a: str, code_b: str) -> float:
     return _multiset_jaccard(_logic_flow_tokens(code_a), _logic_flow_tokens(code_b))
 
 
-def _clean_similarity_baseline(scores: List[float]) -> float:
+def _clean_similarity_baseline(scores: list[float]) -> float:
     """Estimate normal similarity from labeled clean pairs."""
     if not scores:
         return 0.0
@@ -169,12 +169,12 @@ class BatchDetectionService:
     def __init__(
         self,
         threshold: float = 0.5,
-        weights: Optional[Dict[str, float]] = None,
-        starter_sources: Optional[List[str]] = None,
+        weights: dict[str, float] | None = None,
+        starter_sources: list[str] | None = None,
     ):
+        from src.backend.domain.decision import DecisionEngine
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
-        from src.backend.domain.decision import DecisionEngine
 
         self.extractor = FeatureExtractor()
         self.fusion = FusionEngine(weights=weights)
@@ -187,7 +187,7 @@ class BatchDetectionService:
 
             self.starter_remover = StarterCodeRemover(starter_sources)
 
-    def ingest_folder(self, folder: Path) -> Dict[str, str]:
+    def ingest_folder(self, folder: Path) -> dict[str, str]:
         """Read all code files from a folder.
 
         Returns: {"filename.py": "code content", ...}
@@ -219,7 +219,7 @@ class BatchDetectionService:
                     )
         return submissions
 
-    def compare_all_pairs(self, submissions: Dict[str, str]) -> List[ComparisonResult]:
+    def compare_all_pairs(self, submissions: dict[str, str]) -> list[ComparisonResult]:
         """Compare all pairs of submissions and return ranked results."""
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
@@ -289,8 +289,8 @@ class BatchDetectionService:
         return results
 
     def compare_pairs(
-        self, submissions: Dict[str, str], pairs: List[Dict[str, Any]]
-    ) -> List[ComparisonResult]:
+        self, submissions: dict[str, str], pairs: list[dict[str, Any]]
+    ) -> list[ComparisonResult]:
         """Compare an explicit set of labeled benchmark pairs."""
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
@@ -397,7 +397,7 @@ class BatchDetectionService:
         results.sort(key=lambda x: x.score, reverse=True)
         return results
 
-    def generate_report(self, results: List[ComparisonResult]) -> Dict[str, Any]:
+    def generate_report(self, results: list[ComparisonResult]) -> dict[str, Any]:
         """Generate basic report with suspicious pairs above threshold."""
         suspicious = [r for r in results if r.score >= self.threshold]
         total = len(results)
@@ -424,7 +424,7 @@ class BatchDetectionService:
             ],
         }
 
-    def run_analysis(self, folder: Path, save_to: Path = None) -> Dict[str, Any]:
+    def run_analysis(self, folder: Path, save_to: Path | None = None) -> dict[str, Any]:
         """Full pipeline: ingest -> compare -> report."""
         submissions = self.ingest_folder(folder)
         results = self.compare_all_pairs(submissions)

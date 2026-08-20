@@ -16,11 +16,7 @@ Exit codes:
 """
 
 import ast
-import os
-import sys
 from pathlib import Path
-from collections import defaultdict
-
 
 # ============================================================================
 # ARCHITECTURE LAYER DEFINITION (Non-Negotiable)
@@ -29,59 +25,68 @@ from collections import defaultdict
 LAYER_RULES = {
     "domain": {
         "allow": ["domain"],  # Pure - imports NOTHING external
-        "deny": ["api", "application", "infrastructure", "engines", "web", "workers", "ml", "evaluation"],
-        "description": "King Layer - Pure business rules, NO external imports"
+        "deny": [
+            "api",
+            "application",
+            "infrastructure",
+            "engines",
+            "web",
+            "workers",
+            "ml",
+            "evaluation",
+        ],
+        "description": "King Layer - Pure business rules, NO external imports",
     },
     "core": {
         "allow": ["domain", "core"],
         "deny": ["api", "application", "infrastructure", "web", "workers"],
-        "description": "Algorithms, IR, graph logic"
+        "description": "Algorithms, IR, graph logic",
     },
     "engines": {
         "allow": ["domain", "core", "engines"],
         "deny": ["api", "web", "workers"],
-        "description": "Computation layer - controlled access only"
+        "description": "Computation layer - controlled access only",
     },
     "ml": {
         "allow": ["domain", "core", "ml"],
         "deny": ["api", "web", "workers"],
-        "description": "Machine learning models"
+        "description": "Machine learning models",
     },
     "evaluation": {
         "allow": ["domain", "core", "engines", "evaluation"],
         "deny": ["api", "web", "infrastructure", "workers"],
-        "description": "Metrics computation only"
+        "description": "Metrics computation only",
     },
     "application": {
         "allow": ["domain", "core", "engines", "application"],
         "deny": ["infrastructure"],
-        "description": "Orchestration layer"
+        "description": "Orchestration layer",
     },
     "api": {
         "allow": ["api", "application", "domain"],
         "deny": ["engines", "infrastructure", "core"],
-        "description": "REST API - entry point only"
+        "description": "REST API - entry point only",
     },
     "web": {
         "allow": ["web", "application"],
         "deny": ["domain", "core", "engines", "infrastructure"],
-        "description": "Web interface - entry point only"
+        "description": "Web interface - entry point only",
     },
     "workers": {
         "allow": ["workers", "application"],
         "deny": ["domain", "core", "engines", "infrastructure"],
-        "description": "Background workers - entry point only"
+        "description": "Background workers - entry point only",
     },
     "infrastructure": {
         "allow": ["*"],  # Bottom layer - can import anything
         "deny": [],
-        "description": "External systems (DB, IO, etc.)"
+        "description": "External systems (DB, IO, etc.)",
     },
     "cli": {
         "allow": ["cli", "engines"],
         "deny": ["runners"],
-        "description": "CLI dispatcher - must use registry, not direct runner imports"
-    }
+        "description": "CLI dispatcher - must use registry, not direct runner imports",
+    },
 }
 
 # Layer hierarchy for ordering checks
@@ -102,43 +107,42 @@ LAYER_ORDER = {
 def get_module_layer(file_path: Path) -> str:
     """Determine which architectural layer a file belongs to."""
     parts = file_path.parts
-    
-    for layer in LAYER_RULES.keys():
+
+    for layer in LAYER_RULES:
         if layer in parts:
             return layer
-    
+
     return "unknown"
 
 
 def extract_imports(file_path: Path):
     """Extract all imports from a Python file."""
     imports = []
-    
+
     if not file_path.is_file():
         return imports
-    
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             tree = ast.parse(f.read(), filename=str(file_path))
-        
+
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.append(alias.name)
-            
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imports.append(node.module)
-    
+
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.append(node.module)
+
     except (SyntaxError, UnicodeDecodeError):
         pass
-    
+
     return imports
 
 
 def detect_layer(module_name: str):
     """Detect which layer an import belongs to."""
-    for layer in LAYER_RULES.keys():
+    for layer in LAYER_RULES:
         if module_name.startswith(layer):
             return layer
     return None
@@ -147,56 +151,62 @@ def detect_layer(module_name: str):
 def check_file(file_path: Path):
     """Check a single file for architecture violations."""
     layer = get_module_layer(file_path)
-    
+
     if layer == "unknown":
         return []
-    
+
     rules = LAYER_RULES.get(layer, {})
     denied = rules.get("deny", [])
     allowed = rules.get("allow", [])
-    
+
     imports = extract_imports(file_path)
     violations = []
-    
+
     for imp in imports:
         imp_layer = detect_layer(imp)
-        
+
         if imp_layer is None:
             continue
-        
+
         # Check denied
         if imp_layer in denied:
-            violations.append({
-                "file": str(file_path),
-                "source_layer": layer,
-                "import": imp,
-                "target_layer": imp_layer,
-                "rule": f"{layer} cannot import {imp_layer}",
-            })
-        
+            violations.append(
+                {
+                    "file": str(file_path),
+                    "source_layer": layer,
+                    "import": imp,
+                    "target_layer": imp_layer,
+                    "rule": f"{layer} cannot import {imp_layer}",
+                }
+            )
+
         # Check allowed (if not wildcard)
         elif "*" not in allowed and imp_layer not in allowed:
-            violations.append({
-                "file": str(file_path),
-                "source_layer": layer,
-                "import": imp,
-                "target_layer": imp_layer,
-                "rule": f"{layer} cannot import {imp_layer} (not in allowed list)",
-            })
-        
+            violations.append(
+                {
+                    "file": str(file_path),
+                    "source_layer": layer,
+                    "import": imp,
+                    "target_layer": imp_layer,
+                    "rule": f"{layer} cannot import {imp_layer} (not in allowed list)",
+                }
+            )
+
         # Check layer ordering (no upward imports)
         src_order = LAYER_ORDER.get(layer, 999)
         dst_order = LAYER_ORDER.get(imp_layer, 999)
-        
+
         if src_order < dst_order:
-            violations.append({
-                "file": str(file_path),
-                "source_layer": layer,
-                "import": imp,
-                "target_layer": imp_layer,
-                "rule": f"Layer ordering violation: {layer} (order {src_order}) cannot import {imp_layer} (order {dst_order})",
-            })
-    
+            violations.append(
+                {
+                    "file": str(file_path),
+                    "source_layer": layer,
+                    "import": imp,
+                    "target_layer": imp_layer,
+                    "rule": f"Layer ordering violation: {layer} (order {src_order}) cannot import {imp_layer} (order {dst_order})",
+                }
+            )
+
     return violations
 
 
@@ -204,25 +214,27 @@ def check_sibling_coupling(file_path: Path):
     """Check for cross-layer sibling coupling."""
     violations = []
     layer = get_module_layer(file_path)
-    
+
     if layer not in ["engines", "ml", "evaluation"]:
         return violations
-    
+
     # Extract imports
     imports = extract_imports(file_path)
-    
+
     # Check if importing from sibling layer
     for imp in imports:
         for sibling in ["engines", "ml", "evaluation"]:
             if sibling != layer and imp.startswith(sibling):
-                violations.append({
-                    "file": str(file_path),
-                    "source_layer": layer,
-                    "import": imp,
-                    "target_layer": sibling,
-                    "rule": f"Cross-layer sibling coupling: {layer} cannot import {sibling}",
-                })
-    
+                violations.append(
+                    {
+                        "file": str(file_path),
+                        "source_layer": layer,
+                        "import": imp,
+                        "target_layer": sibling,
+                        "rule": f"Cross-layer sibling coupling: {layer} cannot import {sibling}",
+                    }
+                )
+
     return violations
 
 
@@ -233,45 +245,53 @@ def main() -> int:
         0 if all imports clean, 1 if architecture violations detected.
     """
     base_dir = Path(".")
-    
-    skip_dirs = {"venv", ".venv", "__pycache__", ".git", "node_modules", ".tox", "tools"}
-    
+
+    skip_dirs = {
+        "venv",
+        ".venv",
+        "__pycache__",
+        ".git",
+        "node_modules",
+        ".tox",
+        "tools",
+    }
+
     violations = []
     files_checked = 0
-    
+
     print("🔍 Running strict architecture guard...")
     print()
-    
+
     for py_file in base_dir.rglob("*.py"):
         if any(skip in str(py_file) for skip in skip_dirs):
             continue
-        
+
         if py_file.name == "__init__.py":
             try:
                 if py_file.stat().st_size < 10:
                     continue
             except OSError:
                 continue
-        
+
         files_checked += 1
-        
+
         # Check import rules
         file_violations = check_file(py_file)
-        
+
         # Check sibling coupling
         sibling_violations = check_sibling_coupling(py_file)
-        
+
         violations.extend(file_violations)
         violations.extend(sibling_violations)
-    
+
     # Report results
     print(f"📊 Checked {files_checked} Python files")
     print()
-    
+
     if violations:
         print("❌ ARCHITECTURE VIOLATIONS DETECTED:")
         print()
-        
+
         for v in violations:
             print(f"📄 {v['file']}")
             print(f"   Layer: {v['source_layer']}")
@@ -279,7 +299,7 @@ def main() -> int:
             print(f"   Target: {v['target_layer']}")
             print(f"   Rule: {v['rule']}")
             print()
-        
+
         print(f"💥 Total violations: {len(violations)}")
         print()
         print("Architecture rules:")
@@ -301,9 +321,9 @@ def main() -> int:
         print("  - evaluation → api/web/infrastructure")
         print("  - Cross-layer siblings (engines/ml/evaluation importing each other)")
         print()
-        
+
         return 1
-    
+
     else:
         print("✅ Architecture check passed!")
         print()
@@ -321,7 +341,7 @@ def main() -> int:
         print("  ✓ No cross-layer sibling coupling")
         print("  ✓ No upward imports")
         print()
-        
+
         return 0
 
 

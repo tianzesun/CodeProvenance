@@ -5,16 +5,16 @@ Manages job queue and dispatch to worker pool. Supports both local parallel
 execution and Kubernetes cluster scale-out.
 """
 
-from typing import List, Dict, Any, Callable, Optional
 import queue
 import threading
 from datetime import datetime
+from typing import Any
 
 
 class Scheduler:
     """
     Stateless job scheduler for distributed execution.
-    
+
     Strategy: Fire-and-forget job dispatch with back-pressure handling.
     Workers pull jobs from queue on completion.
     """
@@ -26,7 +26,7 @@ class Scheduler:
         self._lock = threading.Lock()
         self._running = False
 
-    def dispatch(self, jobs: List[Dict[str, Any]]) -> None:
+    def dispatch(self, jobs: list[dict[str, Any]]) -> None:
         """Dispatch list of jobs to the queue."""
         for job in jobs:
             job["status"] = "queued"
@@ -42,13 +42,13 @@ class Scheduler:
         self._running = False
         self.worker_pool.stop()
 
-    def wait(self) -> List[Dict[str, Any]]:
+    def wait(self) -> list[dict[str, Any]]:
         """Wait for all jobs to complete and return results."""
         self.queue.join()
         self.stop()
         return self.results
 
-    def _result_callback(self, result: Dict[str, Any]) -> None:
+    def _result_callback(self, result: dict[str, Any]) -> None:
         """Internal callback for completed jobs."""
         with self._lock:
             result["completed_at"] = datetime.now().isoformat()

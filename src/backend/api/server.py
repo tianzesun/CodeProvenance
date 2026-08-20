@@ -1,8 +1,9 @@
 """IntegrityDesk Backend API Server"""
 
 # LOAD ENVIRONMENT FIRST BEFORE ANY OTHER IMPORTS
-from dotenv import load_dotenv
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env.local")
 
@@ -13,65 +14,64 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-import tempfile
-import zipfile
-import shutil
-import uuid
+import csv
+import hashlib
 import json
+import logging
+import math
 import os
 import re
-import logging
-import hashlib
-import secrets
-import time
-import math
+import shutil
 import subprocess
-import csv
-import asyncio
+import time
+import uuid
+import zipfile
 from collections import Counter, defaultdict
-from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Any, Optional
 from pathlib import Path as PathLib
-import numpy as np
+from typing import Any
+from urllib.parse import urlparse
 
+import numpy as np
 from fastapi import (
     FastAPI,
-    Request,
-    Response,
-    UploadFile,
     File,
     Form,
     HTTPException,
-    BackgroundTasks,
+    Request,
+    Response,
+    UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
-    HTMLResponse,
     FileResponse,
+    HTMLResponse,
     JSONResponse,
-    StreamingResponse,
 )
-
-from src.backend.api.middleware.request_id import RequestIdMiddleware
-from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
-from src.backend.api.routes import cases, users, auth, settings as settings_router
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from src.backend.infrastructure.security import (
-    hash_password as _hash_password,
-    verify_password as _verify_password,
-    validate_password_strength as _validate_password_strength,
-)
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
-from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
+from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
+from src.backend.api.middleware.request_id import RequestIdMiddleware
+from src.backend.api.routes import auth, cases, users
+from src.backend.api.routes import settings as settings_router
 from src.backend.application.services.batch_detection_service import (
     BatchDetectionService,
     ComparisonResult,
     _risk_level,
+)
+from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
+from src.backend.infrastructure.security import (
+    hash_password as _hash_password,
+)
+from src.backend.infrastructure.security import (
+    validate_password_strength as _validate_password_strength,
+)
+from src.backend.infrastructure.security import (
+    verify_password as _verify_password,
 )
 
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
@@ -83,20 +83,16 @@ from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
 )
 from src.backend.models.database import (
-    Tenant,
-    User,
-    ApiKey,
-    Job,
-    Submission,
-    SimilarityResult,
     AIDetectionResult,
-    WebhookEvent,
-    UsageMetric,
-    AuditLog,
-    Course,
     Assignment,
+    Course,
     CourseInstructor,
     FprValidationRun,
+    Job,
+    SimilarityResult,
+    Submission,
+    Tenant,
+    User,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -191,14 +187,14 @@ AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 # In-memory progress tracking for benchmark jobs
 import threading
 
-BENCHMARK_PROGRESS: Dict[str, List[str]] = {}
+BENCHMARK_PROGRESS: dict[str, list[str]] = {}
 
 # Rate limiting for login attempts
-LOGIN_ATTEMPTS: Dict[str, List[datetime]] = defaultdict(list)
+LOGIN_ATTEMPTS: dict[str, list[datetime]] = defaultdict(list)
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 300  # 5 minutes
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
-BENCHMARK_RESULTS: Dict[str, Any] = {}
+BENCHMARK_RESULTS: dict[str, Any] = {}
 BENCHMARK_LOCK = threading.Lock()
 
 
@@ -250,7 +246,7 @@ TOOL_DISPLAY_ORDER = [
     "evalforge",
 ]
 
-BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
+BENCHMARK_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "integritydesk": {
         "name": "IntegrityDesk",
         "desc": "Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web signals, with optional AI Detection and Execution/CFG layers.",
@@ -389,7 +385,7 @@ BENCHMARK_TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     },
 }
 
-ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
+ENGINE_WEIGHT_LEGACY_MAP: dict[str, str] = {
     "fingerprint": "token",
     "semantic": "embedding",
     "unixcoder": "embedding",
@@ -400,7 +396,7 @@ ENGINE_WEIGHT_LEGACY_MAP: Dict[str, str] = {
 }
 
 
-def _normalize_engine_weights(raw: Any) -> Dict[str, float]:
+def _normalize_engine_weights(raw: Any) -> dict[str, float]:
     normalized = {key: 0.0 for key in DEFAULT_ENGINE_WEIGHTS}
     seen = set()
     if not isinstance(raw, dict):
@@ -426,7 +422,7 @@ def _normalize_engine_weights(raw: Any) -> Dict[str, float]:
     return normalized
 
 
-_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs: dict[str, dict[str, Any]] = {}
 JOB_METADATA_FILENAME = "job.json"
 REVIEW_STATUSES = {"unreviewed", "needs_review", "confirmed", "dismissed", "escalated"}
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
@@ -539,7 +535,7 @@ def _infer_pmd_language_from_filename(filename: str) -> str:
     return pmd_language_map.get(language, language)
 
 
-def _read_json_file(path: PathLib) -> Dict[str, Any]:
+def _read_json_file(path: PathLib) -> dict[str, Any]:
     """Read a JSON file and return a dictionary."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -549,7 +545,7 @@ def _read_json_file(path: PathLib) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _load_dataset_metadata(dataset_root: PathLib) -> Dict[str, Any]:
+def _load_dataset_metadata(dataset_root: PathLib) -> dict[str, Any]:
     """Load optional dataset metadata from a dataset root."""
     if dataset_root.name in BUILTIN_PAIR_DATASET_IDS:
         metadata = _load_builtin_pair_dataset_metadata(dataset_root.name)
@@ -566,7 +562,7 @@ def _builtin_pair_dataset_path(dataset_id: str) -> PathLib:
     return BUILTIN_PAIR_DATASET_DIR / f"{dataset_id}.json"
 
 
-def _load_builtin_pair_dataset_payload(dataset_id: str) -> Dict[str, Any]:
+def _load_builtin_pair_dataset_payload(dataset_id: str) -> dict[str, Any]:
     """Load a tracked pair-labeled benchmark fixture."""
     if dataset_id not in BUILTIN_PAIR_DATASET_IDS:
         return {}
@@ -576,7 +572,7 @@ def _load_builtin_pair_dataset_payload(dataset_id: str) -> Dict[str, Any]:
     return _read_json_file(fixture_path)
 
 
-def _load_builtin_pair_dataset_metadata(dataset_id: str) -> Dict[str, Any]:
+def _load_builtin_pair_dataset_metadata(dataset_id: str) -> dict[str, Any]:
     """Load display metadata from a tracked pair-labeled benchmark fixture."""
     payload = _load_builtin_pair_dataset_payload(dataset_id)
     metadata = payload.get("metadata")
@@ -640,7 +636,7 @@ def _dataset_default_language(dataset_id: str) -> str:
     }.get(dataset_id, "mixed")
 
 
-def _resolve_benchmark_dataset_dir(dataset_id: str) -> Optional[PathLib]:
+def _resolve_benchmark_dataset_dir(dataset_id: str) -> PathLib | None:
     """Resolve the on-disk directory for a benchmark dataset."""
     dataset_root = _resolve_benchmark_dataset_root(dataset_id)
     if not dataset_root.exists():
@@ -659,7 +655,7 @@ def _resolve_benchmark_dataset_dir(dataset_id: str) -> Optional[PathLib]:
     return dataset_root
 
 
-def _dataset_snippets_per_row(dataset_info: Dict[str, Any]) -> int:
+def _dataset_snippets_per_row(dataset_info: dict[str, Any]) -> int:
     """Estimate how many code files one dataset row can yield."""
     features = dataset_info.get("features") or {}
     if not isinstance(features, dict):
@@ -671,9 +667,9 @@ def _dataset_snippets_per_row(dataset_info: Dict[str, Any]) -> int:
 
 def _infer_dataset_language(
     dataset_id: str,
-    metadata: Dict[str, Any],
-    dataset_info: Dict[str, Any],
-    dataset_dir: Optional[PathLib] = None,
+    metadata: dict[str, Any],
+    dataset_info: dict[str, Any],
+    dataset_dir: PathLib | None = None,
 ) -> str:
     """Infer a dataset language from metadata or dataset schema."""
     language = metadata.get("language") or metadata.get("lang")
@@ -694,8 +690,8 @@ def _infer_dataset_language(
 
 def _infer_dataset_size_label(
     dataset_dir: PathLib,
-    metadata: Dict[str, Any],
-    dataset_info: Dict[str, Any],
+    metadata: dict[str, Any],
+    dataset_info: dict[str, Any],
     is_demo: bool,
 ) -> str:
     """Build the display size label for a dataset card."""
@@ -784,7 +780,7 @@ def _infer_dataset_size_label(
     return "Dataset files"
 
 
-def _read_generated_pair_items(dataset_root: PathLib) -> List[Dict[str, Any]]:
+def _read_generated_pair_items(dataset_root: PathLib) -> list[dict[str, Any]]:
     """Read explicit benchmark pairs from a generated pair dataset."""
     pairs_path = dataset_root / "generated_pairs.jsonl"
     payload = _load_builtin_pair_dataset_payload(dataset_root.name)
@@ -899,7 +895,7 @@ def _has_loadable_huggingface_dataset(dataset_root: PathLib) -> bool:
 
 def _build_benchmark_dataset_readiness(
     dataset_id: str, dataset_root: PathLib
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Describe whether a dataset should be visible as runnable in the dashboard."""
     if dataset_id.startswith("demo_"):
         original_dir = dataset_root / "original"
@@ -1218,7 +1214,7 @@ def _build_benchmark_dataset_readiness(
 
 def _build_benchmark_quality_certificate(
     dataset_root: PathLib,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Build a reproducible quality certificate for explicit pair benchmarks."""
     raw_pairs = _read_generated_pair_items(dataset_root)
     if not raw_pairs:
@@ -1472,7 +1468,7 @@ def _build_benchmark_quality_certificate(
     }
 
 
-def _audit_benchmark_pairs(raw_pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _audit_benchmark_pairs(raw_pairs: list[dict[str, Any]]) -> dict[str, Any]:
     """Audit pair labels, case categories, and train/validation/test separation."""
     case_categories = Counter(_pair_case_category(pair) for pair in raw_pairs)
     split_counts = Counter(_pair_split(pair) for pair in raw_pairs)
@@ -1503,7 +1499,7 @@ def _audit_benchmark_pairs(raw_pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _benchmark_split_guard(split: str, purpose: str) -> Dict[str, Any]:
+def _benchmark_split_guard(split: str, purpose: str) -> dict[str, Any]:
     """Enforce that locked test data is not used for iterative tuning."""
     normalized_split = str(split or "").strip().lower()
     normalized_purpose = str(purpose or "").strip().lower()
@@ -1525,7 +1521,7 @@ def _benchmark_split_guard(split: str, purpose: str) -> Dict[str, Any]:
     }
 
 
-def _pair_case_category(pair: Dict[str, Any]) -> str:
+def _pair_case_category(pair: dict[str, Any]) -> str:
     """Return the benchmark case category for a labeled pair."""
     category = str(pair.get("case_category", "")).strip().lower()
     if category:
@@ -1553,7 +1549,7 @@ def _pair_case_category(pair: Dict[str, Any]) -> str:
     return "true_negative"
 
 
-def _pair_split(pair: Dict[str, Any]) -> str:
+def _pair_split(pair: dict[str, Any]) -> str:
     """Return the benchmark split for a labeled pair."""
     split = str(pair.get("split", "")).strip().lower()
     return split if split else "unspecified"
@@ -1569,9 +1565,9 @@ def _count_unique_code_files(root_dir: PathLib) -> int:
     return len(unique_names)
 
 
-def _infer_language_from_directory(root_dir: PathLib) -> Optional[str]:
+def _infer_language_from_directory(root_dir: PathLib) -> str | None:
     """Infer the dominant language from code file extensions in a raw dataset folder."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for file_path in root_dir.rglob("*"):
         if not file_path.is_file() or not _is_code_file(file_path.name):
             continue
@@ -1591,15 +1587,15 @@ def _infer_language_from_directory(root_dir: PathLib) -> Optional[str]:
 
 
 def _extract_code_entries_from_row(
-    item: Dict[str, Any],
+    item: dict[str, Any],
     dataset_id: str,
     index: int,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Extract one or more source files from a Hugging Face dataset row."""
     if not isinstance(item, dict):
         return []
 
-    code_entries: List[Dict[str, str]] = []
+    code_entries: list[dict[str, str]] = []
     per_row_fields = ("func1", "func2")
     default_language = _dataset_default_language(dataset_id)
     item_language = str(item.get("language") or default_language).lower()
@@ -1648,9 +1644,9 @@ def _extract_code_entries_from_row(
 
 
 def _write_submissions_to_directory(
-    target_dir: PathLib, submissions: Dict[str, str]
-) -> Dict[str, str]:
-    written_paths: Dict[str, str] = {}
+    target_dir: PathLib, submissions: dict[str, str]
+) -> dict[str, str]:
+    written_paths: dict[str, str] = {}
     for filename, content in submissions.items():
         file_path = target_dir / PathLib(filename).name
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1660,9 +1656,9 @@ def _write_submissions_to_directory(
 
 
 def _write_submissions_as_submission_dirs(
-    target_dir: PathLib, submissions: Dict[str, str]
-) -> Dict[str, Dict[str, str]]:
-    written: Dict[str, Dict[str, str]] = {}
+    target_dir: PathLib, submissions: dict[str, str]
+) -> dict[str, dict[str, str]]:
+    written: dict[str, dict[str, str]] = {}
     for index, (filename, content) in enumerate(submissions.items()):
         submission_id = f"sub{index:03d}"
         submission_dir = target_dir / submission_id
@@ -1693,7 +1689,7 @@ def _ai_status_label(score: float) -> str:
     return "Low Risk"
 
 
-_ai_refactor_cache: Dict[str, float] = {}
+_ai_refactor_cache: dict[str, float] = {}
 
 
 def _ai_refactor_threshold() -> float:
@@ -1739,7 +1735,7 @@ def _relative_tool_path(path: PathLib) -> str:
         return str(path)
 
 
-def _iter_tool_inventory_dirs() -> List[PathLib]:
+def _iter_tool_inventory_dirs() -> list[PathLib]:
     """List installed tool directories from the canonical and legacy locations."""
     ignored_top_level = {
         "__pycache__",
@@ -1751,7 +1747,7 @@ def _iter_tool_inventory_dirs() -> List[PathLib]:
         "runs",
         "sandbox",
     }
-    dirs: List[PathLib] = []
+    dirs: list[PathLib] = []
 
     for root in (_external_tools_dir(), TOOLS_DIR):
         if not root.exists():
@@ -1766,7 +1762,7 @@ def _iter_tool_inventory_dirs() -> List[PathLib]:
     return dirs
 
 
-def _first_existing_path(candidates: List[PathLib]) -> Optional[PathLib]:
+def _first_existing_path(candidates: list[PathLib]) -> PathLib | None:
     """Return the first path that exists."""
     for candidate in candidates:
         if candidate.exists():
@@ -1774,10 +1770,10 @@ def _first_existing_path(candidates: List[PathLib]) -> Optional[PathLib]:
     return None
 
 
-def _find_tool_dir(tool_id: str) -> Optional[PathLib]:
+def _find_tool_dir(tool_id: str) -> PathLib | None:
     """Resolve a benchmark tool directory from tools/external with legacy fallback."""
     external_tools_dir = _external_tools_dir()
-    candidates: Dict[str, List[PathLib]] = {
+    candidates: dict[str, list[PathLib]] = {
         "moss": [external_tools_dir / "moss", TOOLS_DIR / "moss"],
         "jplag": [
             external_tools_dir / "JPlag",
@@ -1824,7 +1820,7 @@ def _get_setting_secret(key: str) -> str:
     return ""
 
 
-def _find_jplag_jar() -> Optional[PathLib]:
+def _find_jplag_jar() -> PathLib | None:
     jplag_dir = _find_tool_dir("jplag")
     if not jplag_dir:
         return None
@@ -1837,7 +1833,7 @@ def _find_jplag_jar() -> Optional[PathLib]:
     return None
 
 
-def _find_dolos_cli() -> Optional[PathLib]:
+def _find_dolos_cli() -> PathLib | None:
     dolos_dir = _find_tool_dir("dolos")
     candidates = []
     if dolos_dir:
@@ -1879,14 +1875,14 @@ def _is_dolos_plagiarism_cli(candidate: PathLib) -> bool:
     )
 
 
-def _find_moss_script() -> Optional[PathLib]:
+def _find_moss_script() -> PathLib | None:
     """Find the MOSS Perl script in the configured tool location."""
     from src.backend.benchmark.adapters.moss_adapter import MossAdapter
 
     return MossAdapter.SCRIPT_PATH if MossAdapter.SCRIPT_PATH.exists() else None
 
 
-def _find_nicad_executable() -> Optional[PathLib]:
+def _find_nicad_executable() -> PathLib | None:
     """Find a NiCad executable in the configured tool location."""
     nicad_dir = _find_tool_dir("nicad")
     if not nicad_dir:
@@ -1899,7 +1895,7 @@ def _find_nicad_executable() -> Optional[PathLib]:
     )
 
 
-def _find_txl_executable() -> Optional[PathLib]:
+def _find_txl_executable() -> PathLib | None:
     """Find a TXL executable if the local NiCad install provides one."""
     nicad_dir = _find_tool_dir("nicad")
     candidates = []
@@ -1921,7 +1917,7 @@ def _find_txl_executable() -> Optional[PathLib]:
     return _first_existing_path(candidates)
 
 
-def _find_pmd_executable() -> Optional[PathLib]:
+def _find_pmd_executable() -> PathLib | None:
     """Find the PMD CLI executable in the configured tool location."""
     pmd_dir = _find_tool_dir("pmd")
     if not pmd_dir:
@@ -1929,7 +1925,7 @@ def _find_pmd_executable() -> Optional[PathLib]:
     return _first_existing_path([pmd_dir / "bin" / "pmd", pmd_dir / "pmd"])
 
 
-def _find_sherlock_executable() -> Optional[PathLib]:
+def _find_sherlock_executable() -> PathLib | None:
     """Find an executable Sherlock binary in the configured tool location."""
     sherlock_dir = _find_tool_dir("sherlock")
     if not sherlock_dir:
@@ -1971,7 +1967,7 @@ def _unavailable_tool_reason(tool_id: str) -> str:
     return "Not ready"
 
 
-def _build_tool_record(tool_id: str, source_type: str = "repo") -> Dict[str, Any]:
+def _build_tool_record(tool_id: str, source_type: str = "repo") -> dict[str, Any]:
     metadata = BENCHMARK_TOOL_METADATA.get(tool_id, {})
     runnable = _is_real_benchmark_tool_available(tool_id)
     return {
@@ -2019,7 +2015,7 @@ def _is_real_benchmark_tool_available(tool_id: str) -> bool:
     return False
 
 
-def _tool_sort_key(record: Dict[str, Any]) -> Any:
+def _tool_sort_key(record: dict[str, Any]) -> Any:
     try:
         order = TOOL_DISPLAY_ORDER.index(record["id"])
     except ValueError:
@@ -2027,8 +2023,8 @@ def _tool_sort_key(record: Dict[str, Any]) -> Any:
     return (order, 0 if record.get("runnable") else 1, record.get("name", "").lower())
 
 
-def _list_benchmark_tools() -> List[Dict[str, Any]]:
-    tools: Dict[str, Dict[str, Any]] = {
+def _list_benchmark_tools() -> list[dict[str, Any]]:
+    tools: dict[str, dict[str, Any]] = {
         tool_id: _build_tool_record(
             tool_id,
             source_type="built-in" if tool_id == "integritydesk" else "repo",
@@ -2060,7 +2056,7 @@ def _list_benchmark_tools() -> List[Dict[str, Any]]:
     return sorted(tools.values(), key=_tool_sort_key)
 
 
-def _parse_selected_tool_ids(raw: str = "") -> List[str]:
+def _parse_selected_tool_ids(raw: str = "") -> list[str]:
     """Parse upload-selected detector tools, defaulting to IntegrityDesk."""
     if not raw:
         return ["integritydesk"]
@@ -2077,7 +2073,7 @@ def _parse_selected_tool_ids(raw: str = "") -> List[str]:
     else:
         candidates = []
 
-    selected: List[str] = []
+    selected: list[str] = []
     for candidate in candidates:
         tool_id = str(candidate).strip().lower()
         if tool_id not in REAL_BENCHMARK_TOOL_IDS or tool_id in selected:
@@ -2087,7 +2083,7 @@ def _parse_selected_tool_ids(raw: str = "") -> List[str]:
     return selected or ["integritydesk"]
 
 
-def _build_all_submission_pairs(submissions: Dict[str, str]) -> List[tuple]:
+def _build_all_submission_pairs(submissions: dict[str, str]) -> list[tuple]:
     """Build stable all-pairs comparison tuples for uploaded submissions."""
     file_list = list(submissions.keys())
     return [
@@ -2098,10 +2094,10 @@ def _build_all_submission_pairs(submissions: Dict[str, str]) -> List[tuple]:
 
 
 def _external_tool_pair_lookup(
-    tool_id: str, tool_data: Dict[str, Any]
-) -> Dict[str, float]:
+    tool_id: str, tool_data: dict[str, Any]
+) -> dict[str, float]:
     """Map external tool pair output to pair-keyed similarity scores."""
-    lookup: Dict[str, float] = {}
+    lookup: dict[str, float] = {}
     for pair in tool_data.get("pairs", []):
         file_a = str(pair.get("file_a", ""))
         file_b = str(pair.get("file_b", ""))
@@ -2115,8 +2111,8 @@ def _external_tool_pair_lookup(
 
 
 def _build_external_comparison_results(
-    tool_results: Dict[str, Dict[str, Any]], pairs: List[tuple]
-) -> List[ComparisonResult]:
+    tool_results: dict[str, dict[str, Any]], pairs: list[tuple]
+) -> list[ComparisonResult]:
     """Create report-ready comparison results from selected external tools.
 
     For strict behavioral parity, external tools are treated as independent engines.
@@ -2138,7 +2134,7 @@ def _build_external_comparison_results(
     # This ensures behavioral parity - one tool = one result
     primary_tool = successful_tools[0]
 
-    results: List[ComparisonResult] = []
+    results: list[ComparisonResult] = []
 
     for file_a, file_b in pairs:
         pair_key = _pair_key(file_a, file_b)
@@ -2166,8 +2162,8 @@ def _build_external_comparison_results(
 
 
 def _merge_external_features_into_results(
-    results: List[ComparisonResult],
-    tool_results: Dict[str, Dict[str, Any]],
+    results: list[ComparisonResult],
+    tool_results: dict[str, dict[str, Any]],
 ) -> None:
     """Attach successful external tool scores to existing comparison features."""
     lookups = {
@@ -2187,11 +2183,11 @@ def _merge_external_features_into_results(
 def _external_evidence_for_pair(
     file_a: str,
     file_b: str,
-    tool_results: Dict[str, Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    tool_results: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Return external-tool evidence rows for one comparison pair."""
     pair_key = _pair_key(file_a, file_b)
-    evidence: List[Dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
     for tool_id, data in tool_results.items():
         if "pairs" not in data:
             continue
@@ -2214,10 +2210,10 @@ def _external_evidence_for_pair(
 
 
 def _run_selected_external_tools(
-    selected_tool_ids: List[str],
-    submissions: Dict[str, str],
-    pairs: List[tuple],
-) -> Dict[str, Dict[str, Any]]:
+    selected_tool_ids: list[str],
+    submissions: dict[str, str],
+    pairs: list[tuple],
+) -> dict[str, dict[str, Any]]:
     """Run selected non-IntegrityDesk tools and preserve per-tool failures."""
     from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
@@ -2225,7 +2221,7 @@ def _run_selected_external_tools(
     return runner.run_selected_tools(selected_tool_ids, submissions, pairs)
 
 
-def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> List[str]:
+def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
     extracted = []
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.namelist():
@@ -2266,7 +2262,7 @@ def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
         counter += 1
 
 
-def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
+def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
     submissions = {}
     for ext in ALLOWED_EXTENSIONS:
         for f in directory.rglob(f"*{ext}"):
@@ -2286,8 +2282,8 @@ def _read_files_from_dir(directory: PathLib) -> Dict[str, str]:
 
 
 async def _store_benchmark_uploads(
-    files: List[UploadFile], target_dir: PathLib
-) -> Dict[str, str]:
+    files: list[UploadFile], target_dir: PathLib
+) -> dict[str, str]:
     """Store uploaded benchmark inputs, accepting either source files or zip archives."""
     for upload in files:
         if not upload.filename:
@@ -2323,9 +2319,9 @@ def _benchmark_archive_enabled() -> bool:
     return BENCHMARK_DATA_DIR == DEFAULT_BENCHMARK_DATA_DIR
 
 
-def _iter_benchmark_dataset_roots() -> List[PathLib]:
+def _iter_benchmark_dataset_roots() -> list[PathLib]:
     """Return benchmark dataset roots in precedence order without duplicate ids."""
-    roots: List[PathLib] = []
+    roots: list[PathLib] = []
     seen: set[str] = set()
     for parent in (BENCHMARK_DATA_DIR, BENCHMARK_ARCHIVE_DATA_DIR):
         if parent == BENCHMARK_ARCHIVE_DATA_DIR and not _benchmark_archive_enabled():
@@ -2372,7 +2368,7 @@ def _label_to_clone_grade(label: Any, clone_type: Any = None) -> int:
 
 
 def _write_pair_submission(
-    submissions: Dict[str, str], target_dir: PathLib, filename: str, code: str
+    submissions: dict[str, str], target_dir: PathLib, filename: str, code: str
 ) -> str:
     """Store one pair-based benchmark snippet and return its stable filename."""
     safe_name = PathLib(filename).name
@@ -2382,12 +2378,12 @@ def _write_pair_submission(
     return safe_name
 
 
-def _pair_label_value(pair: Dict[str, Any]) -> int:
+def _pair_label_value(pair: dict[str, Any]) -> int:
     """Return the normalized benchmark label for a pair record."""
     return _label_to_clone_grade(pair.get("label", 0), pair.get("clone_type"))
 
 
-def _stable_pair_sort_key(dataset_id: str, pair: Dict[str, Any]) -> str:
+def _stable_pair_sort_key(dataset_id: str, pair: dict[str, Any]) -> str:
     """Return a deterministic pseudo-random sort key for benchmark pairs."""
     key = "|".join(
         [
@@ -2403,14 +2399,14 @@ def _stable_pair_sort_key(dataset_id: str, pair: Dict[str, Any]) -> str:
 
 def _build_pair_sampling_audit(
     dataset_id: str,
-    original_pairs: List[Dict[str, Any]],
-    selected_pairs: List[Dict[str, Any]],
+    original_pairs: list[dict[str, Any]],
+    selected_pairs: list[dict[str, Any]],
     *,
     balanced: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Describe how labeled benchmark pairs were selected for this run."""
 
-    def counts_for(pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def counts_for(pairs: list[dict[str, Any]]) -> dict[str, Any]:
         positive = sum(1 for pair in pairs if _pair_label_value(pair) >= 2)
         negative = len(pairs) - positive
         categories = Counter(
@@ -2430,8 +2426,8 @@ def _build_pair_sampling_audit(
 
     original_counts = counts_for(original_pairs)
     selected_counts = counts_for(selected_pairs)
-    warnings: List[str] = []
-    blockers: List[str] = []
+    warnings: list[str] = []
+    blockers: list[str] = []
     if selected_counts["positive_pairs"] == 0 or selected_counts["negative_pairs"] == 0:
         blockers.append(
             "Selected benchmark sample lacks both positive and negative pairs."
@@ -2470,8 +2466,8 @@ def _build_pair_sampling_audit(
 
 
 def _select_reliable_explicit_pairs(
-    dataset_id: str, explicit_pairs: List[Dict[str, Any]]
-) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    dataset_id: str, explicit_pairs: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Select a deterministic balanced labeled sample for benchmark scoring."""
     if not explicit_pairs:
         return [], _build_pair_sampling_audit(dataset_id, [], [], balanced=False)
@@ -2528,7 +2524,7 @@ def _pair_language_extension(language: Any) -> str:
 
 def _load_pair_labeled_benchmark_dataset(
     dataset_id: str, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load datasets that already define explicit labeled comparison pairs."""
     dataset_root = _resolve_benchmark_dataset_root(dataset_id)
     if (dataset_root / "generated_pairs.jsonl").exists() or (
@@ -2562,14 +2558,14 @@ def _load_pair_labeled_benchmark_dataset(
 
 def _load_synthetic_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load generated synthetic clone/non-clone pairs from JSON."""
     raw_pairs = _read_generated_pair_items(dataset_root)
     if not raw_pairs:
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
 
     for idx, item in enumerate(raw_pairs[:PAIR_BENCHMARK_MAX_PAIRS]):
         pair_id = str(item.get("id") or f"synthetic_{idx:05d}")
@@ -2604,14 +2600,14 @@ def _load_synthetic_pair_dataset(
 
 def _load_kaggle_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load Kaggle student plagiarism pairs from the labeled CSV."""
     csv_path = dataset_root / "cheating_dataset.csv"
     if not csv_path.exists():
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for idx, row in enumerate(reader):
@@ -2644,13 +2640,13 @@ def _load_kaggle_pair_dataset(
     return submissions, explicit_pairs
 
 
-def _code_similarity_snippet_groups(dataset_root: PathLib) -> Dict[str, List[PathLib]]:
+def _code_similarity_snippet_groups(dataset_root: PathLib) -> dict[str, list[PathLib]]:
     """Group CodeSimilarityDataset snippets by programming task."""
     metadata_csv = dataset_root / "full_metadata.csv"
     if not metadata_csv.exists():
         return {}
 
-    groups: Dict[str, List[PathLib]] = {}
+    groups: dict[str, list[PathLib]] = {}
     with metadata_csv.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
@@ -2667,14 +2663,14 @@ def _code_similarity_snippet_groups(dataset_root: PathLib) -> Dict[str, List[Pat
 
 def _load_code_similarity_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load CodeSimilarityDataset as same-task positives and cross-task negatives."""
     grouped = _code_similarity_snippet_groups(dataset_root)
     if not grouped:
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
 
     positive_count = 0
@@ -2754,7 +2750,7 @@ def _load_code_similarity_pair_dataset(
 
 def _load_google_codejam_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load Google Code Jam pairs from ground_truth.json."""
     gt_path = dataset_root / "ground_truth.json"
     submissions_dir = dataset_root / "submissions"
@@ -2766,8 +2762,8 @@ def _load_google_codejam_pair_dataset(
     except (OSError, json.JSONDecodeError):
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
 
     for pair_key, info in gt_data.items():
         if len(explicit_pairs) >= PAIR_BENCHMARK_MAX_PAIRS:
@@ -2813,10 +2809,10 @@ def _load_google_codejam_pair_dataset(
 
 def _load_ir_plag_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load IR-Plag dataset pairs: original vs plagiarized (positive), original vs non-plagiarized (negative)."""
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
 
     case_dirs = sorted(
         [d for d in dataset_root.iterdir() if d.is_dir() and d.name.startswith("case-")]
@@ -2908,17 +2904,17 @@ def _load_ir_plag_pair_dataset(
 
 def _bigclonebench_reduced_groups(
     dataset_root: PathLib, max_files_per_group: int = 8
-) -> Dict[str, List[PathLib]]:
+) -> dict[str, list[PathLib]]:
     """Group a bounded BigCloneBench reduced sample by functionality id."""
     reduced_root = dataset_root / "bcb_reduced"
     if not reduced_root.exists():
         return {}
 
-    groups: Dict[str, List[PathLib]] = {}
+    groups: dict[str, list[PathLib]] = {}
     for function_dir in sorted(
         path for path in reduced_root.iterdir() if path.is_dir()
     ):
-        files: List[PathLib] = []
+        files: list[PathLib] = []
         for subdir_name in ("sample", "selected", "default"):
             subdir = function_dir / subdir_name
             if subdir.exists():
@@ -2936,14 +2932,14 @@ def _bigclonebench_reduced_groups(
 
 def _load_bigclonebench_reduced_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load a balanced pair sample from BigCloneBench reduced functionality folders."""
     grouped = _bigclonebench_reduced_groups(dataset_root)
     if not grouped:
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
 
     positive_count = 0
@@ -3025,7 +3021,7 @@ def _load_bigclonebench_reduced_pair_dataset(
 
 def _load_conplag_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load a balanced CONPLAG sample from labels.csv and version_1 directories."""
     if dataset_root.name == "conplag_classroom_java":
         dataset_root = BENCHMARK_DATA_DIR / "conplag"
@@ -3035,8 +3031,8 @@ def _load_conplag_pair_dataset(
     if not (labels_csv.exists() and version_1_dir.exists()):
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     max_each = PAIR_BENCHMARK_MAX_PAIRS // 2
 
     try:
@@ -3092,17 +3088,17 @@ def _load_conplag_pair_dataset(
 
 def _load_xiangtan_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load Xiangtan-style Java clone pairs and generate matched negatives."""
     pairs_csv = dataset_root / "pairs.csv"
     source_dir = dataset_root / "source"
     if not pairs_csv.exists() or not source_dir.exists():
         return {}, []
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
-    positive_originals: List[PathLib] = []
-    behavior_signatures: Dict[PathLib, str] = {}
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
+    positive_originals: list[PathLib] = []
+    behavior_signatures: dict[PathLib, str] = {}
 
     with pairs_csv.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -3260,7 +3256,7 @@ def _java_behavior_signature(code: str) -> str:
 
 def _load_codexglue_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load a balanced sample from CodeXGLUE clone detection pairs."""
     hf_path = dataset_root / "huggingface"
     if not hf_path.exists():
@@ -3283,7 +3279,7 @@ def _load_codexglue_pair_dataset(
 
 def _load_poolc_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load a balanced sample from local PoolC Python clone-detection shards."""
     parquet_files = sorted((dataset_root / "data").glob("*.parquet"))
     if not parquet_files:
@@ -3291,8 +3287,8 @@ def _load_poolc_pair_dataset(
 
     import pyarrow.parquet as pq
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
     counts = {0: 0, 1: 0}
 
@@ -3341,10 +3337,10 @@ def _load_hf_binary_pair_rows(
     code_b_key: str,
     label_key: str,
     extension: str,
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Load a balanced positive/negative sample from pair-based HF rows."""
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
     counts = {0: 0, 1: 0}
 
@@ -3377,7 +3373,7 @@ def _load_hf_binary_pair_rows(
 
 def _load_poj104_pair_dataset(
     dataset_root: PathLib, target_dir: PathLib
-) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Create balanced same-problem and different-problem POJ-104 pairs."""
     hf_path = dataset_root / "huggingface"
     if not hf_path.exists():
@@ -3386,7 +3382,7 @@ def _load_poj104_pair_dataset(
     from datasets import load_from_disk
 
     dataset = load_from_disk(str(hf_path))
-    by_label: Dict[str, List[Dict[str, Any]]] = {}
+    by_label: dict[str, list[dict[str, Any]]] = {}
     preferred_splits = [
         name for name in ("test", "validation", "train") if name in dataset
     ]
@@ -3394,8 +3390,8 @@ def _load_poj104_pair_dataset(
         for item in dataset[split_name]:
             by_label.setdefault(str(item.get("label")), []).append(item)
 
-    submissions: Dict[str, str] = {}
-    explicit_pairs: List[Dict[str, Any]] = []
+    submissions: dict[str, str] = {}
+    explicit_pairs: list[dict[str, Any]] = []
     labels = sorted(label for label, items in by_label.items() if len(items) >= 2)
     target_per_class = max(1, PAIR_BENCHMARK_MAX_PAIRS // 2)
 
@@ -3451,7 +3447,7 @@ def _load_poj104_pair_dataset(
     return submissions, explicit_pairs
 
 
-def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> Dict[str, str]:
+def _load_benchmark_dataset(dataset_id: str, target_dir: PathLib) -> dict[str, str]:
     """Load benchmark dataset and extract to target directory for comparison."""
     submissions = {}
 
@@ -3576,8 +3572,8 @@ def _job_metadata_path(job_id: str) -> PathLib:
 
 
 def _build_job_summary(
-    results: List[Dict[str, Any]], threshold: float
-) -> Dict[str, Any]:
+    results: list[dict[str, Any]], threshold: float
+) -> dict[str, Any]:
     suspicious_pairs = sum(
         1 for result in results if _coerce_float(result.get("score")) >= threshold
     )
@@ -3587,7 +3583,7 @@ def _build_job_summary(
     }
 
 
-def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
     features = {}
     for name, value in (result.get("features") or {}).items():
         features[name] = round(_coerce_float(value), 3)
@@ -3609,7 +3605,7 @@ def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_submission_ai_result(entry: dict[str, Any]) -> dict[str, Any]:
     """Normalise a single per-submission AI detection result.
 
     Preserves the richer fields added by the new engine (signal_labels,
@@ -3682,7 +3678,7 @@ def _normalize_submission_ai_result(entry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _normalize_ai_detection(ai_detection: Any) -> Dict[str, Any]:
+def _normalize_ai_detection(ai_detection: Any) -> dict[str, Any]:
     if not isinstance(ai_detection, dict):
         return {}
 
@@ -3736,7 +3732,7 @@ def _normalize_ai_detection(ai_detection: Any) -> Dict[str, Any]:
     }
 
 
-def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
+def _normalize_web_analysis(web_analysis: Any) -> dict[str, Any]:
     if not isinstance(web_analysis, dict):
         return {}
 
@@ -3793,7 +3789,7 @@ def _normalize_web_analysis(web_analysis: Any) -> Dict[str, Any]:
     }
 
 
-def _normalize_job(job: Dict[str, Any], from_disk: bool = False) -> Dict[str, Any]:
+def _normalize_job(job: dict[str, Any], from_disk: bool = False) -> dict[str, Any]:
     normalized = dict(job)
     job_id = normalized.get("id", "")
     threshold = _coerce_float(normalized.get("threshold"), 0.5)
@@ -3900,7 +3896,7 @@ def _persist_job(job_id: str) -> None:
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
-def _persist_ai_detection_results(job_id: str, ai_detection: Dict[str, Any]) -> None:
+def _persist_ai_detection_results(job_id: str, ai_detection: dict[str, Any]) -> None:
     """Best-effort persistence of AI detection results to the database.
 
     Writes one ``AIDetectionResult`` row per submission. Any failure is logged
@@ -3980,7 +3976,7 @@ def _db_job_status(app_status: str) -> str:
     }.get(app_status, app_status)
 
 
-def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
+def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
     report_json_path = _job_report_dir(job_id) / "report.json"
     if not report_json_path.exists():
         return None
@@ -4065,7 +4061,7 @@ def _recover_job_from_report(job_id: str) -> Optional[Dict[str, Any]]:
     return recovered_job
 
 
-def _load_persisted_job(job_id: str) -> Optional[Dict[str, Any]]:
+def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
     metadata_path = _job_metadata_path(job_id)
     if metadata_path.exists():
         try:
@@ -4082,7 +4078,7 @@ def _load_persisted_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _recover_job_from_report(job_id)
 
 
-def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+def _get_job(job_id: str) -> dict[str, Any] | None:
     if job_id in _jobs:
         _jobs[job_id] = _normalize_job(_jobs[job_id])
         return _jobs[job_id]
@@ -4093,7 +4089,7 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _load_job_from_db(job_id)
 
 
-def _read_job_submission_sources(job_id: str, subs: List[Any]) -> Dict[str, str]:
+def _read_job_submission_sources(job_id: str, subs: list[Any]) -> dict[str, str]:
     """Read stored source code for a job's submissions from disk.
 
     Attempts to locate the uploaded files under the job's upload directory,
@@ -4109,9 +4105,9 @@ def _read_job_submission_sources(job_id: str, subs: List[Any]) -> Dict[str, str]
     Returns:
         Mapping of submission name to concatenated source content.
     """
-    sources: Dict[str, str] = {}
+    sources: dict[str, str] = {}
     job_dir = UPLOADS_DIR / job_id
-    on_disk: Dict[str, str] = {}
+    on_disk: dict[str, str] = {}
     if job_dir.exists():
         try:
             on_disk = _read_files_from_dir(job_dir)
@@ -4124,7 +4120,7 @@ def _read_job_submission_sources(job_id: str, subs: List[Any]) -> Dict[str, str]
             sources[sub_name] = on_disk[sub_name]
             continue
 
-        content_parts: List[str] = []
+        content_parts: list[str] = []
         for path in [sub.storage_path, *list(sub.file_paths or [])]:
             if not path:
                 continue
@@ -4143,7 +4139,7 @@ def _read_job_submission_sources(job_id: str, subs: List[Any]) -> Dict[str, str]
     return sources
 
 
-def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
+def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
     """Minimal loader for jobs persisted to the database via the ORM wiring.
 
     Reconstructs a dict shape compatible with the in-memory job format
@@ -4171,7 +4167,7 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
 
             submissions = _read_job_submission_sources(job_id, subs)
 
-            job_dict: Dict[str, Any] = {
+            job_dict: dict[str, Any] = {
                 "id": job_id,
                 "status": db_job.status or "completed",
                 "assignment_name": db_job.name or f"Job {job_id}",
@@ -4251,7 +4247,7 @@ def _load_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+def _enrich_job_from_report(job_dict: dict[str, Any], job_id: str) -> dict[str, Any]:
     """Merge richer data from the on-disk report.json into a DB-loaded job (for C)."""
     try:
         report_path = REPORTS_DIR / job_id / "report.json"
@@ -4280,7 +4276,7 @@ def _enrich_job_from_report(job_dict: Dict[str, Any], job_id: str) -> Dict[str, 
     return job_dict
 
 
-def _extract_ai_evidence_patterns(code: str, language: str) -> Dict[str, Any]:
+def _extract_ai_evidence_patterns(code: str, language: str) -> dict[str, Any]:
     """Extract AI-specific code patterns that indicate AI generation.
 
     Returns evidence patterns found in the code.
@@ -4358,7 +4354,7 @@ def _extract_ai_evidence_patterns(code: str, language: str) -> Dict[str, Any]:
     return {k: v for k, v in patterns_found.items() if v}
 
 
-def _generate_signal_interpretations(signals: Dict[str, float]) -> Dict[str, str]:
+def _generate_signal_interpretations(signals: dict[str, float]) -> dict[str, str]:
     """Generate human-readable interpretations of signal scores.
 
     Returns dictionary mapping signal names to interpretations.
@@ -4420,7 +4416,7 @@ def _generate_signal_interpretations(signals: Dict[str, float]) -> Dict[str, str
     return interpretations
 
 
-def _compute_code_metrics(code: str) -> Dict[str, Any]:
+def _compute_code_metrics(code: str) -> dict[str, Any]:
     """Compute basic code metrics for evidence display.
 
     Returns dictionary with code statistics.
@@ -4462,7 +4458,7 @@ def _compute_code_metrics(code: str) -> Dict[str, Any]:
     }
 
 
-def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
+def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
     """Run AI detection on all submissions and aggregate results.
 
     Returns a rich summary including per-file signals, flagged lines,
@@ -4474,11 +4470,11 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
     from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
     detector = AIDetectionOrchestrator()
-    entries: List[Dict[str, Any]] = []
-    signal_totals: Dict[str, float] = {}
-    signal_peaks: Dict[str, float] = {}
-    signal_counts: Dict[str, int] = {}
-    calibration_info: Dict[str, Any] = {"available": False, "samples": 0}
+    entries: list[dict[str, Any]] = []
+    signal_totals: dict[str, float] = {}
+    signal_peaks: dict[str, float] = {}
+    signal_counts: dict[str, int] = {}
+    calibration_info: dict[str, Any] = {"available": False, "samples": 0}
 
     for name, code in submissions.items():
         language = _infer_language_from_filename(name)
@@ -4627,15 +4623,15 @@ def _build_ai_detection_summary(submissions: Dict[str, str]) -> Dict[str, Any]:
 
 
 def _build_pair_ai_details(
-    results: List[Any],
-    ai_detection: Dict[str, Any],
-) -> Dict[str, Dict[str, Any]]:
+    results: list[Any],
+    ai_detection: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
     ai_by_submission = {
         entry.get("name"): entry
         for entry in ai_detection.get("submissions", [])
         if isinstance(entry, dict) and entry.get("name")
     }
-    pair_ai_details: Dict[str, Dict[str, Any]] = {}
+    pair_ai_details: dict[str, dict[str, Any]] = {}
 
     for result in results:
         file_a = getattr(result, "file_a", "")
@@ -4675,7 +4671,7 @@ def _build_pair_ai_details(
     return pair_ai_details
 
 
-def _build_fusion_debug(result: Any, threshold: float) -> Dict[str, Any]:
+def _build_fusion_debug(result: Any, threshold: float) -> dict[str, Any]:
     """Build a professor-readable breakdown of which engines fired."""
     features = getattr(result, "features", {}) or {}
     contributions = getattr(result, "contributions", {}) or {}
@@ -4706,7 +4702,7 @@ def _build_fusion_debug(result: Any, threshold: float) -> Dict[str, Any]:
     }
 
 
-def _build_calibration_report(threshold: float, mode_id: str) -> Dict[str, Any]:
+def _build_calibration_report(threshold: float, mode_id: str) -> dict[str, Any]:
     """Return threshold/FPR guidance for professor-facing calibration reporting."""
     confidence_zones = [
         {
@@ -4754,10 +4750,10 @@ def _build_calibration_report(threshold: float, mode_id: str) -> Dict[str, Any]:
 
 
 def _build_reproducibility_report(
-    submissions: Dict[str, str],
-    selected_tool_ids: List[str],
+    submissions: dict[str, str],
+    selected_tool_ids: list[str],
     mode: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build deterministic run metadata for reproducible reports."""
     digest = hashlib.sha256()
     for name in sorted(submissions):
@@ -4779,7 +4775,7 @@ def _build_reproducibility_report(
     }
 
 
-def _build_ai_text_trust_report(ai_detection: Dict[str, Any]) -> Dict[str, Any]:
+def _build_ai_text_trust_report(ai_detection: dict[str, Any]) -> dict[str, Any]:
     """Summarize AI-text limitations and high-certainty operating mode."""
     threshold = _coerce_float(ai_detection.get("threshold"), AI_MEDIUM_RISK_THRESHOLD)
     return {
@@ -4798,8 +4794,8 @@ def _build_ai_text_trust_report(ai_detection: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_web_analysis_summary(
-    submissions: Dict[str, str], settings_payload: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    submissions: dict[str, str], settings_payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Build public-source match evidence from administrator-configured sources."""
     if not submissions:
         return {}
@@ -4833,8 +4829,8 @@ def _build_web_analysis_summary(
         github_token=github_token,
         stackoverflow_api_key=stackoverflow_api_key,
     )
-    entries: List[Dict[str, Any]] = []
-    source_totals: Dict[str, int] = {}
+    entries: list[dict[str, Any]] = []
+    source_totals: dict[str, int] = {}
 
     for name, code in submissions.items():
         result = service.scan_configured_sources(
@@ -4897,8 +4893,8 @@ def _build_web_analysis_summary(
     }
 
 
-def _list_all_jobs(current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
-    jobs_by_id: Dict[str, Dict[str, Any]] = {}
+def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
+    jobs_by_id: dict[str, dict[str, Any]] = {}
 
     if REPORTS_DIR.exists():
         for report_dir in REPORTS_DIR.iterdir():
@@ -5218,9 +5214,9 @@ async def update_user(request: Request, user_id: str):
 
 
 @app.get("/api/admin/courses-with-instructors")
-async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any]:
+async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any]:
     """Admin view: all courses with their assigned instructors."""
-    current_user = _require_current_user(request, admin_only=True)
+    _require_current_user(request, admin_only=True)
 
     try:
         with SessionLocal() as db:
@@ -5270,7 +5266,7 @@ async def admin_list_courses_with_instructors(request: Request) -> Dict[str, Any
 @app.post("/api/admin/course-instructors")
 async def admin_assign_instructor_to_course(request: Request):
     """Assign a user as instructor to a course."""
-    current_user = _require_current_user(request, admin_only=True)
+    _require_current_user(request, admin_only=True)
     data = await request.json()
 
     course_id = data.get("course_id")
@@ -5316,7 +5312,7 @@ async def admin_assign_instructor_to_course(request: Request):
 @app.delete("/api/admin/course-instructors")
 async def admin_remove_instructor_from_course(request: Request):
     """Remove an instructor assignment from a course."""
-    current_user = _require_current_user(request, admin_only=True)
+    _require_current_user(request, admin_only=True)
     data = await request.json()
 
     course_id = data.get("course_id")
@@ -5455,7 +5451,7 @@ async def create_demo_dataset(request: Request):
     except Exception as e:
         logger.error(f"Failed to create demo dataset: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to create demo dataset: {str(e)}"
+            status_code=500, detail=f"Failed to create demo dataset: {e!s}"
         )
 
 
@@ -6164,13 +6160,7 @@ def apply_plagiarism_transforms(code: str, language: str) -> str:
     if language == "python":
         code = re.sub(r'""".*?"""', "", code, flags=re.DOTALL)
         code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-    elif language == "java":
-        code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-        code = re.sub(r"//.*$", "", code, flags=re.MULTILINE)
-    elif language == "javascript":
-        code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-        code = re.sub(r"//.*$", "", code, flags=re.MULTILINE)
-    elif language == "cpp":
+    elif language == "java" or language == "javascript" or language == "cpp":
         code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
         code = re.sub(r"//.*$", "", code, flags=re.MULTILINE)
 
@@ -6334,11 +6324,11 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
-    files: List[UploadFile] = File(...),
-    starter_files: List[UploadFile] = File(default=[]),
+    files: list[UploadFile] = File(...),
+    starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
-    assignment_id: Optional[str] = Form(default=None),
+    assignment_id: str | None = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
@@ -6399,10 +6389,10 @@ async def upload_files(
 async def upload_zip(
     request: Request,
     file: UploadFile = File(...),
-    starter_files: List[UploadFile] = File(default=[]),
+    starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
-    assignment_id: Optional[str] = Form(default=None),
+    assignment_id: str | None = Form(default=None),
     assignment_mode: str = Form(default=""),
     threshold: float = Form(default=0.5),
     engine_keys: str = Form(default=""),
@@ -6463,7 +6453,7 @@ async def upload_zip(
 @app.post("/api/ai-detect")
 async def detect_ai_generated_code(
     request: Request,
-    files: List[UploadFile] = File(default=[]),
+    files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
 ):
@@ -6533,7 +6523,7 @@ async def detect_ai_generated_code(
 
 
 # AI Detection Calibration Training
-_calibration_data: List[Dict[str, Any]] = []
+_calibration_data: list[dict[str, Any]] = []
 _CALIBRATION_LOCK = threading.Lock()
 
 
@@ -6608,14 +6598,14 @@ async def retrain_ai_detector():
     except Exception as e:
         logger.error(f"Retraining failed: {e}")
         return JSONResponse(
-            status_code=500, content={"error": f"Retraining failed: {str(e)}"}
+            status_code=500, content={"error": f"Retraining failed: {e!s}"}
         )
 
 
 AIGCODESET_REPORT_DIR = project_root.parent / "data" / "datasets" / "aigcodeset"
 
 
-def _read_ai_benchmark_report(filename: str) -> Optional[Dict[str, Any]]:
+def _read_ai_benchmark_report(filename: str) -> dict[str, Any] | None:
     """Return the parsed AIGCodeSet benchmark report JSON if it exists."""
     path = AIGCODESET_REPORT_DIR / filename
     if not path.exists():
@@ -6669,7 +6659,7 @@ async def get_ai_detection_accuracy():
     )
 
 
-def _analytics_term_label(value: Optional[datetime]) -> str:
+def _analytics_term_label(value: datetime | None) -> str:
     """Return an academic term label (Winter/Summer/Fall + year) for a timestamp.
 
     Terms map from calendar months: Jan–Apr = Winter, May–Aug = Summer,
@@ -6684,7 +6674,7 @@ def _analytics_term_label(value: Optional[datetime]) -> str:
     return f"Fall {value.year}"
 
 
-def _analytics_month_label(value: Optional[datetime]) -> str:
+def _analytics_month_label(value: datetime | None) -> str:
     """Return a short month label (e.g. \"Jun 2026\") for a timestamp."""
     if value is None:
         return "—"
@@ -6692,7 +6682,7 @@ def _analytics_month_label(value: Optional[datetime]) -> str:
 
 
 @app.get("/api/analytics/overview")
-async def get_analytics_overview(request: Request) -> Dict[str, Any]:
+async def get_analytics_overview(request: Request) -> dict[str, Any]:
     """
     Return department integrity analytics aggregated from live database records.
 
@@ -6715,7 +6705,7 @@ async def get_analytics_overview(request: Request) -> Dict[str, Any]:
         assignment_by_id = {a.id: a for a in assignments}
 
         # ── Cases by course (via assignment → course) ──────────────────────
-        by_course: Dict[str, int] = {}
+        by_course: dict[str, int] = {}
         for case in cases:
             assignment = assignment_by_id.get(case.assignment_id)
             course = course_by_id.get(assignment.course_id) if assignment else None
@@ -6727,7 +6717,7 @@ async def get_analytics_overview(request: Request) -> Dict[str, Any]:
         ]
 
         # ── Term risk (high vs medium by case priority) ────────────────────
-        term_risk: Dict[str, Dict[str, int]] = {}
+        term_risk: dict[str, dict[str, int]] = {}
         for case in cases:
             term = _analytics_term_label(case.created_at)
             bucket = term_risk.setdefault(term, {"high": 0, "medium": 0})
@@ -6741,7 +6731,7 @@ async def get_analytics_overview(request: Request) -> Dict[str, Any]:
         ]
 
         # ── Repeat offender buckets (linked-similarity-result count) ───────
-        link_counts: Dict[str, int] = {}
+        link_counts: dict[str, int] = {}
         for link in links:
             key = str(link.case_id)
             link_counts[key] = link_counts.get(key, 0) + 1
@@ -6763,7 +6753,7 @@ async def get_analytics_overview(request: Request) -> Dict[str, Any]:
         ]
 
         # ── Suspicion trend (review cases per month, high-priority split) ──
-        month_counts: Dict[str, Dict[str, int]] = {}
+        month_counts: dict[str, dict[str, int]] = {}
         for case in cases:
             month = _analytics_month_label(case.created_at)
             bucket = month_counts.setdefault(month, {"cases": 0, "high": 0})
@@ -6882,13 +6872,13 @@ async def _run_analysis(
     job_dir,
     course_name,
     assignment_name,
-    assignment_id: Optional[str] = None,
+    assignment_id: str | None = None,
     assignment_mode: str = "",
     threshold: float = 0.5,
-    current_user: Dict[str, Any] = None,
+    current_user: dict[str, Any] | None = None,
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
-    starter_sources: List[str] = None,
+    starter_sources: list[str] | None = None,
 ):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
 
@@ -7294,7 +7284,7 @@ async def _run_analysis(
             _persist_job(job_id)
             _update_job_status_in_db(job_id, "failed", str(e))
         return JSONResponse(
-            status_code=500, content={"error": f"Analysis failed: {str(e)}"}
+            status_code=500, content={"error": f"Analysis failed: {e!s}"}
         )
 
 
@@ -7434,7 +7424,7 @@ async def get_benchmark_tools():
 
 @app.post("/api/benchmark/real-fpr")
 async def compute_real_fpr_on_clean_corpus(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
 ):
     """
     Compute real False Positive Rate on a set of known-clean submissions.
@@ -7446,7 +7436,7 @@ async def compute_real_fpr_on_clean_corpus(
             detail="At least 2 submissions are required to compute FPR.",
         )
 
-    submissions: Dict[str, str] = {}
+    submissions: dict[str, str] = {}
     for upload in files:
         try:
             content = (await upload.read()).decode("utf-8", errors="ignore")
@@ -7471,7 +7461,7 @@ async def compute_real_fpr_on_clean_corpus(
     except Exception as e:
         logger.exception("Real FPR computation failed")
         raise HTTPException(
-            status_code=500, detail=f"Internal error during FPR computation: {str(e)}"
+            status_code=500, detail=f"Internal error during FPR computation: {e!s}"
         ) from e
 
     # Very fine-grained thresholds focused on the critical professor decision zone
@@ -7654,9 +7644,9 @@ async def compute_real_fpr_on_clean_corpus(
 class FprValidationRunCreate(BaseModel):
     """Request body for saving an FPR validation run (internal tool endpoint)."""
 
-    name: Optional[str] = None
-    result: Dict[str, Any]
-    notes: Optional[str] = None
+    name: str | None = None
+    result: dict[str, Any]
+    notes: str | None = None
 
 
 # ============================================================
@@ -7838,7 +7828,7 @@ async def delete_fpr_validation_run(run_id: str, request: Request):
 
 BENCHMARK_DATASETS = []
 
-BENCHMARK_WORKFLOW_PRESETS: List[Dict[str, Any]] = [
+BENCHMARK_WORKFLOW_PRESETS: list[dict[str, Any]] = [
     {
         "id": "quick_precision_check",
         "name": "Quick Precision Check",
@@ -7903,7 +7893,7 @@ def _benchmark_history_path() -> PathLib:
     return BENCHMARK_RUNS_DIR / "history.json"
 
 
-def _read_benchmark_history() -> List[Dict[str, Any]]:
+def _read_benchmark_history() -> list[dict[str, Any]]:
     """Read recent benchmark run summaries from disk."""
     history_path = _benchmark_history_path()
     if not history_path.exists():
@@ -7918,7 +7908,7 @@ def _read_benchmark_history() -> List[Dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
-def _write_benchmark_history(history: List[Dict[str, Any]]) -> None:
+def _write_benchmark_history(history: list[dict[str, Any]]) -> None:
     """Persist benchmark run history with a bounded number of recent entries."""
     history_path = _benchmark_history_path()
     history_path.write_text(
@@ -7926,7 +7916,7 @@ def _write_benchmark_history(history: List[Dict[str, Any]]) -> None:
     )
 
 
-def _metric_from_benchmark_response(response: Dict[str, Any], metric: str) -> float:
+def _metric_from_benchmark_response(response: dict[str, Any], metric: str) -> float:
     """Extract an IntegrityDesk metric from a benchmark response."""
     integrity_metrics = (response.get("evaluation") or {}).get("integritydesk") or {}
     if metric in integrity_metrics:
@@ -7946,7 +7936,7 @@ def _metric_from_benchmark_response(response: Dict[str, Any], metric: str) -> fl
     return 0.0
 
 
-def _benchmark_run_summary(response: Dict[str, Any]) -> Dict[str, Any]:
+def _benchmark_run_summary(response: dict[str, Any]) -> dict[str, Any]:
     """Create a compact benchmark run summary for history and comparisons."""
     metrics = {
         "precision": _metric_from_benchmark_response(response, "precision"),
@@ -7976,8 +7966,8 @@ def _benchmark_run_summary(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _find_previous_benchmark_run(
-    history: List[Dict[str, Any]], current: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    history: list[dict[str, Any]], current: dict[str, Any]
+) -> dict[str, Any] | None:
     """Find the latest comparable prior run for the same workflow and dataset."""
     for item in history:
         if item.get("job_id") == current.get("job_id"):
@@ -7993,8 +7983,8 @@ def _find_previous_benchmark_run(
 
 
 def _build_benchmark_delta(
-    current: Dict[str, Any], previous: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
+    current: dict[str, Any], previous: dict[str, Any] | None
+) -> dict[str, Any]:
     """Compute metric deltas against a previous comparable run."""
     if not previous:
         return {"has_previous": False, "metrics": {}}
@@ -8014,7 +8004,7 @@ def _build_benchmark_delta(
     }
 
 
-def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
+def _persist_benchmark_response(response: dict[str, Any]) -> dict[str, Any]:
     """Save a full benchmark response and update the compact run history."""
     summary = _benchmark_run_summary(response)
     history = _read_benchmark_history()
@@ -8075,7 +8065,7 @@ def _persist_benchmark_response(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/benchmark-presets")
-async def get_benchmark_presets() -> Dict[str, Any]:
+async def get_benchmark_presets() -> dict[str, Any]:
     """Return repeatable benchmark workflows for product optimization."""
     available_tools = {
         tool["id"]: tool
@@ -8117,7 +8107,7 @@ async def get_benchmark_presets() -> Dict[str, Any]:
 
 
 @app.get("/api/benchmark-history")
-async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
+async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
     """Return recent benchmark run summaries (file + DB for native persistence)."""
     safe_limit = max(1, min(100, int(limit)))
     runs = _read_benchmark_history()[:safe_limit]
@@ -8143,7 +8133,7 @@ async def get_benchmark_history(limit: int = 20) -> Dict[str, Any]:
 
 
 @app.get("/api/courses")
-async def get_courses(request: Request) -> Dict[str, Any]:
+async def get_courses(request: Request) -> dict[str, Any]:
     """Return courses visible to the current user.
 
     A user can see a course if:
@@ -8199,8 +8189,8 @@ async def get_courses(request: Request) -> Dict[str, Any]:
 
 @app.get("/api/assignments")
 async def get_assignments(
-    course_id: Optional[str] = None, request: Request = None
-) -> Dict[str, Any]:
+    course_id: str | None = None, request: Request = None
+) -> dict[str, Any]:
     """Return assignments visible to the current user (instructor + org scoped)."""
     try:
         try:
@@ -8254,7 +8244,7 @@ async def get_assignments(
 
 
 @app.get("/api/error-analysis")
-async def get_error_analysis() -> Dict[str, Any]:
+async def get_error_analysis() -> dict[str, Any]:
     """Compute real error analysis from stored benchmark runs and job results.
 
     Priority:
@@ -8268,7 +8258,7 @@ async def get_error_analysis() -> Dict[str, Any]:
         reverse=True,
     )
 
-    labeled_run: Optional[Dict[str, Any]] = None
+    labeled_run: dict[str, Any] | None = None
     for run_path in benchmark_runs[:10]:  # check last 10 runs
         try:
             run = json.loads(run_path.read_text(encoding="utf-8"))
@@ -8285,7 +8275,7 @@ async def get_error_analysis() -> Dict[str, Any]:
     return _build_error_analysis_from_jobs()
 
 
-def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
+def _build_error_analysis_from_benchmark(run: dict[str, Any]) -> dict[str, Any]:
     """Build full error analysis from a benchmark run that has ground-truth labels."""
     pair_results = run.get("pair_results", [])
     tool_scores = run.get("tool_scores", {})
@@ -8311,10 +8301,10 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
             threshold = float(t)
 
     tp = fp = fn = tn = 0
-    false_positive_cases: List[Dict[str, Any]] = []
-    false_negative_cases: List[Dict[str, Any]] = []
-    engine_fp_counts: Dict[str, int] = {}
-    engine_fn_counts: Dict[str, int] = {}
+    false_positive_cases: list[dict[str, Any]] = []
+    false_negative_cases: list[dict[str, Any]] = []
+    engine_fp_counts: dict[str, int] = {}
+    engine_fn_counts: dict[str, int] = {}
 
     for pair in pair_results:
         gt = pair.get("ground_truth_label")
@@ -8324,8 +8314,8 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
 
         # Get score for primary tool
         score = None
-        features: Dict[str, Any] = {}
-        contributions: Dict[str, Any] = {}
+        features: dict[str, Any] = {}
+        contributions: dict[str, Any] = {}
         for tr in pair.get("tool_results", []):
             if tr.get("tool") == primary_tool:
                 score = float(tr.get("score", 0))
@@ -8388,8 +8378,8 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
     engine_contrib = eval_data.get("engine_contribution", {})
 
     def _engine_pct_from_counts(
-        counts: Dict[str, int], total_count: int
-    ) -> Dict[str, int]:
+        counts: dict[str, int], total_count: int
+    ) -> dict[str, int]:
         return {
             k: round(v / total_count * 100)
             for k, v in sorted(counts.items(), key=lambda x: -x[1])[:6]
@@ -8435,9 +8425,9 @@ def _build_error_analysis_from_benchmark(run: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_error_analysis_from_jobs() -> Dict[str, Any]:
+def _build_error_analysis_from_jobs() -> dict[str, Any]:
     """Build error analysis from stored plagiarism job results (no ground truth)."""
-    all_results: List[Dict[str, Any]] = []
+    all_results: list[dict[str, Any]] = []
     job_count = 0
 
     for job_path in sorted(
@@ -8534,8 +8524,8 @@ def _build_error_analysis_from_jobs() -> Dict[str, Any]:
 
 
 def _find_likely_false_negatives(
-    not_flagged: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    not_flagged: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Identify pairs that were not flagged but show suspicious feature patterns."""
     candidates = []
     for r in not_flagged:
@@ -8555,12 +8545,12 @@ def _find_likely_false_negatives(
 
 
 def _make_error_case(
-    pair: Dict[str, Any],
+    pair: dict[str, Any],
     score: float,
     error_type: str,
-    features: Dict[str, Any],
-    contributions: Dict[str, Any],
-) -> Dict[str, Any]:
+    features: dict[str, Any],
+    contributions: dict[str, Any],
+) -> dict[str, Any]:
     """Build an error case dict from a benchmark pair."""
     dominant_engine = (
         max(contributions, key=lambda k: contributions[k], default="token")
@@ -8615,7 +8605,7 @@ def _make_error_case(
     }
 
 
-def _make_job_error_case(r: Dict[str, Any], error_type: str) -> Dict[str, Any]:
+def _make_job_error_case(r: dict[str, Any], error_type: str) -> dict[str, Any]:
     """Build an error case dict from a job result."""
     features = r.get("features", {})
     score = r["score"]
@@ -8658,7 +8648,7 @@ def _make_job_error_case(r: Dict[str, Any], error_type: str) -> Dict[str, Any]:
     }
 
 
-def _classify_fp_reason(features: Dict[str, Any], contributions: Dict[str, Any]) -> str:
+def _classify_fp_reason(features: dict[str, Any], contributions: dict[str, Any]) -> str:
     token = float(features.get("token", features.get("token_similarity", 0)) or 0)
     ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
     embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
@@ -8671,7 +8661,7 @@ def _classify_fp_reason(features: Dict[str, Any], contributions: Dict[str, Any])
     return "Borderline similarity near threshold"
 
 
-def _classify_fn_reason(features: Dict[str, Any], score: float) -> str:
+def _classify_fn_reason(features: dict[str, Any], score: float) -> str:
     token = float(features.get("token", features.get("token_similarity", 0)) or 0)
     ast = float(features.get("ast", features.get("ast_similarity", 0)) or 0)
     embed = float(features.get("embedding", features.get("semantic", 0)) or 0)
@@ -8705,10 +8695,10 @@ def _fn_recommendation(reason: str) -> str:
 
 
 def _aggregate_engine_contributions(
-    feature_list: List[Dict[str, Any]]
-) -> Dict[str, int]:
+    feature_list: list[dict[str, Any]]
+) -> dict[str, int]:
     """Compute average engine contribution percentages across a list of feature dicts."""
-    totals: Dict[str, float] = {}
+    totals: dict[str, float] = {}
     count = 0
     for features in feature_list:
         if not features:
@@ -8727,7 +8717,7 @@ def _aggregate_engine_contributions(
     }
 
 
-def _invert_engine_contrib(engine_contrib: Dict[str, Any]) -> Dict[str, int]:
+def _invert_engine_contrib(engine_contrib: dict[str, Any]) -> dict[str, int]:
     """Convert engine contribution floats to integer percentages."""
     total = sum(float(v or 0) for v in engine_contrib.values()) or 1
     return {
@@ -8737,8 +8727,8 @@ def _invert_engine_contrib(engine_contrib: Dict[str, Any]) -> Dict[str, int]:
 
 
 def _generate_recommendations(
-    fp: int, fn: int, precision: float, recall: float, engine_contrib: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    fp: int, fn: int, precision: float, recall: float, engine_contrib: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Generate actionable recommendations based on error patterns."""
     recs = []
 
@@ -8831,7 +8821,7 @@ def _generate_recommendations(
     return recs
 
 
-def _empty_error_analysis() -> Dict[str, Any]:
+def _empty_error_analysis() -> dict[str, Any]:
     """Return an empty analysis when no data is available."""
     return {
         "source": "none",
@@ -8858,10 +8848,10 @@ def _empty_error_analysis() -> Dict[str, Any]:
 
 
 @app.get("/api/benchmark-datasets")
-async def get_benchmark_datasets() -> Dict[str, Any]:
+async def get_benchmark_datasets() -> dict[str, Any]:
     """Get available benchmark datasets by scanning data/datasets/ directory."""
-    datasets: List[Dict[str, Any]] = []
-    dataset_icons: Dict[str, str] = {
+    datasets: list[dict[str, Any]] = []
+    dataset_icons: dict[str, str] = {
         "demo": "🧪",
         "poj104": "📚",
         "codesearchnet": "🐍",
@@ -8874,7 +8864,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
         "oscar": "🎭",
         "xiangtan": "🏫",
     }
-    dataset_colors: Dict[str, str] = {
+    dataset_colors: dict[str, str] = {
         "demo": "purple",
         "poj104": "blue",
         "codesearchnet": "green",
@@ -8891,7 +8881,7 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
     for item in _iter_benchmark_dataset_roots():
         dataset_id = item.name
         metadata = _load_dataset_metadata(item)
-        dataset_info: Dict[str, Any] = {}
+        dataset_info: dict[str, Any] = {}
 
         if metadata.get("exclude_from_benchmark"):
             continue
@@ -8917,14 +8907,14 @@ async def get_benchmark_datasets() -> Dict[str, Any]:
         color = dataset_colors.get("demo" if is_demo else "gray", "slate")
 
         # Try to find icon/color for known dataset types
-        for key in dataset_icons.keys():
+        for key in dataset_icons:
             if key in dataset_id.lower():
                 icon = dataset_icons[key]
                 color = dataset_colors.get(key, "slate")
                 break
 
         # Build dataset record
-        dataset_record: Dict[str, Any] = {
+        dataset_record: dict[str, Any] = {
             "id": dataset_id,
             "name": metadata.get("name", dataset_id.replace("_", " ").title()),
             "desc": metadata.get("description", f"Dataset: {dataset_id}"),
@@ -9028,14 +9018,14 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
 @app.post("/api/benchmark")
 async def run_benchmark(
     request: Request,
-    files: List[UploadFile] = File(default=[]),
-    tools: List[str] = Form(default=[]),
+    files: list[UploadFile] = File(default=[]),
+    tools: list[str] = Form(default=[]),
     dataset: str = Form(default=""),
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
 ):
     # User authentication is handled by middleware, user info is in request.state
-    selected_tools: List[str] = []
+    selected_tools: list[str] = []
     for tool in tools:
         tool_id = str(tool).strip().lower()
         if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
@@ -9080,8 +9070,8 @@ async def run_benchmark(
             )
 
     submissions = {}
-    explicit_pairs: List[Dict[str, Any]] = []
-    pair_sampling_audit: Dict[str, Any] = {}
+    explicit_pairs: list[dict[str, Any]] = []
+    pair_sampling_audit: dict[str, Any] = {}
 
     logger.info(f"[BENCHMARK {job_id}] Loading submissions")
     if dataset and dataset != "custom":
@@ -9141,7 +9131,7 @@ async def run_benchmark(
     logger.info(f"[BENCHMARK {job_id}] Generated {len(all_pairs)} comparison pairs")
 
     tool_results = {}
-    tool_timings: Dict[str, float] = {}
+    tool_timings: dict[str, float] = {}
 
     if "integritydesk" in tools:
         logger.info(f"[BENCHMARK {job_id}] Running IntegrityDesk engine")
@@ -9440,8 +9430,8 @@ async def run_benchmark(
 @app.post("/api/benchmark/stream")
 async def stream_benchmark(
     request: Request,
-    files: List[UploadFile] = File(default=[]),
-    tools: List[str] = Form(default=[]),
+    files: list[UploadFile] = File(default=[]),
+    tools: list[str] = Form(default=[]),
     dataset: str = Form(default=""),
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
@@ -9458,11 +9448,11 @@ async def stream_benchmark(
 
 
 # ── Background benchmark job store ────────────────────────────────────────
-BENCHMARK_JOBS: Dict[str, Dict[str, Any]] = {}
+BENCHMARK_JOBS: dict[str, dict[str, Any]] = {}
 BENCHMARK_JOBS_LOCK = threading.Lock()
 
 
-def _benchmark_job_set(job_id: str, updates: Dict[str, Any]) -> None:
+def _benchmark_job_set(job_id: str, updates: dict[str, Any]) -> None:
     """Thread-safe update of a benchmark job record."""
     with BENCHMARK_JOBS_LOCK:
         BENCHMARK_JOBS.setdefault(job_id, {}).update(updates)
@@ -9470,15 +9460,13 @@ def _benchmark_job_set(job_id: str, updates: Dict[str, Any]) -> None:
 
 def _run_benchmark_background(
     job_id: str,
-    tool_ids: List[str],
+    tool_ids: list[str],
     dataset: str,
     benchmark_type: str,
     preset_id: str,
-    file_bytes: List[tuple],  # list of (filename, bytes)
+    file_bytes: list[tuple],  # list of (filename, bytes)
 ) -> None:
     """Run the full benchmark in a background thread and store the result."""
-    import asyncio
-    import io
 
     def _progress(msg: str) -> None:
         _benchmark_job_set(job_id, {})
@@ -9489,7 +9477,7 @@ def _run_benchmark_background(
         _benchmark_job_set(job_id, {"status": "running", "progress": []})
         _progress(f"Starting benchmark with tools: {', '.join(tool_ids)}")
 
-        selected_tools: List[str] = []
+        selected_tools: list[str] = []
         for tool in tool_ids:
             tool_id = str(tool).strip().lower()
             if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
@@ -9528,9 +9516,9 @@ def _run_benchmark_background(
                 )
                 return
 
-        submissions: Dict[str, str] = {}
-        explicit_pairs: List[Dict[str, Any]] = []
-        pair_sampling_audit: Dict[str, Any] = {}
+        submissions: dict[str, str] = {}
+        explicit_pairs: list[dict[str, Any]] = []
+        pair_sampling_audit: dict[str, Any] = {}
 
         if dataset and dataset != "custom":
             _progress(f"Loading dataset: {dataset}")
@@ -9587,8 +9575,8 @@ def _run_benchmark_background(
             ]
         _progress(f"Generated {len(all_pairs)} comparison pairs")
 
-        tool_results: Dict[str, Any] = {}
-        tool_timings: Dict[str, float] = {}
+        tool_results: dict[str, Any] = {}
+        tool_timings: dict[str, float] = {}
 
         if "integritydesk" in tools:
             _progress("Running IntegrityDesk engine…")
@@ -9681,7 +9669,7 @@ def _run_benchmark_background(
         }
         pair_results = []
         for fa, fb in all_pairs:
-            entry: Dict[str, Any] = {
+            entry: dict[str, Any] = {
                 "file_a": fa,
                 "file_b": fb,
                 "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
@@ -9707,7 +9695,7 @@ def _run_benchmark_background(
             pair_results.append(entry)
 
         ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
-        evaluation_results: Dict[str, Any] = {}
+        evaluation_results: dict[str, Any] = {}
         if ground_truth_labels:
             for tn, td in tool_results.items():
                 if "pairs" not in td:
@@ -9763,7 +9751,7 @@ def _run_benchmark_background(
 
         shutil.rmtree(job_dir, ignore_errors=True)
 
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "job_id": job_id,
             "preset_id": preset_id,
             "preset_name": next(
@@ -9862,8 +9850,8 @@ def _run_benchmark_background(
 @app.post("/api/benchmark/start")
 async def start_benchmark_job(
     request: Request,
-    files: List[UploadFile] = File(default=[]),
-    tools: List[str] = Form(default=[]),
+    files: list[UploadFile] = File(default=[]),
+    tools: list[str] = Form(default=[]),
     dataset: str = Form(default=""),
     benchmark_type: str = Form(default="tool_comparison"),
     preset_id: str = Form(default=""),
@@ -9872,7 +9860,7 @@ async def start_benchmark_job(
     job_id = str(uuid.uuid4())[:8]
 
     # Read file bytes now, before the request context closes
-    file_bytes: List[tuple] = []
+    file_bytes: list[tuple] = []
     for f in files:
         if f.filename:
             content = await f.read()
@@ -9913,7 +9901,7 @@ async def get_benchmark_job_status(job_id: str):
 
 
 @app.post("/api/benchmark/apply-optimization")
-async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
+async def apply_benchmark_optimization(request: Request) -> dict[str, Any]:
     """Apply proposed benchmark optimization changes to engine_weights.yaml."""
     _require_current_user(request, admin_only=False)
     payload = await request.json()
@@ -9942,8 +9930,8 @@ async def apply_benchmark_optimization(request: Request) -> Dict[str, Any]:
 
 
 def _get_ground_truth_labels(
-    dataset: str, pair_results: List[Dict[str, Any]]
-) -> List[int]:
+    dataset: str, pair_results: list[dict[str, Any]]
+) -> list[int]:
     """Get ground truth labels for built-in datasets.
 
     Labels: 0=unrelated, 1=weak, 2=semantic clone, 3=exact clone
@@ -9984,7 +9972,7 @@ def _get_ground_truth_labels(
     return []
 
 
-REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
+REGRESSION_QUALITY_GATE_THRESHOLDS: dict[str, dict[str, Any]] = {
     "precision": {
         "label": "Precision",
         "min": 0.90,
@@ -10011,7 +9999,7 @@ REGRESSION_QUALITY_GATE_THRESHOLDS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-BENCHMARK_TRUST_THRESHOLDS: Dict[str, int] = {
+BENCHMARK_TRUST_THRESHOLDS: dict[str, int] = {
     "strong_holdout_pairs": 40,
     "strong_holdout_pairs_per_class": 10,
     "moderate_holdout_pairs": 12,
@@ -10023,7 +10011,7 @@ BENCHMARK_TRUST_THRESHOLDS: Dict[str, int] = {
 }
 
 
-def _normalize_benchmark_protocol(benchmark_type: str) -> Dict[str, str]:
+def _normalize_benchmark_protocol(benchmark_type: str) -> dict[str, str]:
     """Normalize legacy benchmark types into clearer product protocol metadata."""
     benchmark_type_aliases = {
         "development": "pan_optimization",
@@ -10068,7 +10056,7 @@ def _normalize_benchmark_protocol(benchmark_type: str) -> Dict[str, str]:
     }
 
 
-def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:
+def _build_regression_quality_gates(metrics: dict[str, Any]) -> dict[str, Any]:
     """Build pass/fail gates for fixed-threshold benchmark regression runs."""
     if not metrics or metrics.get("error"):
         return {
@@ -10111,8 +10099,8 @@ def _build_regression_quality_gates(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _diagnose_regression_gate_failure(
-    metrics: Dict[str, Any], gates: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    metrics: dict[str, Any], gates: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Explain the highest-impact reason a fixed-threshold release gate failed."""
     failed_metrics = {gate["metric"] for gate in gates if not gate.get("passed")}
     if not failed_metrics:
@@ -10174,8 +10162,7 @@ def _diagnose_regression_gate_failure(
 def _get_ground_truth_basis(dataset: str) -> str:
     """Describe how benchmark ground truth was derived."""
     if dataset and (
-        dataset.startswith("demo_")
-        or dataset.startswith("synthetic")
+        dataset.startswith(("demo_", "synthetic"))
         or dataset == "clough_stevenson_style"
         or dataset in {"synthetic_small", "synthetic_medium", "synthetic_java"}
     ):
@@ -10186,12 +10173,11 @@ def _get_ground_truth_basis(dataset: str) -> str:
 
 
 def _infer_filename_ground_truth_labels(
-    dataset: str, pair_results: List[Dict[str, Any]]
-) -> List[int]:
+    dataset: str, pair_results: list[dict[str, Any]]
+) -> list[int]:
     """Infer pair labels from original/plagiarized filename conventions."""
     if not dataset or not (
-        dataset.startswith("demo_")
-        or dataset.startswith("synthetic")
+        dataset.startswith(("demo_", "synthetic"))
         or dataset in {"synthetic_small", "synthetic_medium", "synthetic_java"}
     ):
         return []
@@ -10253,14 +10239,14 @@ def _benchmark_fixed_threshold() -> tuple[float, str]:
 
 
 def _compute_evaluation_metrics(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     tool_name: str,
     dataset_name: str,
     runtime_seconds: float = 0.0,
-    engine_contribution: Optional[Dict[str, float]] = None,
+    engine_contribution: dict[str, float] | None = None,
     threshold_strategy: str = "calibration_holdout",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute PAN-aligned evaluation metrics for labeled benchmark pairs.
 
     The interactive benchmark endpoint currently receives pair-level labels
@@ -10346,12 +10332,12 @@ def _compute_evaluation_metrics(
     # Compute ROC-AUC and PR-AUC
     try:
         from sklearn.metrics import (
-            roc_auc_score,
             average_precision_score,
+            confusion_matrix,
+            f1_score,
             precision_score,
             recall_score,
-            f1_score,
-            confusion_matrix,
+            roc_auc_score,
         )
 
         if len(np.unique(labels_arr)) > 1:
@@ -10533,7 +10519,7 @@ def _compute_evaluation_metrics(
 
 def _binary_metrics_at_threshold(
     scores_arr: np.ndarray, labels_arr: np.ndarray, threshold: float
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute binary confusion metrics at a concrete decision threshold."""
     preds = (scores_arr >= threshold).astype(int)
 
@@ -10541,9 +10527,9 @@ def _binary_metrics_at_threshold(
     try:
         from sklearn.metrics import (
             confusion_matrix,
+            f1_score,
             precision_score,
             recall_score,
-            f1_score,
         )
 
         cm = confusion_matrix(labels_arr, preds)
@@ -10583,8 +10569,8 @@ def _binary_metrics_at_threshold(
 
 
 def _build_stratified_calibration_holdout_split(
-    binary_labels: List[int],
-) -> Dict[str, Any]:
+    binary_labels: list[int],
+) -> dict[str, Any]:
     """Create deterministic calibration and held-out indices with class balance."""
     positive_indices = [
         index for index, label in enumerate(binary_labels) if label == 1
@@ -10611,8 +10597,8 @@ def _build_stratified_calibration_holdout_split(
             ),
         }
 
-    calibration_indices: List[int] = []
-    holdout_indices: List[int] = []
+    calibration_indices: list[int] = []
+    holdout_indices: list[int] = []
     for class_indices in (positive_indices, negative_indices):
         split_at = max(1, len(class_indices) // 2)
         calibration_indices.extend(class_indices[:split_at])
@@ -10639,7 +10625,7 @@ def _build_stratified_calibration_holdout_split(
     }
 
 
-def _build_locked_full_sample_protocol(binary_labels: List[int]) -> Dict[str, Any]:
+def _build_locked_full_sample_protocol(binary_labels: list[int]) -> dict[str, Any]:
     """Describe a fixed-threshold evaluation over all labeled pairs."""
     positive_count = int(sum(binary_labels))
     negative_count = int(len(binary_labels) - positive_count)
@@ -10662,8 +10648,8 @@ def _build_locked_full_sample_protocol(binary_labels: List[int]) -> Dict[str, An
 
 
 def _classification_confidence_intervals(
-    scores: List[float], binary_labels: List[int], threshold: float
-) -> Dict[str, Any]:
+    scores: list[float], binary_labels: list[int], threshold: float
+) -> dict[str, Any]:
     """Return reproducible bootstrap confidence intervals for held-out metrics."""
     if len(scores) < 2 or len(set(binary_labels)) < 2:
         return {
@@ -10689,13 +10675,13 @@ def _classification_confidence_intervals(
 
 
 def _build_benchmark_trust_assessment(
-    split_protocol: Dict[str, Any],
-    confidence_intervals: Dict[str, Any],
-    score_diagnostics: Dict[str, Any],
+    split_protocol: dict[str, Any],
+    confidence_intervals: dict[str, Any],
+    score_diagnostics: dict[str, Any],
     threshold_strategy: str,
     headline_basis: str,
-    binary_labels: List[int],
-) -> Dict[str, Any]:
+    binary_labels: list[int],
+) -> dict[str, Any]:
     """Grade whether benchmark metrics are suitable for internal decisions."""
     protocol = str(split_protocol.get("protocol", "unknown"))
     holdout_size = int(split_protocol.get("holdout_size") or 0)
@@ -10703,8 +10689,8 @@ def _build_benchmark_trust_assessment(
     holdout_negative = int(split_protocol.get("holdout_negative_pairs") or 0)
     positive_count = int(sum(binary_labels))
     negative_count = int(len(binary_labels) - positive_count)
-    reasons: List[str] = []
-    blockers: List[str] = []
+    reasons: list[str] = []
+    blockers: list[str] = []
 
     if positive_count == 0 or negative_count == 0:
         blockers.append("Benchmark needs both positive and negative labeled pairs.")
@@ -10811,19 +10797,19 @@ def _build_benchmark_trust_assessment(
 
 
 def _build_metric_integrity_summary(
-    scores: List[float],
-    labels: List[int],
-    binary_labels: List[int],
+    scores: list[float],
+    labels: list[int],
+    binary_labels: list[int],
     best_threshold: float,
     fixed_threshold: float,
-    optimized_metrics: Dict[str, Any],
-    heldout_metrics: Dict[str, Any],
-    fixed_threshold_metrics: Dict[str, Any],
-    split_protocol: Dict[str, Any],
-    confidence_intervals: Dict[str, Any],
-    score_diagnostics: Dict[str, Any],
-    benchmark_trust: Dict[str, Any],
-) -> Dict[str, Any]:
+    optimized_metrics: dict[str, Any],
+    heldout_metrics: dict[str, Any],
+    fixed_threshold_metrics: dict[str, Any],
+    split_protocol: dict[str, Any],
+    confidence_intervals: dict[str, Any],
+    score_diagnostics: dict[str, Any],
+    benchmark_trust: dict[str, Any],
+) -> dict[str, Any]:
     """Describe benchmark metric trust boundaries and validation checks."""
     positive_count = int(sum(binary_labels))
     negative_count = int(len(binary_labels) - positive_count)
@@ -10891,9 +10877,9 @@ def _canonical_weight_key(engine_name: str) -> str:
 
 
 def _normalized_weight_patch(
-    current_weights: Dict[str, Any],
-    adjustments: Dict[str, float],
-) -> Dict[str, float]:
+    current_weights: dict[str, Any],
+    adjustments: dict[str, float],
+) -> dict[str, float]:
     """Apply relative weight deltas and return a normalized weight map."""
     patched = {
         str(key): max(0.0, float(value))
@@ -10912,7 +10898,7 @@ def _normalized_weight_patch(
 
 
 def _add_config_change(
-    changes: List[Dict[str, Any]],
+    changes: list[dict[str, Any]],
     path: str,
     current: Any,
     proposed: Any,
@@ -10934,16 +10920,16 @@ def _add_config_change(
 
 
 def _manual_engine_tuning_options(
-    weights: Dict[str, Any],
-    decision: Dict[str, Any],
-    precision_guard: Dict[str, Any],
-    ast_boost: Dict[str, Any],
-    deep_verify: Dict[str, Any],
+    weights: dict[str, Any],
+    decision: dict[str, Any],
+    precision_guard: dict[str, Any],
+    ast_boost: dict[str, Any],
+    deep_verify: dict[str, Any],
     tuning_mode: str,
     dominant_engine: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Expose editable config controls even when no automatic edit is available."""
-    options: List[Dict[str, Any]] = []
+    options: list[dict[str, Any]] = []
 
     def add_option(
         path: str,
@@ -11144,10 +11130,10 @@ def _build_engine_tuning_recommendations(
     auc_pr: float,
     best_threshold: float,
     fixed_threshold: float,
-    engine_contribution: Dict[str, float],
-    confusion_matrix: Dict[str, Any],
-    score_diagnostics: Dict[str, Any],
-) -> Dict[str, Any]:
+    engine_contribution: dict[str, float],
+    confusion_matrix: dict[str, Any],
+    score_diagnostics: dict[str, Any],
+) -> dict[str, Any]:
     """Build concrete candidate edits for engine_weights.yaml after a benchmark.
 
     These are deliberately conservative recommendations. They are meant to make
@@ -11183,8 +11169,8 @@ def _build_engine_tuning_recommendations(
         or score_diagnostics.get("label_conflict")
     )
     previous_candidate_pending = bool(advanced.get("weights_need_validation"))
-    changes: List[Dict[str, Any]] = []
-    actions: List[Dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
 
     current_threshold = _coerce_float(
         decision.get("default_threshold"), _coerce_float(fixed_threshold, 0.82)
@@ -11273,7 +11259,7 @@ def _build_engine_tuning_recommendations(
             contributions.items(), key=lambda item: item[1]
         )
 
-    weight_adjustments: Dict[str, float] = {}
+    weight_adjustments: dict[str, float] = {}
     if precision_problem or fpr_problem:
         if dominant_engine in weights and dominant_value >= 0.45:
             weight_adjustments[dominant_engine] = (
@@ -11489,21 +11475,18 @@ def _validate_engine_optimization_value(path: str, proposed: Any) -> None:
         return
 
     numeric = float(proposed)
-    unit_interval_paths = (
-        path.startswith("weights.")
-        or path.startswith("thresholds.")
-        or path.endswith("_threshold")
-        or path.endswith("_floor")
-        or path.endswith("_cap")
-        or path.endswith("_multiplier")
-        or path.endswith(".default_threshold")
-        or path.endswith(".minimum_confidence")
+    unit_interval_paths = path.startswith(("weights.", "thresholds.")) or path.endswith(
+        (
+            "_threshold",
+            "_floor",
+            "_cap",
+            "_multiplier",
+            ".default_threshold",
+            ".minimum_confidence",
+        )
     )
-    count_paths = (
-        path.endswith("_engines")
-        or path.endswith("_engines_high_score")
-        or path.endswith("_agreement")
-        or path.endswith(".minimum_engine_agreement")
+    count_paths = path.endswith(
+        ("_engines", "_engines_high_score", "_agreement", ".minimum_engine_agreement")
     )
 
     if unit_interval_paths and not 0.0 <= numeric <= 1.0:
@@ -11524,11 +11507,11 @@ def _validate_engine_optimization_value(path: str, proposed: Any) -> None:
 
 
 def _apply_engine_optimization_changes(
-    config: Dict[str, Any], changes: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    config: dict[str, Any], changes: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Apply vetted benchmark optimization changes to an engine config copy."""
     updated_config = json.loads(json.dumps(config))
-    applied_changes: List[Dict[str, Any]] = []
+    applied_changes: list[dict[str, Any]] = []
 
     for change in changes:
         if not isinstance(change, dict):
@@ -11577,8 +11560,8 @@ def _apply_engine_optimization_changes(
 
 
 def _build_threshold_calibration_points(
-    scores_arr: np.ndarray, labels_arr: np.ndarray, thresholds: List[float]
-) -> List[Dict[str, Any]]:
+    scores_arr: np.ndarray, labels_arr: np.ndarray, thresholds: list[float]
+) -> list[dict[str, Any]]:
     """Compute precision, recall, and FPR at fixed decision thresholds."""
     points = []
     for threshold in sorted({round(float(value), 6) for value in thresholds}):
@@ -11610,14 +11593,14 @@ def _build_threshold_calibration_points(
 
 def _build_score_diagnostics(
     scores_arr: np.ndarray, labels_arr: np.ndarray
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Summarize score separation to explain precision and retrieval failures."""
     positives = scores_arr[labels_arr == 1]
     negatives = scores_arr[labels_arr == 0]
 
-    diagnostics: Dict[str, Any] = {
-        "positive_count": int(len(positives)),
-        "negative_count": int(len(negatives)),
+    diagnostics: dict[str, Any] = {
+        "positive_count": len(positives),
+        "negative_count": len(negatives),
         "label_conflict": False,
         "message": "",
     }
@@ -11683,7 +11666,7 @@ def _build_score_diagnostics(
 
 
 def _compute_top_k_precision(
-    scores: List[float], binary_labels: List[int], k: int = 10
+    scores: list[float], binary_labels: list[int], k: int = 10
 ) -> float:
     """Compute precision@k for whether the top-ranked pairs are true positives."""
     if k <= 0 or not scores:
@@ -11697,7 +11680,7 @@ def _compute_top_k_precision(
 
 
 def _compute_top_k_recall(
-    scores: List[float], binary_labels: List[int], k: int = 10
+    scores: list[float], binary_labels: list[int], k: int = 10
 ) -> float:
     """Compute recall@k as a supplemental retrieval diagnostic."""
     total_positives = sum(binary_labels)
@@ -11710,15 +11693,15 @@ def _compute_top_k_recall(
 
 
 def _compute_top_k_retrieval(
-    scores: List[float], binary_labels: List[int], k: int = 10
+    scores: list[float], binary_labels: list[int], k: int = 10
 ) -> float:
     """Backward-compatible alias for top-k precision."""
     return _compute_top_k_precision(scores, binary_labels, k)
 
 
-def _compute_engine_contribution(pairs: List[Dict[str, Any]]) -> Dict[str, float]:
+def _compute_engine_contribution(pairs: list[dict[str, Any]]) -> dict[str, float]:
     """Estimate per-engine contribution from IntegrityDesk feature scores."""
-    totals: Dict[str, float] = {}
+    totals: dict[str, float] = {}
     for pair in pairs:
         contribution_source = pair.get("contributions") or pair.get("features") or {}
         for name, value in contribution_source.items():
@@ -11809,7 +11792,7 @@ def _refresh_html_report_from_json(job_id: str) -> None:
     )
 
 
-def _format_env_value(value: Any) -> Optional[str]:
+def _format_env_value(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, (dict, list)):
@@ -11827,7 +11810,7 @@ def _quote_env_value(value: str) -> str:
     return value
 
 
-def _persist_env_settings(updates: Dict[str, Any]) -> None:
+def _persist_env_settings(updates: dict[str, Any]) -> None:
     lines = (
         ENV_SETTINGS_PATH.read_text(encoding="utf-8").splitlines()
         if ENV_SETTINGS_PATH.exists()
@@ -11835,7 +11818,7 @@ def _persist_env_settings(updates: Dict[str, Any]) -> None:
     )
     rendered_updates = {key: _format_env_value(value) for key, value in updates.items()}
 
-    new_lines: List[str] = []
+    new_lines: list[str] = []
     seen = set()
 
     for line in lines:
@@ -11871,11 +11854,9 @@ def _should_require_auth(path: str) -> bool:
     if path.startswith(AUTH_EXEMPT_PREFIXES):
         # /api/settings is in AUTH_EXEMPT_PREFIXES for API-key bypass,
         # but still requires JWT session auth for the dashboard.
-        if path == "/api/settings" or path.startswith("/api/settings/"):
-            return True
-        return False
+        return bool(path == "/api/settings" or path.startswith("/api/settings/"))
     # Allow unauthenticated access to job status endpoints
-    if path.startswith("/api/jobs/") or path.startswith("/api/job/"):
+    if path.startswith(("/api/jobs/", "/api/job/")):
         return False
     # Allow unauthenticated access to benchmark status polling
     if path.startswith("/api/benchmark/status/"):
@@ -11916,7 +11897,7 @@ def _create_access_token(user: User) -> str:
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def _serialize_user(user: User) -> Dict[str, Any]:
+def _serialize_user(user: User) -> dict[str, Any]:
     tenant = getattr(user, "tenant", None)
 
     return {
@@ -11933,7 +11914,7 @@ def _serialize_user(user: User) -> Dict[str, Any]:
     }
 
 
-USER_EDITABLE_SETTINGS_DEFAULTS: Dict[str, Any] = {
+USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "default_threshold": settings.DEFAULT_THRESHOLD,
     "openai_api_key": settings.OPENAI_API_KEY or "",
     "openai_base_url": settings.OPENAI_BASE_URL,
@@ -12021,7 +12002,7 @@ UPLOAD_ENGINE_KEYS = (
 )
 
 
-def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
+def _load_tenant_settings_record(tenant_id: str | None) -> dict[str, Any]:
     if not tenant_id:
         return {}
 
@@ -12032,7 +12013,7 @@ def _load_tenant_settings_record(tenant_id: Optional[str]) -> Dict[str, Any]:
         return dict(tenant.settings)
 
 
-def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
+def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
     payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
@@ -12064,7 +12045,7 @@ def _build_settings_payload(tenant_id: Optional[str]) -> Dict[str, Any]:
     return payload
 
 
-def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
+def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
@@ -12076,7 +12057,7 @@ def _apply_runtime_settings_from_record(record: Dict[str, Any]) -> None:
                 os.environ[attr] = str(merged[key])
 
 
-def _normalize_source_scan_sites(value: Any) -> List[str]:
+def _normalize_source_scan_sites(value: Any) -> list[str]:
     """Normalize admin-configured external source scan locations."""
     if isinstance(value, str):
         raw_sites = re.split(r"[\n,]+", value)
@@ -12085,7 +12066,7 @@ def _normalize_source_scan_sites(value: Any) -> List[str]:
     else:
         raw_sites = []
 
-    sites: List[str] = []
+    sites: list[str] = []
     for site in raw_sites:
         normalized = site.strip()
         if normalized and normalized not in sites:
@@ -12094,8 +12075,8 @@ def _normalize_source_scan_sites(value: Any) -> List[str]:
 
 
 def _get_upload_engine_weights(
-    tenant_id: Optional[str], selected_keys: Optional[List[str]] = None
-) -> Dict[str, float]:
+    tenant_id: str | None, selected_keys: list[str] | None = None
+) -> dict[str, float]:
     payload = _build_settings_payload(tenant_id)
     engine_weights = _normalize_engine_weights(payload.get("engine_weights"))
 
@@ -12109,7 +12090,7 @@ def _get_upload_engine_weights(
     return {key: _coerce_float(engine_weights.get(key)) for key in UPLOAD_ENGINE_KEYS}
 
 
-def _build_fusion_weights(engine_weights: Dict[str, float]) -> Dict[str, float]:
+def _build_fusion_weights(engine_weights: dict[str, float]) -> dict[str, float]:
     fusion_weights = {
         "fingerprint": _coerce_float(engine_weights.get("token")),
         "winnowing": _coerce_float(engine_weights.get("winnowing")),
@@ -12154,16 +12135,14 @@ def _generate_tenant_name(full_name: str, email: str) -> str:
 def _create_tenant(db, name: str) -> Tenant:
     tenant = Tenant(
         name=name,
-        api_key_hash=hashlib.sha256(
-            f"{uuid.uuid4()}:{name}".encode("utf-8")
-        ).hexdigest(),
+        api_key_hash=hashlib.sha256(f"{uuid.uuid4()}:{name}".encode()).hexdigest(),
     )
     db.add(tenant)
     db.flush()
     return tenant
 
 
-def _authenticate_request(request: Request) -> Dict[str, Any]:
+def _authenticate_request(request: Request) -> dict[str, Any]:
     token = request.cookies.get(AUTH_COOKIE_NAME)
     auth_header = request.headers.get("Authorization", "")
     if not token and auth_header.startswith("Bearer "):
@@ -12194,7 +12173,7 @@ def _authenticate_request(request: Request) -> Dict[str, Any]:
     return serialized
 
 
-def _require_current_user(request: Request, admin_only: bool = False) -> Dict[str, Any]:
+def _require_current_user(request: Request, admin_only: bool = False) -> dict[str, Any]:
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -12203,7 +12182,7 @@ def _require_current_user(request: Request, admin_only: bool = False) -> Dict[st
     return user
 
 
-def _job_is_accessible(job: Dict[str, Any], user: Optional[Dict[str, Any]]) -> bool:
+def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
     # Allow access to jobs without authentication (guest users)
     if user is None:
         return True
@@ -12220,13 +12199,10 @@ def _job_is_accessible(job: Dict[str, Any], user: Optional[Dict[str, Any]]) -> b
         return True
 
     # Allow access if job has no owner (guest job)
-    if not owner_user_id and not tenant_id:
-        return True
-
-    return False
+    return bool(not owner_user_id and not tenant_id)
 
 
-def _require_job_access(job_id: str, request: Request) -> Dict[str, Any]:
+def _require_job_access(job_id: str, request: Request) -> dict[str, Any]:
     job = _get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -12399,7 +12375,7 @@ async def download_report_pdf(job_id: str, request: Request):
         )
 
 
-def _build_ai_originality_report_html(job: Dict[str, Any]) -> str:
+def _build_ai_originality_report_html(job: dict[str, Any]) -> str:
     """Build a Turnitin-grade printable AI Detector originality report."""
     from src.backend.infrastructure.ai_report_generator import (
         build_ai_originality_report_html,
@@ -12649,7 +12625,7 @@ def _metric_action(metric: str, value: float) -> str:
     return "Track this value across benchmark runs and investigate regressions."
 
 
-def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _build_detailed_evaluation_scorecard(payload: dict[str, Any]) -> dict[str, Any]:
     """Build a comprehensive evaluation scorecard with visual elements and detailed analysis."""
     pair_results = payload.get("pair_results") or []
     evaluation = payload.get("evaluation") or {}
@@ -12693,7 +12669,7 @@ def _build_detailed_evaluation_scorecard(payload: Dict[str, Any]) -> Dict[str, A
     return scorecard
 
 
-def _build_executive_summary(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+def _build_executive_summary(evaluations: dict[str, Any]) -> dict[str, Any]:
     """Build executive summary section."""
     if not evaluations:
         return {"status": "No valid evaluations available"}
@@ -12741,7 +12717,7 @@ def _build_executive_summary(evaluations: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_performance_metrics(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+def _build_performance_metrics(evaluations: dict[str, Any]) -> dict[str, Any]:
     """Build detailed performance metrics section."""
     metrics_data = {}
 
@@ -12812,8 +12788,8 @@ def _build_performance_metrics(evaluations: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_tool_comparison(
-    evaluations: Dict[str, Any], tool_timings: Dict[str, float]
-) -> Dict[str, Any]:
+    evaluations: dict[str, Any], tool_timings: dict[str, float]
+) -> dict[str, Any]:
     """Build tool comparison section."""
     comparison_data = []
 
@@ -12876,7 +12852,7 @@ def _build_tool_comparison(
     }
 
 
-def _build_risk_assessment(evaluations: Dict[str, Any]) -> Dict[str, Any]:
+def _build_risk_assessment(evaluations: dict[str, Any]) -> dict[str, Any]:
     """Build risk assessment section."""
     if not evaluations:
         return {"overall_risk": "high", "issues": ["No evaluation data available"]}
@@ -12906,7 +12882,7 @@ def _build_risk_assessment(evaluations: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "severity": "medium",
                 "category": "False Positives",
-                "description": f"Moderate false positive rate may require additional review",
+                "description": "Moderate false positive rate may require additional review",
                 "impact": "Increased manual review workload",
                 "recommendation": "Fine-tune threshold for better precision/recall balance",
             }
@@ -12976,7 +12952,7 @@ def _build_risk_assessment(evaluations: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_recommendations(evaluations: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _build_recommendations(evaluations: dict[str, Any]) -> list[dict[str, Any]]:
     """Build recommendations section."""
     if not evaluations:
         return [
@@ -13061,8 +13037,8 @@ def _build_recommendations(evaluations: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _build_detailed_breakdown(
-    pair_results: List[Dict[str, Any]], evaluations: Dict[str, Any]
-) -> Dict[str, Any]:
+    pair_results: list[dict[str, Any]], evaluations: dict[str, Any]
+) -> dict[str, Any]:
     """Build detailed breakdown section."""
     if not pair_results:
         return {
@@ -13157,7 +13133,7 @@ def _build_detailed_breakdown(
     }
 
 
-def _calculate_confidence_level(metrics: Dict[str, Any]) -> str:
+def _calculate_confidence_level(metrics: dict[str, Any]) -> str:
     """Calculate confidence level based on metric stability and sample size."""
     plagdet = metrics.get("plagdet", 0)
     sample_size = metrics.get("sample_size", 0)
@@ -13172,7 +13148,7 @@ def _calculate_confidence_level(metrics: Dict[str, Any]) -> str:
         return "Very Low"
 
 
-def _calculate_performance_tier(metrics: Dict[str, Any]) -> str:
+def _calculate_performance_tier(metrics: dict[str, Any]) -> str:
     """Calculate performance tier for a tool."""
     f1_score = metrics.get("f1_score", 0)
 
@@ -13186,7 +13162,7 @@ def _calculate_performance_tier(metrics: Dict[str, Any]) -> str:
         return "Poor"
 
 
-def _identify_tool_strengths(metrics: Dict[str, Any]) -> List[str]:
+def _identify_tool_strengths(metrics: dict[str, Any]) -> list[str]:
     """Identify strengths of a tool based on its metrics."""
     strengths = []
 
@@ -13206,7 +13182,7 @@ def _identify_tool_strengths(metrics: Dict[str, Any]) -> List[str]:
     return strengths if strengths else ["Consistent baseline performance"]
 
 
-def _identify_tool_weaknesses(metrics: Dict[str, Any]) -> List[str]:
+def _identify_tool_weaknesses(metrics: dict[str, Any]) -> list[str]:
     """Identify weaknesses of a tool based on its metrics."""
     weaknesses = []
 
@@ -13227,7 +13203,7 @@ def _identify_tool_weaknesses(metrics: Dict[str, Any]) -> List[str]:
 
 
 def _generate_mitigation_strategy(
-    risks: List[Dict[str, Any]], metrics: Dict[str, Any]
+    risks: list[dict[str, Any]], metrics: dict[str, Any]
 ) -> str:
     """Generate an overall mitigation strategy."""
     if not risks:
@@ -13244,7 +13220,7 @@ def _generate_mitigation_strategy(
     return "Minor adjustments may improve user experience. Focus on monitoring and trend analysis."
 
 
-def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
+def _build_benchmark_report_lines(payload: dict[str, Any]) -> list[str]:
     """Build a detailed, professional benchmark report from a benchmark payload."""
     pair_results = payload.get("pair_results") or []
     summary = payload.get("summary") or {}
@@ -13267,7 +13243,7 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
         primary_tool = next(iter(valid_eval.keys()))
     primary_metrics = valid_eval.get(primary_tool or "", {})
 
-    lines: List[str] = [
+    lines: list[str] = [
         f"IntegrityDesk Benchmark Report - {dataset_name}",
         "",
         "Executive Summary",
@@ -13603,10 +13579,8 @@ def _build_benchmark_report_lines(payload: Dict[str, Any]) -> List[str]:
     return lines
 
 
-def _generate_detailed_scorecard_pdf(scorecard: Dict[str, Any]) -> bytes:
+def _generate_detailed_scorecard_pdf(scorecard: dict[str, Any]) -> bytes:
     """Generate a detailed, visually appealing scorecard PDF using HTML/CSS and WeasyPrint."""
-    from weasyprint import HTML, CSS
-    from io import BytesIO
 
     # Build HTML content
     html_content = f"""
@@ -14088,7 +14062,7 @@ def _meets_target(value: float, target_str: str) -> bool:
     return True
 
 
-def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
+def _simple_text_pdf_bytes(title: str, lines: list[str]) -> bytes:
     """Generate a reliable multi-page text PDF without external PDF dependencies."""
     import textwrap
 
@@ -14099,7 +14073,7 @@ def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
     max_lines = 52
     wrap_width = 92
 
-    rendered_lines: List[str] = []
+    rendered_lines: list[str] = []
     for raw_line in lines:
         line = str(raw_line).strip("\n")
         if not line:
@@ -14118,8 +14092,8 @@ def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
         for index in range(0, len(rendered_lines), max_lines)
     ] or [[title]]
 
-    objects: List[bytes] = []
-    page_object_ids: List[int] = []
+    objects: list[bytes] = []
+    page_object_ids: list[int] = []
 
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     objects.append(b"")
@@ -14152,9 +14126,7 @@ def _simple_text_pdf_bytes(title: str, lines: List[str]) -> bytes:
         )
 
     kids = " ".join(f"{page_id} 0 R" for page_id in page_object_ids)
-    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode(
-        "utf-8"
-    )
+    objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{kids}] >>".encode()
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
     output = bytearray(b"%PDF-1.4\n")
@@ -14408,11 +14380,11 @@ async def export_benchmark_pdf(request: Request):
             </div>
             <div class="card">
                 <div class="label">IntegrityDesk Avg</div>
-                <div class="value">{round(float(((summary.get("accuracy") or {}).get("integritydesk") or 0)) * 100, 1)}%</div>
+                <div class="value">{round(float((summary.get("accuracy") or {}).get("integritydesk") or 0) * 100, 1)}%</div>
             </div>
             <div class="card">
                 <div class="label">Best Competitor Avg</div>
-                <div class="value">{round(float(((summary.get("accuracy") or {}).get("best_competitor") or 0)) * 100, 1)}%</div>
+                <div class="value">{round(float((summary.get("accuracy") or {}).get("best_competitor") or 0) * 100, 1)}%</div>
             </div>
         </div>
 
@@ -14897,7 +14869,7 @@ async def get_upload_settings(request: Request):
 
 
 @app.get("/api/benchmark-audit/{dataset_id}")
-async def get_benchmark_audit(dataset_id: str) -> Dict[str, Any]:
+async def get_benchmark_audit(dataset_id: str) -> dict[str, Any]:
     """Return a benchmark audit for labeled datasets with explicit pair metadata."""
     dataset_root = BENCHMARK_DATA_DIR / dataset_id
     if not dataset_root.exists() and dataset_id not in BUILTIN_PAIR_DATASET_IDS:
@@ -14922,7 +14894,7 @@ async def get_benchmark_audit(dataset_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/assignment-modes")
-async def get_assignment_modes_catalog() -> Dict[str, Any]:
+async def get_assignment_modes_catalog() -> dict[str, Any]:
     """Return professor-facing assignment modes and preprocessing policy."""
     from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
 
@@ -14930,7 +14902,7 @@ async def get_assignment_modes_catalog() -> Dict[str, Any]:
 
 
 @app.post("/api/assignment-modes/suggest")
-async def suggest_assignment_mode(request: Request) -> Dict[str, Any]:
+async def suggest_assignment_mode(request: Request) -> dict[str, Any]:
     """Suggest an assignment mode from professor-provided metadata."""
     _require_current_user(request)
     from src.backend.engines.scoring.assignment_modes import recommend_assignment_mode
@@ -14973,7 +14945,7 @@ async def update_settings(request: Request):
 
         stored_settings = dict(tenant.settings or {})
         applied = {}
-        env_updates: Dict[str, Any] = {}
+        env_updates: dict[str, Any] = {}
 
         for key, value in data.items():
             if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
@@ -15055,7 +15027,7 @@ async def update_settings(request: Request):
 
     FusionEngine.update_config(engine_config)
 
-    response: Dict[str, Any] = {
+    response: dict[str, Any] = {
         "status": "ok",
         "settings": applied,
         "source": "database",
@@ -15067,7 +15039,7 @@ async def update_settings(request: Request):
 
 
 @app.post("/api/settings/ai-provider/test")
-async def test_ai_provider_connection(request: Request) -> Dict[str, Any]:
+async def test_ai_provider_connection(request: Request) -> dict[str, Any]:
     """Test an AI provider connection using the configured (or supplied) key.
 
     This makes a real minimal model call so the settings page can report an
@@ -15104,7 +15076,7 @@ async def test_ai_provider_connection(request: Request) -> Dict[str, Any]:
 
 
 @app.post("/api/analyze/evidence-summary")
-async def analyze_evidence_summary(request: Request) -> Dict[str, Any]:
+async def analyze_evidence_summary(request: Request) -> dict[str, Any]:
     """Generate a neutral evidence-based summary for a submission pair.
 
     Uses the configured OpenAI/Anthropic key when available and falls back to
@@ -15175,7 +15147,7 @@ async def get_engine_config():
 
 
 @app.put("/api/settings/engine-config")
-async def update_engine_config(config_update: Dict[str, Any]):
+async def update_engine_config(config_update: dict[str, Any]):
     """Update engine configuration (admin only)."""
     from src.backend.engines.scoring.fusion_engine import (
         load_engine_config,
@@ -15208,7 +15180,7 @@ async def update_engine_config(config_update: Dict[str, Any]):
                 )
 
         # Validate weights sum to 1.0
-        if "weights" in updated_config and updated_config["weights"]:
+        if updated_config.get("weights"):
             total = sum(updated_config["weights"].values())
             if abs(total - 1.0) > 0.001:
                 raise HTTPException(
@@ -15230,7 +15202,7 @@ async def update_engine_config(config_update: Dict[str, Any]):
         # Save configuration
         save_engine_config(updated_config)
 
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "success": True,
             "message": "Engine configuration updated successfully",
         }
@@ -15265,7 +15237,7 @@ async def trigger_calibration():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Calibration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Calibration failed: {e!s}")
 
 
 @app.get("/api/settings/validation")
@@ -15290,9 +15262,8 @@ async def validate_current_config():
     for section in ["weights", "thresholds"]:
         if section in config:
             for key, value in config[section].items():
-                if isinstance(value, (int, float)):
-                    if not 0.0 <= value <= 1.0:
-                        issues.append(f"{section}.{key} out of range: {value}")
+                if isinstance(value, (int, float)) and not 0.0 <= value <= 1.0:
+                    issues.append(f"{section}.{key} out of range: {value}")
 
     if config.get("advanced", {}).get("weights_need_validation"):
         governance = evaluate_weight_change_governance(

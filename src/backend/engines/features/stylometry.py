@@ -1,7 +1,7 @@
 import ast
 import re
-from typing import Dict, List, Any, Optional
-from collections import Counter
+from typing import Any
+
 import numpy as np
 
 
@@ -16,7 +16,7 @@ class StylometryExtractor:
     - White space usage (tabs vs spaces, indentation level)
     """
 
-    def extract(self, code: str) -> Dict[str, Any]:
+    def extract(self, code: str) -> dict[str, Any]:
         features = {}
 
         try:
@@ -29,7 +29,7 @@ class StylometryExtractor:
         features.update(self._extract_regex_stylometry(code))
         return features
 
-    def _extract_ast_stylometry(self, tree: ast.AST) -> Dict[str, Any]:
+    def _extract_ast_stylometry(self, tree: ast.AST) -> dict[str, Any]:
         stats = {
             "var_naming": [],
             "func_lengths": [],
@@ -85,7 +85,7 @@ class StylometryExtractor:
 
         return features
 
-    def _extract_regex_stylometry(self, code: str) -> Dict[str, Any]:
+    def _extract_regex_stylometry(self, code: str) -> dict[str, Any]:
         lines = code.splitlines()
         if not lines:
             return {}
@@ -108,7 +108,7 @@ class StylometryExtractor:
         }
 
 
-def compare_stylometry(feat_a: Dict[str, Any], feat_b: Dict[str, Any]) -> float:
+def compare_stylometry(feat_a: dict[str, Any], feat_b: dict[str, Any]) -> float:
     """Compares two stylometry feature sets and returns a similarity score."""
     keys = set(feat_a.keys()).intersection(feat_b.keys())
     if not keys:

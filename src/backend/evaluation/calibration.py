@@ -9,10 +9,11 @@ Implements:
 - Platt scaling (logistic calibration)
 - Isotonic regression (non-parametric calibration)
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -28,13 +29,14 @@ class CalibrationMetrics:
         n_bins: Number of bins used for calibration.
         n_samples: Total number of samples.
     """
+
     ece: float
     mce: float
-    reliability_diagram: List[Dict[str, Any]]
+    reliability_diagram: list[dict[str, Any]]
     n_bins: int
     n_samples: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "ece": self.ece,
@@ -55,6 +57,7 @@ class PlattScalingParams:
         a: Slope parameter.
         b: Intercept parameter.
     """
+
     a: float
     b: float
 
@@ -78,8 +81,8 @@ class PlattScalingParams:
 
 
 def compute_ece(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     n_bins: int = 10,
 ) -> CalibrationMetrics:
     """Compute Expected Calibration Error.
@@ -115,15 +118,17 @@ def compute_ece(
         n_in_bin = mask.sum()
 
         if n_in_bin == 0:
-            reliability_diagram.append({
-                "bin_idx": bin_idx,
-                "bin_start": float(bin_edges[bin_idx]),
-                "bin_end": float(bin_edges[bin_idx + 1]),
-                "n_samples": 0,
-                "mean_confidence": 0.0,
-                "mean_accuracy": 0.0,
-                "gap": 0.0,
-            })
+            reliability_diagram.append(
+                {
+                    "bin_idx": bin_idx,
+                    "bin_start": float(bin_edges[bin_idx]),
+                    "bin_end": float(bin_edges[bin_idx + 1]),
+                    "n_samples": 0,
+                    "mean_confidence": 0.0,
+                    "mean_accuracy": 0.0,
+                    "gap": 0.0,
+                }
+            )
             continue
 
         bin_confidences = scores_arr[mask]
@@ -138,15 +143,17 @@ def compute_ece(
         ece += weight * gap
         mce = max(mce, gap)
 
-        reliability_diagram.append({
-            "bin_idx": bin_idx,
-            "bin_start": float(bin_edges[bin_idx]),
-            "bin_end": float(bin_edges[bin_idx + 1]),
-            "n_samples": int(n_in_bin),
-            "mean_confidence": mean_confidence,
-            "mean_accuracy": mean_accuracy,
-            "gap": gap,
-        })
+        reliability_diagram.append(
+            {
+                "bin_idx": bin_idx,
+                "bin_start": float(bin_edges[bin_idx]),
+                "bin_end": float(bin_edges[bin_idx + 1]),
+                "n_samples": int(n_in_bin),
+                "mean_confidence": mean_confidence,
+                "mean_accuracy": mean_accuracy,
+                "gap": gap,
+            }
+        )
 
     return CalibrationMetrics(
         ece=ece,
@@ -158,8 +165,8 @@ def compute_ece(
 
 
 def fit_platt_scaling(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     max_iter: int = 100,
     lr: float = 0.01,
 ) -> PlattScalingParams:
@@ -206,9 +213,9 @@ def fit_platt_scaling(
 
 
 def calibrate_scores(
-    scores: List[float],
+    scores: list[float],
     params: PlattScalingParams,
-) -> List[float]:
+) -> list[float]:
     """Apply Platt scaling calibration to scores.
 
     Args:

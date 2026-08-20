@@ -5,22 +5,21 @@ Computes group-level statistics across multiple pairs and tools.
 This layer produces the final publication-grade summary metrics.
 """
 
-from typing import List, Dict, Any
+from typing import Any
+
 import numpy as np
 
 
 class ResultAggregator:
     """
     Aggregates individual pair-level results into global benchmark statistics.
-    
+
     Computes summary metrics that can be directly published in papers or product
     documentation.
     """
 
     @staticmethod
-    def summarize_pair_results(
-        pair_results: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def summarize_pair_results(pair_results: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Aggregate results across multiple code pairs.
 
@@ -43,13 +42,13 @@ class ResultAggregator:
             "robustness_mean": float(np.mean(robustness_scores)),
             "robustness_std": float(np.std(robustness_scores)),
             "pair_count": len(pair_results),
-            "individual_results": pair_results
+            "individual_results": pair_results,
         }
 
     @staticmethod
     def cross_tool_comparison(
-        tool_results: Dict[str, List[Dict[str, Any]]]
-    ) -> Dict[str, Dict[str, float]]:
+        tool_results: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, dict[str, float]]:
         """Generate comparative summary across multiple detection tools."""
         comparison = {}
 
@@ -61,13 +60,16 @@ class ResultAggregator:
                 "average_score": float(np.mean(means)),
                 "average_robustness": float(np.mean(robustness_scores)),
                 "score_std": float(np.std(means)),
-                "rank": 0  # to be filled after sorting
+                "rank": 0,  # to be filled after sorting
             }
 
         # Assign ranks by robustness (primary) then score (secondary)
         sorted_tools = sorted(
             comparison.keys(),
-            key=lambda t: (-comparison[t]["average_robustness"], -comparison[t]["average_score"])
+            key=lambda t: (
+                -comparison[t]["average_robustness"],
+                -comparison[t]["average_score"],
+            ),
         )
 
         for i, tool_id in enumerate(sorted_tools):

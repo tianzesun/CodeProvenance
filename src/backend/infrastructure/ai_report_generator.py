@@ -7,7 +7,7 @@ Python 3.12 f-string parsing rules.
 
 from datetime import datetime
 from html import escape as _esc
-from typing import Any, Dict
+from typing import Any
 
 
 def _pct(value: Any) -> str:
@@ -26,7 +26,7 @@ def _coerce(value: Any) -> float:
         return 0.0
 
 
-_SIGNAL_LABELS: Dict[str, str] = {
+_SIGNAL_LABELS: dict[str, str] = {
     "perplexity": "Token Entropy",
     "burstiness": "Code Burstiness",
     "stylometry": "Style Profile",
@@ -103,7 +103,7 @@ def _risk_color(score: float) -> str:
     return "#16a34a"
 
 
-def _signal_rows(signal_summary: Dict[str, Any]) -> str:
+def _signal_rows(signal_summary: dict[str, Any]) -> str:
     """Build HTML rows for the signal summary table."""
     rows = ""
     for key, data in signal_summary.items():
@@ -124,7 +124,7 @@ def _signal_rows(signal_summary: Dict[str, Any]) -> str:
     return rows
 
 
-def _submission_card(entry: Dict[str, Any]) -> str:
+def _submission_card(entry: dict[str, Any]) -> str:
     """Build HTML for one submission evidence card."""
     name = _esc(str(entry.get("name") or "Submission"))
     prob = _coerce(entry.get("ai_probability"))
@@ -232,7 +232,9 @@ def _submission_card(entry: Dict[str, Any]) -> str:
         "justify-content:space-between;flex-wrap:wrap'>"
         "<div>"
         "<div style='display:flex;align-items:center;flex-wrap:wrap'>"
-        "<span style='font-size:14px;font-weight:700;color:#0f172a;margin-right:8px'>" + name + "</span>"
+        "<span style='font-size:14px;font-weight:700;color:#0f172a;margin-right:8px'>"
+        + name
+        + "</span>"
         "<span style='background:"
         + badge_bg
         + ";color:"
@@ -267,12 +269,14 @@ def _submission_card(entry: Dict[str, Any]) -> str:
         "</div>"
         + ("<div style='margin-top:10px'>" + pills + "</div>" if pills else "")
         + "</div>"
-        "<div style='min-width:200px;flex:1;max-width:320px;margin-left:20px'>" + sig_html + "</div>"
+        "<div style='min-width:200px;flex:1;max-width:320px;margin-left:20px'>"
+        + sig_html
+        + "</div>"
         "</div>" + snippet + "</div>"
     )
 
 
-def build_ai_originality_report_html(job: Dict[str, Any]) -> str:
+def build_ai_originality_report_html(job: dict[str, Any]) -> str:
     """Build a Turnitin-grade printable AI Detector originality report.
 
     Args:

@@ -8,8 +8,7 @@ matter for each assignment type, and which evidence views should be surfaced.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 MODE_CATALOG_VERSION = "2026.04.phase2"
 DEFAULT_ASSIGNMENT_MODE_ID = "intro_programming"
@@ -20,11 +19,11 @@ class UniversalPreprocessingPolicy:
     """Mandatory preprocessing applied before any mode-specific analysis."""
 
     version: str
-    stages: List[Dict[str, Any]]
-    comment_policy: Dict[str, Any]
-    required_logs: List[str]
+    stages: list[dict[str, Any]]
+    comment_policy: dict[str, Any]
+    required_logs: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the universal preprocessing policy."""
         return {
             "version": self.version,
@@ -44,19 +43,19 @@ class AssignmentMode:
     category: str
     access: str
     context: str
-    preprocessing: List[str]
-    required_inputs: List[str]
-    detection_passes: List[Dict[str, Any]]
-    calibration: List[str]
-    evidence_surfaces: List[str]
-    edge_case_policies: List[str]
-    warnings: List[str] = field(default_factory=list)
-    pipelines: List[str] = field(default_factory=lambda: ["code"])
+    preprocessing: list[str]
+    required_inputs: list[str]
+    detection_passes: list[dict[str, Any]]
+    calibration: list[str]
+    evidence_surfaces: list[str]
+    edge_case_policies: list[str]
+    warnings: list[str] = field(default_factory=list)
+    pipelines: list[str] = field(default_factory=lambda: ["code"])
     overlay: bool = False
     base_mode_required: bool = False
-    weights: Dict[str, float] = field(default_factory=dict)
+    weights: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the mode for APIs and persisted job metadata."""
         return {
             "id": self.mode_id,
@@ -132,7 +131,7 @@ def universal_preprocessing_policy() -> UniversalPreprocessingPolicy:
     )
 
 
-def get_assignment_modes() -> Dict[str, AssignmentMode]:
+def get_assignment_modes() -> dict[str, AssignmentMode]:
     """Return the complete professor-facing mode catalog."""
     modes = [
         AssignmentMode(
@@ -977,7 +976,7 @@ def get_assignment_modes() -> Dict[str, AssignmentMode]:
     return {mode.mode_id: mode for mode in modes}
 
 
-def assignment_modes_payload(include_advanced: bool = True) -> Dict[str, Any]:
+def assignment_modes_payload(include_advanced: bool = True) -> dict[str, Any]:
     """Return the mode catalog and shared cross-mode decisions."""
     modes = [
         mode.to_dict()
@@ -1004,7 +1003,7 @@ def assignment_modes_payload(include_advanced: bool = True) -> Dict[str, Any]:
     }
 
 
-def get_assignment_mode(mode_id: Optional[str]) -> AssignmentMode:
+def get_assignment_mode(mode_id: str | None) -> AssignmentMode:
     """Return a mode by ID, falling back to the default mode."""
     modes = get_assignment_modes()
     if mode_id and mode_id in modes:
@@ -1015,9 +1014,9 @@ def get_assignment_mode(mode_id: Optional[str]) -> AssignmentMode:
 def recommend_assignment_mode(
     assignment_name: str = "",
     course_name: str = "",
-    filenames: Optional[List[str]] = None,
-    content_samples: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    filenames: list[str] | None = None,
+    content_samples: list[str] | None = None,
+) -> dict[str, Any]:
     """Suggest the most likely assignment mode from metadata and content hints."""
     filenames = filenames or []
     content_samples = content_samples or []
@@ -1039,7 +1038,7 @@ def recommend_assignment_mode(
         "theory_proofs": 0.0,
         "research_report_essay": 0.0,
     }
-    reasons: Dict[str, List[str]] = {mode_id: [] for mode_id in scores}
+    reasons: dict[str, list[str]] = {mode_id: [] for mode_id in scores}
 
     _score_keywords(
         haystack,
@@ -1221,17 +1220,17 @@ def recommend_assignment_mode(
     }
 
 
-def _pass(name: str, weight: str) -> Dict[str, str]:
+def _pass(name: str, weight: str) -> dict[str, str]:
     """Build a compact detection-pass declaration."""
     return {"name": name, "weight": weight}
 
 
 def _score_keywords(
     haystack: str,
-    scores: Dict[str, float],
-    reasons: Dict[str, List[str]],
+    scores: dict[str, float],
+    reasons: dict[str, list[str]],
     mode_id: str,
-    keywords: List[str],
+    keywords: list[str],
 ) -> None:
     """Increase a mode score for matching assignment/content keywords."""
     matched = [keyword for keyword in keywords if keyword in haystack]

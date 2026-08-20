@@ -1,8 +1,10 @@
 """Benchmark runner plugin."""
-from typing import Dict, Any
+
 from pathlib import Path
-from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
+from typing import Any
+
 from src.backend.bootstrap.plugins.loader import register_plugin
+from src.backend.bootstrap.plugins.plugin_base import ExecutionPlugin
 
 
 @register_plugin
@@ -11,7 +13,7 @@ class BenchmarkRunner(ExecutionPlugin):
 
     name = "benchmark"
 
-    def run(self, dataset: str, mode: str = "full") -> Dict[str, Any]:
+    def run(self, dataset: str, mode: str = "full") -> dict[str, Any]:
         """Run benchmark pipeline.
 
         Args:
@@ -24,9 +26,9 @@ class BenchmarkRunner(ExecutionPlugin):
         # Import here to avoid circular imports
         from src.backend.benchmark.runners import (
             CoreBenchmarkRunner,
+            DiagnosticBenchmarkRunner,
             FullBenchmarkRunner,
             ThreeLayerBenchmarkRunner,
-            DiagnosticBenchmarkRunner,
         )
 
         runners_map = {
@@ -38,7 +40,9 @@ class BenchmarkRunner(ExecutionPlugin):
 
         runner_cls = runners_map.get(mode)
         if runner_cls is None:
-            raise ValueError(f"Unknown mode: {mode}. Available: {list(runners_map.keys())}")
+            raise ValueError(
+                f"Unknown mode: {mode}. Available: {list(runners_map.keys())}"
+            )
 
         runner = runner_cls()
         dataset_path = Path(f"data/{dataset}")

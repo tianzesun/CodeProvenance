@@ -3,7 +3,7 @@
 import os
 from contextvars import ContextVar
 from pathlib import Path
-from typing import ContextManager, Optional
+from typing import ContextManager
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -34,19 +34,19 @@ engine = create_engine(
     max_overflow=max_overflow,
     pool_recycle=300,  # Recycle connections after 5 minutes to prevent stale connections
     echo=False,
-    connect_args={"connect_timeout": 15},  # fail fast instead of hanging on unreachable DB
+    connect_args={
+        "connect_timeout": 15
+    },  # fail fast instead of hanging on unreachable DB
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Tenant context variable for request-scoped context
-_tenant_context: ContextVar[Optional[str]] = ContextVar("_tenant_context", default=None)
+_tenant_context: ContextVar[str | None] = ContextVar("_tenant_context", default=None)
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
-
-    pass
 
 
 def get_db() -> ContextManager[Session]:
@@ -71,7 +71,7 @@ def set_tenant_context(db: Session, tenant_id: str) -> None:
     _tenant_context.set(tenant_id)
 
 
-def get_tenant_context() -> Optional[str]:
+def get_tenant_context() -> str | None:
     """Get the current tenant context.
 
     Returns:

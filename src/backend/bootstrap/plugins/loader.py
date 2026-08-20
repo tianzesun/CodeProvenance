@@ -1,4 +1,5 @@
 """Plugin loader decorator for registration."""
+
 from src.backend.bootstrap.plugins.plugin_registry import PluginRegistry
 
 

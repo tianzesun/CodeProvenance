@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 import time
-from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 
 @dataclass
@@ -14,8 +13,8 @@ class CodeProcessingResult:
 
     original_code: str
     processed_code: str
-    tokens: List[str]
-    lines: List[str]
+    tokens: list[str]
+    lines: list[str]
     language: str
     processing_time: float
 
@@ -51,10 +50,10 @@ class CodeProcessor:
 
     def process_batch(
         self,
-        submissions: Dict[str, str],
+        submissions: dict[str, str],
         *,
         language: str = "python",
-    ) -> Dict[str, CodeProcessingResult]:
+    ) -> dict[str, CodeProcessingResult]:
         return {
             submission_id: self.process(code, language)
             for submission_id, code in submissions.items()

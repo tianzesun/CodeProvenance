@@ -1,16 +1,15 @@
 """Engine Registry - formal plugin system."""
 
-from typing import Dict, Type
 from src.backend.engines.base import BaseSimilarityEngine
 
 
 class EngineRegistry:
     """Central registry for all similarity engines."""
 
-    _engines: Dict[str, Type[BaseSimilarityEngine]] = {}
+    _engines: dict[str, type[BaseSimilarityEngine]] = {}
 
     @classmethod
-    def register(cls, name: str, engine_class: Type[BaseSimilarityEngine]):
+    def register(cls, name: str, engine_class: type[BaseSimilarityEngine]):
         """Register a similarity engine plugin."""
         cls._engines[name] = engine_class
 

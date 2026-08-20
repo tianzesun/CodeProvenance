@@ -7,23 +7,23 @@ It does NOT contain business logic or core primitives.
 Responsibility: String manipulation, file I/O, date/time, formatting
 """
 
-from typing import Any, Dict, List, Optional, Union
-from pathlib import Path
-import re
-import json
-from datetime import datetime, timedelta
 import hashlib
-
+import json
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 # ============================================================================
 # STRING UTILITIES
 # ============================================================================
 
+
 def slugify(text: str) -> str:
     """Convert text to URL-friendly slug."""
     text = text.lower().strip()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[-\s]+', '-', text)
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "-", text)
     return text
 
 
@@ -31,61 +31,62 @@ def truncate(text: str, max_length: int = 100, suffix: str = "...") -> str:
     """Truncate text to maximum length."""
     if len(text) <= max_length:
         return text
-    return text[:max_length - len(suffix)] + suffix
+    return text[: max_length - len(suffix)] + suffix
 
 
-def extract_keywords(text: str, min_length: int = 3) -> List[str]:
+def extract_keywords(text: str, min_length: int = 3) -> list[str]:
     """Extract keywords from text."""
-    words = re.findall(r'\b\w+\b', text.lower())
+    words = re.findall(r"\b\w+\b", text.lower())
     return [w for w in words if len(w) >= min_length]
 
 
 def normalize_whitespace(text: str) -> str:
     """Normalize whitespace in text."""
-    return ' '.join(text.split())
+    return " ".join(text.split())
 
 
 # ============================================================================
 # FILE UTILITIES
 # ============================================================================
 
-def read_json(file_path: Union[str, Path]) -> Dict[str, Any]:
+
+def read_json(file_path: str | Path) -> dict[str, Any]:
     """Read JSON file."""
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def write_json(data: Dict[str, Any], file_path: Union[str, Path], indent: int = 2) -> None:
+def write_json(data: dict[str, Any], file_path: str | Path, indent: int = 2) -> None:
     """Write JSON file."""
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)
 
 
-def read_text(file_path: Union[str, Path]) -> str:
+def read_text(file_path: str | Path) -> str:
     """Read text file."""
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         return f.read()
 
 
-def write_text(text: str, file_path: Union[str, Path]) -> None:
+def write_text(text: str, file_path: str | Path) -> None:
     """Write text file."""
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, "w", encoding="utf-8") as f:
         f.write(text)
 
 
-def ensure_directory(dir_path: Union[str, Path]) -> Path:
+def ensure_directory(dir_path: str | Path) -> Path:
     """Ensure directory exists."""
     path = Path(dir_path)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def get_file_extension(file_path: Union[str, Path]) -> str:
+def get_file_extension(file_path: str | Path) -> str:
     """Get file extension."""
     return Path(file_path).suffix
 
 
-def get_file_name(file_path: Union[str, Path]) -> str:
+def get_file_name(file_path: str | Path) -> str:
     """Get file name without extension."""
     return Path(file_path).stem
 
@@ -93,6 +94,7 @@ def get_file_name(file_path: Union[str, Path]) -> str:
 # ============================================================================
 # DATE/TIME UTILITIES
 # ============================================================================
+
 
 def format_datetime(dt: datetime, format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
     """Format datetime to string."""
@@ -123,9 +125,10 @@ def days_between(date1: datetime, date2: datetime) -> int:
 # FORMATTING UTILITIES
 # ============================================================================
 
+
 def format_bytes(bytes_count: int) -> str:
     """Format bytes to human-readable string."""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes_count < 1024.0:
             return f"{bytes_count:.2f} {unit}"
         bytes_count /= 1024.0
@@ -158,12 +161,13 @@ def format_percentage(value: float, decimals: int = 2) -> str:
 # HASHING UTILITIES
 # ============================================================================
 
+
 def hash_string(text: str) -> str:
     """Hash string using SHA-256."""
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def hash_file(file_path: Union[str, Path]) -> str:
+def hash_file(file_path: str | Path) -> str:
     """Hash file using SHA-256."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -176,15 +180,16 @@ def hash_file(file_path: Union[str, Path]) -> str:
 # VALIDATION UTILITIES
 # ============================================================================
 
+
 def is_valid_email(email: str) -> bool:
     """Validate email format."""
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email))
 
 
 def is_valid_url(url: str) -> bool:
     """Validate URL format."""
-    pattern = r'^https?://[^\s/$.?#].[^\s]*$'
+    pattern = r"^https?://[^\s/$.?#].[^\s]*$"
     return bool(re.match(pattern, url))
 
 

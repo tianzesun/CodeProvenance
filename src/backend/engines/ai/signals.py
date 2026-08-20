@@ -20,7 +20,6 @@ import logging
 import math
 import re
 from collections import Counter
-from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
-def _tokenize(code: str) -> List[str]:
+def _tokenize(code: str) -> list[str]:
     """Lightweight code tokenizer - identifiers, keywords, operators.
 
     Args:
@@ -60,7 +59,9 @@ def _safe_entropy(counter: Counter) -> float:
     if n_unique <= 1:
         return 0.0
 
-    entropy = -sum((c / total) * math.log2(c / total) for c in counter.values() if c > 0)
+    entropy = -sum(
+        (c / total) * math.log2(c / total) for c in counter.values() if c > 0
+    )
     max_entropy = math.log2(n_unique)
     return entropy / max_entropy if max_entropy > 0 else 0.0
 
@@ -262,29 +263,45 @@ def compute_stylometry_signal(code: str) -> float:
 
 # LLM fingerprint patterns - curated from GPT-4 / Claude / Copilot output
 _LLM_COMMENT_PATTERNS = [
-    re.compile(r"#\s*(Let's|Let us|We can|We will|We need to|We first|We then)\b", re.I),
-    re.compile(r"#\s*(Here we|Here is|Here's|This function|This method|This class)\b", re.I),
-    re.compile(r"#\s*(Note:|Note that|NOTE:|TODO:|FIXME:|Step \d+:)", re.I),
-    re.compile(r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b", re.I),
-    re.compile(r"#\s*[A-Z][a-z]+(?: [a-z]+){2,}\s*$", re.M),
+    re.compile(
+        r"#\s*(Let's|Let us|We can|We will|We need to|We first|We then)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"#\s*(Here we|Here is|Here's|This function|This method|This class)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"#\s*(Note:|Note that|NOTE:|TODO:|FIXME:|Step \d+:)", re.IGNORECASE),
+    re.compile(
+        r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"#\s*[A-Z][a-z]+(?: [a-z]+){2,}\s*$", re.MULTILINE),
     re.compile(r"#\s*-{3,}"),
     re.compile(
-        r'"""[\s\S]{0,40}(?:Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)', re.I
+        r'"""[\s\S]{0,40}(?:Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)',
+        re.IGNORECASE,
     ),
 ]
 
 _LLM_NAMING_PATTERNS = [
-    re.compile(r"\b(result|output|data|value|temp|final|new|processed|formatted|cleaned)\b"),
-    re.compile(r"\b(process_|handle_|compute_|calculate_|generate_|validate_|parse_)\w+"),
-    re.compile(r"\b(input_data|output_data|result_list|data_list|item_list|temp_list)\b"),
+    re.compile(
+        r"\b(result|output|data|value|temp|final|new|processed|formatted|cleaned)\b"
+    ),
+    re.compile(
+        r"\b(process_|handle_|compute_|calculate_|generate_|validate_|parse_)\w+"
+    ),
+    re.compile(
+        r"\b(input_data|output_data|result_list|data_list|item_list|temp_list)\b"
+    ),
     re.compile(r"\b(is_valid|is_empty|is_none|has_error|has_value)\b"),
 ]
 
 _LLM_STRUCTURAL_PATTERNS = [
-    re.compile(r"if\s+\w+\s+is\s+None\s*:", re.I),
-    re.compile(r"raise\s+ValueError\s*\(f?['\"]", re.I),
-    re.compile(r"raise\s+TypeError\s*\(f?['\"]", re.I),
-    re.compile(r"logging\.(debug|info|warning|error)\s*\(f?['\"]", re.I),
+    re.compile(r"if\s+\w+\s+is\s+None\s*:", re.IGNORECASE),
+    re.compile(r"raise\s+ValueError\s*\(f?['\"]", re.IGNORECASE),
+    re.compile(r"raise\s+TypeError\s*\(f?['\"]", re.IGNORECASE),
+    re.compile(r"logging\.(debug|info|warning|error)\s*\(f?['\"]", re.IGNORECASE),
     re.compile(r"return\s+\[\s*\w+\s+for\s+\w+\s+in\s+\w+\s*\]"),
     re.compile(r"Optional\["),
     re.compile(r"Union\["),
@@ -293,7 +310,9 @@ _LLM_STRUCTURAL_PATTERNS = [
     re.compile(r"-> (?:None|bool|int|str|float|List|Dict|Optional)\s*:"),
 ]
 
-_ALL_LLM_PATTERNS = _LLM_COMMENT_PATTERNS + _LLM_NAMING_PATTERNS + _LLM_STRUCTURAL_PATTERNS
+_ALL_LLM_PATTERNS = (
+    _LLM_COMMENT_PATTERNS + _LLM_NAMING_PATTERNS + _LLM_STRUCTURAL_PATTERNS
+)
 
 
 def compute_pattern_library_signal(code: str) -> float:

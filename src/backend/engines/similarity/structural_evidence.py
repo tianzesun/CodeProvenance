@@ -9,8 +9,8 @@ exception handling, and helper-function pattern.
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence
 
 
 @dataclass(frozen=True)
@@ -18,11 +18,11 @@ class StructuralProfile:
     """Normalized structure facts extracted from one submission."""
 
     function_count: int = 0
-    function_shapes: List[int] = field(default_factory=list)
-    branch_order: List[str] = field(default_factory=list)
+    function_shapes: list[int] = field(default_factory=list)
+    branch_order: list[str] = field(default_factory=list)
     max_loop_nesting: int = 0
     exception_handlers: int = 0
-    helper_call_pattern: List[str] = field(default_factory=list)
+    helper_call_pattern: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class StructuralEvidence:
     same_loop_nesting: bool
     same_exception_handling: bool
     same_helper_function_pattern: bool
-    evidence: List[str]
+    evidence: list[str]
 
 
 def extract_structural_profile(source: str) -> StructuralProfile:
@@ -44,10 +44,10 @@ def extract_structural_profile(source: str) -> StructuralProfile:
     except SyntaxError:
         return StructuralProfile()
 
-    function_shapes: List[int] = []
-    branch_order: List[str] = []
+    function_shapes: list[int] = []
+    branch_order: list[str] = []
     exception_handlers = 0
-    helper_calls: List[str] = []
+    helper_calls: list[str] = []
     max_loop_nesting = 0
 
     def visit(node: ast.AST, loop_depth: int = 0) -> None:
@@ -107,7 +107,7 @@ def compare_structural_profiles(
         profile_a.helper_call_pattern, profile_b.helper_call_pattern
     )
 
-    evidence: List[str] = []
+    evidence: list[str] = []
     if same_function_decomposition:
         evidence.append("same function decomposition")
     if same_branch_order:
@@ -137,7 +137,7 @@ def compare_structural_evidence(source_a: str, source_b: str) -> StructuralEvide
     )
 
 
-def structural_evidence_features(evidence: StructuralEvidence) -> Dict[str, float]:
+def structural_evidence_features(evidence: StructuralEvidence) -> dict[str, float]:
     """Convert structural evidence booleans into ranker-ready features."""
     return {
         "same_function_decomposition": float(evidence.same_function_decomposition),

@@ -10,12 +10,14 @@ Implements comprehensive Abstract Syntax Tree analysis with:
 - Complexity metrics comparison
 """
 
-from typing import List, Dict, Any, Set, Tuple, Optional
-from .base_similarity import BaseSimilarityAlgorithm
-from collections import Counter, defaultdict
 import hashlib
 import re
+from collections import Counter, defaultdict
+from typing import Any
+
 from src.backend.utils.hash_utils import fast_hash64
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 
 class Finding:
@@ -26,8 +28,8 @@ class Finding:
         engine: str = "",
         score: float = 0.0,
         confidence: float = 0.0,
-        evidence: list = None,
-        evidence_blocks: list = None,
+        evidence: list | None = None,
+        evidence_blocks: list | None = None,
         methodology: str = "",
         details: str = "",
     ):
@@ -39,7 +41,7 @@ class Finding:
         self.methodology = methodology
         self.details = details
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "engine": self.engine,
             "score": self.score,
@@ -100,7 +102,7 @@ class EvidenceBlock:
         confidence: float = 0.0,
         a_snippet: str = "",
         b_snippet: str = "",
-        transformation_notes: list = None,
+        transformation_notes: list | None = None,
     ):
         self.engine = engine
         self.score = score
@@ -109,7 +111,7 @@ class EvidenceBlock:
         self.b_snippet = b_snippet
         self.transformation_notes = transformation_notes or []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "engine": self.engine,
             "score": self.score,
@@ -127,16 +129,16 @@ class ASTNode:
         self,
         node_type: str,
         value: str = "",
-        children: Optional[List["ASTNode"]] = None,
+        children: list["ASTNode"] | None = None,
         line: int = 0,
         col: int = 0,
     ):
         self.node_type = node_type
         self.value = value
-        self.children: List["ASTNode"] = children if children is not None else []
+        self.children: list[ASTNode] = children if children is not None else []
         self.line = line
         self.col = col
-        self.parent: Optional["ASTNode"] = None
+        self.parent: ASTNode | None = None
         self._set_parent()
 
     def _set_parent(self):
@@ -146,7 +148,7 @@ class ASTNode:
     def __repr__(self):
         return f"ASTNode({self.node_type}, {self.value!r})"
 
-    def to_tuple(self) -> Tuple:
+    def to_tuple(self) -> tuple:
         """Convert node to tuple for hashing."""
         return (
             self.node_type,
@@ -170,7 +172,7 @@ class ASTNode:
         Handles variables, functions, arguments, and class names.
         """
         var_counter = [0]
-        var_map: Dict[str, str] = {}
+        var_map: dict[str, str] = {}
 
         # Comprehensive keywords to skip
         skip_keywords = {
@@ -290,9 +292,9 @@ class ASTNode:
 
         _normalize(self)
 
-    def get_subtrees(self, min_size: int = 1) -> List["ASTNode"]:
+    def get_subtrees(self, min_size: int = 1) -> list["ASTNode"]:
         """Get all subtrees with minimum size."""
-        subtrees: List["ASTNode"] = []
+        subtrees: list[ASTNode] = []
 
         def _collect(node: "ASTNode"):
             if node.subtree_size() >= min_size:
@@ -317,7 +319,7 @@ class JPlagNormalizer:
 
     def __init__(self):
         self.var_counter = 0
-        self.var_map: Dict[str, str] = {}
+        self.var_map: dict[str, str] = {}
         self.skip_keywords = {
             "if",
             "else",
@@ -416,11 +418,11 @@ class JPlagSubtreeHasher:
     def __init__(self, min_subtree_size: int = 2, max_subtree_size: int = 32):
         self.min_subtree_size = min_subtree_size
         self.max_subtree_size = max_subtree_size
-        self.hash_cache: Dict[ASTNode, int] = {}
-        self.size_cache: Dict[ASTNode, int] = {}
-        self.hashes: List[int] = []
+        self.hash_cache: dict[ASTNode, int] = {}
+        self.size_cache: dict[ASTNode, int] = {}
+        self.hashes: list[int] = []
 
-    def compute_hashes(self, root: ASTNode) -> List[int]:
+    def compute_hashes(self, root: ASTNode) -> list[int]:
         """Compute all subtree hashes for the given AST root."""
         self.hash_cache.clear()
         self.size_cache.clear()
@@ -428,7 +430,7 @@ class JPlagSubtreeHasher:
         self._postorder(root)
         return list(self.hashes)
 
-    def _postorder(self, node: ASTNode) -> Tuple[int, int]:
+    def _postorder(self, node: ASTNode) -> tuple[int, int]:
         """Post-order traversal for bottom-up hash calculation."""
         child_hashes = []
         total_size = 1
@@ -456,7 +458,7 @@ class JPlagSubtreeHasher:
         return node_hash, total_size
 
 
-def multiset_jaccard_similarity(hashes_a: List[int], hashes_b: List[int]) -> float:
+def multiset_jaccard_similarity(hashes_a: list[int], hashes_b: list[int]) -> float:
     """
     Compute Multiset Jaccard similarity (bag similarity) as used in JPlag.
     This correctly handles duplicate subtree occurrences unlike set-based Jaccard.
@@ -484,7 +486,7 @@ def multiset_jaccard_similarity(hashes_a: List[int], hashes_b: List[int]) -> flo
     return min_sum / max_sum if max_sum > 0 else 0.0
 
 
-def collect_hash_sequence(root: ASTNode, min_size: int = 3) -> List[int]:
+def collect_hash_sequence(root: ASTNode, min_size: int = 3) -> list[int]:
     """
     Collect ordered sequence of subtree hashes using pre-order traversal.
     Preserves structural ordering while only including subtrees of minimum size.
@@ -519,7 +521,7 @@ def collect_hash_sequence(root: ASTNode, min_size: int = 3) -> List[int]:
     return hashes
 
 
-def winnow(hash_sequence: List[int], window_size: int = 5) -> Set[int]:
+def winnow(hash_sequence: list[int], window_size: int = 5) -> set[int]:
     """
     Winnowing algorithm to select robust document fingerprint hashes.
 
@@ -562,7 +564,7 @@ def winnow(hash_sequence: List[int], window_size: int = 5) -> Set[int]:
     return fingerprints
 
 
-def jaccard_set(set_a: Set[int], set_b: Set[int]) -> float:
+def jaccard_set(set_a: set[int], set_b: set[int]) -> float:
     """
     Standard Jaccard similarity for sets of winnowing fingerprints.
 
@@ -592,7 +594,7 @@ class WinnowingFingerprinter:
         self.window_size = window_size
         self.min_subtree_size = min_subtree_size
 
-    def fingerprint(self, root: ASTNode) -> Set[int]:
+    def fingerprint(self, root: ASTNode) -> set[int]:
         """Generate winnowing fingerprint set for an AST."""
         hash_sequence = collect_hash_sequence(root, self.min_subtree_size)
         return winnow(hash_sequence, self.window_size)
@@ -628,13 +630,13 @@ class ControlFlowGraph:
     """Represents a Control Flow Graph."""
 
     def __init__(self):
-        self.basic_blocks: List[Dict[str, Any]] = []
-        self.edges: List[CFGEdge] = []
+        self.basic_blocks: list[dict[str, Any]] = []
+        self.edges: list[CFGEdge] = []
         self.entry_block: int = 0
-        self.exit_blocks: List[int] = []
+        self.exit_blocks: list[int] = []
 
     def add_block(
-        self, statements: Optional[List[str]] = None, block_id: Optional[int] = None
+        self, statements: list[str] | None = None, block_id: int | None = None
     ) -> int:
         """Add a basic block."""
         block_id = block_id if block_id is not None else len(self.basic_blocks)
@@ -663,9 +665,9 @@ class DataFlowGraph:
     """Represents a Data Flow Graph."""
 
     def __init__(self):
-        self.variables: Dict[str, List[str]] = defaultdict(list)
-        self.dependencies: List[Tuple[str, str]] = []
-        self.dependencies_by_type: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+        self.variables: dict[str, list[str]] = defaultdict(list)
+        self.dependencies: list[tuple[str, str]] = []
+        self.dependencies_by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
 
     def add_dependency(self, from_var: str, to_var: str, dep_type: str = "data"):
         """Add data dependency."""
@@ -700,7 +702,7 @@ class TreeEditDistance:
         self.relabel_cost = relabel_cost
 
     def calculate_distance(
-        self, tree_a: Optional[ASTNode], tree_b: Optional[ASTNode]
+        self, tree_a: ASTNode | None, tree_b: ASTNode | None
     ) -> float:
         """Calculate identity-aware tree edit distance between two ASTs."""
         if tree_a is None or tree_b is None:
@@ -715,7 +717,7 @@ class TreeEditDistance:
 
         return self._identity_aware_ted(forest_a, forest_b, weights_a, weights_b)
 
-    def _compute_node_weights(self, root: ASTNode) -> Dict[ASTNode, float]:
+    def _compute_node_weights(self, root: ASTNode) -> dict[ASTNode, float]:
         """Compute identity weights for each node based on depth and context."""
         weights = {}
         function_stack = []
@@ -759,10 +761,10 @@ class TreeEditDistance:
 
     def _identity_aware_ted(
         self,
-        forest_a: List[ASTNode],
-        forest_b: List[ASTNode],
-        weights_a: Dict[ASTNode, float],
-        weights_b: Dict[ASTNode, float],
+        forest_a: list[ASTNode],
+        forest_b: list[ASTNode],
+        weights_a: dict[ASTNode, float],
+        weights_b: dict[ASTNode, float],
     ) -> float:
         """Identity-aware tree edit distance with weighted nodes."""
         if not forest_a and not forest_b:
@@ -828,9 +830,9 @@ class TreeEditDistance:
 
         return deletion_cost + insertion_cost + function_depth_penalty + density_penalty
 
-    def _postorder_linearize(self, node: ASTNode) -> List[ASTNode]:
+    def _postorder_linearize(self, node: ASTNode) -> list[ASTNode]:
         """Linearize tree using post-order traversal."""
-        result: List[ASTNode] = []
+        result: list[ASTNode] = []
 
         def _postorder(n: ASTNode):
             for child in n.children:
@@ -914,7 +916,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         """
         super().__init__("enhanced_ast")
         self.ted = TreeEditDistance()
-        self.weights: Dict[str, float] = {
+        self.weights: dict[str, float] = {
             "ted": ted_weight,
             "cfg": cfg_weight,
             "dfg": dfg_weight,
@@ -931,7 +933,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         )
         self.use_winnowing_fast_path = True
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """
         Compare two parsed code representations using AST analysis.
 
@@ -1101,7 +1103,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             methodology="Comprehensive AST analysis including TED, CFG/DFG overlap, and stylometry.",
         )
 
-    def _extract_ast(self, parsed: Dict[str, Any]) -> Optional[ASTNode]:
+    def _extract_ast(self, parsed: dict[str, Any]) -> ASTNode | None:
         """Extract AST from parsed code representation."""
         if "ast" in parsed:
             return self._convert_to_ast_nodes(parsed["ast"])
@@ -1116,7 +1118,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return None
 
-    def _tokenize_raw_for_ast(self, source: str) -> List[Dict[str, str]]:
+    def _tokenize_raw_for_ast(self, source: str) -> list[dict[str, str]]:
         """Build coarse AST tokens from raw source when a parser is unavailable."""
         source = re.sub(r"//.*?$", "", source, flags=re.MULTILINE)
         source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
@@ -1175,7 +1177,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             return ASTNode(node_type, value, children)
         return ASTNode("LITERAL", str(ast_data))
 
-    def _build_ast_from_tokens(self, tokens: List[Dict]) -> ASTNode:
+    def _build_ast_from_tokens(self, tokens: list[dict]) -> ASTNode:
         """Build simplified AST from token stream."""
         root = ASTNode("ROOT")
         current_node = root
@@ -1204,7 +1206,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         similarity = 1.0 - (distance / max_size)
         return max(0.0, min(1.0, similarity))
 
-    def _cfg_similarity(self, parsed_a: Dict, parsed_b: Dict) -> float:
+    def _cfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
         """Calculate similarity based on control flow graphs."""
         cfg_a = self._extract_cfg(parsed_a)
         cfg_b = self._extract_cfg(parsed_b)
@@ -1226,7 +1228,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return common / total if total > 0 else 0.0
 
-    def _extract_cfg(self, parsed: Dict) -> Optional[ControlFlowGraph]:
+    def _extract_cfg(self, parsed: dict) -> ControlFlowGraph | None:
         """Extract Control Flow Graph from parsed code."""
         cfg = ControlFlowGraph()
 
@@ -1236,7 +1238,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         tokens = parsed["tokens"]
         current_block = cfg.add_block([])
         block_stack = [current_block]
-        loop_stack: List[int] = []
+        loop_stack: list[int] = []
 
         for token in tokens:
             if token.get("type") != "KEYWORD":
@@ -1287,7 +1289,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return cfg
 
-    def _dfg_similarity(self, parsed_a: Dict, parsed_b: Dict) -> float:
+    def _dfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
         """Calculate similarity based on data flow graphs."""
         dfg_a = self._extract_dfg(parsed_a)
         dfg_b = self._extract_dfg(parsed_b)
@@ -1306,7 +1308,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return common / total if total > 0 else 0.0
 
-    def _extract_dfg(self, parsed: Dict) -> Optional[DataFlowGraph]:
+    def _extract_dfg(self, parsed: dict) -> DataFlowGraph | None:
         """Extract Data Flow Graph from parsed code."""
         dfg = DataFlowGraph()
 
@@ -1314,7 +1316,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             return dfg
 
         tokens = parsed["tokens"]
-        defined_vars: Set[str] = set()
+        defined_vars: set[str] = set()
 
         for token in tokens:
             if token.get("type") == "VARIABLE":
@@ -1355,7 +1357,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
     def _control_abstraction_similarity(self, ast_a: ASTNode, ast_b: ASTNode) -> float:
         """Compare normalized control-flow intent without requiring identical shape."""
 
-        def _tokens(root: ASTNode) -> List[str]:
+        def _tokens(root: ASTNode) -> list[str]:
             tokens = []
 
             def _collect(node: ASTNode):
@@ -1396,7 +1398,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         metrics_b = self._compute_complexity(ast_b)
 
         # Compare individual metrics
-        scores: List[float] = []
+        scores: list[float] = []
 
         for key in metrics_a:
             if key in metrics_b:
@@ -1412,12 +1414,12 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return sum(scores) / len(scores) if scores else 0.5
 
-    def _compute_complexity(self, ast: ASTNode) -> Dict[str, float]:
+    def _compute_complexity(self, ast: ASTNode) -> dict[str, float]:
         """Compute complexity metrics from AST with logic density and function depth."""
         total_nodes = ast.subtree_size()
 
         # Count specific node types
-        node_types: Dict[str, int] = defaultdict(int)
+        node_types: dict[str, int] = defaultdict(int)
         function_depths = []
 
         def _count(node: ASTNode, depth: int = 0):

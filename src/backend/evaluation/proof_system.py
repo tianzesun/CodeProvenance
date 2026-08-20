@@ -8,9 +8,8 @@ recall, previous-term recall, ablations, and release gates.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence
-
 
 HARD_NEGATIVE_TYPES = {
     "starter_code_false_positive",
@@ -28,7 +27,7 @@ class ProofCase:
     score: float
     label: int
     category: str
-    metadata: Dict[str, float | str | bool] = field(default_factory=dict)
+    metadata: dict[str, float | str | bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -36,17 +35,15 @@ class ReleaseGate:
     """A named metric threshold required before production release."""
 
     metric: str
-    minimum: Optional[float] = None
-    maximum: Optional[float] = None
+    minimum: float | None = None
+    maximum: float | None = None
 
     def evaluate(self, metrics: Mapping[str, float]) -> bool:
         """Return whether a metric snapshot passes this gate."""
         value = float(metrics.get(self.metric, 0.0))
         if self.minimum is not None and value < self.minimum:
             return False
-        if self.maximum is not None and value > self.maximum:
-            return False
-        return True
+        return not (self.maximum is not None and value > self.maximum)
 
 
 @dataclass(frozen=True)
@@ -63,11 +60,11 @@ class GateResult:
 class ProofReport:
     """Complete proof report for release readiness."""
 
-    metrics: Dict[str, float]
-    gate_results: List[GateResult]
+    metrics: dict[str, float]
+    gate_results: list[GateResult]
     release_ready: bool
-    ablations: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    tool_comparison: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    ablations: dict[str, dict[str, float]] = field(default_factory=dict)
+    tool_comparison: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 DEFAULT_RELEASE_GATES = [
@@ -88,7 +85,7 @@ class AccuracyProofSystem:
         self,
         cases: Sequence[ProofCase],
         *,
-        baseline_cases: Optional[Sequence[ProofCase]] = None,
+        baseline_cases: Sequence[ProofCase] | None = None,
         gates: Sequence[ReleaseGate] = DEFAULT_RELEASE_GATES,
         high_risk_threshold: float = 0.75,
         fixed_fpr: float = 0.01,
@@ -111,10 +108,10 @@ class AccuracyProofSystem:
         self,
         cases: Sequence[ProofCase],
         *,
-        baseline_cases: Optional[Sequence[ProofCase]] = None,
+        baseline_cases: Sequence[ProofCase] | None = None,
         high_risk_threshold: float = 0.75,
         fixed_fpr: float = 0.01,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute all release proof metrics."""
         ordered = _sorted_cases(cases)
         metrics = {
@@ -148,8 +145,8 @@ class AccuracyProofSystem:
         self,
         variants: Mapping[str, Sequence[ProofCase]],
         *,
-        baseline_cases: Optional[Sequence[ProofCase]] = None,
-    ) -> Dict[str, Dict[str, float]]:
+        baseline_cases: Sequence[ProofCase] | None = None,
+    ) -> dict[str, dict[str, float]]:
         """Evaluate Layer A/B/C/D/E and guardrail variants side by side."""
         return {
             name: self.metrics(cases, baseline_cases=baseline_cases)
@@ -159,7 +156,7 @@ class AccuracyProofSystem:
     def compare_tools(
         self,
         tool_outputs: Mapping[str, Sequence[ProofCase]],
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> dict[str, dict[str, float]]:
         """Compare MOSS/JPlag/Dolos/IntegrityDesk using professor metrics."""
         return {tool: self.metrics(cases) for tool, cases in tool_outputs.items()}
 
@@ -281,6 +278,6 @@ def embedding_only_high_risk_count(cases: Sequence[ProofCase], threshold: float)
     return count
 
 
-def _sorted_cases(cases: Sequence[ProofCase]) -> List[ProofCase]:
+def _sorted_cases(cases: Sequence[ProofCase]) -> list[ProofCase]:
     """Sort cases by score descending with stable case-id tie break."""
     return sorted(cases, key=lambda case: (-case.score, case.case_id))

@@ -1,18 +1,22 @@
 """
 Pydantic schemas for webhook-related API requests and responses.
 """
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
-from datetime import datetime
+
 import uuid
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class WebhookEventBase(BaseModel):
     job_id: uuid.UUID
-    event_type: str = Field(..., pattern=r'^(job\.completed|job\.failed|job\.progress)$')
-    payload: Dict[str, Any]
-    status: Optional[str] = Field(None, pattern=r'^(pending|delivered|failed|retried)$')
-    signature: Optional[str] = None
+    event_type: str = Field(
+        ..., pattern=r"^(job\.completed|job\.failed|job\.progress)$"
+    )
+    payload: dict[str, Any]
+    status: str | None = Field(None, pattern=r"^(pending|delivered|failed|retried)$")
+    signature: str | None = None
 
 
 class WebhookEventCreate(WebhookEventBase):
@@ -23,9 +27,9 @@ class WebhookEventResponse(WebhookEventBase):
     id: uuid.UUID
     attempt_count: int
     max_attempts: int
-    next_attempt_at: Optional[datetime]
-    delivered_at: Optional[datetime]
-    last_error: Optional[str]
+    next_attempt_at: datetime | None
+    delivered_at: datetime | None
+    last_error: str | None
     created_at: datetime
     updated_at: datetime
 

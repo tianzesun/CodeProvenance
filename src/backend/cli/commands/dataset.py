@@ -1,4 +1,5 @@
 """Dataset CLI command module."""
+
 import typer
 from rich.console import Console
 

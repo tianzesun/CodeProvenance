@@ -78,9 +78,9 @@ from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Any
 from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -92,31 +92,31 @@ class ASTEvidence:
     """
 
     # Shape evidence (structural patterns)
-    shape_evidence: Dict[str, Any] = field(default_factory=dict)
-    shape_node_counts: Dict[str, int] = field(default_factory=dict)
-    shape_depth_distribution: Dict[int, int] = field(default_factory=dict)
+    shape_evidence: dict[str, Any] = field(default_factory=dict)
+    shape_node_counts: dict[str, int] = field(default_factory=dict)
+    shape_depth_distribution: dict[int, int] = field(default_factory=dict)
 
     # Semantic node evidence (logic operations)
-    semantic_calls: List[str] = field(default_factory=list)
-    semantic_operators: List[str] = field(default_factory=list)
-    semantic_expressions: List[str] = field(default_factory=list)
-    semantic_function_defs: List[str] = field(default_factory=list)
+    semantic_calls: list[str] = field(default_factory=list)
+    semantic_operators: list[str] = field(default_factory=list)
+    semantic_expressions: list[str] = field(default_factory=list)
+    semantic_function_defs: list[str] = field(default_factory=list)
 
     # Control flow evidence
-    control_flow_structures: List[str] = field(default_factory=list)
-    control_flow_patterns: Dict[str, int] = field(default_factory=dict)
+    control_flow_structures: list[str] = field(default_factory=list)
+    control_flow_patterns: dict[str, int] = field(default_factory=dict)
 
     # Identifier role evidence (NOT normalized names)
-    variable_roles: List[str] = field(default_factory=list)
-    function_roles: List[str] = field(default_factory=list)
-    parameter_patterns: List[str] = field(default_factory=list)
+    variable_roles: list[str] = field(default_factory=list)
+    function_roles: list[str] = field(default_factory=list)
+    parameter_patterns: list[str] = field(default_factory=list)
 
     # React/TSX specific evidence
     has_react_imports: bool = False
     has_jsx: bool = False
-    component_names: List[str] = field(default_factory=list)
-    hook_usage: Dict[str, int] = field(default_factory=dict)
-    boilerplate_patterns: List[str] = field(default_factory=list)
+    component_names: list[str] = field(default_factory=list)
+    hook_usage: dict[str, int] = field(default_factory=dict)
+    boilerplate_patterns: list[str] = field(default_factory=list)
     boilerplate_discount: float = 1.0
 
     # Structural divergence
@@ -189,7 +189,7 @@ class ASTEvidenceExtractor:
 
     def extract(
         self, code_a: str, code_b: str, file_type: str = "CODE"
-    ) -> Tuple[ASTEvidence, ASTEvidence]:
+    ) -> tuple[ASTEvidence, ASTEvidence]:
         """Extract evidence from two code strings.
 
         Args:
@@ -269,7 +269,7 @@ class ASTEvidenceExtractor:
         """Check if code contains JSX."""
         return bool(self._jsx_tag_pattern.search(code))
 
-    def _extract_structural_patterns(self, code: str) -> List[str]:
+    def _extract_structural_patterns(self, code: str) -> list[str]:
         """Extract structural boilerplate patterns."""
         patterns = []
 
@@ -286,7 +286,7 @@ class ASTEvidenceExtractor:
 
         return patterns
 
-    def _compute_boilerplate_discount(self, patterns: List[str]) -> float:
+    def _compute_boilerplate_discount(self, patterns: list[str]) -> float:
         """Compute discount for boilerplate patterns."""
         if len(patterns) >= 3:
             return 0.1  # 90% discount
@@ -296,7 +296,7 @@ class ASTEvidenceExtractor:
             return 0.6  # 40% discount
         return 1.0
 
-    def _extract_hooks(self, code: str) -> Dict[str, int]:
+    def _extract_hooks(self, code: str) -> dict[str, int]:
         """Extract hook usage counts."""
         hook_usage = {}
         for pattern, hook_name in self.HOOK_PATTERNS:
@@ -305,30 +305,29 @@ class ASTEvidenceExtractor:
                 hook_usage[hook_name] = len(matches)
         return hook_usage
 
-    def _extract_component_names(self, code: str) -> List[str]:
+    def _extract_component_names(self, code: str) -> list[str]:
         """Extract React component names (PascalCase functions)."""
         components = []
         try:
             tree = ast.parse(code)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    if node.name[0].isupper():
-                        components.append(node.name)
+                if isinstance(node, ast.FunctionDef) and node.name[0].isupper():
+                    components.append(node.name)
         except SyntaxError:
             pass
         return components
 
-    def _extract_shape_node_counts(self, tree: ast.AST) -> Dict[str, int]:
+    def _extract_shape_node_counts(self, tree: ast.AST) -> dict[str, int]:
         """Count each node type in the AST."""
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for node in ast.walk(tree):
             node_name = type(node).__name__
             counts[node_name] = counts.get(node_name, 0) + 1
         return counts
 
-    def _extract_shape_depth(self, tree: ast.AST) -> Dict[int, int]:
+    def _extract_shape_depth(self, tree: ast.AST) -> dict[int, int]:
         """Extract depth distribution of nodes."""
-        depths: Dict[int, int] = {}
+        depths: dict[int, int] = {}
 
         def walk_with_depth(node: ast.AST, depth: int) -> None:
             depths[depth] = depths.get(depth, 0) + 1
@@ -338,9 +337,9 @@ class ASTEvidenceExtractor:
         walk_with_depth(tree, 0)
         return depths
 
-    def _extract_shape_evidence(self, tree: ast.AST) -> Dict[str, Any]:
+    def _extract_shape_evidence(self, tree: ast.AST) -> dict[str, Any]:
         """Extract shape evidence (structure patterns)."""
-        evidence: Dict[str, Any] = {}
+        evidence: dict[str, Any] = {}
 
         total_nodes = len(list(ast.walk(tree)))
         evidence["total_nodes"] = total_nodes
@@ -353,26 +352,23 @@ class ASTEvidenceExtractor:
 
         return evidence
 
-    def _extract_semantic_calls(self, tree: ast.AST) -> List[str]:
+    def _extract_semantic_calls(self, tree: ast.AST) -> list[str]:
         """Extract function call names."""
         calls = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    calls.append(node.func.id)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                calls.append(node.func.id)
         return calls
 
-    def _extract_semantic_operators(self, tree: ast.AST) -> List[str]:
+    def _extract_semantic_operators(self, tree: ast.AST) -> list[str]:
         """Extract operator types."""
         operators = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.BinOp):
-                operators.append(type(node.op).__name__)
-            elif isinstance(node, ast.BoolOp):
+            if isinstance(node, (ast.BinOp, ast.BoolOp)):
                 operators.append(type(node.op).__name__)
         return operators
 
-    def _extract_semantic_expressions(self, tree: ast.AST) -> List[str]:
+    def _extract_semantic_expressions(self, tree: ast.AST) -> list[str]:
         """Extract expression types."""
         expressions = []
         for node in ast.walk(tree):
@@ -384,13 +380,13 @@ class ASTEvidenceExtractor:
                 expressions.append("BoolOp")
         return expressions
 
-    def _extract_semantic_function_defs(self, tree: ast.AST) -> List[str]:
+    def _extract_semantic_function_defs(self, tree: ast.AST) -> list[str]:
         """Extract function definition names."""
         return [
             node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
         ]
 
-    def _extract_control_flow(self, tree: ast.AST) -> List[str]:
+    def _extract_control_flow(self, tree: ast.AST) -> list[str]:
         """Extract control flow structure types."""
         flow = []
         for node in ast.walk(tree):
@@ -398,9 +394,9 @@ class ASTEvidenceExtractor:
                 flow.append(type(node).__name__)
         return flow
 
-    def _extract_control_flow_patterns(self, tree: ast.AST) -> Dict[str, int]:
+    def _extract_control_flow_patterns(self, tree: ast.AST) -> dict[str, int]:
         """Extract control flow pattern counts."""
-        patterns: Dict[str, int] = {}
+        patterns: dict[str, int] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.If):
                 patterns["if"] = patterns.get("if", 0) + 1
@@ -410,7 +406,7 @@ class ASTEvidenceExtractor:
                 patterns["with"] = patterns.get("with", 0) + 1
         return patterns
 
-    def _extract_variable_roles(self, tree: ast.AST) -> List[str]:
+    def _extract_variable_roles(self, tree: ast.AST) -> list[str]:
         """Extract variable role patterns (assignments, usages)."""
         roles = []
         for node in ast.walk(tree):
@@ -420,7 +416,7 @@ class ASTEvidenceExtractor:
                 roles.append("aug_assign")
         return roles
 
-    def _extract_function_roles(self, tree: ast.AST) -> List[str]:
+    def _extract_function_roles(self, tree: ast.AST) -> list[str]:
         """Extract function role patterns."""
         roles = []
         for node in ast.walk(tree):
@@ -431,7 +427,7 @@ class ASTEvidenceExtractor:
                     roles.append("plain_func")
         return roles
 
-    def _extract_parameter_patterns(self, tree: ast.AST) -> List[str]:
+    def _extract_parameter_patterns(self, tree: ast.AST) -> list[str]:
         """Extract parameter patterns."""
         patterns = []
         for node in ast.walk(tree):
@@ -484,27 +480,27 @@ class ASTEvidenceExtractor:
         )
 
     # Regex fallback methods for non-Python code
-    def _extract_regex_node_counts(self, code: str) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
+    def _extract_regex_node_counts(self, code: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
         counts["function"] = len(re.findall(r"function\s+\w+", code))
         counts["class"] = len(re.findall(r"class\s+\w+", code))
         counts["if"] = len(re.findall(r"\bif\b", code))
         counts["loop"] = len(re.findall(r"\b(for|while)\b", code))
         return counts
 
-    def _extract_regex_control_flow(self, code: str) -> List[str]:
+    def _extract_regex_control_flow(self, code: str) -> list[str]:
         flow = []
         flow.extend(["if"] * len(re.findall(r"\bif\s*\(", code)))
         flow.extend(["loop"] * len(re.findall(r"\b(for|while)\s*\(", code)))
         return flow
 
-    def _extract_regex_calls(self, code: str) -> List[str]:
+    def _extract_regex_calls(self, code: str) -> list[str]:
         return re.findall(r"(\w+)\s*\(", code)
 
 
 def extract_ast_evidence(
     code_a: str, code_b: str, file_type: str = "CODE"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convenience function to extract AST evidence and return as dictionary.
 
     This is the main entry point for the feature extractor.
@@ -513,7 +509,7 @@ def extract_ast_evidence(
         Dictionary with evidence fields for fusion with other signals.
     """
     extractor = ASTEvidenceExtractor()
-    evidence_a, evidence_b = extractor.extract(code_a, code_b, file_type)
+    evidence_a, _evidence_b = extractor.extract(code_a, code_b, file_type)
 
     return {
         "shape_evidence": evidence_a.shape_evidence,
@@ -535,7 +531,7 @@ def extract_ast_evidence(
 
 def compute_ast_layer_scores(
     code_a: str, code_b: str, file_type: str = "CODE"
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Backwards-compatible function that returns evidence-based scores.
 
     NOTE: These are derived from evidence, not direct similarity scores.

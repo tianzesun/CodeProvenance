@@ -5,9 +5,10 @@ Turns the system from O(n²) pairwise comparison into O(log N) retrieval.
 Combined with hybrid reranking for maximum accuracy + speed.
 """
 
-from typing import List, Tuple, Dict, Any, Optional
-import numpy as np
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 try:
     import faiss
@@ -30,10 +31,10 @@ class CodeVectorIndex:
     # Feature vector dimensions
     DIM = 128
 
-    def __init__(self, index_path: Optional[str] = None):
+    def __init__(self, index_path: str | None = None):
         self.index = None
-        self.id_map: List[str] = []  # Maps FAISS internal ID to file/submission ID
-        self._metadata: Dict[str, Dict[str, Any]] = {}
+        self.id_map: list[str] = []  # Maps FAISS internal ID to file/submission ID
+        self._metadata: dict[str, dict[str, Any]] = {}
 
         if not FAISS_AVAILABLE:
             raise ImportError("FAISS is required for vector indexing")
@@ -46,7 +47,7 @@ class CodeVectorIndex:
             self.index = faiss.IndexIVFFlat(quantizer, self.DIM, 100)  # 100 clusters
 
     def embed(
-        self, code: str, engine_scores: Optional[Dict[str, float]] = None
+        self, code: str, engine_scores: dict[str, float] | None = None
     ) -> np.ndarray:
         """
         Convert code into 128-dimensional feature vector.
@@ -107,7 +108,7 @@ class CodeVectorIndex:
         self,
         submission_id: str,
         code: str,
-        engine_scores: Optional[Dict[str, float]] = None,
+        engine_scores: dict[str, float] | None = None,
     ) -> None:
         """Add a submission to the index."""
         vec = self.embed(code, engine_scores)
@@ -122,7 +123,7 @@ class CodeVectorIndex:
         self.id_map.append(submission_id)
         self._metadata[submission_id] = {"code": code, "scores": engine_scores}
 
-    def query(self, code: str, k: int = 50) -> List[Tuple[str, float]]:
+    def query(self, code: str, k: int = 50) -> list[tuple[str, float]]:
         """
         Fast approximate similarity search.
 
@@ -146,7 +147,7 @@ class CodeVectorIndex:
 
         return candidates
 
-    def _exact_search(self, query_vec: np.ndarray, k: int) -> List[Tuple[str, float]]:
+    def _exact_search(self, query_vec: np.ndarray, k: int) -> list[tuple[str, float]]:
         """Exact L2 search for small datasets."""
         candidates = []
         for sid, metadata in self._metadata.items():
@@ -180,7 +181,7 @@ class VectorSearchPipeline:
     3. Explainable report generation
     """
 
-    def __init__(self, index_path: Optional[str] = None):
+    def __init__(self, index_path: str | None = None):
         self.vector_index = CodeVectorIndex(index_path)
 
         # Load full scoring engines for reranking
@@ -194,7 +195,7 @@ class VectorSearchPipeline:
 
     def search(
         self, code: str, k: int = 10, rerank: bool = True
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
+    ) -> list[tuple[str, float, dict[str, Any]]]:
         """
         Full search pipeline: fast retrieval + precise reranking.
 

@@ -16,14 +16,15 @@ Report Structure:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class VerdictType(str, Enum):
     """Allowed verdict types for academic integrity reports."""
+
     CLEAN = "CLEAN"
     SUSPICIOUS = "SUSPICIOUS"
     STRONG_SIMILARITY = "STRONG_SIMILARITY"
@@ -32,18 +33,20 @@ class VerdictType(str, Enum):
 @dataclass
 class EvidenceDetail:
     """Detailed evidence match information."""
+
     file_a_location: str
     file_b_location: str
     match_type: str
     similarity_score: float
     explanation: str
-    code_snippet_a: Optional[str] = None
-    code_snippet_b: Optional[str] = None
+    code_snippet_a: str | None = None
+    code_snippet_b: str | None = None
 
 
 @dataclass
 class EvidenceCategory:
     """Evidence category summary."""
+
     category: str
     strength: str  # LOW, MODERATE, HIGH
     explanation: str
@@ -53,19 +56,22 @@ class EvidenceCategory:
 @dataclass
 class EvidenceDetail:
     """Detailed evidence match information."""
+
     file_a_location: str
     file_b_location: str
     match_type: str
     similarity_score: float
     explanation: str
-    code_snippet_a: Optional[str] = None
-    code_snippet_b: Optional[str] = None
+    code_snippet_a: str | None = None
+    code_snippet_b: str | None = None
 
 
 class EvidenceReportGenerator:
     """Generate formal evidence reports for academic integrity cases."""
 
-    def __init__(self, system_version: str = "1.0.0", rule_set_version: str = "1.0") -> None:
+    def __init__(
+        self, system_version: str = "1.0.0", rule_set_version: str = "1.0"
+    ) -> None:
         self.system_version = system_version
         self.rule_set_version = rule_set_version
 
@@ -76,12 +82,12 @@ class EvidenceReportGenerator:
         submission_b: str,
         verdict: VerdictType,
         confidence: float,
-        evidence_categories: List[EvidenceCategory],
-        matched_details: List[EvidenceDetail],
-        conflict_analysis: List[str],
-        triggered_rules: List[str],
-        course_context: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        evidence_categories: list[EvidenceCategory],
+        matched_details: list[EvidenceDetail],
+        conflict_analysis: list[str],
+        triggered_rules: list[str],
+        course_context: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Generate a formal evidence report.
 
         Args:
@@ -134,7 +140,9 @@ class EvidenceReportGenerator:
             "conflict_and_weakness_analysis": conflict_analysis,
             "rule_based_interpretation": {
                 "triggered_rules": triggered_rules,
-                "interpretation": self._generate_interpretation(triggered_rules, verdict),
+                "interpretation": self._generate_interpretation(
+                    triggered_rules, verdict
+                ),
             },
             "final_verdict": {
                 "verdict": verdict.value,
@@ -149,7 +157,7 @@ class EvidenceReportGenerator:
         return report
 
     def _generate_interpretation(
-        self, triggered_rules: List[str], verdict: VerdictType
+        self, triggered_rules: list[str], verdict: VerdictType
     ) -> str:
         """Generate human-readable interpretation."""
         if "IDENTITY_MATCH" in triggered_rules:
@@ -165,11 +173,11 @@ class EvidenceReportGenerator:
         else:
             return "Evidence patterns require careful academic judgment."
 
-    def to_json(self, report: Dict[str, Any]) -> str:
+    def to_json(self, report: dict[str, Any]) -> str:
         """Convert report to JSON string."""
         return json.dumps(report, indent=2)
 
-    def to_html(self, report: Dict[str, Any]) -> str:
+    def to_html(self, report: dict[str, Any]) -> str:
         """Convert report to HTML format."""
         # This would contain the HTML generation logic
         # For now, return a placeholder

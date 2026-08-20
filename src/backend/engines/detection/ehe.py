@@ -24,7 +24,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ class LayerResult:
     """Result from a single evidence layer."""
 
     score: float = 0.0
-    signals: Dict[str, float] = field(default_factory=dict)
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    signals: dict[str, float] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     triggered: bool = False
 
 
@@ -55,9 +55,9 @@ class EHEDecision:
     verdict: Verdict
     confidence: float
     triggered_layer: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    decision_path: List[str] = field(default_factory=list)
-    raw_scores: Dict[str, float] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    decision_path: list[str] = field(default_factory=list)
+    raw_scores: dict[str, float] = field(default_factory=dict)
 
 
 class IdentityLayer:
@@ -174,7 +174,7 @@ class EvidenceHierarchyEngine:
         self.semantic = SemanticLayer()
 
     def decide(
-        self, code_a: str, code_b: str, engine_scores: Dict[str, float]
+        self, code_a: str, code_b: str, engine_scores: dict[str, float]
     ) -> EHEDecision:
         """
         Execute hierarchical decision pipeline.
@@ -187,7 +187,7 @@ class EvidenceHierarchyEngine:
         Returns:
             EHEDecision with verdict and evidence
         """
-        decision_path: List[str] = []
+        decision_path: list[str] = []
 
         # ─────────────────────────────────────────────────────────────
         # Layer 0: Identity (HARD OVERRIDE - STOP HERE)
@@ -256,7 +256,7 @@ class EvidenceHierarchyEngine:
         structural: LayerResult,
         statistical: LayerResult,
         semantic: LayerResult,
-        decision_path: List[str],
+        decision_path: list[str],
     ) -> EHEDecision:
         """Apply hierarchical decision rules."""
 

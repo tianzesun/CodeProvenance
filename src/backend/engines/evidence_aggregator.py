@@ -20,7 +20,6 @@ All scoring decisions happen in the Rule Engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
 
 from src.backend.engines.features.feature_extractor import FeatureVector
 
@@ -35,7 +34,7 @@ class EvidenceVector:
     style: float  # stylometry, graph
     coverage: float = 0.0  # Portion of code covered by matching segments (0.0-1.0)
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """Convert to dictionary for policy evaluation."""
         return {
             "structural": self.structural,
@@ -94,7 +93,7 @@ def aggregate(features: FeatureVector, logic_flow: float = 0.0) -> EvidenceVecto
 
 
 def aggregate_from_scores(
-    weighted_scores: Dict[str, float], logic_flow: float = 0.0, coverage: float = 0.0
+    weighted_scores: dict[str, float], logic_flow: float = 0.0, coverage: float = 0.0
 ) -> EvidenceVector:
     """
     Aggregate weighted scores into unified evidence vector.

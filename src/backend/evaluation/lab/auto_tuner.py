@@ -5,11 +5,10 @@ Objective: maximise F-beta (default beta=2, recall-heavy for plagiarism).
 Supports per-engine thresholds and cross-engine weight optimization.
 """
 
-import math
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class SearchStrategy(str, Enum):
@@ -21,12 +20,13 @@ class SearchStrategy(str, Enum):
 @dataclass
 class ParameterRange:
     """Search range for a tunable parameter."""
+
     param_name: str
     low: float
     high: float
     step: float = 0.01
 
-    def values(self) -> List[float]:
+    def values(self) -> list[float]:
         vals = []
         v = self.low
         while v <= self.high + 1e-9:
@@ -41,9 +41,10 @@ class ParameterRange:
 @dataclass
 class TuningConfig:
     """Configuration for the auto-tuner."""
+
     strategy: SearchStrategy = SearchStrategy.BAYESIAN
     max_iterations: int = 50
-    random_seed: Optional[int] = 42
+    random_seed: int | None = 42
     beta: float = 2.0
     cv_folds: int = 3
     patience: int = 10
@@ -60,7 +61,8 @@ class TuningConfig:
 @dataclass
 class TrialResult:
     """Result of a single parameter trial."""
-    params: Dict[str, Any]
+
+    params: dict[str, Any]
     score: float
     precision: float = 0.0
     recall: float = 0.0
@@ -72,13 +74,14 @@ class TrialResult:
 @dataclass
 class TuningResult:
     """Final tuning result with best parameters."""
-    best_params: Dict[str, Any]
+
+    best_params: dict[str, Any]
     best_score: float
     best_precision: float = 0.0
     best_recall: float = 0.0
     best_f1: float = 0.0
     best_fbeta: float = 0.0
-    all_trials: List[TrialResult] = field(default_factory=list)
-    search_history: List[Dict[str, Any]] = field(default_factory=list)
+    all_trials: list[TrialResult] = field(default_factory=list)
+    search_history: list[dict[str, Any]] = field(default_factory=list)
     n_iterations: int = 0
     conver

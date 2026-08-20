@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.backend.evaluation.evidence_viewer import (
     EvidenceViewer,
-    generate_evidence_view,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,13 +25,13 @@ class EvidenceViewRequest(BaseModel):
     submission_a_id: str
     submission_b_id: str
     similarity_score: float
-    engine_details: Optional[Dict[str, float]] = None
+    engine_details: dict[str, float] | None = None
 
 
 @router.post("/generate")
 async def generate_evidence_view_endpoint(
     request: EvidenceViewRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generate an evidence view for a code pair.
 
@@ -63,7 +62,7 @@ async def generate_evidence_view_endpoint(
 async def get_diff(
     code_a: str = Query(..., description="First code submission"),
     code_b: str = Query(..., description="Second code submission"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get a diff between two code submissions.
 
@@ -76,7 +75,6 @@ async def get_diff(
     """
     try:
         viewer = EvidenceViewer()
-        from src.backend.evaluation.evidence_viewer import DiffHunk
 
         hunks = viewer._generate_diff(code_a, code_b)
 
@@ -98,7 +96,7 @@ async def get_diff(
 
 
 @router.get("/verdict-options")
-async def get_verdict_options() -> Dict[str, Any]:
+async def get_verdict_options() -> dict[str, Any]:
     """
     Get available verdict options.
 

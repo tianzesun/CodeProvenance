@@ -3,8 +3,8 @@
 Centralizes password hashing, verification, and validation to ensure
 consistent security policies across all authentication paths.
 """
+
 import logging
-from typing import List
 
 from fastapi import HTTPException
 from passlib.context import CryptContext
@@ -13,9 +13,17 @@ logger = logging.getLogger(__name__)
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-WEAK_PASSWORDS: List[str] = [
-    "password", "12345678", "qwerty", "admin", "letmein",
-    "welcome", "monkey", "dragon", "master", "login",
+WEAK_PASSWORDS: list[str] = [
+    "password",
+    "12345678",
+    "qwerty",
+    "admin",
+    "letmein",
+    "welcome",
+    "monkey",
+    "dragon",
+    "master",
+    "login",
 ]
 
 

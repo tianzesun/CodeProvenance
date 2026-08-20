@@ -10,8 +10,6 @@ Safeguards:
 5. Confidence Floor: Never allow confidence below threshold for medium risk
 """
 
-from typing import Dict, Tuple
-
 from src.backend.engines.ai.agreement import (
     calculate_signal_variance,
     detect_signal_contradiction,
@@ -25,8 +23,8 @@ def apply_false_positive_reduction(
     ai_probability: float,
     confidence: float,
     signals: SignalScores,
-    reliabilities: Dict[str, float],
-) -> Tuple[float, float]:
+    reliabilities: dict[str, float],
+) -> tuple[float, float]:
     """Apply false positive reduction safeguards.
 
     Args:
@@ -78,7 +76,7 @@ def apply_false_positive_reduction(
     )
 
 
-def check_single_signal_dominance(signals: SignalScores) -> Dict:
+def check_single_signal_dominance(signals: SignalScores) -> dict:
     """Check for single signal dominance and return details.
 
     Args:
@@ -112,7 +110,7 @@ def check_single_signal_dominance(signals: SignalScores) -> Dict:
     }
 
 
-def check_signal_contradiction(signals: SignalScores) -> Dict:
+def check_signal_contradiction(signals: SignalScores) -> dict:
     """Check for signal contradiction and return details.
 
     Args:
@@ -143,7 +141,7 @@ def check_signal_contradiction(signals: SignalScores) -> Dict:
     }
 
 
-def check_low_reliability(reliabilities: Dict[str, float]) -> Dict:
+def check_low_reliability(reliabilities: dict[str, float]) -> dict:
     """Check for low average reliability and return details.
 
     Args:
@@ -177,7 +175,7 @@ def check_low_reliability(reliabilities: Dict[str, float]) -> Dict:
     }
 
 
-def check_extreme_variance(signals: SignalScores) -> Dict:
+def check_extreme_variance(signals: SignalScores) -> dict:
     """Check for extreme signal variance and return details.
 
     Args:
@@ -196,7 +194,8 @@ def check_extreme_variance(signals: SignalScores) -> Dict:
     if is_extreme:
         penalty = 0.15
         explanation = (
-            f"Extreme signal variance ({variance:.3f}). " f"Reducing confidence by {penalty:.0%}."
+            f"Extreme signal variance ({variance:.3f}). "
+            f"Reducing confidence by {penalty:.0%}."
         )
     else:
         penalty = 0.0
@@ -210,7 +209,9 @@ def check_extreme_variance(signals: SignalScores) -> Dict:
     }
 
 
-def get_all_false_positive_checks(signals: SignalScores, reliabilities: Dict[str, float]) -> Dict:
+def get_all_false_positive_checks(
+    signals: SignalScores, reliabilities: dict[str, float]
+) -> dict:
     """Run all false positive reduction checks.
 
     Args:
@@ -229,7 +230,7 @@ def get_all_false_positive_checks(signals: SignalScores, reliabilities: Dict[str
 
 
 def calculate_total_confidence_penalty(
-    signals: SignalScores, reliabilities: Dict[str, float]
+    signals: SignalScores, reliabilities: dict[str, float]
 ) -> float:
     """Calculate total confidence penalty from all safeguards.
 

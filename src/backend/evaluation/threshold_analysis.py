@@ -8,9 +8,10 @@ via both API and CLI interfaces.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -36,7 +37,7 @@ class ThresholdMetrics(NamedTuple):
     true_negatives: int
     false_negatives: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "threshold": float(f"{self.threshold:.4f}"),
@@ -56,8 +57,8 @@ class ThresholdMetrics(NamedTuple):
 class ThresholdSweepResult:
     """Complete results from threshold sweep analysis."""
 
-    thresholds: List[float]
-    metrics: List[ThresholdMetrics]
+    thresholds: list[float]
+    metrics: list[ThresholdMetrics]
     optimal_threshold: float
     optimal_metrics: ThresholdMetrics
     auc_pr: float
@@ -65,7 +66,7 @@ class ThresholdSweepResult:
     positive_count: int
     negative_count: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "thresholds": [float(f"{t:.4f}") for t in self.thresholds],
@@ -206,7 +207,7 @@ def threshold_sweep(
     optimal_metrics = metrics_list[optimal_idx]
 
     sorted_indices = np.argsort(scores_np)[::-1]
-    sorted_scores = scores_np[sorted_indices]
+    scores_np[sorted_indices]
     sorted_labels = labels_np[sorted_indices]
 
     tp_cum = np.cumsum(sorted_labels)
@@ -240,7 +241,7 @@ def find_optimal_threshold(
     start: float = 0.0,
     end: float = 1.0,
     step: float = 0.001,
-) -> Tuple[float, ThresholdMetrics]:
+) -> tuple[float, ThresholdMetrics]:
     """Find threshold that maximizes specified metric.
 
     Args:
@@ -279,7 +280,7 @@ def find_optimal_threshold(
     return best_threshold, best_metrics
 
 
-def global_threshold_override(threshold: Optional[float] = None) -> float:
+def global_threshold_override(threshold: float | None = None) -> float:
     """Get or set global runtime threshold configuration.
 
     Args:

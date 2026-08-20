@@ -7,9 +7,8 @@ Unregistered schemas cannot be used in the system.
 from __future__ import annotations
 
 import hashlib
-import json
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Set, Type, TypeVar
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 from src.backend.benchmark.contracts.evaluation_result import (
     EnrichedPair,
@@ -55,16 +54,16 @@ class SchemaRegistry:
 
     def __init__(self) -> None:
         """Initialize empty registry."""
-        self._schemas: Dict[str, Type[Any]] = {}
-        self._versions: Dict[str, SchemaVersion] = {}
-        self._compatibility: Dict[str, Set[str]] = {}
+        self._schemas: dict[str, type[Any]] = {}
+        self._versions: dict[str, SchemaVersion] = {}
+        self._compatibility: dict[str, set[str]] = {}
 
     def register(
         self,
         name: str,
-        schema: Type[T],
+        schema: type[T],
         version: str = "1.0",
-        compatible_with: Optional[Set[str]] = None,
+        compatible_with: set[str] | None = None,
     ) -> SchemaVersion:
         """Register a schema.
 
@@ -102,7 +101,7 @@ class SchemaRegistry:
 
         return version_info
 
-    def get(self, name: str) -> Type[Any]:
+    def get(self, name: str) -> type[Any]:
         """Get schema by name.
 
         Args:
@@ -178,7 +177,7 @@ class SchemaRegistry:
             return True
         return other_version in self._compatibility[name]
 
-    def list_schemas(self) -> Dict[str, SchemaVersion]:
+    def list_schemas(self) -> dict[str, SchemaVersion]:
         """List all registered schemas.
 
         Returns:
@@ -186,7 +185,7 @@ class SchemaRegistry:
         """
         return dict(self._versions)
 
-    def _compute_schema_hash(self, schema: Type[Any]) -> str:
+    def _compute_schema_hash(self, schema: type[Any]) -> str:
         """Compute deterministic hash of schema.
 
         Args:
@@ -210,8 +209,6 @@ class SchemaRegistry:
 
 class ValidationError(Exception):
     """Raised when validation fails."""
-
-    pass
 
 
 # Global registry instance

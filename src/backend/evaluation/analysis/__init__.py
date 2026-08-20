@@ -10,29 +10,14 @@ Note: This module has been elevated to benchmark.forensics for enhanced
 forensic intelligence capabilities. The original imports are maintained
 for backward compatibility.
 """
+
 # Import from forensics module for enhanced capabilities
-from benchmark.forensics.causal import (
-    CausalRankingEngine,
-    CausalRankingReport,
-    ImprovementCandidate,
-    RootCauseAttributor,
-    RootCause,
-)
-from benchmark.forensics.attribution import (
-    ErrorAnalyzer,
-    ErrorCategory,
-    ErrorReport,
-    FailurePatternDetector,
-    FailurePattern,
-    FailurePatternReport,
-)
-from benchmark.forensics.clone_taxonomy import (
-    CloneTypeClassifier,
-    CloneType,
-    CloneTypeReport,
-    TechniqueDetector,
-    TechniqueType,
-    TechniqueReport,
+from benchmark.analysis.error_attribution import (
+    AttributionReport,
+    CloneTypeAttribution,
+    ComponentEffectiveness,
+    ErrorAttribution,
+    ErrorAttributionModel,
 )
 
 # Legacy imports for backward compatibility
@@ -43,58 +28,75 @@ from benchmark.analysis.failure_analysis import (
     FailureReport,
     failure_to_improvement_map,
 )
-from benchmark.analysis.error_attribution import (
-    ErrorAttributionModel,
-    ErrorAttribution,
-    AttributionReport,
-    ComponentEffectiveness,
-    CloneTypeAttribution,
-)
 from benchmark.analysis.stability_analysis import (
-    ThresholdStabilityAnalyzer,
-    FailureClusterAnalyzer,
-    ThresholdStabilityReport,
-    FailureClusterReport,
     FailureCluster,
+    FailureClusterAnalyzer,
+    FailureClusterReport,
+    ThresholdStabilityAnalyzer,
+    ThresholdStabilityReport,
+)
+
+from benchmark.forensics.attribution import (
+    ErrorAnalyzer,
+    ErrorCategory,
+    ErrorReport,
+    FailurePattern,
+    FailurePatternDetector,
+    FailurePatternReport,
+)
+from benchmark.forensics.causal import (
+    CausalRankingEngine,
+    CausalRankingReport,
+    ImprovementCandidate,
+    RootCause,
+    RootCauseAttributor,
+)
+from benchmark.forensics.clone_taxonomy import (
+    CloneType,
+    CloneTypeClassifier,
+    CloneTypeReport,
+    TechniqueDetector,
+    TechniqueReport,
+    TechniqueType,
 )
 
 __all__ = [
+    "AttributionReport",
     # Forensics - Causal analysis
     "CausalRankingEngine",
     "CausalRankingReport",
-    "ImprovementCandidate",
-    "RootCauseAttributor",
-    "RootCause",
-    # Forensics - Attribution
-    "ErrorAnalyzer",
-    "ErrorCategory",
-    "ErrorReport",
-    "FailurePatternDetector",
-    "FailurePattern",
-    "FailurePatternReport",
+    "CloneType",
+    "CloneTypeAttribution",
     # Forensics - Clone taxonomy
     "CloneTypeClassifier",
-    "CloneType",
     "CloneTypeReport",
-    "TechniqueDetector",
-    "TechniqueType",
-    "TechniqueReport",
+    "ComponentEffectiveness",
+    # Forensics - Attribution
+    "ErrorAnalyzer",
+    "ErrorAttribution",
+    # Legacy - Error attribution
+    "ErrorAttributionModel",
+    "ErrorCategory",
+    "ErrorReport",
     # Legacy - Failure analysis
     "FailureAnalyzer",
     "FailureCase",
     "FailureCategory",
+    "FailureCluster",
+    "FailureClusterAnalyzer",
+    "FailureClusterReport",
+    "FailurePattern",
+    "FailurePatternDetector",
+    "FailurePatternReport",
     "FailureReport",
-    "failure_to_improvement_map",
-    # Legacy - Error attribution
-    "ErrorAttributionModel",
-    "ErrorAttribution",
-    "AttributionReport",
-    "ComponentEffectiveness",
-    "CloneTypeAttribution",
+    "ImprovementCandidate",
+    "RootCause",
+    "RootCauseAttributor",
+    "TechniqueDetector",
+    "TechniqueReport",
+    "TechniqueType",
     # Legacy - Stability and clustering
     "ThresholdStabilityAnalyzer",
-    "FailureClusterAnalyzer",
     "ThresholdStabilityReport",
-    "FailureClusterReport",
-    "FailureCluster",
+    "failure_to_improvement_map",
 ]

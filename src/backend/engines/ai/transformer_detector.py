@@ -1,11 +1,12 @@
-import numpy as np
 import logging
-from typing import Dict, Any
+from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-def _engine_analyze(code: str) -> Dict[str, Any]:
+def _engine_analyze(code: str) -> dict[str, Any]:
     """Lazily delegate to the heuristic AIDetectionEngine.
 
     The CodeBERT fine-tuned detector was never checked in and the zero-shot
@@ -39,8 +40,8 @@ class ZeroShotAIDetector:
     def _load_model(self):
         if self._tokenizer is None:
             try:
-                from transformers import AutoTokenizer, AutoModel
                 import torch
+                from transformers import AutoModel, AutoTokenizer
 
                 self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                 self._model = AutoModel.from_pretrained(self.model_name)
@@ -119,7 +120,7 @@ class CodeBERTDetector:
     def __init__(self):
         self._engine = None
 
-    def predict(self, code: str) -> Dict[str, Any]:
+    def predict(self, code: str) -> dict[str, Any]:
         if self._engine is None:
             from src.backend.engines.similarity.ai_detection import AIDetectionEngine
 
@@ -149,7 +150,7 @@ class AIDetectionLayer:
 
         self._orchestrator = AIDetectionOrchestrator()
 
-    def analyze(self, code: str) -> Dict[str, Any]:
+    def analyze(self, code: str) -> dict[str, Any]:
         """Deep forensic analysis for AI presence."""
         result = self._orchestrator.analyze(code)
         ai_prob = result.get("ai_probability", 0.0)

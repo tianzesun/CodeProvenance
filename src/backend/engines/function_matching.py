@@ -10,7 +10,6 @@ import ast
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -25,7 +24,7 @@ class FunctionMatch:
     variable_rename_count: int
     parameter_rename_count: int
     has_structural_match: bool
-    matched_blocks: List[Tuple[int, int, int, int]]  # (start_a, end_a, start_b, end_b)
+    matched_blocks: list[tuple[int, int, int, int]]  # (start_a, end_a, start_b, end_b)
 
 
 @dataclass
@@ -34,11 +33,11 @@ class FunctionMatchReport:
 
     total_functions_a: int
     total_functions_b: int
-    matched_functions: List[FunctionMatch] = field(default_factory=list)
-    unmatched_functions_a: List[str] = field(default_factory=list)
-    unmatched_functions_b: List[str] = field(default_factory=list)
+    matched_functions: list[FunctionMatch] = field(default_factory=list)
+    unmatched_functions_a: list[str] = field(default_factory=list)
+    unmatched_functions_b: list[str] = field(default_factory=list)
     total_matched_lines: int = 0
-    rename_patterns: Dict[str, str] = field(default_factory=dict)
+    rename_patterns: dict[str, str] = field(default_factory=dict)
     variable_rename_count: int = 0
     parameter_rename_count: int = 0
 
@@ -60,7 +59,7 @@ class FunctionMatcher:
     def __init__(self, similarity_threshold: float = 0.7) -> None:
         self.similarity_threshold = similarity_threshold
 
-    def extract_functions(self, code: str) -> Dict[str, str]:
+    def extract_functions(self, code: str) -> dict[str, str]:
         """Extract function names and their bodies from code.
 
         Args:
@@ -122,7 +121,7 @@ class FunctionMatcher:
         except SyntaxError:
             return 0.0
 
-    def _get_ast_signature(self, tree: ast.AST) -> List[str]:
+    def _get_ast_signature(self, tree: ast.AST) -> list[str]:
         """Get a normalized signature of AST structure."""
         signature = []
         for node in ast.walk(tree):
@@ -148,7 +147,7 @@ class FunctionMatcher:
         except SyntaxError:
             return 0
 
-    def detect_variable_renaming(self, code_a: str, code_b: str) -> Dict[str, str]:
+    def detect_variable_renaming(self, code_a: str, code_b: str) -> dict[str, str]:
         """Detect variable renaming patterns between functions."""
         renames = {}
 
@@ -183,8 +182,8 @@ class FunctionMatcher:
         self,
         code_a: str,
         code_b: str,
-        func_names_a: Optional[List[str]] = None,
-        func_names_b: Optional[List[str]] = None,
+        func_names_a: list[str] | None = None,
+        func_names_b: list[str] | None = None,
     ) -> FunctionMatchReport:
         """Match functions between two code files.
 
@@ -247,7 +246,7 @@ class FunctionMatcher:
                 renames = self.detect_variable_renaming(func_a, func_b)
                 match.variable_rename_count = len(renames)
                 match.parameter_rename_count = len(
-                    [k for k in renames.keys() if k.startswith("param_")]
+                    [k for k in renames if k.startswith("param_")]
                 )
                 report.rename_patterns.update(renames)
                 report.variable_rename_count += match.variable_rename_count

@@ -5,13 +5,13 @@ Implements conservative retry logic that ensures failed jobs are retried
 appropriately without compromising scientific validity.
 """
 
-from typing import Dict, Any
+from typing import Any
 
 
 class RetryPolicy:
     """
     Failure handling policy for benchmark jobs.
-    
+
     Retries transient errors up to 3 times. Fatal errors are not retried
     to maintain scientific integrity.
     """
@@ -22,11 +22,11 @@ class RetryPolicy:
         "SegmentationFault",
         "IllegalInstruction",
         "ToolNotFound",
-        "DatasetNotFound"
+        "DatasetNotFound",
     }
 
     @staticmethod
-    def should_retry(job: Dict[str, Any]) -> bool:
+    def should_retry(job: dict[str, Any]) -> bool:
         """
         Determine if a failed job should be retried.
 

@@ -3,9 +3,9 @@
 Combines AST alignment and GST alignment into forensic proof reports.
 """
 
-from typing import List, Dict, Tuple, Any, Optional, Set
-from dataclasses import dataclass
 import ast
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -13,11 +13,11 @@ class MatchUnit:
     """Unified match unit combining AST and GST evidence."""
 
     confidence: float
-    ast_nodes: List[Tuple[ast.AST, ast.AST]]
-    gst_block: Optional[Tuple[int, int, int]]
+    ast_nodes: list[tuple[ast.AST, ast.AST]]
+    gst_block: tuple[int, int, int] | None
     transformation: str
-    a_range: Tuple[int, int]
-    b_range: Tuple[int, int]
+    a_range: tuple[int, int]
+    b_range: tuple[int, int]
 
 
 @dataclass
@@ -26,12 +26,12 @@ class ExplainableReport:
 
     overall_score: float
     confidence: float
-    detected_strategies: List[str]
-    ast_matches: List[Tuple[str, str]]
-    gst_blocks: List[Dict[str, Any]]
-    transformation_analysis: List[str]
+    detected_strategies: list[str]
+    ast_matches: list[tuple[str, str]]
+    gst_blocks: list[dict[str, Any]]
+    transformation_analysis: list[str]
     final_verdict: str
-    match_units: List[MatchUnit]
+    match_units: list[MatchUnit]
 
     def to_string(self) -> str:
         """Format report as human-readable text."""
@@ -122,7 +122,7 @@ class ASTAligner:
         self.node_hashes[node_id] = h
         return h
 
-    def align(self, ast_a: ast.AST, ast_b: ast.AST) -> List[Tuple[ast.AST, ast.AST]]:
+    def align(self, ast_a: ast.AST, ast_b: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
         """Align matching AST nodes between two programs."""
         self.node_hashes.clear()
 
@@ -142,7 +142,7 @@ class ASTAligner:
 
         def match_a(n: ast.AST) -> None:
             h = self._hash_node(n)
-            if h in index_b and index_b[h]:
+            if index_b.get(h):
                 matched = index_b[h].pop()
                 matches.append((n, matched))
             for c in ast.iter_child_nodes(n):
@@ -175,8 +175,8 @@ class GSTAligner:
     """Greedy String Tiling alignment for exact block matching."""
 
     def align(
-        self, tokens_a: List[str], tokens_b: List[str], min_match: int = 3
-    ) -> List[Tuple[int, int, int]]:
+        self, tokens_a: list[str], tokens_b: list[str], min_match: int = 3
+    ) -> list[tuple[int, int, int]]:
         """Find all matching tile blocks between two token sequences."""
         matches = []
         marked_a = [False] * len(tokens_a)
@@ -242,7 +242,7 @@ class ReportGenerator:
         self,
         code_a: str,
         code_b: str,
-        engine_scores: Dict[str, float],
+        engine_scores: dict[str, float],
         final_score: float,
     ) -> ExplainableReport:
         """Generate full explainable report for a code pair."""
@@ -281,7 +281,7 @@ class ReportGenerator:
         # Format GST blocks
         gst_blocks = []
         code_a_lines = code_a.splitlines()
-        code_b_lines = code_b.splitlines()
+        code_b.splitlines()
 
         for a_start, b_start, length in gst_tiles:
             a_end = a_start + length

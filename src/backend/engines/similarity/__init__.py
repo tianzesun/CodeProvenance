@@ -2,7 +2,7 @@
 
 from src.backend.engines.similarity.similarity_registry import SimilarityRegistry
 
-__all__ = ["SimilarityRegistry", "BaseSimilarityAlgorithm", "SimilarityEngine"]
+__all__ = ["BaseSimilarityAlgorithm", "SimilarityEngine", "SimilarityRegistry"]
 
 
 def __getattr__(name):

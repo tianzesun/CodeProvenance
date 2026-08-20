@@ -22,11 +22,12 @@ This module enforces strict architecture boundaries:
 import sys
 from pathlib import Path
 
+
 # Add architecture validation
 def validate_architecture():
     """Enforce architecture boundaries at import time."""
     # This will be expanded with import restrictions
-    pass
+
 
 # Initialize architecture validation
 validate_architecture()

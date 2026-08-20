@@ -5,28 +5,28 @@ Generates:
 - LaTeX tables for publication
 - HTML dashboard
 """
-from __future__ import annotations
-import json
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Tuple
-import numpy as np
 
-from src.backend.evalforge.core import BenchmarkResult
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
 from src.backend.evalforge.pipelines.runner import BenchmarkRunner
 
 
 @dataclass
 class ReportGenerator:
     """Generates benchmark reports in multiple formats."""
-    
+
     runner: BenchmarkRunner
-    evaluation: Optional[Dict[str, Any]] = None
-    
+    evaluation: dict[str, Any] | None = None
+
     def __post_init__(self):
         if self.evaluation is None:
             self.evaluation = self.runner.evaluate()
-    
+
     def to_json(self, path: Path) -> None:
         """Save full report as JSON."""
         report = {
@@ -44,10 +44,10 @@ class ReportGenerator:
                     "transform_path": r.transform_path,
                 }
                 for r in self.runner.results
-            ]
+            ],
         }
         path.write_text(json.dumps(report, indent=2))
-    
+
     def to_latex_table(self, path: Path) -> None:
         """Generate LaTeX table for publication."""
         latex = r"""\begin{table*}[t]
@@ -60,11 +60,11 @@ class ReportGenerator:
 Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
 \midrule
 """
-        
+
         for detector_name, data in self.evaluation.items():
             if detector_name == "agreement":
                 continue
-            
+
             metrics = data["metrics"]
             latex += f"{detector_name.title()} & "
             latex += f"{metrics['precision']:.3f} & "
@@ -73,18 +73,18 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
             latex += f"{metrics['roc_auc']:.3f} & "
             latex += f"{metrics['pr_auc']:.3f} & "
             latex += f"{metrics['ece']:.3f} \\\\\n"
-        
+
         latex += r"""\bottomrule
 \end{tabular}%
 }
 \end{table*}
 """
         path.write_text(latex)
-    
+
     def to_html(self, path: Path) -> None:
         """Generate interactive HTML dashboard."""
-        detector_names = [d for d in self.evaluation if d != "agreement"]
-        
+        [d for d in self.evaluation if d != "agreement"]
+
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -122,11 +122,11 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
             </thead>
             <tbody>
 """
-        
+
         for detector_name, data in self.evaluation.items():
             if detector_name == "agreement":
                 continue
-            
+
             metrics = data["metrics"]
             html += f"""
                 <tr>
@@ -139,8 +139,8 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
                     <td>{metrics['ece']:.4f}</td>
                 </tr>
 """
-        
-        html += f"""
+
+        html += """
             </tbody>
         </table>
     </div>
@@ -149,16 +149,22 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
         <h2>Per Clone Type Performance</h2>
         <div class="metric-grid">
 """
-        
+
         # Show per-clone-type performance for best detector
         best_detector = max(
             (d for d in self.evaluation if d != "agreement"),
-            key=lambda d: self.evaluation[d]["metrics"]["f1"]
+            key=lambda d: self.evaluation[d]["metrics"]["f1"],
         )
-        
+
         per_type = self.evaluation[best_detector]["metrics"]["per_clone_type"]
-        clone_type_names = ["Unrelated", "Low Similarity", "Structural Clone", "Semantic Clone", "Exact Clone"]
-        
+        clone_type_names = [
+            "Unrelated",
+            "Low Similarity",
+            "Structural Clone",
+            "Semantic Clone",
+            "Exact Clone",
+        ]
+
         for clone_type, data in per_type.items():
             html += f"""
             <div class="metric">
@@ -166,7 +172,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
                 <div class="metric-label">{clone_type_names[int(clone_type)]} (n={data['count']})</div>
             </div>
 """
-        
+
         html += """
         </div>
     </div>
@@ -174,7 +180,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
 </html>
 """
         path.write_text(html)
-    
+
     def summary(self) -> str:
         """Generate text summary."""
         lines = []
@@ -183,46 +189,48 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
         lines.append(f"Total pairs: {len(self.runner.dataset)}")
         lines.append(f"Detectors: {len(self.runner.detectors)}")
         lines.append("")
-        
+
         # Find best detector by F1
         best_f1 = 0.0
         best_detector = None
-        
+
         for detector_name, data in self.evaluation.items():
             if detector_name == "agreement":
                 continue
-            
+
             f1 = data["metrics"]["f1"]
             if f1 > best_f1:
                 best_f1 = f1
                 best_detector = detector_name
-        
+
         lines.append(f"Best performance: {best_detector} (F1 = {best_f1:.3f})")
         lines.append("")
         lines.append("All detectors:")
-        
+
         for detector_name, data in self.evaluation.items():
             if detector_name == "agreement":
                 continue
-            
+
             metrics = data["metrics"]
-            lines.append(f"  {detector_name:12}  F1: {metrics['f1']:.3f}  ROC-AUC: {metrics['roc_auc']:.3f}  PR-AUC: {metrics['pr_auc']:.3f}")
-        
+            lines.append(
+                f"  {detector_name:12}  F1: {metrics['f1']:.3f}  ROC-AUC: {metrics['roc_auc']:.3f}  PR-AUC: {metrics['pr_auc']:.3f}"
+            )
+
         return "\n".join(lines)
 
 
 def generate_standard_report(runner: BenchmarkRunner, output_dir: Path) -> None:
     """Generate all standard report formats."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     reporter = ReportGenerator(runner)
-    
+
     reporter.to_json(output_dir / "results.json")
     reporter.to_latex_table(output_dir / "results.tex")
     reporter.to_html(output_dir / "report.html")
-    
+
     summary = reporter.summary()
     (output_dir / "summary.txt").write_text(summary)
-    
+
     print(summary)
     print(f"\nReports saved to: {output_dir}")

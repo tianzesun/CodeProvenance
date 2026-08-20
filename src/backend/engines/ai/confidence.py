@@ -9,16 +9,14 @@ Confidence factors:
 - Extreme scores (very high/low → high confidence)
 """
 
-from typing import Dict
-
 from src.backend.engines.ai.agreement import calculate_signal_variance
 from src.backend.engines.ai.models import SignalScores
 
 
 def calibrate_confidence(
     signals: SignalScores,
-    reliabilities: Dict[str, float],
-    agreement: Dict,
+    reliabilities: dict[str, float],
+    agreement: dict,
     ai_probability: float,
 ) -> float:
     """Calibrate confidence score based on multiple factors.
@@ -49,7 +47,9 @@ def calibrate_confidence(
     return round(max(0.0, min(1.0, final_confidence)), 3)
 
 
-def _calculate_base_confidence(reliabilities: Dict[str, float], agreement: Dict) -> float:
+def _calculate_base_confidence(
+    reliabilities: dict[str, float], agreement: dict
+) -> float:
     """Calculate base confidence from agreement and reliability.
 
     Args:
@@ -139,14 +139,14 @@ def should_flag_low_confidence(ai_probability: float, confidence: float) -> bool
         True if result should be flagged, False otherwise
     """
     # Flag if confidence is too low for the AI probability
-    if ai_probability > 0.7 and confidence < 0.4:
-        return True
-    elif ai_probability > 0.5 and confidence < 0.3:
-        return True
-    elif ai_probability < 0.3 and confidence < 0.3:
-        return True
-    else:
-        return False
+    return bool(
+        ai_probability > 0.7
+        and confidence < 0.4
+        or ai_probability > 0.5
+        and confidence < 0.3
+        or ai_probability < 0.3
+        and confidence < 0.3
+    )
 
 
 def adjust_confidence_for_code_length(confidence: float, code_length: int) -> float:
@@ -180,8 +180,8 @@ def adjust_confidence_for_code_length(confidence: float, code_length: int) -> fl
 
 def get_confidence_explanation(
     confidence: float,
-    agreement: Dict,
-    reliabilities: Dict[str, float],
+    agreement: dict,
+    reliabilities: dict[str, float],
 ) -> str:
     """Get human-readable explanation of confidence score.
 
@@ -201,7 +201,10 @@ def get_confidence_explanation(
             f"Signals show {agreement_level} agreement with strong reliability."
         )
     elif confidence >= 0.7:
-        return f"High confidence ({confidence:.1%}). " f"Signals show {agreement_level} agreement."
+        return (
+            f"High confidence ({confidence:.1%}). "
+            f"Signals show {agreement_level} agreement."
+        )
     elif confidence >= 0.5:
         return (
             f"Medium confidence ({confidence:.1%}). "
@@ -213,4 +216,7 @@ def get_confidence_explanation(
             f"Signals show {agreement_level} agreement with mixed reliability."
         )
     else:
-        return f"Very low confidence ({confidence:.1%}). " f"Result should be treated with caution."
+        return (
+            f"Very low confidence ({confidence:.1%}). "
+            f"Result should be treated with caution."
+        )

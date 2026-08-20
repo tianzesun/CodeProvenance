@@ -6,10 +6,12 @@ Detects AI-generated code using multiple signals:
 - Pattern matching: AI-typical code comments and structures
 - Repetition detection: AI often repeats similar phrasing
 """
+
+import itertools
 import math
 import re
 from collections import Counter
-from typing import Dict, List, Any
+from typing import Any
 
 
 class AICodeDetector:
@@ -30,7 +32,7 @@ class AICodeDetector:
             r"# This (?:function|method) (?:takes|receives|accepts|returns)",
         ]
 
-    def detect(self, code: str) -> Dict[str, Any]:
+    def detect(self, code: str) -> dict[str, Any]:
         """Run all AI detection signals on code.
 
         Returns:
@@ -51,10 +53,10 @@ class AICodeDetector:
 
         # Weighted combination
         ai_score = (
-            perplexity * 0.30 +
-            burstiness * 0.25 +
-            pattern_score * 0.25 +
-            repetition * 0.20
+            perplexity * 0.30
+            + burstiness * 0.25
+            + pattern_score * 0.25
+            + repetition * 0.20
         ) * 100
 
         # Confidence based on score agreement
@@ -91,15 +93,19 @@ class AICodeDetector:
 
         Uses simple bigram frequency analysis as a proxy for perplexity.
         """
-        lines = [l.strip() for l in code.split('\n') if l.strip() and not l.strip().startswith('#')]
+        lines = [
+            l.strip()
+            for l in code.split("\n")
+            if l.strip() and not l.strip().startswith("#")
+        ]
         if len(lines) < 3:
             return 0.5  # Not enough data
 
-        tokens = ' '.join(lines).split()
+        tokens = " ".join(lines).split()
         if len(tokens) < 3:
             return 0.5
 
-        bigrams = list(zip(tokens, tokens[1:]))
+        bigrams = list(itertools.pairwise(tokens))
         bigram_counts = Counter(bigrams)
         total = len(bigrams)
 
@@ -115,7 +121,7 @@ class AICodeDetector:
             return 0.5
 
         avg_log_prob = sum(log_probs) / len(log_probs)
-        perplexity = 2 ** avg_log_prob
+        perplexity = 2**avg_log_prob
 
         # Normalize: typical code perplexity range is roughly 10-200
         # Lower perplexity is more AI-like
@@ -128,7 +134,7 @@ class AICodeDetector:
 
         Human code has high variance in line length; AI code is more uniform.
         """
-        lines = [l.strip() for l in code.split('\n') if l.strip()]
+        lines = [l.strip() for l in code.split("\n") if l.strip()]
         if len(lines) < 3:
             return 0.5
 
@@ -137,7 +143,7 @@ class AICodeDetector:
         if mean_len == 0:
             return 0.5
         variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
-        cv = (variance ** 0.5) / mean_len  # Coefficient of variation
+        cv = (variance**0.5) / mean_len  # Coefficient of variation
 
         # Low CV = uniform = AI-like
         # Typical human code CV is 0.4-1.5
@@ -149,14 +155,12 @@ class AICodeDetector:
         if not code:
             return 0.0
 
-        comments = re.findall(r'#.*', code) + re.findall(r'//.*', code)
+        comments = re.findall(r"#.*", code) + re.findall(r"//.*", code)
         if not comments:
             return 0.0
 
         matches = sum(
-            1 for c in comments
-            for p in self.ai_comment_patterns
-            if re.search(p, c)
+            1 for c in comments for p in self.ai_comment_patterns if re.search(p, c)
         )
         # Score based on density of AI patterns
         return min(1.0, matches / max(len(comments) * 0.3, 1))
@@ -167,7 +171,7 @@ class AICodeDetector:
 
         High repetition of identical or near-identical lines suggests AI.
         """
-        lines = [l.strip() for l in code.split('\n') if l.strip()]
+        lines = [l.strip() for l in code.split("\n") if l.strip()]
         if len(lines) < 5:
             return 0.0  # Not enough data
 

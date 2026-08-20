@@ -1,20 +1,20 @@
 """Settings API routes for admin configuration."""
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from src.backend.engines.scoring.fusion_engine import (
+    load_engine_config,
+    save_engine_config,
+)
 from src.backend.engines.scoring.profile_manager import (
     apply_course_profile,
     export_course_profile_yaml,
     get_active_profile_id,
     get_course_profile,
     list_course_profile_summaries,
-)
-from src.backend.engines.scoring.fusion_engine import (
-    load_engine_config,
-    save_engine_config,
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -39,7 +39,7 @@ async def get_engine_config():
 
 
 @router.put("/engine-config")
-async def update_engine_config(config_update: Dict[str, Any]):
+async def update_engine_config(config_update: dict[str, Any]):
     """Update engine configuration (admin only)."""
     try:
         # Load current config
@@ -49,7 +49,7 @@ async def update_engine_config(config_update: Dict[str, Any]):
         updated_config = {**current_config, **config_update}
 
         # Validate weights sum to 1.0
-        if "weights" in updated_config and updated_config["weights"]:
+        if updated_config.get("weights"):
             total = sum(updated_config["weights"].values())
             if abs(total - 1.0) > 0.001:
                 raise HTTPException(
@@ -92,7 +92,7 @@ async def trigger_calibration():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Calibration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Calibration failed: {e!s}")
 
 
 @router.get("/validation")
@@ -111,9 +111,8 @@ async def validate_current_config():
     for section in ["weights", "thresholds"]:
         if section in config:
             for key, value in config[section].items():
-                if isinstance(value, (int, float)):
-                    if not 0.0 <= value <= 1.0:
-                        issues.append(f"{section}.{key} out of range: {value}")
+                if isinstance(value, (int, float)) and not 0.0 <= value <= 1.0:
+                    issues.append(f"{section}.{key} out of range: {value}")
 
     return {
         "valid": len(issues) == 0,

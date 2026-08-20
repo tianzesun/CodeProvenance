@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any
 
 from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
 from src.backend.evaluation.proof_system import ProofCase, precision_at_k
@@ -17,9 +18,9 @@ class RankedCase:
     review_priority: float
     confidence: str
     professor_summary: str
-    reasons: List[str] = field(default_factory=list)
-    guardrails: List[str] = field(default_factory=list)
-    payload: Dict[str, Any] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+    guardrails: list[str] = field(default_factory=list)
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 class PrecisionAt20Ranker:
@@ -28,9 +29,9 @@ class PrecisionAt20Ranker:
     def __init__(self, ranker: EvidenceFusionRanker | None = None) -> None:
         self.ranker = ranker or EvidenceFusionRanker()
 
-    def rank(self, cases: Iterable[Mapping[str, Any]]) -> List[RankedCase]:
+    def rank(self, cases: Iterable[Mapping[str, Any]]) -> list[RankedCase]:
         """Rank case dictionaries containing `case_id` and `features`."""
-        ranked: List[RankedCase] = []
+        ranked: list[RankedCase] = []
         for index, case in enumerate(cases):
             case_id = str(case.get("case_id") or case.get("id") or f"case_{index}")
             result = self.ranker.rank_pair(

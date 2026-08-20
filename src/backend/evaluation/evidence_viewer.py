@@ -13,7 +13,7 @@ import difflib
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class MatchedElement:
     end_line_b: int
     similarity: float
     confidence: float = 1.0
-    details: List[str] = field(default_factory=list)
+    details: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -38,9 +38,9 @@ class DiffHunk:
     """A hunk of diff output."""
 
     hunk_type: str  # 'added', 'removed', 'changed', 'context'
-    line_number: Optional[int]
+    line_number: int | None
     content: str
-    original_content: Optional[str] = None
+    original_content: str | None = None
 
 
 @dataclass
@@ -52,12 +52,12 @@ class EvidenceView:
     similarity_score: float
     verdict: str
     confidence: float
-    matched_elements: List[MatchedElement] = field(default_factory=list)
-    diff_hunks: List[DiffHunk] = field(default_factory=list)
-    analysis_notes: List[str] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
+    matched_elements: list[MatchedElement] = field(default_factory=list)
+    diff_hunks: list[DiffHunk] = field(default_factory=list)
+    analysis_notes: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "submission_a_id": self.submission_a_id,
             "submission_b_id": self.submission_b_id,
@@ -97,7 +97,6 @@ class EvidenceViewer:
 
     def __init__(self) -> None:
         """Initialize the evidence viewer."""
-        pass
 
     def generate_view(
         self,
@@ -106,7 +105,7 @@ class EvidenceViewer:
         submission_a_id: str,
         submission_b_id: str,
         similarity_score: float,
-        engine_details: Optional[Dict[str, Any]] = None,
+        engine_details: dict[str, Any] | None = None,
     ) -> EvidenceView:
         """
         Generate an evidence view for a code pair.
@@ -164,7 +163,7 @@ class EvidenceViewer:
             return "INCONCLUSIVE"
 
     def _calculate_confidence(
-        self, score: float, engine_details: Optional[Dict[str, Any]]
+        self, score: float, engine_details: dict[str, Any] | None
     ) -> float:
         """Calculate confidence in the similarity assessment."""
         if engine_details is None:
@@ -182,7 +181,7 @@ class EvidenceViewer:
         base_confidence = agreeing_engines / total_engines
         return min(1.0, base_confidence + 0.3)
 
-    def _find_matched_elements(self, code_a: str, code_b: str) -> List[MatchedElement]:
+    def _find_matched_elements(self, code_a: str, code_b: str) -> list[MatchedElement]:
         """Find matched functions, classes, and blocks."""
         matches = []
 
@@ -216,7 +215,7 @@ class EvidenceViewer:
 
         return matches
 
-    def _generate_diff(self, code_a: str, code_b: str) -> List[DiffHunk]:
+    def _generate_diff(self, code_a: str, code_b: str) -> list[DiffHunk]:
         """Generate diff hunks between two code submissions."""
         lines_a = code_a.splitlines(keepends=True)
         lines_b = code_b.splitlines(keepends=True)
@@ -277,9 +276,9 @@ class EvidenceViewer:
     def _generate_analysis_notes(
         self,
         score: float,
-        matched_elements: List[MatchedElement],
-        engine_details: Optional[Dict[str, Any]],
-    ) -> List[str]:
+        matched_elements: list[MatchedElement],
+        engine_details: dict[str, Any] | None,
+    ) -> list[str]:
         """Generate analysis notes for the evidence view."""
         notes = []
 
@@ -299,8 +298,8 @@ class EvidenceViewer:
         return notes
 
     def _generate_recommendations(
-        self, verdict: str, matched_elements: List[MatchedElement]
-    ) -> List[str]:
+        self, verdict: str, matched_elements: list[MatchedElement]
+    ) -> list[str]:
         """Generate recommendations based on analysis."""
         recommendations = []
 
@@ -328,8 +327,8 @@ def generate_evidence_view(
     submission_a_id: str,
     submission_b_id: str,
     similarity_score: float,
-    engine_details: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    engine_details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Convenience function to generate an evidence view.
 

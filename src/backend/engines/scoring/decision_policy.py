@@ -13,7 +13,7 @@ Output format:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -22,7 +22,7 @@ class Decision:
 
     verdict: str  # CLEAN, REVIEW, PROBABLE, TRUE
     confidence: float  # Rule-based confidence (0.0-1.0)
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
     triggered_layer: str = ""
 
@@ -36,7 +36,7 @@ class DecisionPolicy:
     """
 
     @staticmethod
-    def decide(evidence: Dict[str, float]) -> Decision:
+    def decide(evidence: dict[str, float]) -> Decision:
         """
         Apply deterministic rules to evidence.
 

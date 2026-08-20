@@ -1,8 +1,9 @@
-import json
-import hashlib
 import datetime
+import hashlib
+import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any
+
 from jinja2 import Environment, FileSystemLoader
 
 
@@ -16,7 +17,7 @@ class PublicationReportGenerator:
         self.env = Environment(loader=FileSystemLoader(str(template_dir)))
         self.template = self.env.get_template("publication_report.html")
 
-    def generate(self, case_data: Dict[str, Any], output_path: Path):
+    def generate(self, case_data: dict[str, Any], output_path: Path):
         """
         Populate the HTML template with case evidence.
 
@@ -69,8 +70,8 @@ class PublicationReportGenerator:
         return "Weak Consensus"
 
     def _process_engines(
-        self, explanation: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, explanation: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         processed = []
         for exp in explanation:
             processed.append(
@@ -87,7 +88,7 @@ class PublicationReportGenerator:
             )
         return processed
 
-    def _process_evidence(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _process_evidence(self, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         blocks = []
         for f in findings:
             for b in f.get("evidence_blocks", []):

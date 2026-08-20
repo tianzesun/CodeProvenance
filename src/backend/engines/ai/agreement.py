@@ -9,12 +9,10 @@ Agreement levels:
 - Low: 3 or fewer signals in same direction
 """
 
-from typing import Dict
-
 from src.backend.engines.ai.models import SignalScores
 
 
-def analyze_signal_agreement(signals: SignalScores) -> Dict:
+def analyze_signal_agreement(signals: SignalScores) -> dict:
     """Analyze agreement between signals.
 
     Args:
@@ -80,7 +78,7 @@ def analyze_signal_agreement(signals: SignalScores) -> Dict:
     }
 
 
-def get_agreement_confidence_adjustment(agreement: Dict) -> float:
+def get_agreement_confidence_adjustment(agreement: dict) -> float:
     """Get confidence adjustment based on signal agreement.
 
     Args:

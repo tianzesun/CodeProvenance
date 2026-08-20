@@ -2,28 +2,35 @@
 
 import uuid
 from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
-from src.backend.config.database import SessionLocal, Base, engine
-from src.backend.models.database import Case, CaseComment, Organization, User, Assignment
+from src.backend.config.database import Base, SessionLocal, engine
+from src.backend.models.database import (
+    Assignment,
+    Case,
+    CaseComment,
+    Organization,
+    User,
+)
 
 
 def create_seed_data(db: Session) -> None:
     """Create demo case data in the database."""
-    
+
     # Check if we already have cases
     existing_cases = db.query(Case).count()
     if existing_cases > 0:
         print(f"Found {existing_cases} existing cases. Skipping seed.")
         return
-    
+
     # Create demo organization if not exists
     org = db.query(Organization).first()
     if not org:
         org = Organization(id=uuid.uuid4(), name="Demo University")
         db.add(org)
         db.flush()
-    
+
     # Create demo users if not exist
     users = db.query(User).all()
     if not users:
@@ -46,10 +53,10 @@ def create_seed_data(db: Session) -> None:
         for u in users:
             db.add(u)
         db.flush()
-    
+
     professor = db.query(User).filter(User.role == "professor").first()
     ta = db.query(User).filter(User.role == "ta").first()
-    
+
     # Create demo assignments
     assignments = db.query(Assignment).all()
     if not assignments:
@@ -72,10 +79,14 @@ def create_seed_data(db: Session) -> None:
         for a in assignments:
             db.add(a)
         db.flush()
-    
-    assignment1 = db.query(Assignment).filter(Assignment.course_code == "CSC108").first()
-    assignment2 = db.query(Assignment).filter(Assignment.course_code == "CSC148").first()
-    
+
+    assignment1 = (
+        db.query(Assignment).filter(Assignment.course_code == "CSC108").first()
+    )
+    assignment2 = (
+        db.query(Assignment).filter(Assignment.course_code == "CSC148").first()
+    )
+
     # Create demo cases
     cases = [
         Case(
@@ -113,12 +124,12 @@ def create_seed_data(db: Session) -> None:
             updated_at=datetime.now(timezone.utc),
         ),
     ]
-    
+
     for c in cases:
         db.add(c)
-    
+
     db.flush()
-    
+
     # Add comments to cases
     comments = [
         CaseComment(
@@ -136,10 +147,10 @@ def create_seed_data(db: Session) -> None:
             created_at=datetime.now(timezone.utc),
         ),
     ]
-    
+
     for comment in comments:
         db.add(comment)
-    
+
     db.commit()
     print(f"Created {len(cases)} demo cases with {len(comments)} comments.")
 
@@ -147,9 +158,9 @@ def create_seed_data(db: Session) -> None:
 if __name__ == "__main__":
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    
+
     print("Seeding demo data...")
     with SessionLocal() as db:
         create_seed_data(db)
-    
+
     print("Done!")

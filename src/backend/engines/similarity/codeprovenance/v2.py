@@ -5,7 +5,8 @@ Token + AST hybrid similarity combining token-based and structural analysis.
 This version adds AST-based comparison for better structural understanding.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from .base import BaseCodeProvenanceEngine
 from .version_registry import register_engine
 
@@ -170,7 +171,7 @@ class CodeProvenanceV2(BaseCodeProvenanceEngine):
         # Normalize literals
         if value.isdigit():
             return "NUM"
-        if value.startswith('"') or value.startswith("'"):
+        if value.startswith(('"', "'")):
             return "STR"
         return value
 
@@ -178,7 +179,7 @@ class CodeProvenanceV2(BaseCodeProvenanceEngine):
         """Simple structural similarity fallback."""
 
         # Count structural elements
-        def count_elements(code: str) -> Dict[str, int]:
+        def count_elements(code: str) -> dict[str, int]:
             import re
 
             return {
@@ -206,7 +207,7 @@ class CodeProvenanceV2(BaseCodeProvenanceEngine):
 
         return 1.0 - (total_diff / total_count)
 
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Tokenize source code."""
         import re
 
@@ -223,7 +224,7 @@ class CodeProvenanceV2(BaseCodeProvenanceEngine):
 
         return [t for t in tokens if t]
 
-    def _get_ngrams(self, tokens: List[str]) -> set:
+    def _get_ngrams(self, tokens: list[str]) -> set:
         """Extract n-grams from token sequence."""
         ngrams = set()
         for i in range(len(tokens) - self._ngram_size + 1):
@@ -244,7 +245,7 @@ class CodeProvenanceV2(BaseCodeProvenanceEngine):
 
         return "unknown"
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get engine configuration."""
         config = super().get_config()
         config.update(

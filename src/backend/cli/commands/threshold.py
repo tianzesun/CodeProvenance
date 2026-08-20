@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from src.backend.evaluation.threshold_analysis import (
-    threshold_sweep,
     find_optimal_threshold,
     global_threshold_override,
+    threshold_sweep,
 )
 from src.backend.pipeline.dataset_builders.ground_truth import load_ground_truth_dataset
-
 
 app = typer.Typer(name="threshold", help="Threshold configuration and analysis tools")
 console = Console()
@@ -53,8 +50,8 @@ def run_threshold_sweep(
     start: float = typer.Option(0.60, help="Starting threshold value"),
     end: float = typer.Option(0.80, help="Ending threshold value"),
     step: float = typer.Option(0.01, help="Step size between thresholds"),
-    output_json: Optional[Path] = typer.Option(None, help="Save results to JSON file"),
-    output_plot: Optional[Path] = typer.Option(None, help="Save PR curve plot to file"),
+    output_json: Path | None = typer.Option(None, help="Save results to JSON file"),
+    output_plot: Path | None = typer.Option(None, help="Save PR curve plot to file"),
     show_table: bool = typer.Option(True, help="Display metrics table"),
 ) -> None:
     """Run threshold sweep analysis on a ground truth dataset."""

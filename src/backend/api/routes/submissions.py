@@ -2,21 +2,21 @@
 Submission management endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from typing import List
 import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
+from src.backend.api.middleware.auth import get_current_tenant
+from src.backend.api.schemas import submission as submission_schema
 from src.backend.config.database import get_db, set_tenant_context
 from src.backend.models.database import Submission
 from src.backend.utils.database import SubmissionService
-from src.backend.api.schemas import submission as submission_schema
-from src.backend.api.middleware.auth import get_current_tenant
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[submission_schema.SubmissionResponse])
+@router.get("/", response_model=list[submission_schema.SubmissionResponse])
 async def list_submissions(
     request: Request, job_id: uuid.UUID, db: Session = Depends(get_db)
 ):

@@ -1,13 +1,11 @@
 """Application Settings - Centralized configuration management."""
 
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
+DEFAULT_ENGINE_WEIGHTS: dict[str, float] = {
     "token": 0.12,
     "winnowing": 0.16,
     "gst": 0.13,
@@ -18,7 +16,7 @@ DEFAULT_ENGINE_WEIGHTS: Dict[str, float] = {
     "static_rules": 0.05,
 }
 
-ENGINE_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
+ENGINE_WEIGHT_PROFILES: dict[str, dict[str, float]] = {
     "standard": DEFAULT_ENGINE_WEIGHTS.copy(),
     "conservative": {
         "token": 0.16,
@@ -58,11 +56,11 @@ class AppSettings(BaseSettings):
     DEFAULT_THRESHOLD: float = 0.82
 
     # LLM / AI
-    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-3.5-turbo"
 
-    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
 
     # Auth
@@ -72,23 +70,23 @@ class AppSettings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     # External plagiarism services
-    MOSS_USER_ID: Optional[str] = None
+    MOSS_USER_ID: str | None = None
 
     # Embeddings
     EMBEDDING_RUNTIME: str = "local_unixcoder"
     EMBEDDING_MODEL: str = "microsoft/unixcoder-base"
-    EMBEDDING_SERVER_URL: Optional[str] = None
-    EMBEDDING_SERVER_HOST: Optional[str] = None
+    EMBEDDING_SERVER_URL: str | None = None
+    EMBEDDING_SERVER_HOST: str | None = None
     EMBEDDING_SERVER_PORT: int = 8000
     EMBEDDING_DEVICE: str = "auto"
     EMBEDDING_BATCH_SIZE: int = 32
 
     # AI Detection
-    GPTZERO_API_KEY: Optional[str] = None
-    GRAMMARLY_API_KEY: Optional[str] = None
+    GPTZERO_API_KEY: str | None = None
+    GRAMMARLY_API_KEY: str | None = None
 
     # Detection Pipeline (three-layer decision tree)
-    DETECTION_DOMAIN_PRESETS: Dict[str, str] = Field(
+    DETECTION_DOMAIN_PRESETS: dict[str, str] = Field(
         default_factory=lambda: {
             "code": "General code plagiarism detection (balanced)",
             "cs_code": "CS programming assignments (AST-weighted)",
@@ -97,7 +95,7 @@ class AppSettings(BaseSettings):
         }
     )
     DEFAULT_DETECTION_DOMAIN: str = "code"
-    DEFAULT_DETECTION_MODES: List[str] = Field(
+    DEFAULT_DETECTION_MODES: list[str] = Field(
         default_factory=lambda: [
             "token",
             "winnowing",
@@ -111,7 +109,7 @@ class AppSettings(BaseSettings):
     )
 
     # Engine Weights
-    ENGINE_WEIGHTS: Dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()
+    ENGINE_WEIGHTS: dict[str, float] = DEFAULT_ENGINE_WEIGHTS.copy()
 
     # Advanced
     BATCH_SIZE: int = 32

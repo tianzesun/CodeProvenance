@@ -13,41 +13,44 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.backend.evaluation.significance import (
     bootstrap_confidence_interval,
     mcnemar_test,
-    McNemarResult,
 )
 
 
 @dataclass
 class ToolMetrics:
     """Complete metrics for a single tool."""
+
     tool_name: str
     precision: float
     recall: float
     f1: float
     accuracy: float
-    auc_roc: Optional[float] = None
+    auc_roc: float | None = None
     tp: int = 0
     fp: int = 0
     tn: int = 0
     fn: int = 0
-    precision_ci: Optional[Dict[str, float]] = None
-    recall_ci: Optional[Dict[str, float]] = None
-    f1_ci: Optional[Dict[str, float]] = None
+    precision_ci: dict[str, float] | None = None
+    recall_ci: dict[str, float] | None = None
+    f1_ci: dict[str, float] | None = None
     rank_by_f1: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {
             "tool": self.tool_name,
             "precision": round(self.precision, 4),
             "recall": round(self.recall, 4),
             "f1": round(self.f1, 4),
             "accuracy": round(self.accuracy, 4),
-            "tp": self.tp, "fp": self.fp, "tn": self.tn, "fn": self.fn,
+            "tp": self.tp,
+            "fp": self.fp,
+            "tn": self.tn,
+            "fn": self.fn,
             "rank": self.rank_by_f1,
         }
         if self.f1_ci:
@@ -60,6 +63,7 @@ class ToolMetrics:
 @dataclass
 class PairwiseSignificance:
     """Result of comparing two tools."""
+
     tool_a: str
     tool_b: str
     metric: str
@@ -70,7 +74,7 @@ class PairwiseSignificance:
     effect_size: float
     interpretation: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "comparison": f"{self.tool_a} vs {self.tool_b}",
             "metric": self.metric,
@@ -86,14 +90,15 @@ class PairwiseSignificance:
 @dataclass
 class SignificanceMatrix:
     """Full pairwise significance matrix for all tools."""
-    tools: List[str]
-    metric: str
-    matrix: Dict[Tuple[str, str], PairwiseSignificance] = field(default_factory=dict)
 
-    def get(self, a: str, b: str) -> Optional[PairwiseSignificance]:
+    tools: list[str]
+    metric: str
+    matrix: dict[tuple[str, str], PairwiseSignificance] = field(default_factory=dict)
+
+    def get(self, a: str, b: str) -> PairwiseSignificance | None:
         return self.matrix.get((a, b)) or self.matrix.get((b, a))
 
-    def to_table(self) -> List[List[str]]:
+    def to_table(self) -> list[list[str]]:
         rows = [[""] + self.tools]
         for a in self.tools:
             row = [a]
@@ -103,9 +108,13 @@ class SignificanceMatrix:
                 else:
                     comp = self.get(a, b)
                     if comp:
-                        sig = "***" if comp.p_value < 0.001 else (
-                            "**" if comp.p_value < 0.01 else (
-                                "*" if comp.p_value < 0.05 else "ns"
+                        sig = (
+                            "***"
+                            if comp.p_value < 0.001
+                            else (
+                                "**"
+                                if comp.p_value < 0.01
+                                else ("*" if comp.p_value < 0.05 else "ns")
                             )
                         )
                         row.append(f"{comp.p_value:.4f}{sig}")
@@ -114,14 +123,12 @@ class SignificanceMatrix:
             rows.append(row)
         return rows
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "metric": self.metric,
             "tools": self.tools,
             "comparisons": {
-                f"{a} vs {b}": v.to_dict()
-                for (a, b), v in self.matrix.items()
-                if a < b
+                f"{a} vs {b}": v.to_dict() for (a, b), v in self.matrix.items() if a < b
             },
         }
 
@@ -129,12 +136,13 @@ class SignificanceMatrix:
 @dataclass
 class ToolRanking:
     """Complete ranking of tools with statistical backing."""
-    rankings: List[ToolMetrics]
+
+    rankings: list[ToolMetrics]
     significance_matrix: SignificanceMatrix
     best_tool: str
     confidence_statement: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "best_tool": self.best_tool,
             "confidence_statement": self.confidence_statement,
@@ -171,7 +179,7 @@ class ToolRanking:
         return "\n".join(lines)
 
 
-def _cohens_d(group1: List[int], group2: List[int]) -> float:
+def _cohens_d(group1: list[int], group2: list[int]) -> float:
     """Compute Cohen's d effect size."""
     n1, n2 = len(group1), len(group2)
     if n1 < 2 or n2 < 2:
@@ -182,7 +190,7 @@ def _cohens_d(group1: List[int], group2: List[int]) -> float:
     var2 = sum((x - mean2) ** 2 for x in group2) / (n2 - 1)
     pooled_std = math.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
     if pooled_std == 0:
-        return float('inf') if mean1 != mean2 else 0.0
+        return float("inf") if mean1 != mean2 else 0.0
     return (mean1 - mean2) / pooled_std
 
 
@@ -199,8 +207,8 @@ def _interpret_effect_size(d: float) -> str:
 
 
 def build_significance_matrix(
-    tool_scores: Dict[str, List[float]],
-    labels: List[int],
+    tool_scores: dict[str, list[float]],
+    labels: list[int],
     threshold: float = 0.5,
     metric: str = "f1",
     ci_level: float = 0.95,
@@ -221,7 +229,7 @@ def build_significance_matrix(
         SignificanceMatrix with all pairwise comparisons.
     """
     tools = sorted(tool_scores.keys())
-    matrix: Dict[Tuple[str, str], PairwiseSignificance] = {}
+    matrix: dict[tuple[str, str], PairwiseSignificance] = {}
 
     for i, a in enumerate(tools):
         for j, b in enumerate(tools):
@@ -231,8 +239,12 @@ def build_significance_matrix(
             scores_a = tool_scores[a]
             scores_b = tool_scores[b]
 
-            ci_a = bootstrap_confidence_interval(scores_a, labels, threshold, ci_level, n_bootstrap)
-            ci_b = bootstrap_confidence_interval(scores_b, labels, threshold, ci_level, n_bootstrap)
+            ci_a = bootstrap_confidence_interval(
+                scores_a, labels, threshold, ci_level, n_bootstrap
+            )
+            ci_b = bootstrap_confidence_interval(
+                scores_b, labels, threshold, ci_level, n_bootstrap
+            )
 
             pred_a = [1 if s >= threshold else 0 for s in scores_a]
             pred_b = [1 if s >= threshold else 0 for s in scores_b]
@@ -271,18 +283,23 @@ def build_significance_matrix(
             )
             matrix[(a, b)] = comp
             matrix[(b, a)] = PairwiseSignificance(
-                tool_a=b, tool_b=a, metric=metric,
-                value_b=value_a, value_a=value_b,
-                p_value=mc.p_value, is_significant=mc.is_significant,
-                effect_size=-effect, interpretation=interp,
+                tool_a=b,
+                tool_b=a,
+                metric=metric,
+                value_b=value_a,
+                value_a=value_b,
+                p_value=mc.p_value,
+                is_significant=mc.is_significant,
+                effect_size=-effect,
+                interpretation=interp,
             )
 
     return SignificanceMatrix(tools=tools, metric=metric, matrix=matrix)
 
 
 def rank_tools(
-    tool_scores: Dict[str, List[float]],
-    labels: List[int],
+    tool_scores: dict[str, list[float]],
+    labels: list[int],
     threshold: float = 0.5,
     ci_level: float = 0.95,
     n_bootstrap: int = 1000,
@@ -303,7 +320,9 @@ def rank_tools(
     metrics_list = []
 
     for tool_name, scores in tool_scores.items():
-        ci = bootstrap_confidence_interval(scores, labels, threshold, ci_level, n_bootstrap)
+        ci = bootstrap_confidence_interval(
+            scores, labels, threshold, ci_level, n_bootstrap
+        )
 
         tp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 1)
         fp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 0)
@@ -315,17 +334,22 @@ def rank_tools(
         f1 = ci["f1"]["value"]
         accuracy = (tp + tn) / len(labels) if labels else 0.0
 
-        metrics_list.append(ToolMetrics(
-            tool_name=tool_name,
-            precision=precision,
-            recall=recall,
-            f1=f1,
-            accuracy=accuracy,
-            tp=tp, fp=fp, tn=tn, fn=fn,
-            precision_ci=ci["precision"],
-            recall_ci=ci["recall"],
-            f1_ci=ci["f1"],
-        ))
+        metrics_list.append(
+            ToolMetrics(
+                tool_name=tool_name,
+                precision=precision,
+                recall=recall,
+                f1=f1,
+                accuracy=accuracy,
+                tp=tp,
+                fp=fp,
+                tn=tn,
+                fn=fn,
+                precision_ci=ci["precision"],
+                recall_ci=ci["recall"],
+                f1_ci=ci["f1"],
+            )
+        )
 
     metrics_list.sort(key=lambda m: m.f1, reverse=True)
     for i, m in enumerate(metrics_list):
@@ -340,7 +364,12 @@ def rank_tools(
         )
 
     sig_matrix = build_significance_matrix(
-        tool_scores, labels, threshold, "f1", ci_level, n_bootstrap,
+        tool_scores,
+        labels,
+        threshold,
+        "f1",
+        ci_level,
+        n_bootstrap,
     )
 
     best = metrics_list[0]

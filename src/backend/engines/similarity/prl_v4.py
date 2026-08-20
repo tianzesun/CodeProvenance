@@ -17,10 +17,9 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .base_similarity import BaseSimilarityAlgorithm
-
 
 # ============================================================================
 # Data Structures
@@ -31,7 +30,7 @@ from .base_similarity import BaseSimilarityAlgorithm
 class GraphEmbedding:
     """GNN-generated graph embedding."""
 
-    vector: List[float]
+    vector: list[float]
     node_count: int = 0
     edge_count: int = 0
     cyclomatic_complexity: int = 0
@@ -41,7 +40,7 @@ class GraphEmbedding:
 class SemanticEmbedding:
     """CodeBERT-generated semantic embedding."""
 
-    vector: List[float]
+    vector: list[float]
     model_name: str = ""
     token_count: int = 0
 
@@ -53,7 +52,7 @@ class LLMReasoningResult:
     is_plagiarism: bool = False
     confidence: float = 0.0
     reasoning: str = ""
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     plagiarism_type: str = "unknown"  # type1, type2, type3, type4, semantic
 
 
@@ -65,10 +64,10 @@ class PRLv4Result:
     graph_score: float = 0.0
     semantic_score: float = 0.0
     llm_score: float = 0.0
-    llm_result: Optional[LLMReasoningResult] = None
+    llm_result: LLMReasoningResult | None = None
     decision: str = "unknown"  # similar, dissimilar, uncertain
     confidence: float = 0.0
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 # ============================================================================
@@ -101,7 +100,7 @@ class GraphEncoder:
         self.embedding_dim = embedding_dim
         self.num_layers = num_layers
         self.aggr = aggr
-        self._model: Optional[Any] = None
+        self._model: Any | None = None
 
     def encode(self, graph_data: Any) -> GraphEmbedding:
         """
@@ -160,7 +159,7 @@ class GraphEncoder:
 
         return max(0.0, min(1.0, dot / (norm_a * norm_b)))
 
-    def _extract_node_features(self, graph_data: Any) -> List[Dict[str, float]]:
+    def _extract_node_features(self, graph_data: Any) -> list[dict[str, float]]:
         """Extract node features from combined graph."""
         features = []
 
@@ -170,7 +169,7 @@ class GraphEncoder:
         # Node type one-hot encoding
         node_types = self._get_node_types(graph_data)
 
-        for node_id, node in graph_data.cfg.nodes.items():
+        for node in graph_data.cfg.nodes.values():
             feat = {}
 
             # Node type features
@@ -188,7 +187,7 @@ class GraphEncoder:
 
         return features
 
-    def _extract_edge_index(self, graph_data: Any) -> List[Tuple[int, int]]:
+    def _extract_edge_index(self, graph_data: Any) -> list[tuple[int, int]]:
         """Extract edge connectivity from graph."""
         edges = []
 
@@ -204,7 +203,7 @@ class GraphEncoder:
 
         return edges
 
-    def _get_node_types(self, graph_data: Any) -> List[str]:
+    def _get_node_types(self, graph_data: Any) -> list[str]:
         """Get unique node types for feature encoding."""
         if not hasattr(graph_data, "cfg"):
             return []
@@ -212,9 +211,9 @@ class GraphEncoder:
 
     def _message_passing(
         self,
-        node_features: List[Dict[str, float]],
-        edge_index: List[Tuple[int, int]],
-    ) -> List[float]:
+        node_features: list[dict[str, float]],
+        edge_index: list[tuple[int, int]],
+    ) -> list[float]:
         """
         Simplified message passing for graph embedding.
 
@@ -376,7 +375,7 @@ class SemanticEncoder:
             if self._device == "auto":
                 self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
-            from transformers import AutoTokenizer, AutoModel
+            from transformers import AutoModel, AutoTokenizer
 
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModel.from_pretrained(self.model_name).to(self._device)
@@ -389,7 +388,7 @@ class SemanticEncoder:
         """Fallback embedding using n-gram hashing."""
         # Simple character 3-gram frequency vector
         ngram_size = 3
-        freq: Dict[str, int] = {}
+        freq: dict[str, int] = {}
 
         code_lower = code.lower()
         for i in range(len(code_lower) - ngram_size + 1):
@@ -490,8 +489,8 @@ class LLMReasoner:
         self,
         code_a: str,
         code_b: str,
-        evidence: Dict[str, Any],
-    ) -> Tuple[str, float]:
+        evidence: dict[str, Any],
+    ) -> tuple[str, float]:
         """
         Detect the type of plagiarism.
 
@@ -536,7 +535,7 @@ class LLMReasoner:
         if semantic_score < 0.3:
             evidence.append("Different semantic content")
 
-        plagi_type, plagi_conf = self.detect_plagiarism_type(
+        plagi_type, _plagi_conf = self.detect_plagiarism_type(
             code_a,
             code_b,
             {"graph_score": graph_score, "semantic_score": semantic_score},
@@ -725,7 +724,7 @@ class PRLv4Engine(BaseSimilarityAlgorithm):
             similarity_threshold=similarity_threshold,
         )
 
-    def get_params(self) -> Dict[str, Any]:
+    def get_params(self) -> dict[str, Any]:
         """Get all configurable parameters."""
         return {
             "graph_weight": self.graph_weight,
@@ -738,14 +737,14 @@ class PRLv4Engine(BaseSimilarityAlgorithm):
             "llm_enabled": self.llm_reasoner.enabled,
         }
 
-    def set_params(self, **params) -> "PRLv4Engine":
+    def set_params(self, **params) -> PRLv4Engine:
         """Set parameters."""
         for key, value in params.items():
             if hasattr(self, key):
                 setattr(self, key, value)
         return self
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> float:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> float:
         """
         Compare two code representations using PRL v4 pipeline.
 
@@ -845,7 +844,7 @@ class PRLv4Engine(BaseSimilarityAlgorithm):
             },
         )
 
-    def _extract_code(self, parsed: Dict[str, Any]) -> str:
+    def _extract_code(self, parsed: dict[str, Any]) -> str:
         """Extract raw code from parsed dict."""
         if "content" in parsed:
             return parsed["content"]
@@ -860,7 +859,6 @@ class PRLv4Engine(BaseSimilarityAlgorithm):
         try:
             from src.backend.core.graph.combined_builder import (
                 CFGDFGBuilder,
-                CombinedGraph,
             )
 
             builder = CFGDFGBuilder()

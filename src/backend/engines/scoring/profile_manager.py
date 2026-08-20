@@ -7,7 +7,7 @@ exports, and dashboard profile switching without rewriting the core fusion code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,6 @@ from src.backend.engines.scoring.fusion_engine import (
     load_engine_config,
     save_engine_config,
 )
-
 
 PROFILE_CONFIG_PATH = Path(__file__).resolve().parent.parent / "course_profiles.yaml"
 

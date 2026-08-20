@@ -15,7 +15,7 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.backend.domain.models import EvidenceBlock, Finding
 
@@ -31,8 +31,8 @@ class ToolFinding:
     file2: str
     similarity: float
     confidence: float
-    evidence_blocks: List[EvidenceBlock] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    evidence_blocks: list[EvidenceBlock] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_finding(self) -> Finding:
         return Finding(
@@ -51,15 +51,15 @@ class MossAdapter:
     def adapt(
         self,
         output_path: Path,
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
-    ) -> List[ToolFinding]:
+        ground_truth: dict[tuple[str, str], int] | None = None,
+    ) -> list[ToolFinding]:
         if not output_path or not output_path.exists():
             return []
 
         pairs = self._parse_html(output_path)
         return [self._to_finding(p, ground_truth) for p in pairs]
 
-    def _parse_html(self, html_path: Path) -> List[Dict[str, Any]]:
+    def _parse_html(self, html_path: Path) -> list[dict[str, Any]]:
         import re
 
         content = html_path.read_text(errors="ignore")
@@ -84,9 +84,9 @@ class MossAdapter:
                 )
         return pairs
 
-    def _extract_cell(self, cell: str) -> Optional[Dict[str, Any]]:
-        import re
+    def _extract_cell(self, cell: str) -> dict[str, Any] | None:
         import html as html_mod
+        import re
 
         txt = html_mod.unescape(cell)
         pct = re.search(r"(\d+(?:\.\d+)?)\s*%", txt)
@@ -99,8 +99,8 @@ class MossAdapter:
 
     def _to_finding(
         self,
-        pair: Dict[str, Any],
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
+        pair: dict[str, Any],
+        ground_truth: dict[tuple[str, str], int] | None = None,
     ) -> ToolFinding:
         sim = pair["similarity"]
         confidence = 0.85 if sim > 0.7 else (0.65 if sim > 0.4 else 0.4)
@@ -135,8 +135,8 @@ class JPlagAdapter:
     def adapt(
         self,
         output_path: Path,
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
-    ) -> List[ToolFinding]:
+        ground_truth: dict[tuple[str, str], int] | None = None,
+    ) -> list[ToolFinding]:
         if not output_path or not output_path.exists():
             return []
 
@@ -155,7 +155,7 @@ class JPlagAdapter:
 
         return [self._to_finding(p, ground_truth) for p in pairs]
 
-    def _parse_json(self, json_path: Path) -> List[Dict[str, Any]]:
+    def _parse_json(self, json_path: Path) -> list[dict[str, Any]]:
         data = json.loads(json_path.read_text())
         pairs = []
         for c in data.get("comparisons", []):
@@ -172,7 +172,7 @@ class JPlagAdapter:
             )
         return pairs
 
-    def _parse_xml(self, xml_path: Path) -> List[Dict[str, Any]]:
+    def _parse_xml(self, xml_path: Path) -> list[dict[str, Any]]:
         tree = ET.parse(xml_path)
         root = tree.getroot()
         pairs = []
@@ -204,8 +204,8 @@ class JPlagAdapter:
 
     def _to_finding(
         self,
-        pair: Dict[str, Any],
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
+        pair: dict[str, Any],
+        ground_truth: dict[tuple[str, str], int] | None = None,
     ) -> ToolFinding:
         sim = pair["similarity"]
         confidence = 0.90 if sim > 0.7 else (0.70 if sim > 0.4 else 0.45)
@@ -256,15 +256,15 @@ class DolosAdapter:
     def adapt(
         self,
         output_path: Path,
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
-    ) -> List[ToolFinding]:
+        ground_truth: dict[tuple[str, str], int] | None = None,
+    ) -> list[ToolFinding]:
         if not output_path or not output_path.exists():
             return []
 
         pairs = self._parse_csv(output_path)
         return [self._to_finding(p, ground_truth) for p in pairs]
 
-    def _parse_csv(self, csv_path: Path) -> List[Dict[str, Any]]:
+    def _parse_csv(self, csv_path: Path) -> list[dict[str, Any]]:
         pairs = []
         with open(csv_path, "r") as f:
             reader = csv.DictReader(f)
@@ -281,8 +281,8 @@ class DolosAdapter:
 
     def _to_finding(
         self,
-        pair: Dict[str, Any],
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
+        pair: dict[str, Any],
+        ground_truth: dict[tuple[str, str], int] | None = None,
     ) -> ToolFinding:
         sim = pair["similarity"]
         confidence = 0.88 if sim > 0.7 else (0.68 if sim > 0.4 else 0.4)
@@ -317,8 +317,8 @@ class NiCadAdapter:
     def adapt(
         self,
         output_path: Path,
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
-    ) -> List[ToolFinding]:
+        ground_truth: dict[tuple[str, str], int] | None = None,
+    ) -> list[ToolFinding]:
         if not output_path or not output_path.exists():
             return []
 
@@ -331,7 +331,7 @@ class NiCadAdapter:
 
         return [self._to_finding(p, ground_truth) for p in pairs]
 
-    def _parse_xml(self, xml_path: Path) -> List[Dict[str, Any]]:
+    def _parse_xml(self, xml_path: Path) -> list[dict[str, Any]]:
         tree = ET.parse(xml_path)
         root = tree.getroot()
         pairs = []
@@ -375,7 +375,7 @@ class NiCadAdapter:
                         )
         return pairs
 
-    def _parse_text(self, content: str) -> List[Dict[str, Any]]:
+    def _parse_text(self, content: str) -> list[dict[str, Any]]:
         import re
 
         pairs = []
@@ -429,8 +429,8 @@ class NiCadAdapter:
 
     def _to_finding(
         self,
-        pair: Dict[str, Any],
-        ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
+        pair: dict[str, Any],
+        ground_truth: dict[tuple[str, str], int] | None = None,
     ) -> ToolFinding:
         sim = pair["similarity"]
         clone_type = pair.get("clone_type", 3)
@@ -494,15 +494,15 @@ class AdapterRegistry:
         return cls_name()
 
     @classmethod
-    def available_tools(cls) -> List[str]:
+    def available_tools(cls) -> list[str]:
         return list(cls._adapters.keys())
 
 
 def adapt_tool_output(
     tool_name: str,
     output_path: Path,
-    ground_truth: Optional[Dict[Tuple[str, str], int]] = None,
-) -> List[Finding]:
+    ground_truth: dict[tuple[str, str], int] | None = None,
+) -> list[Finding]:
     """
     High-level function: adapt raw tool output to domain Findings.
 

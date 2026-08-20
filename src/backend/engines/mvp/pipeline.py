@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
 
 from src.backend.engines.mvp.ast_subtree import ASTSubtreeHasher
 from src.backend.engines.mvp.normalization import CodeNormalizer
@@ -17,7 +17,7 @@ class MVPAnalysisResult:
     """Pair-level output from the MVP detection pipeline."""
 
     case_id: str
-    features: Dict[str, float]
+    features: dict[str, float]
     ranked_case: RankedCase
 
 
@@ -26,7 +26,7 @@ class MVPDetectionPipeline:
 
     def __init__(
         self,
-        starter_sources: Optional[Iterable[str]] = None,
+        starter_sources: Iterable[str] | None = None,
         language: str = "python",
     ) -> None:
         self.language = language
@@ -42,8 +42,8 @@ class MVPDetectionPipeline:
         source_a: str,
         source_b: str,
         *,
-        outcomes_a: Optional[Iterable[RuntimeOutcome]] = None,
-        outcomes_b: Optional[Iterable[RuntimeOutcome]] = None,
+        outcomes_a: Iterable[RuntimeOutcome] | None = None,
+        outcomes_b: Iterable[RuntimeOutcome] | None = None,
         label: int = 0,
         category: str = "unknown",
     ) -> MVPAnalysisResult:
@@ -90,7 +90,7 @@ class MVPDetectionPipeline:
         )[0]
         return MVPAnalysisResult(case_id=case_id, features=features, ranked_case=ranked)
 
-    def rank_pairs(self, results: Iterable[MVPAnalysisResult]) -> List[RankedCase]:
+    def rank_pairs(self, results: Iterable[MVPAnalysisResult]) -> list[RankedCase]:
         """Rank previously analyzed MVP pair results."""
         cases = [
             {
@@ -101,7 +101,7 @@ class MVPDetectionPipeline:
         ]
         return self.precision_ranker.rank(cases)
 
-    def _token_jaccard(self, left: List[str], right: List[str]) -> float:
+    def _token_jaccard(self, left: list[str], right: list[str]) -> float:
         """Compute a simple normalized-token Jaccard score."""
         left_set = set(left)
         right_set = set(right)

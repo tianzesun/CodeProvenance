@@ -7,39 +7,37 @@ It does NOT contain business logic, algorithms, or ML models.
 Responsibility: Scheduler, execution context, parallelism
 """
 
-from typing import Dict, Any, List, Optional
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
 
 
 class ExecutionEngine(ABC):
     """Base class for all execution engines."""
 
     @abstractmethod
-    def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute a task."""
-        pass
 
     @abstractmethod
     def get_status(self) -> str:
         """Get engine status."""
-        pass
 
 
 class EngineRegistry:
     """Registry for execution engines."""
 
     def __init__(self):
-        self._engines: Dict[str, ExecutionEngine] = {}
+        self._engines: dict[str, ExecutionEngine] = {}
 
     def register(self, name: str, engine: ExecutionEngine) -> None:
         """Register an execution engine."""
         self._engines[name] = engine
 
-    def get(self, name: str) -> Optional[ExecutionEngine]:
+    def get(self, name: str) -> ExecutionEngine | None:
         """Get an execution engine by name."""
         return self._engines.get(name)
 
-    def list_engines(self) -> List[str]:
+    def list_engines(self) -> list[str]:
         """List all registered engines."""
         return list(self._engines.keys())
 
@@ -48,7 +46,7 @@ class EngineRegistry:
 registry = EngineRegistry()
 
 
-def get_engine(name: str) -> Optional[ExecutionEngine]:
+def get_engine(name: str) -> ExecutionEngine | None:
     """Get an execution engine by name."""
     return registry.get(name)
 

@@ -8,13 +8,13 @@ Usage:
     from src.backend.architecture import ARCH_LAYERS, RULES, validate_import
 """
 
-from typing import Dict, List, Set, Optional
-from enum import IntEnum
 from dataclasses import dataclass
+from enum import IntEnum
 
 
 class LayerOrder(IntEnum):
     """Layer hierarchy order (lower number = higher level)."""
+
     API = 1
     APPLICATION = 2
     DOMAIN = 3
@@ -25,7 +25,7 @@ class LayerOrder(IntEnum):
 
 
 # Layer hierarchy mapping
-ARCH_LAYERS: Dict[str, int] = {
+ARCH_LAYERS: dict[str, int] = {
     "api": LayerOrder.API,
     "application": LayerOrder.APPLICATION,
     "domain": LayerOrder.DOMAIN,
@@ -37,7 +37,7 @@ ARCH_LAYERS: Dict[str, int] = {
 
 # Import rules: what each layer MAY import
 # Everything else is DENIED
-RULES: Dict[str, Dict[str, List[str]]] = {
+RULES: dict[str, dict[str, list[str]]] = {
     "api": {
         "allow": ["application"],
         "deny": ["domain", "core", "engines", "evaluation", "infrastructure"],
@@ -48,7 +48,14 @@ RULES: Dict[str, Dict[str, List[str]]] = {
     },
     "domain": {
         "allow": [],  # Domain is PURE - imports NOTHING
-        "deny": ["api", "application", "core", "engines", "evaluation", "infrastructure"],
+        "deny": [
+            "api",
+            "application",
+            "core",
+            "engines",
+            "evaluation",
+            "infrastructure",
+        ],
     },
     "core": {
         "allow": ["domain"],
@@ -72,6 +79,7 @@ RULES: Dict[str, Dict[str, List[str]]] = {
 @dataclass
 class ImportViolation:
     """Import architecture violation."""
+
     source_layer: str
     target_layer: str
     import_name: str
@@ -89,35 +97,32 @@ def is_valid_import(source_layer: str, target_layer: str) -> bool:
     """Check if import from source to target is valid."""
     if source_layer not in ARCH_LAYERS:
         return True  # Unknown layer, allow
-    
+
     if target_layer not in ARCH_LAYERS:
         return True  # Unknown target, allow
-    
+
     source_order = get_layer_order(source_layer)
     target_order = get_layer_order(target_layer)
-    
+
     # Lower order = higher level (can import lower level)
     return source_order <= target_order
 
 
 def validate_import(
-    source_layer: str,
-    import_name: str,
-    file_path: str = "",
-    line_number: int = 0
-) -> Optional[ImportViolation]:
+    source_layer: str, import_name: str, file_path: str = "", line_number: int = 0
+) -> ImportViolation | None:
     """Validate an import against architecture rules.
-    
+
     Returns:
         ImportViolation if invalid, None if valid
     """
     if source_layer not in RULES:
         return None
-    
+
     rules = RULES[source_layer]
     denied = rules.get("deny", [])
     allowed = rules.get("allow", [])
-    
+
     # Check if import is denied
     for denied_layer in denied:
         if import_name.startswith(denied_layer):
@@ -125,7 +130,7 @@ def validate_import(
             for allowed_layer in allowed:
                 if import_name.startswith(allowed_layer):
                     return None  # Explicitly allowed
-            
+
             # Not allowed, create violation
             return ImportViolation(
                 source_layer=source_layer,
@@ -135,14 +140,14 @@ def validate_import(
                 line_number=line_number,
                 message=f"{source_layer} cannot import {denied_layer}",
             )
-    
+
     # Check layer ordering
     target_layer = None
-    for layer in ARCH_LAYERS.keys():
+    for layer in ARCH_LAYERS:
         if import_name.startswith(layer):
             target_layer = layer
             break
-    
+
     if target_layer and not is_valid_import(source_layer, target_layer):
         return ImportViolation(
             source_layer=source_layer,
@@ -152,23 +157,23 @@ def validate_import(
             line_number=line_number,
             message=f"Layer ordering violation: {source_layer} (order {get_layer_order(source_layer)}) cannot import {target_layer} (order {get_layer_order(target_layer)})",
         )
-    
+
     return None
 
 
-def get_allowed_imports(layer_name: str) -> List[str]:
+def get_allowed_imports(layer_name: str) -> list[str]:
     """Get list of allowed imports for a layer."""
     if layer_name not in RULES:
         return []
-    
+
     return RULES[layer_name].get("allow", [])
 
 
-def get_denied_imports(layer_name: str) -> List[str]:
+def get_denied_imports(layer_name: str) -> list[str]:
     """Get list of denied imports for a layer."""
     if layer_name not in RULES:
         return []
-    
+
     return RULES[layer_name].get("deny", [])
 
 
@@ -183,7 +188,7 @@ def get_layer_description(layer_name: str) -> str:
         "evaluation": "Metrics computation (no execution)",
         "infrastructure": "External systems (DB, IO, etc.)",
     }
-    
+
     return descriptions.get(layer_name, "Unknown layer")
 
 
@@ -192,19 +197,19 @@ def print_architecture_summary():
     print("Architecture Layer Summary:")
     print("=" * 60)
     print()
-    
+
     for layer_name in sorted(ARCH_LAYERS.keys(), key=lambda x: ARCH_LAYERS[x]):
         order = ARCH_LAYERS[layer_name]
         description = get_layer_description(layer_name)
         allowed = get_allowed_imports(layer_name)
         denied = get_denied_imports(layer_name)
-        
+
         print(f"Layer {order}: {layer_name}")
         print(f"  Description: {description}")
         print(f"  May import: {', '.join(allowed) if allowed else 'nothing'}")
         print(f"  Must NOT import: {', '.join(denied)}")
         print()
-    
+
     print("Dependency Direction:")
     print("  api → application → domain → core")
     print("                      ↓")

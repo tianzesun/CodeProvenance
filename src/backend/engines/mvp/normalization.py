@@ -11,9 +11,8 @@ import io
 import keyword
 import re
 import tokenize
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
-
 
 PYTHON_LITERAL_TYPES = {tokenize.NUMBER, tokenize.STRING}
 PYTHON_SKIP_TYPES = {
@@ -31,7 +30,7 @@ PYTHON_SKIP_TYPES = {
 class NormalizedCode:
     """Normalized source text and token stream."""
 
-    tokens: List[str]
+    tokens: list[str]
     normalized_code: str
     identifier_count: int
     literal_count: int
@@ -56,7 +55,7 @@ class CodeNormalizer:
             literal_count=literal_count,
         )
 
-    def kgrams(self, tokens: Iterable[str], k: int = 5) -> List[tuple[str, ...]]:
+    def kgrams(self, tokens: Iterable[str], k: int = 5) -> list[tuple[str, ...]]:
         """Build ordered k-grams from a normalized token stream."""
         token_list = list(tokens)
         if k <= 0:
@@ -68,10 +67,10 @@ class CodeNormalizer:
             for index in range(len(token_list) - k + 1)
         ]
 
-    def _normalize_python(self, source: str) -> List[str]:
+    def _normalize_python(self, source: str) -> list[str]:
         """Normalize Python source with the standard tokenizer."""
-        identifier_map: Dict[str, str] = {}
-        tokens: List[str] = []
+        identifier_map: dict[str, str] = {}
+        tokens: list[str] = []
 
         try:
             token_stream = tokenize.generate_tokens(io.StringIO(source or "").readline)
@@ -97,7 +96,7 @@ class CodeNormalizer:
 
         return tokens
 
-    def _normalize_generic(self, source: str) -> List[str]:
+    def _normalize_generic(self, source: str) -> list[str]:
         """Normalize non-Python or syntactically invalid source with regex fallback."""
         cleaned = re.sub(r"//.*?$|#.*?$", "", source or "", flags=re.MULTILINE)
         cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL)
@@ -106,10 +105,10 @@ class CodeNormalizer:
         )
         cleaned = re.sub(r"\b\d+(?:\.\d+)?\b", " LIT_NUM ", cleaned)
         raw_tokens = re.findall(r"[A-Za-z_]\w*|LIT_STR|LIT_NUM|[^\s\w]", cleaned)
-        identifier_map: Dict[str, str] = {}
+        identifier_map: dict[str, str] = {}
         return [self._normalize_name(token, identifier_map) for token in raw_tokens]
 
-    def _normalize_name(self, token: str, identifier_map: Dict[str, str]) -> str:
+    def _normalize_name(self, token: str, identifier_map: dict[str, str]) -> str:
         """Normalize identifiers while preserving language keywords."""
         if token in {"LIT_STR", "LIT_NUM"}:
             return token

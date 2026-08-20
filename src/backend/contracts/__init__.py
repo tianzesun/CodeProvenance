@@ -4,12 +4,25 @@ This module provides the Schema Registry and validation enforcement
 for the entire benchmark system.
 """
 
-from .schema_registry import SchemaRegistry, registry, ValidationError
+from .reproducibility import (
+    GoldenDataset,
+    ReproducibilityHash,
+    RunFingerprint,
+    compute_config_hash,
+    compute_directory_hash,
+    compute_file_hash,
+    compute_reproducibility_hash,
+    create_golden_dataset,
+    create_run_fingerprint,
+    verify_golden_dataset,
+    verify_run_fingerprint,
+)
+from .schema_registry import SchemaRegistry, ValidationError, registry
 from .validation import (
     ValidationGate,
     ValidationResult,
-    validate_evaluation_result,
     validate_enriched_pair,
+    validate_evaluation_result,
 )
 from .versioning import (
     SchemaVersion,
@@ -18,46 +31,33 @@ from .versioning import (
     create_version_manifest,
     validate_manifest,
 )
-from .reproducibility import (
-    ReproducibilityHash,
-    GoldenDataset,
-    RunFingerprint,
-    compute_file_hash,
-    compute_directory_hash,
-    compute_config_hash,
-    compute_reproducibility_hash,
-    create_golden_dataset,
-    verify_golden_dataset,
-    create_run_fingerprint,
-    verify_run_fingerprint,
-)
 
 __all__ = [
+    "GoldenDataset",
+    # Reproducibility
+    "ReproducibilityHash",
+    "RunFingerprint",
     # Registry
     "SchemaRegistry",
-    "registry",
+    # Versioning
+    "SchemaVersion",
     "ValidationError",
     # Validation
     "ValidationGate",
     "ValidationResult",
-    "validate_evaluation_result",
-    "validate_enriched_pair",
-    # Versioning
-    "SchemaVersion",
     "VersionManifest",
     "check_compatibility",
-    "create_version_manifest",
-    "validate_manifest",
-    # Reproducibility
-    "ReproducibilityHash",
-    "GoldenDataset",
-    "RunFingerprint",
-    "compute_file_hash",
-    "compute_directory_hash",
     "compute_config_hash",
+    "compute_directory_hash",
+    "compute_file_hash",
     "compute_reproducibility_hash",
     "create_golden_dataset",
-    "verify_golden_dataset",
     "create_run_fingerprint",
+    "create_version_manifest",
+    "registry",
+    "validate_enriched_pair",
+    "validate_evaluation_result",
+    "validate_manifest",
+    "verify_golden_dataset",
     "verify_run_fingerprint",
 ]

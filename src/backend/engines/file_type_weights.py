@@ -8,7 +8,6 @@ files, build artifacts, and other non-CODE content.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 from src.backend.engines.file_type_classifier import FileType
 
@@ -37,7 +36,7 @@ class FileTypeWeights:
     static_rules: float = 1.0
     sklearn_cosine: float = 1.0
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """Convert to dictionary."""
         return {
             "embedding": self.embedding,
@@ -114,7 +113,7 @@ MIXED_WEIGHTS = FileTypeWeights(
 
 
 # Mapping from file type to weights
-FILE_TYPE_WEIGHTS: Dict[FileType, FileTypeWeights] = {
+FILE_TYPE_WEIGHTS: dict[FileType, FileTypeWeights] = {
     FileType.CODE: CODE_WEIGHTS,
     FileType.CONFIG: CONFIG_WEIGHTS,
     FileType.SCRIPT: SCRIPT_WEIGHTS,
@@ -136,9 +135,9 @@ def get_weights_for_file_type(file_type: FileType) -> FileTypeWeights:
 
 
 def apply_weights(
-    raw_scores: Dict[str, float],
+    raw_scores: dict[str, float],
     file_type: FileType,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Apply file-type dependent weights to raw scores.
 
     Args:
@@ -175,7 +174,7 @@ EMBEDDING_VETO_DOMAINS = {
 }
 
 
-def should_veto_embedding(file_type: FileType, domain: str = None) -> bool:
+def should_veto_embedding(file_type: FileType, domain: str | None = None) -> bool:
     """Determine if embedding similarity should be vetoed.
 
     Args:
@@ -190,7 +189,4 @@ def should_veto_embedding(file_type: FileType, domain: str = None) -> bool:
         return True
 
     # Veto for specific domains
-    if domain and domain in EMBEDDING_VETO_DOMAINS:
-        return True
-
-    return False
+    return bool(domain and domain in EMBEDDING_VETO_DOMAINS)

@@ -18,8 +18,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ============================================================
 # LANGUAGE POLICY - Academic Neutral Terminology
@@ -64,10 +63,10 @@ class EvidenceItem:
     value: float
     confidence: str  # HIGH, MEDIUM, LOW
     explanation: str
-    matched_spans: List[Dict[str, Any]] = field(default_factory=list)
-    source_references: List[str] = field(default_factory=list)
+    matched_spans: list[dict[str, Any]] = field(default_factory=list)
+    source_references: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "evidence_type": self.evidence_type,
             "description": self.description,
@@ -98,26 +97,26 @@ class DeanGradeReport:
     final_verdict: str  # CLEAN, REVIEW_REQUIRED, STRONG_SIMILARITY_OBSERVED
 
     # Evidence sections
-    structural_evidence: List[EvidenceItem] = field(default_factory=list)
-    lexical_evidence: List[EvidenceItem] = field(default_factory=list)
-    semantic_evidence: List[EvidenceItem] = field(default_factory=list)
-    control_flow_evidence: List[EvidenceItem] = field(default_factory=list)
-    historical_evidence: List[EvidenceItem] = field(default_factory=list)
-    cluster_evidence: List[EvidenceItem] = field(default_factory=list)
-    divergence_evidence: List[EvidenceItem] = field(default_factory=list)
-    ai_indicators: List[EvidenceItem] = field(default_factory=list)
+    structural_evidence: list[EvidenceItem] = field(default_factory=list)
+    lexical_evidence: list[EvidenceItem] = field(default_factory=list)
+    semantic_evidence: list[EvidenceItem] = field(default_factory=list)
+    control_flow_evidence: list[EvidenceItem] = field(default_factory=list)
+    historical_evidence: list[EvidenceItem] = field(default_factory=list)
+    cluster_evidence: list[EvidenceItem] = field(default_factory=list)
+    divergence_evidence: list[EvidenceItem] = field(default_factory=list)
+    ai_indicators: list[EvidenceItem] = field(default_factory=list)
 
     # Reviewer notes
-    reviewer_notes: List[str] = field(default_factory=list)
+    reviewer_notes: list[str] = field(default_factory=list)
 
     # Dean-specific fields
-    executive_summary: Optional[Dict[str, Any]] = field(default_factory=dict)
-    policy_references: List[str] = field(default_factory=list)
-    precedent_comparison: List[Dict[str, Any]] = field(default_factory=list)
-    student_context: Optional[Dict[str, Any]] = field(default_factory=dict)
-    timeline: List[Dict[str, str]] = field(default_factory=list)
-    confidence_interval: Optional[Dict[str, float]] = field(default_factory=dict)
-    recommendation: Optional[Dict[str, Any]] = field(default_factory=dict)
+    executive_summary: dict[str, Any] | None = field(default_factory=dict)
+    policy_references: list[str] = field(default_factory=list)
+    precedent_comparison: list[dict[str, Any]] = field(default_factory=list)
+    student_context: dict[str, Any] | None = field(default_factory=dict)
+    timeline: list[dict[str, str]] = field(default_factory=list)
+    confidence_interval: dict[str, float] | None = field(default_factory=dict)
+    recommendation: dict[str, Any] | None = field(default_factory=dict)
 
     # Metadata
     generated_at: str = ""
@@ -128,7 +127,7 @@ class DeanGradeReport:
         if not self.generated_at:
             self.generated_at = datetime.now(timezone.utc).isoformat()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
             "report_metadata": {
@@ -162,10 +161,10 @@ class DeanGradeReport:
             "recommendation": self.recommendation,
         }
 
-    def _items_to_dict(self, items: List[EvidenceItem]) -> List[Dict[str, Any]]:
+    def _items_to_dict(self, items: list[EvidenceItem]) -> list[dict[str, Any]]:
         return [item.to_dict() for item in items]
 
-    def _build_executive_summary(self) -> Dict[str, Any]:
+    def _build_executive_summary(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
             "submissions_compared": f"{self.submission_a_id} vs {self.submission_b_id}",
@@ -192,7 +191,7 @@ class DeanGradeReport:
                 "submissions. This evidence warrants detailed examination by the instructor."
             )
 
-    def _build_evidence_overview(self) -> Dict[str, Any]:
+    def _build_evidence_overview(self) -> dict[str, Any]:
         """Build compact evidence overview table."""
         return {
             "structural_similarity": self._get_top_evidence(self.structural_evidence),
@@ -204,7 +203,7 @@ class DeanGradeReport:
             "structural_divergence": self._get_top_evidence(self.divergence_evidence),
         }
 
-    def _get_top_evidence(self, items: List[EvidenceItem]) -> Optional[Dict[str, Any]]:
+    def _get_top_evidence(self, items: list[EvidenceItem]) -> dict[str, Any] | None:
         if not items:
             return None
         top = items[0]
@@ -234,8 +233,8 @@ class DeanReportGenerator:
         assignment_id: str,
         submission_a_id: str,
         submission_b_id: str,
-        evidence_bundle: Dict[str, Any],
-        reviewer_notes: Optional[List[str]] = None,
+        evidence_bundle: dict[str, Any],
+        reviewer_notes: list[str] | None = None,
     ) -> DeanGradeReport:
         """Generate a dean-grade report from evidence bundle.
 
@@ -286,8 +285,8 @@ class DeanReportGenerator:
         )
 
     def _extract_structural_evidence(
-        self, bundle: Dict[str, Any]
-    ) -> List[EvidenceItem]:
+        self, bundle: dict[str, Any]
+    ) -> list[EvidenceItem]:
         """Extract structural evidence from bundle."""
         items = []
         shape = bundle.get("shape_similarity", 0.0)
@@ -336,7 +335,7 @@ class DeanReportGenerator:
 
         return items
 
-    def _extract_lexical_evidence(self, bundle: Dict[str, Any]) -> List[EvidenceItem]:
+    def _extract_lexical_evidence(self, bundle: dict[str, Any]) -> list[EvidenceItem]:
         """Extract lexical evidence from bundle."""
         items = []
 
@@ -359,7 +358,7 @@ class DeanReportGenerator:
 
         return items
 
-    def _extract_semantic_evidence(self, bundle: Dict[str, Any]) -> List[EvidenceItem]:
+    def _extract_semantic_evidence(self, bundle: dict[str, Any]) -> list[EvidenceItem]:
         """Extract semantic evidence from bundle."""
         items = []
         embedding = bundle.get("embedding_similarity", 0.0)
@@ -381,8 +380,8 @@ class DeanReportGenerator:
         return items
 
     def _extract_control_flow_evidence(
-        self, bundle: Dict[str, Any]
-    ) -> List[EvidenceItem]:
+        self, bundle: dict[str, Any]
+    ) -> list[EvidenceItem]:
         """Extract control flow evidence from bundle."""
         items = []
         cf_similarity = bundle.get("control_flow_similarity", 0.0)
@@ -405,8 +404,8 @@ class DeanReportGenerator:
         return items
 
     def _extract_historical_evidence(
-        self, bundle: Dict[str, Any]
-    ) -> List[EvidenceItem]:
+        self, bundle: dict[str, Any]
+    ) -> list[EvidenceItem]:
         """Extract historical evidence from bundle."""
         items = []
         history = bundle.get("historical_evidence", {})
@@ -426,7 +425,7 @@ class DeanReportGenerator:
 
         return items
 
-    def _extract_cluster_evidence(self, bundle: Dict[str, Any]) -> List[EvidenceItem]:
+    def _extract_cluster_evidence(self, bundle: dict[str, Any]) -> list[EvidenceItem]:
         """Extract cluster evidence from bundle."""
         items = []
         cluster = bundle.get("cluster_evidence", {})
@@ -450,8 +449,8 @@ class DeanReportGenerator:
         return items
 
     def _extract_divergence_evidence(
-        self, bundle: Dict[str, Any]
-    ) -> List[EvidenceItem]:
+        self, bundle: dict[str, Any]
+    ) -> list[EvidenceItem]:
         """Extract divergence evidence from bundle."""
         items = []
         divergence = bundle.get("divergence_score", 0.0)
@@ -473,7 +472,7 @@ class DeanReportGenerator:
 
         return items
 
-    def _extract_ai_indicators(self, bundle: Dict[str, Any]) -> List[EvidenceItem]:
+    def _extract_ai_indicators(self, bundle: dict[str, Any]) -> list[EvidenceItem]:
         """Extract AI indicators (non-decisive) from bundle."""
         items = []
         ai = bundle.get("ai_indicators", {})
@@ -498,11 +497,11 @@ class DeanReportGenerator:
 
     def _determine_verdict(
         self,
-        structural: List[EvidenceItem],
-        lexical: List[EvidenceItem],
-        semantic: List[EvidenceItem],
-        control_flow: List[EvidenceItem],
-        divergence: List[EvidenceItem],
+        structural: list[EvidenceItem],
+        lexical: list[EvidenceItem],
+        semantic: list[EvidenceItem],
+        control_flow: list[EvidenceItem],
+        divergence: list[EvidenceItem],
     ) -> str:
         """Determine final verdict based on evidence (not accusatory)."""
         # Calculate weighted evidence strength
@@ -529,7 +528,7 @@ class DeanReportGenerator:
         else:
             return "STRONG_SIMILARITY_OBSERVED"
 
-    def _compute_hash(self, bundle: Dict[str, Any]) -> str:
+    def _compute_hash(self, bundle: dict[str, Any]) -> str:
         """Compute hash for evidence bundle reproducibility."""
         import hashlib
 
@@ -543,8 +542,8 @@ def generate_dean_report(
     assignment_id: str,
     submission_a_id: str,
     submission_b_id: str,
-    evidence_bundle: Dict[str, Any],
-    reviewer_notes: Optional[List[str]] = None,
+    evidence_bundle: dict[str, Any],
+    reviewer_notes: list[str] | None = None,
 ) -> DeanGradeReport:
     """Convenience function to generate a dean-grade report.
 

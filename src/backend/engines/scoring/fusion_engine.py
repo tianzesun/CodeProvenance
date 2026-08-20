@@ -19,24 +19,22 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from src.backend.evaluation.arbitration import PrecisionWeightedFuser
+from src.backend.engines.decision_policy import Decision, DecisionPolicy
+from src.backend.engines.evidence_aggregator import (
+    aggregate_from_scores,
+)
 from src.backend.engines.scoring.assignment_modes import assignment_modes_payload
+from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
 from src.backend.engines.scoring.fusion_policy import (
     default_normalization_config,
     default_weight_governance_policy,
     fusion_presets_payload,
 )
-from src.backend.engines.scoring.evidence_ranker import EvidenceFusionRanker
-from src.backend.engines.evidence_aggregator import (
-    aggregate,
-    aggregate_from_scores,
-    EvidenceVector,
-)
-from src.backend.engines.decision_policy import DecisionPolicy, Decision
+from src.backend.evaluation.arbitration import PrecisionWeightedFuser
 
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
@@ -50,19 +48,19 @@ class FusedScore:
     confidence: float = 0.8
     uncertainty: float = 0.0
     agreement_index: float = 1.0
-    components: Dict[str, float] = field(default_factory=dict)
-    contributions: Dict[str, float] = field(default_factory=dict)
+    components: dict[str, float] = field(default_factory=dict)
+    contributions: dict[str, float] = field(default_factory=dict)
     review_priority: float = 0.0
     professor_summary: str = ""
     evidence_reasons: list[str] = field(default_factory=list)
     evidence_guardrails: list[str] = field(default_factory=list)
-    evidence_quality: Dict[str, str] = field(default_factory=dict)
-    relevant_engines: List[str] = field(default_factory=list)
+    evidence_quality: dict[str, str] = field(default_factory=dict)
+    relevant_engines: list[str] = field(default_factory=list)
     verdict: str = "INCONCLUSIVE"
 
 
 # Baseline scores expected for two unrelated files in the same language.
-LANGUAGE_BASELINE: Dict[str, float] = {
+LANGUAGE_BASELINE: dict[str, float] = {
     "embedding": 0.70,
     "winnowing": 0.25,
     "string_tiling": 0.20,
@@ -74,7 +72,7 @@ LANGUAGE_BASELINE: Dict[str, float] = {
     "sklearn_cosine": 0.25,
 }
 
-WEIGHT_ALIASES: Dict[str, str] = {
+WEIGHT_ALIASES: dict[str, str] = {
     "token": "fingerprint",
     "semantic": "embedding",
     "codebert": "embedding",
@@ -88,7 +86,7 @@ WEIGHT_ALIASES: Dict[str, str] = {
 CONFIG_PATH = Path(__file__).parent.parent / "engine_weights.yaml"
 
 
-def load_engine_config() -> Dict:
+def load_engine_config() -> dict:
     """Load engine configuration from YAML config file."""
     if not CONFIG_PATH.exists():
         return _get_default_config()
@@ -101,7 +99,7 @@ def load_engine_config() -> Dict:
         return _get_default_config()
 
 
-def save_engine_config(config: Dict) -> None:
+def save_engine_config(config: dict) -> None:
     """Save engine configuration to YAML config file with validation."""
     config = _with_policy_defaults(config)
 
@@ -122,7 +120,7 @@ def save_engine_config(config: Dict) -> None:
         yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
 
 
-def _get_default_config() -> Dict:
+def _get_default_config() -> dict:
     return _with_policy_defaults(
         {
             "weights": {
@@ -165,7 +163,7 @@ def _get_default_config() -> Dict:
     )
 
 
-def _with_policy_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
+def _with_policy_defaults(config: dict[str, Any]) -> dict[str, Any]:
     """Ensure fusion policy sections are present in loaded configuration."""
     config.setdefault("score_normalization", default_normalization_config())
     config.setdefault("fusion_presets", fusion_presets_payload())
@@ -175,16 +173,16 @@ def _with_policy_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-DEFAULT_WEIGHTS: Dict[str, float] = _get_default_config()["weights"]
-LANGUAGE_BASELINE: Dict[str, float] = _get_default_config()["baseline_correction"][
+DEFAULT_WEIGHTS: dict[str, float] = _get_default_config()["weights"]
+LANGUAGE_BASELINE: dict[str, float] = _get_default_config()["baseline_correction"][
     "baselines"
 ]
 
 
 def hard_gate(
-    evidence: Dict[str, float],
+    evidence: dict[str, float],
     coverage: float = 0.0,
-) -> Optional[str]:
+) -> str | None:
     """
     Hard gating layer to veto false positives.
 
@@ -243,15 +241,15 @@ def hard_gate(
 class FusionEngine:
     """Policy-only fusion engine with evidence aggregation."""
 
-    def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
+    def __init__(self, weights: dict[str, float] | None = None) -> None:
         self._config = load_engine_config()
         self._last_load_time = time.time()
 
         if weights is None:
             weights = self._config["weights"]
 
-        self.weights: Dict[str, float] = self._normalize_weight_names(weights)
-        self.baselines: Dict[str, float] = self._normalize_weight_names(
+        self.weights: dict[str, float] = self._normalize_weight_names(weights)
+        self.baselines: dict[str, float] = self._normalize_weight_names(
             self._config.get("baseline_correction", {}).get("baselines", {})
         )
         total = sum(self.weights.values())
@@ -265,9 +263,9 @@ class FusionEngine:
         self._ranker = EvidenceFusionRanker()
 
     @staticmethod
-    def _normalize_weight_names(weights: Dict[str, float]) -> Dict[str, float]:
+    def _normalize_weight_names(weights: dict[str, float]) -> dict[str, float]:
         """Map config-facing weight names to FeatureVector engine names."""
-        normalized: Dict[str, float] = {}
+        normalized: dict[str, float] = {}
         for name, value in weights.items():
             feature_name = WEIGHT_ALIASES.get(name, name)
             normalized[feature_name] = normalized.get(feature_name, 0.0) + float(value)
@@ -281,17 +279,17 @@ class FusionEngine:
                 self.__init__()
 
     @classmethod
-    def get_current_config(cls) -> Dict:
+    def get_current_config(cls) -> dict:
         """Get full current engine configuration."""
         return load_engine_config()
 
     @classmethod
-    def update_config(cls, config: Dict) -> None:
+    def update_config(cls, config: dict) -> None:
         """Update and save engine configuration (Admin only)."""
         save_engine_config(config)
 
     @classmethod
-    def get_standard_presets(cls) -> Dict[str, Dict[str, Any]]:
+    def get_standard_presets(cls) -> dict[str, dict[str, Any]]:
         """Get standard faculty presets."""
         return {
             "standard": {
@@ -316,12 +314,12 @@ class FusionEngine:
         }
 
     @classmethod
-    def get_assignment_presets(cls) -> Dict[str, Dict[str, Any]]:
+    def get_assignment_presets(cls) -> dict[str, dict[str, Any]]:
         """Get assignment-aware presets with weights and evidence policy."""
         return fusion_presets_payload()
 
     @classmethod
-    def run_calibration_benchmark(cls) -> Dict[str, Any]:
+    def run_calibration_benchmark(cls) -> dict[str, Any]:
         """Run a labeled benchmark and return accuracy metrics.
 
         Uses the synthetic clone-pair generator so calibration works without
@@ -406,8 +404,8 @@ class FusionEngine:
 
     def fuse(
         self,
-        features: "FeatureVector",
-        weight_multipliers: Optional[Dict[str, float]] = None,
+        features: FeatureVector,
+        weight_multipliers: dict[str, float] | None = None,
         logic_flow: float = 0.0,
     ) -> FusedScore:
         """Make deterministic decision using policy rules.
@@ -473,9 +471,9 @@ class FusionEngine:
         file_type_domain = getattr(features, "file_type_domain", None)
 
         from src.backend.engines.file_type_weights import (
+            FileType,
             apply_weights,
             should_veto_embedding,
-            FileType,
         )
 
         # Apply file-type dependent weights to raw scores
@@ -572,11 +570,11 @@ class FusionEngine:
             verdict=decision.verdict,
         )
 
-    def get_weights(self) -> Dict[str, float]:
+    def get_weights(self) -> dict[str, float]:
         """Return the current normalized engine weights."""
         return dict(self.weights)
 
-    def set_weights(self, weights: Dict[str, float]) -> None:
+    def set_weights(self, weights: dict[str, float]) -> None:
         """Update and re-normalize engine weights."""
         self.weights = self._normalize_weight_names(weights)
         total = sum(self.weights.values())
@@ -589,8 +587,8 @@ class FusionEngine:
 
     @staticmethod
     def _calculate_evidence_quality(
-        raw_scores: Dict[str, float], corrected_scores: Dict[str, float]
-    ) -> Dict[str, str]:
+        raw_scores: dict[str, float], corrected_scores: dict[str, float]
+    ) -> dict[str, str]:
         """Rate evidence quality for each engine."""
         quality = {}
         for name, score in raw_scores.items():

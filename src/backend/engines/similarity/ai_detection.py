@@ -25,7 +25,7 @@ import logging
 import math
 import re
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.backend.engines.features.code_stylometry import StylometryExtractor
 
@@ -34,28 +34,31 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LLM fingerprint patterns — curated from GPT-4 / Claude / Copilot output
 # ---------------------------------------------------------------------------
-_LLM_COMMENT_PATTERNS: List[re.Pattern] = [
+_LLM_COMMENT_PATTERNS: list[re.Pattern] = [
     re.compile(
-        r"#\s*(Let's|Let us|We can|We will|We need to|We first|We then)\b", re.I
+        r"#\s*(Let's|Let us|We can|We will|We need to|We first|We then)\b",
+        re.IGNORECASE,
     ),
     re.compile(
-        r"#\s*(Here we|Here is|Here's|This function|This method|This class)\b", re.I
+        r"#\s*(Here we|Here is|Here's|This function|This method|This class)\b",
+        re.IGNORECASE,
     ),
-    re.compile(r"#\s*(Note:|Note that|TODO:|FIXME:|Step \d+:)", re.I),
+    re.compile(r"#\s*(Note:|Note that|TODO:|FIXME:|Step \d+:)", re.IGNORECASE),
     re.compile(
-        r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b", re.I
+        r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b",
+        re.IGNORECASE,
     ),
-    re.compile(r"#\s*[A-Z][a-zA-Z'-]*(?: [a-zA-Z'-]+){2,}\s*$", re.M),
+    re.compile(r"#\s*[A-Z][a-zA-Z'-]*(?: [a-zA-Z'-]+){2,}\s*$", re.MULTILINE),
     re.compile(r"#\s*-{3,}"),
     # Only match templated LLM docstrings (Google/Sphinx/NumPy style). This avoids
     # flagging plain one-line human docstrings that merely contain a common verb.
     re.compile(
         r'"""[\s\S]{0,200}(?:Args:|Raises:|Yields:|Example:|Note:|:param:|:return:)',
-        re.I,
+        re.IGNORECASE,
     ),
 ]
 
-_LLM_NAMING_PATTERNS: List[re.Pattern] = [
+_LLM_NAMING_PATTERNS: list[re.Pattern] = [
     # Bare generic words (result/data/value/...) are ubiquitous in human code;
     # matched via density only (see _signal_pattern_library), not as hard hits.
     re.compile(
@@ -67,11 +70,11 @@ _LLM_NAMING_PATTERNS: List[re.Pattern] = [
     re.compile(r"\b(is_valid|is_empty|is_none|has_error|has_value)\b"),
 ]
 
-_LLM_STRUCTURAL_PATTERNS: List[re.Pattern] = [
-    re.compile(r"if\s+\w+\s+is\s+None\s*:", re.I),
-    re.compile(r"raise\s+ValueError\s*\(f?['\"]", re.I),
-    re.compile(r"raise\s+TypeError\s*\(f?['\"]", re.I),
-    re.compile(r"logging\.(debug|info|warning|error)\s*\(f?['\"]", re.I),
+_LLM_STRUCTURAL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"if\s+\w+\s+is\s+None\s*:", re.IGNORECASE),
+    re.compile(r"raise\s+ValueError\s*\(f?['\"]", re.IGNORECASE),
+    re.compile(r"raise\s+TypeError\s*\(f?['\"]", re.IGNORECASE),
+    re.compile(r"logging\.(debug|info|warning|error)\s*\(f?['\"]", re.IGNORECASE),
     re.compile(r"return\s+\[\s*\w+\s+for\s+\w+\s+in\s+\w+\s*\]"),
     re.compile(r"Optional\["),
     re.compile(r"Union\["),
@@ -100,7 +103,7 @@ def _safe_entropy(counter: Counter) -> float:
     return entropy / max_entropy if max_entropy > 0 else 0.0
 
 
-def _tokenize(code: str) -> List[str]:
+def _tokenize(code: str) -> list[str]:
     """Lightweight code tokeniser — identifiers, keywords, operators."""
     return [
         t.lower()
@@ -127,7 +130,7 @@ class AIDetectionEngine:
         docstring_density   0.06
     """
 
-    _WEIGHTS: Dict[str, float] = {
+    _WEIGHTS: dict[str, float] = {
         "perplexity": 0.18,
         "burstiness": 0.14,
         "stylometry": 0.16,
@@ -138,7 +141,7 @@ class AIDetectionEngine:
         "docstring_density": 0.06,
     }
 
-    def __init__(self, calibrator_path: Optional[str] = None) -> None:
+    def __init__(self, calibrator_path: str | None = None) -> None:
         """Initialise the detection engine.
 
         Args:
@@ -181,7 +184,7 @@ class AIDetectionEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def analyze(self, code: str, language: str = "python") -> Dict[str, Any]:
+    def analyze(self, code: str, language: str = "python") -> dict[str, Any]:
         """Analyse code for AI-generated patterns.
 
         Args:
@@ -245,7 +248,7 @@ class AIDetectionEngine:
     # Signal computation
     # ------------------------------------------------------------------
 
-    def _compute_all_signals(self, code: str, language: str) -> Dict[str, float]:
+    def _compute_all_signals(self, code: str, language: str) -> dict[str, float]:
         """Compute all eight detection signals."""
         return {
             "perplexity": self._signal_perplexity(code),
@@ -429,7 +432,7 @@ class AIDetectionEngine:
         LLMs produce very regular blank-line spacing.
         """
         lines = code.splitlines()
-        runs: List[int] = []
+        runs: list[int] = []
         run = 0
         for ln in lines:
             if not ln.strip():
@@ -455,7 +458,9 @@ class AIDetectionEngine:
         """
         func_count = len(
             re.findall(
-                r"^\s*(?:def|function|func|void|public|private)\s+\w+", code, re.M
+                r"^\s*(?:def|function|func|void|public|private)\s+\w+",
+                code,
+                re.MULTILINE,
             )
         )
         docstring_count = len(re.findall(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', code))
@@ -473,7 +478,7 @@ class AIDetectionEngine:
     # Fusion and confidence
     # ------------------------------------------------------------------
 
-    def _fuse(self, signals: Dict[str, float]) -> float:
+    def _fuse(self, signals: dict[str, float]) -> float:
         """Weighted average fusion with optional calibration."""
         total_score = 0.0
         total_weight = 0.0
@@ -498,7 +503,7 @@ class AIDetectionEngine:
 
         return calibrated
 
-    def _confidence(self, signals: Dict[str, float], ai_prob: float) -> float:
+    def _confidence(self, signals: dict[str, float], ai_prob: float) -> float:
         """Confidence = agreement among signals + distance from decision boundary."""
         values = list(signals.values())
         if len(values) < 2:
@@ -518,10 +523,10 @@ class AIDetectionEngine:
     # ------------------------------------------------------------------
 
     def _indicators(
-        self, code: str, signals: Dict[str, float], ai_prob: float
-    ) -> List[str]:
+        self, code: str, signals: dict[str, float], ai_prob: float
+    ) -> list[str]:
         """Generate human-readable evidence strings."""
-        items: List[Tuple[float, str]] = []
+        items: list[tuple[float, str]] = []
 
         for pattern in _LLM_COMMENT_PATTERNS:
             matches = pattern.findall(code)
@@ -595,8 +600,8 @@ class AIDetectionEngine:
                 (0.7, f"Saturated type annotations ({type_hint_count} return hints)")
             )
 
-        try_count = len(re.findall(r"^\s*try\s*:", code, re.M))
-        func_count = max(1, len(re.findall(r"^\s*def\s+\w+", code, re.M)))
+        try_count = len(re.findall(r"^\s*try\s*:", code, re.MULTILINE))
+        func_count = max(1, len(re.findall(r"^\s*def\s+\w+", code, re.MULTILINE)))
         if try_count / func_count > 0.6:
             items.append((0.65, f"Every function has try/except ({try_count} blocks)"))
 
@@ -609,7 +614,7 @@ class AIDetectionEngine:
                 result.append(text)
         return result
 
-    def _flagged_lines(self, code: str) -> List[int]:
+    def _flagged_lines(self, code: str) -> list[int]:
         """Return 1-indexed line numbers that contain LLM fingerprints."""
         flagged: set = set()
         for i, line in enumerate(code.splitlines(), start=1):
@@ -619,7 +624,7 @@ class AIDetectionEngine:
                     break
         return sorted(flagged)
 
-    def _signal_labels(self, signals: Dict[str, float]) -> Dict[str, str]:
+    def _signal_labels(self, signals: dict[str, float]) -> dict[str, str]:
         """Return human-readable label for each signal score."""
         labels = {
             "perplexity": "Token Entropy",
@@ -638,11 +643,11 @@ class AIDetectionEngine:
     # Legacy ML interface (kept for backward compatibility)
     # ------------------------------------------------------------------
 
-    def predict_ml(self, code: str) -> Optional[Tuple[float, float]]:
+    def predict_ml(self, code: str) -> tuple[float, float] | None:
         """Legacy ML prediction interface — returns None (no trained model)."""
         return None
 
-    def train_classifier(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    def train_classifier(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Legacy training interface — not implemented in this version."""
         raise NotImplementedError(
             "ML classifier training is not available in this version."
@@ -652,7 +657,7 @@ class AIDetectionEngine:
     # Legacy method aliases (kept for backward compatibility with tests)
     # ------------------------------------------------------------------
 
-    def _combine_signals(self, signals: Dict[str, float]) -> float:
+    def _combine_signals(self, signals: dict[str, float]) -> float:
         """Legacy: combine signals via weighted average (no sigmoid)."""
         weights = {
             "perplexity": 0.18,
@@ -669,15 +674,15 @@ class AIDetectionEngine:
         weight_sum = sum(w for k, w in weights.items() if k in signals)
         return total / weight_sum if weight_sum > 0 else 0.0
 
-    def _calculate_confidence(self, signals: Dict[str, float]) -> float:
+    def _calculate_confidence(self, signals: dict[str, float]) -> float:
         """Legacy: confidence from signal agreement."""
         return self._confidence(signals, self._fuse(signals))
 
-    def _identify_indicators(self, code: str) -> List[str]:
+    def _identify_indicators(self, code: str) -> list[str]:
         """Legacy: identify indicators without full signal computation."""
         signals = self._compute_all_signals(code, "python")
         return self._indicators(code, signals, self._fuse(signals))
 
-    def _tokenize_code(self, code: str) -> List[str]:
+    def _tokenize_code(self, code: str) -> list[str]:
         """Legacy: tokenise code into lowercase tokens."""
         return _tokenize(code)

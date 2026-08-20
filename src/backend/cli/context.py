@@ -1,12 +1,15 @@
 """CLI context and configuration."""
+
 from dataclasses import dataclass
-from src.backend.bootstrap.plugins.discovery import discover_plugins
+
 from src.backend.bootstrap.architecture_guard import main as guard
+from src.backend.bootstrap.plugins.discovery import discover_plugins
 
 
 @dataclass
 class CLIConfig:
     """CLI configuration."""
+
     verbose: bool = False
     debug: bool = False
 

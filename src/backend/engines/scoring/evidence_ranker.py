@@ -9,8 +9,9 @@ an allegation or final misconduct probability.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any
 
 
 def _clamp(value: float) -> float:
@@ -30,10 +31,10 @@ class EvidenceRank:
     review_priority: float
     risk_score: float
     confidence: str
-    reasons: List[str] = field(default_factory=list)
-    guardrails: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    guardrails: list[str] = field(default_factory=list)
     professor_summary: str = ""
-    features: Dict[str, float] = field(default_factory=dict)
+    features: dict[str, float] = field(default_factory=dict)
 
 
 class EvidenceFusionRanker:
@@ -60,7 +61,7 @@ class EvidenceFusionRanker:
         self,
         features: Mapping[str, float],
         *,
-        base_score: Optional[float] = None,
+        base_score: float | None = None,
     ) -> EvidenceRank:
         """Rank a pair for review using multi-layer evidence and guardrails."""
         normalized = {key: _clamp(value) for key, value in features.items()}
@@ -94,8 +95,8 @@ class EvidenceFusionRanker:
             )
 
         score = _clamp(base_score)
-        reasons: List[str] = []
-        guardrails: List[str] = []
+        reasons: list[str] = []
+        guardrails: list[str] = []
 
         if starter_overlap >= 0.70:
             score *= 0.55
@@ -156,9 +157,9 @@ class EvidenceFusionRanker:
             features=normalized,
         )
 
-    def rank_cases(self, cases: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    def rank_cases(self, cases: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         """Attach ranker output to cases and sort by review priority descending."""
-        ranked: List[Dict[str, Any]] = []
+        ranked: list[dict[str, Any]] = []
         for case in cases:
             features = case.get("features", {})
             rank = self.rank_pair(features, base_score=case.get("base_score"))
@@ -169,7 +170,7 @@ class EvidenceFusionRanker:
         return sorted(ranked, key=lambda item: item["review_priority"], reverse=True)
 
     def _confidence_label(
-        self, score: float, concrete_support: int, reasons: List[str]
+        self, score: float, concrete_support: int, reasons: list[str]
     ) -> str:
         """Translate score and evidence agreement into professor-facing confidence."""
         if score >= 0.82 and concrete_support >= 2 and reasons:
@@ -178,7 +179,7 @@ class EvidenceFusionRanker:
             return "Medium"
         return "Low"
 
-    def _summary(self, reasons: List[str], guardrails: List[str]) -> str:
+    def _summary(self, reasons: list[str], guardrails: list[str]) -> str:
         """Build a concise natural-language explanation for review queues."""
         if reasons:
             return reasons[0]

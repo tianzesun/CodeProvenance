@@ -1,21 +1,22 @@
-import os
-import json
-import hashlib
 import datetime
+import hashlib
+import json
 import logging
-import base64
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from jinja2 import Environment, FileSystemLoader
 
 # Try importing pdfkit or weasyprint
 try:
     import pdfkit
+
     PDF_ENABLED = True
 except ImportError:
     PDF_ENABLED = False
 
 logger = logging.getLogger(__name__)
+
 
 class ForensicPdfExporter:
     """
@@ -27,28 +28,32 @@ class ForensicPdfExporter:
     - Digital Signatures
     - Timestamps & Metadata
     """
-    
+
     def __init__(self, template_dir: Path, output_dir: Path):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.env = Environment(loader=FileSystemLoader(str(template_dir)))
-        self.template = self.env.get_template('publication_report.html')
+        self.template = self.env.get_template("publication_report.html")
 
-    def export_case_evidence(self, case_id: str, case_data: Dict[str, Any]) -> Optional[Path]:
+    def export_case_evidence(
+        self, case_id: str, case_data: dict[str, Any]
+    ) -> Path | None:
         """
         Export a fully signed PDF forensic evidence chain.
         """
         if not PDF_ENABLED:
-            logger.error("pdfkit not installed. Please install 'pdfkit' and 'wkhtmltopdf'.")
+            logger.error(
+                "pdfkit not installed. Please install 'pdfkit' and 'wkhtmltopdf'."
+            )
             return None
 
         # 1. Generate Metadata & Timestamp
         timestamp = datetime.datetime.now().isoformat()
-        
+
         # 2. Compute Digital Signature (SHA-256)
         payload = json.dumps(case_data, sort_keys=True).encode()
         signature = hashlib.sha256(payload).hexdigest()
-        
+
         # 3. Prepare Context for Template
         context = {
             "case_id": case_id,
@@ -63,27 +68,25 @@ class ForensicPdfExporter:
             "is_signed": True,
             "meta": {
                 "generated_by": "IntegrityDesk v2.4 Forensic Engine",
-                "authority": "Institutional Academic Integrity Board"
-            }
+                "authority": "Institutional Academic Integrity Board",
+            },
         }
 
         # 4. Render HTML
         html_content = self.template.render(context)
-        
+
         # 5. Convert to PDF
         pdf_path = self.output_dir / f"forensic_evidence_{case_id}.pdf"
         try:
             options = {
-                'page-size': 'Letter',
-                'margin-top': '0.75in',
-                'margin-right': '0.75in',
-                'margin-bottom': '0.75in',
-                'margin-left': '0.75in',
-                'encoding': "UTF-8",
-                'custom-header': [
-                    ('Accept-Encoding', 'gzip')
-                ],
-                'no-outline': None
+                "page-size": "Letter",
+                "margin-top": "0.75in",
+                "margin-right": "0.75in",
+                "margin-bottom": "0.75in",
+                "margin-left": "0.75in",
+                "encoding": "UTF-8",
+                "custom-header": [("Accept-Encoding", "gzip")],
+                "no-outline": None,
             }
             pdfkit.from_string(html_content, str(pdf_path), options=options)
             logger.info(f"Forensic PDF exported: {pdf_path}")
@@ -95,8 +98,7 @@ class ForensicPdfExporter:
     def sign_pdf(self, pdf_path: Path, private_key: str):
         """
         Add a cryptographic signature to the PDF (Simulated).
-        In production, use libraries like 'pyHanko' or 'oscrypto' to 
+        In production, use libraries like 'pyHanko' or 'oscrypto' to
         add a real digital signature block.
         """
         # Placeholder for real PDF signing logic
-        pass

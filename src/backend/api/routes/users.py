@@ -12,7 +12,7 @@ router = APIRouter()
 async def list_users(db: Session = Depends(get_db)):
     """List all users for reviewer assignment."""
     from src.backend.models.database import User
-    
+
     users = db.query(User).all()
     return [
         {

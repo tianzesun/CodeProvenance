@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-import json
 import datetime
-from dataclasses import dataclass, asdict
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
-from jinja2 import Environment, FileSystemLoader
+from contracts.reproducibility import compute_reproducibility_hash
 
 # Your internal modules
 from evaluation.statistics.statistical_tests import (
     bootstrap_confidence_interval,
     paired_bootstrap_test,
 )
-from contracts.reproducibility import compute_reproducibility_hash
-
+from jinja2 import Environment, FileSystemLoader
 
 # =========================
 # Contracts (STRICT)
 # =========================
+
 
 @dataclass(frozen=True)
 class SystemMetrics:
@@ -33,9 +33,9 @@ class SystemMetrics:
 @dataclass(frozen=True)
 class SystemPredictions:
     name: str
-    scores: List[float]          # probability or similarity score
-    predictions: List[int]      # binary decisions
-    labels: List[int]           # ground truth
+    scores: list[float]  # probability or similarity score
+    predictions: list[int]  # binary decisions
+    labels: list[int]  # ground truth
 
 
 @dataclass(frozen=True)
@@ -53,12 +53,12 @@ class ReportConfig:
 # Core Generator
 # =========================
 
+
 class CertificationReportGenerator:
     def __init__(self, config: ReportConfig):
         self.config = config
         self.env = Environment(
-            loader=FileSystemLoader(config.template_dir),
-            autoescape=True
+            loader=FileSystemLoader(config.template_dir), autoescape=True
         )
 
     # -------------------------
@@ -67,10 +67,10 @@ class CertificationReportGenerator:
 
     def generate(
         self,
-        metrics: List[SystemMetrics],
-        predictions: List[SystemPredictions],
-        reproducibility_inputs: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        metrics: list[SystemMetrics],
+        predictions: list[SystemPredictions],
+        reproducibility_inputs: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Main entrypoint.
         Returns report_data (also written to disk).
@@ -106,8 +106,8 @@ class CertificationReportGenerator:
 
     def _validate_inputs(
         self,
-        metrics: List[SystemMetrics],
-        predictions: List[SystemPredictions],
+        metrics: list[SystemMetrics],
+        predictions: list[SystemPredictions],
     ):
         if not metrics or not predictions:
             raise ValueError("Metrics and predictions cannot be empty")
@@ -122,7 +122,7 @@ class CertificationReportGenerator:
     # Confidence Intervals
     # -------------------------
 
-    def _compute_confidence(self, predictions: List[SystemPredictions]):
+    def _compute_confidence(self, predictions: list[SystemPredictions]):
         results = []
 
         for p in predictions:
@@ -132,13 +132,15 @@ class CertificationReportGenerator:
                 seed=self.config.seed,
             )
 
-            results.append({
-                "name": p.name,
-                "metric": "score",
-                "mean": round(ci.mean, 4),
-                "lower": round(ci.lower, 4),
-                "upper": round(ci.upper, 4),
-            })
+            results.append(
+                {
+                    "name": p.name,
+                    "metric": "score",
+                    "mean": round(ci.mean, 4),
+                    "lower": round(ci.lower, 4),
+                    "upper": round(ci.upper, 4),
+                }
+            )
 
         return results
 
@@ -146,7 +148,7 @@ class CertificationReportGenerator:
     # Significance Tests
     # -------------------------
 
-    def _compute_significance(self, predictions: List[SystemPredictions]):
+    def _compute_significance(self, predictions: list[SystemPredictions]):
         if len(predictions) < 2:
             return []
 
@@ -161,12 +163,14 @@ class CertificationReportGenerator:
                 confidence=self.config.confidence,
             )
 
-            results.append({
-                "name": f"{baseline.name} vs {other.name}",
-                "delta": round(test.delta, 4),
-                "p_value": round(test.p_value, 6),
-                "significant": test.significant,
-            })
+            results.append(
+                {
+                    "name": f"{baseline.name} vs {other.name}",
+                    "delta": round(test.delta, 4),
+                    "p_value": round(test.p_value, 6),
+                    "significant": test.significant,
+                }
+            )
 
         return results
 
@@ -174,7 +178,7 @@ class CertificationReportGenerator:
     # Calibration (ECE)
     # -------------------------
 
-    def _compute_calibration(self, predictions: List[SystemPredictions]):
+    def _compute_calibration(self, predictions: list[SystemPredictions]):
         # Only evaluate first system (primary)
         p = predictions[0]
 
@@ -191,10 +195,7 @@ class CertificationReportGenerator:
             lower = i * bin_size
             upper = (i + 1) * bin_size
 
-            bin_indices = [
-                idx for idx, s in enumerate(scores)
-                if lower <= s < upper
-            ]
+            bin_indices = [idx for idx, s in enumerate(scores) if lower <= s < upper]
 
             if not bin_indices:
                 continue
@@ -210,7 +211,7 @@ class CertificationReportGenerator:
     # Output Writers
     # -------------------------
 
-    def _write_outputs(self, report_data: Dict[str, Any]):
+    def _write_outputs(self, report_data: dict[str, Any]):
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -227,6 +228,6 @@ class CertificationReportGenerator:
         with open(html_path, "w") as f:
             f.write(html)
 
-        print(f"[OK] Report generated:")
+        print("[OK] Report generated:")
         print(f" - {json_path}")
         print(f" - {html_path}")

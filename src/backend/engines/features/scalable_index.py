@@ -16,13 +16,11 @@ Storage:
 - Query time: O(B * log(n/B)) where B = number of bands
 """
 
-from typing import Dict, List, Any, Optional, Tuple, Set
-from pathlib import Path
 import hashlib
 import struct
-import math
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -30,7 +28,7 @@ class MinHashSignature:
     """MinHash signature for a code document."""
 
     doc_id: str
-    hash_values: List[int]
+    hash_values: list[int]
     num_permutations: int = 200
 
     def jaccard_estimate(self, other: "MinHashSignature") -> float:
@@ -50,7 +48,7 @@ class LSHEncodedCode:
     file_hash: str  # SHA-256 for exact duplicate detection
     token_count: int
     language: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class TokenShingler:
@@ -67,7 +65,7 @@ class TokenShingler:
     def __init__(self, k: int = 5):
         self.k = k
 
-    def shingle(self, code: str, language: str = "python") -> List[str]:
+    def shingle(self, code: str, language: str = "python") -> list[str]:
         """
         Tokenize and create k-gram shingles.
 
@@ -84,7 +82,7 @@ class TokenShingler:
             shingles.append(shingle)
         return shingles
 
-    def _tokenize(self, code: str, language: str) -> List[str]:
+    def _tokenize(self, code: str, language: str) -> list[str]:
         """Tokenize code with normalization."""
         import re
 
@@ -114,7 +112,7 @@ class TokenShingler:
 
         return normalized
 
-    def _get_keywords(self, language: str) -> Set[str]:
+    def _get_keywords(self, language: str) -> set[str]:
         """Get language keywords."""
         if language == "python":
             return {
@@ -211,7 +209,7 @@ class MinHashGenerator:
             for _ in range(num_permutations)
         ]
 
-    def signature(self, shingles: List[str]) -> MinHashSignature:
+    def signature(self, shingles: list[str]) -> MinHashSignature:
         """
         Compute MinHash signature for a set of shingles.
 
@@ -270,13 +268,13 @@ class LSHIndex:
         self.num_bands = num_bands
         self.rows_per_band = rows_per_band
         # band_id → hash_bucket → set of doc_ids
-        self.buckets: List[Dict[int, Set[str]]] = [
+        self.buckets: list[dict[int, set[str]]] = [
             defaultdict(set) for _ in range(num_bands)
         ]
         # All indexed documents
-        self.documents: Dict[str, LSHEncodedCode] = {}
+        self.documents: dict[str, LSHEncodedCode] = {}
         # Inverted index: shingle → doc_ids (for additional filtering)
-        self.shingle_index: Dict[str, Set[str]] = defaultdict(set)
+        self.shingle_index: dict[str, set[str]] = defaultdict(set)
 
     def add(self, doc: LSHEncodedCode) -> None:
         """
@@ -299,7 +297,7 @@ class LSHIndex:
 
     def query(
         self, signature: MinHashSignature, min_jaccard: float = 0.5
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Find near-duplicate documents.
 
@@ -308,7 +306,7 @@ class LSHIndex:
         Returns:
             List of (doc_id, estimated_jaccard) sorted by similarity desc
         """
-        candidates: Set[str] = set()
+        candidates: set[str] = set()
         sig = signature.hash_values
 
         for band_idx in range(self.num_bands):
@@ -331,12 +329,12 @@ class LSHIndex:
         results.sort(key=lambda x: -x[1])
         return results
 
-    def batch_index(self, docs: List[LSHEncodedCode]) -> None:
+    def batch_index(self, docs: list[LSHEncodedCode]) -> None:
         """Index a batch of documents."""
         for doc in docs:
             self.add(doc)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
         total_buckets = sum(len(b) for b in self.buckets)
         avg_bucket_size = sum(
@@ -354,7 +352,7 @@ class LSHIndex:
             ),
         }
 
-    def _hash_band(self, values: List[int]) -> int:
+    def _hash_band(self, values: list[int]) -> int:
         """Hash a band of MinHash values."""
         data = struct.pack(f"{len(values)}I", *values)
         return int(hashlib.md5(data).hexdigest()[:8], 16)
@@ -409,7 +407,7 @@ class ScalableCodeIndex:
         doc_id: str,
         code: str,
         language: str = "python",
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> LSHEncodedCode:
         """
         Add a code file to the index.
@@ -450,7 +448,7 @@ class ScalableCodeIndex:
         language: str = "python",
         min_jaccard: float = 0.5,
         top_k: int = 10,
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Find similar code in the index.
 
@@ -469,7 +467,7 @@ class ScalableCodeIndex:
         results = self.lsh.query(sig, min_jaccard)
         return results[:top_k]
 
-    def find_exact_duplicates(self, code: str) -> List[str]:
+    def find_exact_duplicates(self, code: str) -> list[str]:
         """Find exact duplicates by file hash."""
         target_hash = hashlib.sha256(code.encode()).hexdigest()
         return [
@@ -478,6 +476,6 @@ class ScalableCodeIndex:
             if doc.file_hash == target_hash
         ]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
         return self.lsh.get_stats()

@@ -5,11 +5,11 @@ All similarity algorithms should inherit from this base class.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any
+
 import numpy as np
 
-
-from src.backend.domain.models import Finding, EvidenceBlock
+from src.backend.domain.models import Finding
 
 
 class BaseSimilarityAlgorithm(ABC):
@@ -25,7 +25,7 @@ class BaseSimilarityAlgorithm(ABC):
         self.methodology = methodology
 
     @abstractmethod
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """
         Compare two parsed code representations and return a Finding.
 
@@ -36,7 +36,6 @@ class BaseSimilarityAlgorithm(ABC):
         Returns:
             A Finding object containing scores and evidence
         """
-        pass
 
     def get_name(self) -> str:
         """
@@ -54,8 +53,8 @@ class SimilarityEngine:
     """
 
     def __init__(self):
-        self.algorithms: List[BaseSimilarityAlgorithm] = []
-        self.weights: Dict[str, float] = {}
+        self.algorithms: list[BaseSimilarityAlgorithm] = []
+        self.weights: dict[str, float] = {}
         self._deep_analysis_enabled = True
 
     def add_algorithm(self, algorithm: BaseSimilarityAlgorithm, weight: float = 1.0):
@@ -79,8 +78,8 @@ class SimilarityEngine:
         self._deep_analysis_enabled = enabled
 
     def compare(
-        self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Compare two parsed code representations using all algorithms.
         """
@@ -92,7 +91,7 @@ class SimilarityEngine:
                 "confidence_interval": {"lower": 0.0, "upper": 0.0, "confidence": 0.0},
             }
 
-        findings: List[Finding] = []
+        findings: list[Finding] = []
         individual_scores = {}
         weighted_sum = 0.0
         total_weight = 0.0
@@ -117,7 +116,7 @@ class SimilarityEngine:
                 weight = self.weights.get(algorithm_name, 1.0)
                 weighted_sum += score * weight
                 total_weight += weight
-            except Exception as e:
+            except Exception:
                 algorithm_name = algorithm.get_name()
                 individual_scores[algorithm_name] = 0.0
 
@@ -179,17 +178,17 @@ class SimilarityEngine:
 _builtins = None
 
 
-def _get_builtin_algorithms() -> Dict[str, BaseSimilarityAlgorithm]:
+def _get_builtin_algorithms() -> dict[str, BaseSimilarityAlgorithm]:
     """Lazily create and cache all built-in algorithm instances."""
     global _builtins
     if _builtins is not None:
         return _builtins
 
-    from .token_similarity import TokenSimilarity
-    from .ngram_similarity import NgramSimilarity
     from .ast_similarity import ASTSimilarity
-    from .winnowing_similarity import EnhancedWinnowingSimilarity
     from .execution_similarity import ExecutionSimilarity
+    from .ngram_similarity import NgramSimilarity
+    from .token_similarity import TokenSimilarity
+    from .winnowing_similarity import EnhancedWinnowingSimilarity
 
     # Use UniXcoder (local GPU) — falls back to OpenAI EmbeddingSimilarity if unavailable
     try:
@@ -235,7 +234,7 @@ def register_builtin_algorithms(engine: SimilarityEngine) -> None:
         engine: SimilarityEngine instance to register algorithms with
     """
     # JPlag-style weighting matching fusion engine formula
-    default_weights: Dict[str, float] = {
+    default_weights: dict[str, float] = {
         "ast": 4.0,  # 40%
         "graph": 2.0,  # 20%
         "token": 2.5,  # 25%

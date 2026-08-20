@@ -1,6 +1,10 @@
 """Compatibility exports for the legacy processor API."""
 
-from src.backend.core.processor.code_processor import CodeProcessingResult, CodeProcessor, process_code
+from src.backend.core.processor.code_processor import (
+    CodeProcessingResult,
+    CodeProcessor,
+    process_code,
+)
 from src.backend.core.processor.submission_processor import (
     SubmissionProcessingResult,
     SubmissionProcessor,

@@ -16,12 +16,13 @@ import hashlib
 import logging
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
-from .base_similarity import BaseSimilarityAlgorithm
 from src.backend.domain.models import Finding
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     def _cache_path(self, text: str) -> Path:
         return self.cache_dir / f"{self._cache_key(text)}.pkl"
 
-    def _load_from_cache(self, text: str) -> Optional[np.ndarray]:
+    def _load_from_cache(self, text: str) -> np.ndarray | None:
         p = self._cache_path(text)
         if p.exists():
             try:
@@ -171,7 +172,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     #  Core embedding
     # ─────────────────────────────────────────
 
-    def _embed_texts(self, texts: List[str]) -> np.ndarray:
+    def _embed_texts(self, texts: list[str]) -> np.ndarray:
         """
         Embed a list of code strings.
         Returns shape (N, hidden_size), L2-normalised rows.
@@ -179,9 +180,9 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         """
         import torch
 
-        results: List[Optional[np.ndarray]] = [None] * len(texts)
-        uncached_indices: List[int] = []
-        uncached_texts: List[str] = []
+        results: list[np.ndarray | None] = [None] * len(texts)
+        uncached_indices: list[int] = []
+        uncached_texts: list[str] = []
 
         # Check cache
         for i, text in enumerate(texts):
@@ -195,7 +196,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         # Run model in batches for cache misses
         if uncached_texts:
             self._load_model()
-            all_embeddings: List[np.ndarray] = []
+            all_embeddings: list[np.ndarray] = []
 
             for batch_start in range(0, len(uncached_texts), self.batch_size):
                 batch = uncached_texts[batch_start : batch_start + self.batch_size]
@@ -230,7 +231,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     #  Public API (matches BaseSimilarityAlgorithm)
     # ─────────────────────────────────────────
 
-    def compare(self, parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """
         Compare two parsed code dicts.
         Reads 'raw' key first (set by FeatureExtractor), falls back to 'tokens'.
@@ -287,7 +288,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 methodology="UniXcoder semantic similarity (fallback due to error)",
             )
 
-    def similarity_matrix(self, codes: List[str]) -> np.ndarray:
+    def similarity_matrix(self, codes: list[str]) -> np.ndarray:
         """
         Compute full pairwise similarity matrix for a list of code strings.
         Single GPU pass — use this for all-pairs batch comparison.
@@ -310,10 +311,10 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
 
     def top_suspicious_pairs(
         self,
-        codes: List[str],
-        labels: Optional[List[str]] = None,
+        codes: list[str],
+        labels: list[str] | None = None,
         threshold: float = 0.85,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Return all pairs above a similarity threshold, sorted descending.
 
@@ -361,7 +362,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     # ─────────────────────────────────────────
 
     @staticmethod
-    def _extract_text(parsed: Dict[str, Any]) -> str:
+    def _extract_text(parsed: dict[str, Any]) -> str:
         """Extract best text representation from a parsed dict."""
         if parsed.get("raw"):
             return parsed["raw"].strip()
@@ -371,7 +372,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         return ""
 
     @staticmethod
-    def _token_fallback(parsed_a: Dict[str, Any], parsed_b: Dict[str, Any]) -> Finding:
+    def _token_fallback(parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """Fallback to token similarity when embedding is unavailable / unreliable."""
         try:
             from .token_similarity import TokenSimilarity
