@@ -25,7 +25,6 @@ class ComparativeReport:
     """Comparative evaluation report."""
 
     engine_results: list[EngineResult] = field(default_factory=list)
-    best_engine: str = ""
     best_metric: str = "f1"
 
     def rank_by(self, metric: str = "f1") -> list[EngineResult]:

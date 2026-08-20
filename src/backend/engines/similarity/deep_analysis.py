@@ -13,7 +13,7 @@ Advanced code similarity detection using multiple techniques:
 import hashlib
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, ClassVar
 
 
 class DeepCodeAnalyzer:
@@ -895,15 +895,14 @@ class ControlFlowAnalyzer:
 
         # Calculate similarity for each metric
         similarities = []
-        for key in metrics_a:
-            if metrics_a[key] == 0 and metrics_b[key] == 0:
+        for key, val_a in metrics_a.items():
+            if val_a == 0 and metrics_b[key] == 0:
                 similarities.append(1.0)
-            elif metrics_a[key] == 0 or metrics_b[key] == 0:
+            elif val_a == 0 or metrics_b[key] == 0:
                 similarities.append(0.0)
             else:
                 similarities.append(
-                    min(metrics_a[key], metrics_b[key])
-                    / max(metrics_a[key], metrics_b[key])
+                    min(val_a, metrics_b[key]) / max(val_a, metrics_b[key])
                 )
 
         return sum(similarities) / len(similarities)
@@ -917,7 +916,7 @@ class PatternCloneDetector:
     """
 
     # Common suspicious pattern combinations
-    SUSPICIOUS_PATTERNS = [
+    SUSPICIOUS_PATTERNS: ClassVar[list] = [
         # Same control flow structure
         ("For", "For"),
         ("While", "While"),
@@ -1136,8 +1135,6 @@ class DeepVerify:
         from src.backend.engines.weight_config import EngineWeightConfig
 
         self.config = EngineWeightConfig.get_instance()
-
-    def __init__(self):
         self.ted = ASTTreeEditDistance()
         self.tree_kernel = TreeKernelSimilarity()
         self.cfg_analyzer = ControlFlowAnalyzer()

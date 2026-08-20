@@ -53,19 +53,6 @@ class EvidenceCategory:
     score: float
 
 
-@dataclass
-class EvidenceDetail:
-    """Detailed evidence match information."""
-
-    file_a_location: str
-    file_b_location: str
-    match_type: str
-    similarity_score: float
-    explanation: str
-    code_snippet_a: str | None = None
-    code_snippet_b: str | None = None
-
-
 class EvidenceReportGenerator:
     """Generate formal evidence reports for academic integrity cases."""
 
