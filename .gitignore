@@ -82,6 +82,12 @@ data/*
 !data/datasets/*.lock
 
 ###############
+# Root benchmark/data dirs (large downloaded datasets, nested repos)
+###############
+benchmark/
+datasets/
+
+###############
 # Uploads (user-submitted files - not tracked)
 ###############
 uploads/
@@ -112,6 +118,11 @@ apps/backend/uploads/
 *.tsbuildinfo
 apps/frontend/tsconfig.tsbuildinfo
 test_results/
+
+###############
+# Stale experimental dashboard copies (source-of-truth is src/frontend)
+###############
+src/web/
 
 ###############
 # Model Caches
