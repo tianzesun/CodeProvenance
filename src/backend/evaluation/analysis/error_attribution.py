@@ -701,8 +701,8 @@ def _structural_similarity(code_a: str, code_b: str) -> float:
         # Normalize by code length
         code_len = len(code)
         if code_len > 0:
-            for key in features:
-                features[key] = features[key] / max(code_len / 100, 1)
+            for key, value in features.items():
+                features[key] = value / max(code_len / 100, 1)
 
         return features
 

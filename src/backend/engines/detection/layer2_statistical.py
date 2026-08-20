@@ -288,11 +288,9 @@ class Layer2Statistical:
 
         # Convert to [0,1] similarity based on ratio closeness
         struct_similarities = []
-        for key in profile_a:
-            if key in profile_b and max(profile_a[key], profile_b[key]) > 0:
-                ratio = min(profile_a[key], profile_b[key]) / max(
-                    profile_a[key], profile_b[key]
-                )
+        for key, val_a in profile_a.items():
+            if key in profile_b and max(val_a, profile_b[key]) > 0:
+                ratio = min(val_a, profile_b[key]) / max(val_a, profile_b[key])
                 struct_similarities.append(ratio)
         if not has_code:
             sentence_structure_sim = 0.0

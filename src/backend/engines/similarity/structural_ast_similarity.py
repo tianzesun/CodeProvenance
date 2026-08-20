@@ -129,12 +129,15 @@ class ASTStructuralNode:
         var_map: dict[str, str] = {}
 
         def _normalize(node: ASTStructuralNode):
-            if node.node_type in ("IDENTIFIER", "NAME", "VARIABLE") and node.value:
-                if node.value not in keywords:
-                    if node.value not in var_map:
-                        var_map[node.value] = f"VAR_{var_counter[0]}"
-                        var_counter[0] += 1
-                    node.value = var_map[node.value]
+            if (
+                node.node_type in ("IDENTIFIER", "NAME", "VARIABLE")
+                and node.value
+                and node.value not in keywords
+            ):
+                if node.value not in var_map:
+                    var_map[node.value] = f"VAR_{var_counter[0]}"
+                    var_counter[0] += 1
+                node.value = var_map[node.value]
             for child in node.children:
                 _normalize(child)
 

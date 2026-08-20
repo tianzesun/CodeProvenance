@@ -94,23 +94,25 @@ class CFGDFGBuilder:
         tree = ast.parse(source_code)
 
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name == function_name:
-                    # Build CFG for function
-                    cfg = self._cfg_builder.build_from_function(node, source_code)
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == function_name
+            ):
+                # Build CFG for function
+                cfg = self._cfg_builder.build_from_function(node, source_code)
 
-                    # Build DFG for function
-                    dfg = self._dfg_builder.build_for_function(node, cfg, source_code)
+                # Build DFG for function
+                dfg = self._dfg_builder.build_for_function(node, cfg, source_code)
 
-                    return CombinedGraph(
-                        cfg=cfg,
-                        dfg=dfg,
-                        source_code=source_code,
-                        metadata={
-                            "language": "python",
-                            "function_name": function_name,
-                        },
-                    )
+                return CombinedGraph(
+                    cfg=cfg,
+                    dfg=dfg,
+                    source_code=source_code,
+                    metadata={
+                        "language": "python",
+                        "function_name": function_name,
+                    },
+                )
 
         return None
 

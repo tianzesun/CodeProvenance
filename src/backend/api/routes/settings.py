@@ -61,12 +61,11 @@ async def update_engine_config(config_update: dict[str, Any]):
         for section in validate_sections:
             if section in updated_config:
                 for key, value in updated_config[section].items():
-                    if isinstance(value, (int, float)):
-                        if not 0.0 <= value <= 1.0:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"{section}.{key} must be between 0.0 and 1.0, got {value}",
-                            )
+                    if isinstance(value, (int, float)) and not 0.0 <= value <= 1.0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"{section}.{key} must be between 0.0 and 1.0, got {value}",
+                        )
 
         # Save configuration
         save_engine_config(updated_config)

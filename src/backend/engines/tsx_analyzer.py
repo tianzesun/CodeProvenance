@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -43,13 +44,13 @@ class TSXAnalysisResult:
 class TSXAnalyzer:
     """Analyzes TSX/JSX files for React-specific patterns."""
 
-    REACT_IMPORT_PATTERNS = [
+    REACT_IMPORT_PATTERNS: ClassVar[list] = [
         r"import\s+React\s+from\s+['\"]react['\"]",
         r"import\s+\{.*\}\s+from\s+['\"]react['\"]",
         r"from\s+['\"]react['\"]",
     ]
 
-    HOOK_PATTERNS = [
+    HOOK_PATTERNS: ClassVar[list] = [
         (r"useState\s*\(", "useState"),
         (r"useEffect\s*\(", "useEffect"),
         (r"useCallback\s*\(", "useCallback"),
@@ -98,12 +99,13 @@ class TSXAnalyzer:
         try:
             tree = ast.parse(code)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    # Check if it's a component (PascalCase name, returns JSX)
-                    if self._is_component_function(node):
-                        component = self._analyze_component(node, code)
-                        if component:
-                            components.append(component)
+                # Check if it's a component (PascalCase name, returns JSX)
+                if isinstance(node, ast.FunctionDef) and self._is_component_function(
+                    node
+                ):
+                    component = self._analyze_component(node, code)
+                    if component:
+                        components.append(component)
         except SyntaxError:
             pass
         return components
@@ -111,11 +113,7 @@ class TSXAnalyzer:
     def _is_component_function(self, node: ast.FunctionDef) -> bool:
         """Check if a function is a React component."""
         # PascalCase naming convention
-        if not node.name[0].isupper():
-            return False
-
-        # Check for JSX return (look for JSX-like patterns in source)
-        return True  # Simplified - in practice would need to check return type
+        return node.name[0].isupper()
 
     def _analyze_component(
         self, node: ast.FunctionDef, code: str
@@ -133,10 +131,13 @@ class TSXAnalyzer:
 
         # Check for hooks in function body
         for child in ast.walk(node):
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
-                if child.func.id.startswith("use"):
-                    has_hooks = True
-                    hook_names.append(child.func.id)
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id.startswith("use")
+            ):
+                has_hooks = True
+                hook_names.append(child.func.id)
 
         # Estimate JSX depth and children from source
         lines = code.split("\n")

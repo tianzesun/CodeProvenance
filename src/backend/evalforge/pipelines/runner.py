@@ -128,9 +128,9 @@ class BenchmarkRunner:
                     results1 = {r.pair_id: r for r in detector_results[d1]}
                     results2 = {r.pair_id: r for r in detector_results[d2]}
 
-                    for pair_id in results1:
+                    for pair_id, r1 in results1.items():
                         if pair_id in results2:
-                            scores1.append(results1[pair_id].score)
+                            scores1.append(r1.score)
                             scores2.append(results2[pair_id].score)
 
                     if len(scores1) > 5:

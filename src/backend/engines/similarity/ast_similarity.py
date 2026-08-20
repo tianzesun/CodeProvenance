@@ -249,12 +249,15 @@ class ASTNode:
         }
 
         def _normalize(node: "ASTNode"):
-            if node.node_type in identifier_nodes and node.value:
-                if node.value not in skip_keywords:
-                    if node.value not in var_map:
-                        var_map[node.value] = f"var_{var_counter[0]}"
-                        var_counter[0] += 1
-                    node.value = var_map[node.value]
+            if (
+                node.node_type in identifier_nodes
+                and node.value
+                and node.value not in skip_keywords
+            ):
+                if node.value not in var_map:
+                    var_map[node.value] = f"var_{var_counter[0]}"
+                    var_counter[0] += 1
+                node.value = var_map[node.value]
             for child in node.children:
                 _normalize(child)
 
@@ -398,12 +401,15 @@ class JPlagNormalizer:
         self._traverse(node)
 
     def _traverse(self, node: ASTNode) -> None:
-        if node.node_type in self.identifier_nodes and node.value:
-            if node.value not in self.skip_keywords:
-                if node.value not in self.var_map:
-                    self.var_map[node.value] = f"v{self.var_counter}"
-                    self.var_counter += 1
-                node.value = self.var_map[node.value]
+        if (
+            node.node_type in self.identifier_nodes
+            and node.value
+            and node.value not in self.skip_keywords
+        ):
+            if node.value not in self.var_map:
+                self.var_map[node.value] = f"v{self.var_counter}"
+                self.var_counter += 1
+            node.value = self.var_map[node.value]
         for child in node.children:
             self._traverse(child)
 

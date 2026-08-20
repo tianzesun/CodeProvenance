@@ -93,9 +93,12 @@ class FunctionMatcher:
             tree = ast.parse(func_code)
             # Remove docstrings
             for node in ast.walk(tree):
-                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-                    if isinstance(node.value.value, str):
-                        node.value = ast.Constant(value="")
+                if (
+                    isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                ):
+                    node.value = ast.Constant(value="")
 
             # Normalize
             normalized = func_code

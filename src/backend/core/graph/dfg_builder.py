@@ -6,7 +6,7 @@ that represents data dependencies between variable definitions and uses.
 """
 
 import ast
-from typing import Optional
+from typing import ClassVar, Optional
 
 from .models import (
     ControlFlowGraph,
@@ -61,7 +61,7 @@ class DataFlowGraphBuilder:
     """
 
     # Built-in names that should not be tracked as user variables
-    BUILTINS: set[str] = {
+    BUILTINS: ClassVar[set[str]] = {
         "True",
         "False",
         "None",
@@ -557,17 +557,20 @@ class DataFlowGraphBuilder:
             self._collect_uses(item.context_expr, dfg, cfg)
 
             # Record variable binding if present
-            if item.optional_vars and isinstance(item.optional_vars, ast.Name):
-                if self._is_user_variable(item.optional_vars.id):
-                    df_node = self._create_df_node(
-                        variable_name=item.optional_vars.id,
-                        state=VariableState.DEFINED,
-                        cfg_node_id=cfg_node_id,
-                        line_number=line,
-                        scope=self._current_scope,
-                    )
-                    dfg.add_node(df_node)
-                    self._get_scope().add_definition(item.optional_vars.id, df_node.id)
+            if (
+                item.optional_vars
+                and isinstance(item.optional_vars, ast.Name)
+                and self._is_user_variable(item.optional_vars.id)
+            ):
+                df_node = self._create_df_node(
+                    variable_name=item.optional_vars.id,
+                    state=VariableState.DEFINED,
+                    cfg_node_id=cfg_node_id,
+                    line_number=line,
+                    scope=self._current_scope,
+                )
+                dfg.add_node(df_node)
+                self._get_scope().add_definition(item.optional_vars.id, df_node.id)
 
         self._collect_declarations(ast.Module(body=node.body), dfg, cfg)
 
@@ -627,20 +630,22 @@ class DataFlowGraphBuilder:
                         scope=self._current_scope,
                     )
                     dfg.add_node(df_node)
-            elif isinstance(child, ast.Attribute):
+            elif (
+                isinstance(child, ast.Attribute)
+                and isinstance(child.value, ast.Name)
+                and self._is_user_variable(child.value.id)
+            ):
                 # Track attribute access as use of the base object
-                if isinstance(child.value, ast.Name):
-                    if self._is_user_variable(child.value.id):
-                        line = getattr(child, "lineno", 0)
-                        cfg_node_id = self._find_cfg_node_for_line(cfg, line)
-                        df_node = self._create_df_node(
-                            variable_name=child.value.id,
-                            state=VariableState.USED,
-                            cfg_node_id=cfg_node_id,
-                            line_number=line,
-                            scope=self._current_scope,
-                        )
-                        dfg.add_node(df_node)
+                line = getattr(child, "lineno", 0)
+                cfg_node_id = self._find_cfg_node_for_line(cfg, line)
+                df_node = self._create_df_node(
+                    variable_name=child.value.id,
+                    state=VariableState.USED,
+                    cfg_node_id=cfg_node_id,
+                    line_number=line,
+                    scope=self._current_scope,
+                )
+                dfg.add_node(df_node)
 
     def _build_def_use_chains(
         self,
@@ -685,16 +690,16 @@ class DataFlowGraphBuilder:
 
                 for use_node in uses:
                     for def_node in all_defs:
-                        if def_node.id != use_node.id:
-                            # Check if definition could reach use via CFG
-                            if self._could_reach(cfg, def_node, use_node):
-                                dfg.add_edge(
-                                    DFEdge(
-                                        source=def_node.id,
-                                        target=use_node.id,
-                                        variable=var_name,
-                                    )
+                        if def_node.id != use_node.id and self._could_reach(
+                            cfg, def_node, use_node
+                        ):
+                            dfg.add_edge(
+                                DFEdge(
+                                    source=def_node.id,
+                                    target=use_node.id,
+                                    variable=var_name,
                                 )
+                            )
 
                 # Connect modifications to subsequent uses/definitions
                 for mod_node in mods:

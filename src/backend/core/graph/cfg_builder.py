@@ -900,9 +900,11 @@ def build_cfg_for_function(
     tree = ast.parse(source_code)
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name == function_name:
-                builder = ControlFlowGraphBuilder()
-                return builder.build_from_function(node, source_code)
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+        ):
+            builder = ControlFlowGraphBuilder()
+            return builder.build_from_function(node, source_code)
 
     return None
