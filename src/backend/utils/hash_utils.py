@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Union
 
-BytesLike = Union[bytes, bytearray, memoryview]
+BytesLike = bytes | bytearray | memoryview
 
 try:
     import xxhash as _xxhash  # type: ignore

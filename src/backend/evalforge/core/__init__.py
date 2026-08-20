@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 
 class CloneType(Enum):
@@ -108,6 +108,5 @@ class BenchmarkResult:
     def is_positive_label(self) -> bool:
         return self.label >= CloneType.STRUCTURAL_CLONE.value
 
-    @property
     def prediction(self, threshold: float = 0.5) -> bool:
         return self.score >= threshold

@@ -18,10 +18,6 @@ This module enforces strict architecture boundaries:
 - utils/: Utility functions
 """
 
-# Architecture enforcement
-import sys
-from pathlib import Path
-
 
 # Add architecture validation
 def validate_architecture():

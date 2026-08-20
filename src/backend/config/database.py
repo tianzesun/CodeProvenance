@@ -1,9 +1,9 @@
 """Database configuration and session management."""
 
 import os
+from contextlib import AbstractContextManager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import ContextManager
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -49,7 +49,7 @@ class Base(DeclarativeBase):
     """Base class for all database models."""
 
 
-def get_db() -> ContextManager[Session]:
+def get_db() -> AbstractContextManager[Session]:
     """Get a database session context manager.
 
     Usage:

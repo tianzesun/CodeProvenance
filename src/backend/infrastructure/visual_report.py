@@ -8,13 +8,7 @@ Produces:
 4. Summary score with HIGH/MEDIUM/LOW/SUSPICIOUS risk levels
 """
 
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
-import difflib
-import re
-from collections import defaultdict
-
 
 # =============================================================================
 # Plagiarism Type Classifier
@@ -28,7 +22,7 @@ class PlagiarismType:
     type_code: str  # T1, T2, T3, T4, NONE
     type_name: str
     confidence: float
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
 
 
 PLAGIARISM_TYPES = {
@@ -52,7 +46,7 @@ class PlagiarismTypeClassifier:
     - T5 (Independent): all similarities < 0.4
     """
 
-    def classify(self, scores: Dict[str, float]) -> PlagiarismType:
+    def classify(self, scores: dict[str, float]) -> PlagiarismType:
         """
         Classify plagiarism type from similarity scores.
 
@@ -172,9 +166,9 @@ class SimilarBlock:
     line_end_b: int
     similarity: float
     similarity_type: str  # "exact", "near-exact", "structural"
-    code_a_lines: List[str] = field(default_factory=list)
-    code_b_lines: List[str] = field(default_factory=list)
-    diff_hunks: List[str] = field(default_factory=list)
+    code_a_lines: list[str] = field(default_factory=list)
+    code_b_lines: list[str] = field(default_factory=list)
+    diff_hunks: list[str] = field(default_factory=list)
 
 
 class CodeDiffGenerator:

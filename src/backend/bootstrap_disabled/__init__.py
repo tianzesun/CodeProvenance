@@ -16,7 +16,7 @@ Blocked use:
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent

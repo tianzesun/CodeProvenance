@@ -24,7 +24,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from benchmark.registry import registry
 
@@ -87,7 +87,7 @@ def _load_plugin(py_file: Path) -> None:
             # Create instance to get name
             try:
                 instance = attr()
-                name = getattr(instance, "name", lambda: attr_name)
+                name = getattr(instance, "name", lambda a=attr_name: a)
                 engine_name = name() if callable(name) else name
                 registry.register(engine_name, attr)
             except Exception:
