@@ -1,0 +1,54 @@
+# Detection Policy Configuration — Three-layer decision tree thresholds (v2)
+#
+# This replaces engine_weights.yaml as the primary configuration for
+# detection decisions. Each threshold has a clear semantic meaning.
+#
+# Decision Tree (v2 — fixed issues from code review):
+#   IF L1 > 0.90                       → TRUE (hard match)
+#   ELIF L1 > 0.85 AND L2 > 0.85      → TRUE (high-confidence combined)
+#   ELIF L1 > 0.70 AND L2 > 0.60      → TRUE (strong structural)
+#   ELIF L2 > 0.80 AND L3 > 0.80      → PROBABLE (likely, needs review)
+#   ELIF L3 > 0.90                     → FLAG (semantic-only, must review)
+#   ELIF L1 > 0.50 OR L2 > 0.50       → REVIEW (borderline, human check)
+#   ELSE                                → CLEAN
+#
+# Fixes:
+#   - Layer 1 uses max() not weighted avg (no dilution)
+#   - Added high-confidence path (L1=0.85 AND L2=0.85 → TRUE)
+#   - Added REVIEW verdict for human review zone
+#   - Domain presets for CS code, essays, math
+
+thresholds:
+  # Layer 1 — Deterministic (hard match)
+  hard_match_threshold: 0.90 # L1 ≥ 90% → conclusive plagiarism
+  high_confidence_l1: 0.85 # L1 ≥ 85% AND L2 ≥ 85% → TRUE
+  high_confidence_l2: 0.85
+  strong_structural_l1: 0.70 # L1 ≥ 70% AND L2 ≥ 60% → TRUE
+  strong_structural_l2: 0.60
+
+  # Layer 2 — Statistical
+  probable_l2: 0.80 # L2 ≥ 80% AND L3 ≥ 80% → PROBABLE
+  probable_l3: 0.80
+  review_l2_threshold: 0.50 # L2 ≥ 50% → REVIEW zone
+
+  # Layer 3 — Semantic (review only, never standalone verdict)
+  flag_l3_threshold: 0.90 # L3 ≥ 90% → FLAG for manual review
+
+  # Review zone (borderline — too weak for auto-action, too strong to ignore)
+  review_l1_threshold: 0.50 # L1 ≥ 50% → REVIEW
+  review_enabled: true
+
+  # Course-specific multipliers (applied to layer computations, not fusion)
+  cs_code_ast_weight: 1.2 # CS courses: boost AST dominance
+  essay_semantic_weight: 1.5 # Essays: boost semantic
+  math_structure_weight: 1.3 # Math: boost structure
+
+# Per-engine baseline (noise floor for unrelated files in same language)
+baselines:
+  token: 0.12
+  winnowing: 0.16
+  ast: 0.25
+  ngram: 0.10
+  graph: 0.20
+  embedding: 0.70
+  static_rules: 0.20

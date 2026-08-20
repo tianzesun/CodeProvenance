@@ -1,0 +1,138 @@
+# Plagiarism Detection Policy Configuration
+# Version: 1.0
+# This file defines declarative rules for the Policy Engine.
+# Rules are evaluated in order - first match wins.
+
+version: "1.0"
+
+decision_order:
+  - identity_override
+  - structural_dominance
+  - mixed_evidence
+  - conflict_resolution
+  - fallback
+
+rules:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 1: Identity Override
+  # Exact match detection - highest priority
+  # ─────────────────────────────────────────────────────────────────────────────
+  identity_override:
+    if:
+      exact_match: true
+    then:
+      verdict: "TRUE"
+      confidence: 0.99
+      reason: "Exact file match detected"
+      priority: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 2: Structural Dominance
+  # Strong structural equivalence
+  # ─────────────────────────────────────────────────────────────────────────────
+  structural_dominance:
+    if:
+      or:
+        - logic_flow: ">= 0.95"
+        - and:
+            - ngram: ">= 0.95"
+            - winnowing: ">= 0.90"
+    then:
+      verdict: "TRUE"
+      confidence: 0.95
+      reason: "Strong structural equivalence detected"
+      priority: 2
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 3: High Confidence Combined
+  # AST + multiple structural signals
+  # ─────────────────────────────────────────────────────────────────────────────
+  high_confidence_combined:
+    if:
+      and:
+        - ast: ">= 0.85"
+        - or:
+            - logic_flow: ">= 0.80"
+            - graph: ">= 0.80"
+    then:
+      verdict: "TRUE"
+      confidence: 0.90
+      reason: "High-confidence combined structural evidence"
+      priority: 3
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 4: Mixed Evidence
+  # Lexical + semantic similarity
+  # ─────────────────────────────────────────────────────────────────────────────
+  mixed_evidence:
+    if:
+      and:
+        - ngram: ">= 0.80"
+        - embedding: ">= 0.75"
+    then:
+      verdict: "PROBABLE"
+      confidence: 0.75
+      reason: "Lexical and semantic similarity detected"
+      priority: 4
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 5: Semantic Flag
+  # High semantic similarity without structural match
+  # ─────────────────────────────────────────────────────────────────────────────
+  semantic_only_warning:
+    if:
+      and:
+        - embedding: ">= 0.90"
+        - structural: "< 0.50"
+    then:
+      verdict: "FLAG"
+      confidence: 0.60
+      reason: "Semantic similarity without structural match - review required"
+      priority: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 6: Conflict Resolution
+  # Contradictory evidence patterns
+  # ─────────────────────────────────────────────────────────────────────────────
+  conflict_resolution:
+    if:
+      or:
+        - and:
+            - ast: ">= 0.85"
+            - embedding: "< 0.30"
+        - and:
+            - logic_flow: ">= 0.80"
+            - embedding: "< 0.20"
+    then:
+      verdict: "REVIEW"
+      confidence: 0.65
+      reason: "Evidence contradiction detected - manual review required"
+      priority: 6
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Rule 7: Review Zone
+  # Borderline signals
+  # ─────────────────────────────────────────────────────────────────────────────
+  review_zone:
+    if:
+      or:
+        - structural: ">= 0.50"
+        - lexical: ">= 0.50"
+    then:
+      verdict: "REVIEW"
+      confidence: 0.50
+      reason: "Borderline signals - human inspection recommended"
+      priority: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Default: Fallback
+  # No evidence of plagiarism
+  # ─────────────────────────────────────────────────────────────────────────────
+  fallback:
+    if:
+      true:  # Always matches as fallback
+    then:
+      verdict: "CLEAN"
+      confidence: 0.10
+      reason: "No significant similarity detected"
+      priority: 99
