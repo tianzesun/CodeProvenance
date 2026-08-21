@@ -584,7 +584,9 @@ class Report(Base):
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=True
     )
 
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
+    job_id = Column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
 
     report_type = Column(String(50), nullable=False)
@@ -641,7 +643,9 @@ class Notification(Base):
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
 
-    related_job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
+    related_job_id = Column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
     related_case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
     related_report_id = Column(
         UUID(as_uuid=False), ForeignKey("reports.id"), nullable=True
@@ -683,7 +687,9 @@ class BehavioralSession(Base):
     submission_id = Column(
         UUID(as_uuid=False), ForeignKey("submissions.id"), nullable=False
     )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
     session_id = Column(String(100), nullable=True)
@@ -818,7 +824,9 @@ class TimelineEvent(Base):
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
     )
     case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
+    job_id = Column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
     event_type = Column(String(100), nullable=False)

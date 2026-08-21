@@ -300,7 +300,7 @@ export default function Home() {
     if (completedJobs.length > 0 && !selectedReportJob) {
       setSelectedReportJob(completedJobs[0]);
     }
-  }, [completedJobs, selectedReportJob]);
+  }, [completedJobs]);
   const runningCount = jobs.filter((job) => ['processing', 'analyzing'].includes(job.status)).length;
   const latestFlaggedResults = latestCompleted ? getFlaggedResults(latestCompleted) : [];
   const latestPreviewResults = latestFlaggedResults.slice(0, 3);

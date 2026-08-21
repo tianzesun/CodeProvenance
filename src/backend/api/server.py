@@ -4011,6 +4011,32 @@ def _persist_report_record(
         db.commit()
 
 
+def _atomic_write(target: Path, data: bytes) -> None:
+    """Write data to target atomically via a temp file + rename.
+
+    Prevents partial writes and concurrent corruption.
+    """
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(
+        dir=str(target.parent), delete=False, suffix=".tmp"
+    )
+    try:
+        tmp.write(data)
+        tmp.flush()
+        import os
+
+        os.fsync(tmp.fileno())
+        tmp.close()
+        os.replace(tmp.name, str(target))
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
 def _resolve_cached_report(job_id: str, report_type: str, fmt: str) -> Path | None:
     """Return the file path if a completed report of this type/format exists, else None."""
     from pathlib import Path as PathLib
@@ -7109,39 +7135,34 @@ async def _run_analysis(
         with SessionLocal() as db:
             if not db.query(Job).filter(Job.id == job_id).first():
                 tenant_id = _jobs[job_id].get("tenant_id")
-                if not tenant_id:
+                if not tenant_id and current_user:
                     fallback = db.query(Tenant).first()
                     if fallback:
                         tenant_id = fallback.id
                         _jobs[job_id]["tenant_id"] = tenant_id
 
-                if tenant_id:
-                    db_job = Job(
-                        id=job_id,
-                        tenant_id=tenant_id,
-                        assignment_id=_jobs[job_id].get("assignment_id"),
-                        name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
-                        status=_db_job_status(_jobs[job_id].get("status", "analyzing")),
-                        threshold=_jobs[job_id].get("threshold", 0.5),
-                        created_at=datetime.now(),
-                        total_submissions=len(submissions),
-                    )
-                    db.add(db_job)
-                    for sub_name in list(submissions.keys())[:100]:
-                        db.add(
-                            Submission(
-                                id=str(uuid.uuid4()),
-                                job_id=job_id,
-                                name=sub_name,
-                                file_count=1,
-                                created_at=datetime.now(),
-                            )
+                db_job = Job(
+                    id=job_id,
+                    tenant_id=tenant_id or None,
+                    assignment_id=_jobs[job_id].get("assignment_id"),
+                    name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
+                    status=_db_job_status(_jobs[job_id].get("status", "analyzing")),
+                    threshold=_jobs[job_id].get("threshold", 0.5),
+                    created_at=datetime.now(),
+                    total_submissions=len(submissions),
+                )
+                db.add(db_job)
+                for sub_name in list(submissions.keys())[:100]:
+                    db.add(
+                        Submission(
+                            id=str(uuid.uuid4()),
+                            job_id=job_id,
+                            name=sub_name,
+                            file_count=1,
+                            created_at=datetime.now(),
                         )
-                    db.commit()
-                else:
-                    logger.warning(
-                        f"DB persist skipped for job {job_id} - no tenant available"
                     )
+                    db.commit()
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -11998,9 +12019,6 @@ def _should_require_auth(path: str) -> bool:
     # Allow unauthenticated access to benchmark status polling
     if path.startswith("/api/benchmark/status/"):
         return False
-    # Allow unauthenticated access to report endpoints
-    if path.startswith("/report/"):
-        return False
     return path.startswith(AUTH_PROTECTED_PREFIXES)
 
 
@@ -12320,9 +12338,12 @@ def _require_current_user(request: Request, admin_only: bool = False) -> dict[st
 
 
 def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
-    # Allow access to jobs without authentication (guest users)
+    # Deny access if no user is authenticated (except for guest jobs)
     if user is None:
-        return True
+        # Allow access only to guest jobs (no owner, no tenant)
+        owner_user_id = str(job.get("owner_user_id") or "")
+        tenant_id = str(job.get("tenant_id") or "")
+        return bool(not owner_user_id and not tenant_id)
 
     if user.get("role") == "admin":
         return True
@@ -12335,8 +12356,7 @@ def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool
     if tenant_id and tenant_id == user.get("tenant_id"):
         return True
 
-    # Allow access if job has no owner (guest job)
-    return bool(not owner_user_id and not tenant_id)
+    return False
 
 
 def _require_job_access(job_id: str, request: Request) -> dict[str, Any]:
@@ -12520,11 +12540,15 @@ async def download_report_pdf(job_id: str, request: Request):
 
         # Cache PDF to disk and track in DB
         pdf_path = REPORTS_DIR / job_id / f"report_{job_id}.pdf"
-        pdf_path.write_bytes(pdf_bytes)
         try:
-            _persist_report_record(job_id, "originality", "pdf", str(pdf_path))
-        except SQLAlchemyError:
-            logger.warning("Failed to cache PDF report record for job %s", job_id)
+            _atomic_write(pdf_path, pdf_bytes)
+        except Exception as write_err:
+            logger.warning("Failed to write PDF to disk for %s: %s", job_id, write_err)
+        else:
+            try:
+                _persist_report_record(job_id, "originality", "pdf", str(pdf_path))
+            except SQLAlchemyError:
+                logger.warning("Failed to cache PDF report record for job %s", job_id)
 
         response = Response(content=pdf_bytes, media_type="application/pdf")
         response.headers["Content-Disposition"] = (
@@ -12631,11 +12655,15 @@ async def download_report_csv(job_id: str, request: Request):
 
     # Cache CSV to disk and track in DB
     csv_path = REPORTS_DIR / job_id / f"report_{job_id}.csv"
-    csv_path.write_bytes(csv_bytes)
     try:
-        _persist_report_record(job_id, "originality", "csv", str(csv_path))
-    except SQLAlchemyError:
-        logger.warning("Failed to cache CSV report record for job %s", job_id)
+        _atomic_write(csv_path, csv_bytes)
+    except Exception as write_err:
+        logger.warning("Failed to write CSV to disk for %s: %s", job_id, write_err)
+    else:
+        try:
+            _persist_report_record(job_id, "originality", "csv", str(csv_path))
+        except SQLAlchemyError:
+            logger.warning("Failed to cache CSV report record for job %s", job_id)
 
     return Response(
         content=csv_bytes,
