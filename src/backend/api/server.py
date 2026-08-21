@@ -4011,6 +4011,29 @@ def _persist_report_record(
         db.commit()
 
 
+def _resolve_cached_report(job_id: str, report_type: str, fmt: str) -> Path | None:
+    """Return the file path if a completed report of this type/format exists, else None."""
+    from pathlib import Path as PathLib
+
+    with SessionLocal() as db:
+        record = (
+            db.query(Report)
+            .filter(
+                Report.job_id == job_id,
+                Report.report_type == report_type,
+                Report.format == fmt,
+                Report.status == "completed",
+            )
+            .order_by(Report.generated_at.desc())
+            .first()
+        )
+        if record and record.file_path:
+            p = PathLib(record.file_path)
+            if p.exists():
+                return p
+    return None
+
+
 def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
     report_json_path = _job_report_dir(job_id) / "report.json"
     if not report_json_path.exists():
@@ -12434,8 +12457,21 @@ async def list_job_reports(job_id: str, request: Request):
 
 @app.get("/report/{job_id}/download-pdf")
 async def download_report_pdf(job_id: str, request: Request):
-    """Generate and return a PDF version of the originality report."""
+    """Generate and return a PDF version of the originality report.
+
+    Checks the reports table for a cached PDF first. If not found, generates
+    a new one, saves to disk, tracks in DB, and serves.
+    """
     _require_job_access(job_id, request)
+
+    # Check for cached PDF
+    cached = _resolve_cached_report(job_id, "originality", "pdf")
+    if cached:
+        return FileResponse(
+            str(cached),
+            media_type="application/pdf",
+            filename=f"integritydesk_report_{job_id}.pdf",
+        )
 
     # Always regenerate HTML from JSON so report_id and all fields are current
     _refresh_html_report_from_json(job_id)
@@ -12482,6 +12518,14 @@ async def download_report_pdf(job_id: str, request: Request):
             ]
         )
 
+        # Cache PDF to disk and track in DB
+        pdf_path = REPORTS_DIR / job_id / f"report_{job_id}.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        try:
+            _persist_report_record(job_id, "originality", "pdf", str(pdf_path))
+        except SQLAlchemyError:
+            logger.warning("Failed to cache PDF report record for job %s", job_id)
+
         response = Response(content=pdf_bytes, media_type="application/pdf")
         response.headers["Content-Disposition"] = (
             f'attachment; filename="integritydesk_report_{job_id}.pdf"'
@@ -12518,6 +12562,88 @@ async def download_report_pdf(job_id: str, request: Request):
             status_code=500,
             detail=f"PDF generation failed: {exc}. Try using the Print button in your browser instead.",
         )
+
+
+@app.get("/report/{job_id}/download-csv")
+async def download_report_csv(job_id: str, request: Request):
+    """Generate and return a CSV of similarity results for a job.
+
+    Checks the reports table for a cached CSV first. If not found, generates
+    a new one, saves to disk, tracks in DB, and serves.
+    """
+    _require_job_access(job_id, request)
+
+    # Check for cached CSV
+    cached = _resolve_cached_report(job_id, "originality", "csv")
+    if cached:
+        return FileResponse(
+            str(cached),
+            media_type="text/csv",
+            filename=f"integritydesk_report_{job_id}.csv",
+        )
+
+    # Load job data
+    job = _require_job_access(job_id, request)
+    results = job.get("results", [])
+    if not results:
+        raise HTTPException(status_code=404, detail="No results found for this job")
+
+    # Generate CSV
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "file_a",
+            "file_b",
+            "similarity_score",
+            "risk_level",
+            "review_status",
+            "ast_score",
+            "fingerprint_score",
+            "embedding_score",
+            "ngram_score",
+            "winnowing_score",
+            "logic_flow_score",
+        ]
+    )
+    for r in results:
+        features = r.get("features", {})
+        writer.writerow(
+            [
+                r.get("file_a", ""),
+                r.get("file_b", ""),
+                round(r.get("score", 0), 4),
+                r.get("risk_level", ""),
+                r.get("review_status", ""),
+                round(features.get("ast", 0), 4),
+                round(features.get("fingerprint", 0), 4),
+                round(features.get("embedding", 0), 4),
+                round(features.get("ngram", 0), 4),
+                round(features.get("winnowing", 0), 4),
+                round(features.get("logic_flow", 0), 4),
+            ]
+        )
+
+    csv_content = buffer.getvalue()
+    csv_bytes = csv_content.encode("utf-8")
+
+    # Cache CSV to disk and track in DB
+    csv_path = REPORTS_DIR / job_id / f"report_{job_id}.csv"
+    csv_path.write_bytes(csv_bytes)
+    try:
+        _persist_report_record(job_id, "originality", "csv", str(csv_path))
+    except SQLAlchemyError:
+        logger.warning("Failed to cache CSV report record for job %s", job_id)
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="integritydesk_report_{job_id}.csv"'
+        },
+    )
 
 
 def _build_ai_originality_report_html(job: dict[str, Any]) -> str:

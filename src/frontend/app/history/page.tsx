@@ -434,6 +434,22 @@ export default function HistoryPage() {
                                   <Download size={13} />
                                   Committee Report
                                 </a>
+                                <a
+                                  href={`/report/${job.id}/download-pdf`}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                                  onClick={() => setOpenDropdown(null)}
+                                >
+                                  <Download size={13} />
+                                  PDF Report
+                                </a>
+                                <a
+                                  href={`/report/${job.id}/download-csv`}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                                  onClick={() => setOpenDropdown(null)}
+                                >
+                                  <Download size={13} />
+                                  CSV Data
+                                </a>
                               </div>
                             )}
                           </div>
