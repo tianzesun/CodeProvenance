@@ -175,17 +175,63 @@ class BatchDetectionService:
         from src.backend.domain.decision import DecisionEngine
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
+        from src.backend.engines.scoring.learned_fusion import LearnedFusionScorer
 
         self.extractor = FeatureExtractor()
         self.fusion = FusionEngine(weights=weights)
         self.decision = DecisionEngine(threshold)
         self.threshold = threshold
         self.weights = weights
+        self.learned_scorer = LearnedFusionScorer()
         self.starter_remover = None
         if starter_sources:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
 
             self.starter_remover = StarterCodeRemover(starter_sources)
+
+    def _learned_available(self) -> bool:
+        """True when a trained learned-fusion artifact is loaded."""
+        learned_scorer = getattr(self, "learned_scorer", None)
+        return learned_scorer is not None and learned_scorer.available
+
+    def _primary_score(
+        self,
+        features: Any,
+        logic_flow: float,
+        fused: Any,
+    ) -> float:
+        """Return the effective similarity score for a code pair.
+
+        Uses the learned fusion model's calibrated probability when a trained
+        artifact is available; otherwise falls back to the rule-based
+        ``FusedScore`` from ``FusionEngine`` unchanged.
+        """
+        learned_scorer = getattr(self, "learned_scorer", None)
+        if learned_scorer is not None and learned_scorer.available:
+            learned = learned_scorer.score(
+                {
+                    "ast": features.ast,
+                    "fingerprint": features.fingerprint,
+                    "embedding": features.embedding,
+                    "ngram": features.ngram,
+                    "winnowing": features.winnowing,
+                    "logic_flow": logic_flow,
+                    "coverage": getattr(features, "coverage", 0.0) or 0.0,
+                }
+            )
+            base = (
+                learned if fused.final_score < 0.999 else 1.0
+            )  # keep exact-match override
+        else:
+            base = fused.final_score
+        return _apply_structure_sensitivity_floor(
+            base,
+            features.ast,
+            features.fingerprint,
+            logic_flow,
+            features.ngram,
+            features.winnowing,
+        )
 
     def ingest_folder(self, folder: Path) -> dict[str, str]:
         """Read all code files from a folder.
@@ -237,14 +283,7 @@ class BatchDetectionService:
                 features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
                 logic_flow = _logic_flow_similarity(ca, cb)
                 fused = self.fusion.fuse(features, logic_flow=logic_flow)
-                final_score = _apply_structure_sensitivity_floor(
-                    fused.final_score,
-                    features.ast,
-                    features.fingerprint,
-                    logic_flow,
-                    features.ngram,
-                    features.winnowing,
-                )
+                final_score = self._primary_score(features, logic_flow, fused)
 
                 # Compute matching blocks for highlighting
                 match_result = highlighter.find_matching_segments(ca, cb)
@@ -260,22 +299,27 @@ class BatchDetectionService:
                     for seg in match_result.segments
                 ]
 
+                feature_payload: dict[str, float] = {
+                    "ast": features.ast,
+                    "fingerprint": features.fingerprint,
+                    "embedding": features.embedding,
+                    "ngram": features.ngram,
+                    "winnowing": features.winnowing,
+                    "logic_flow": logic_flow,
+                    "coverage": getattr(features, "coverage", 0.0) or 0.0,
+                    "fused_score": fused.final_score,
+                    "raw_score": final_score,
+                }
+                if self._learned_available():
+                    feature_payload["learned_score"] = round(float(final_score), 6)
+
                 pair_result = ComparisonResult(
                     file_a=fa,
                     file_b=fb,
                     score=final_score,
                     risk_level=_risk_level(final_score),
                     features={
-                        k: v
-                        for k, v in {
-                            "ast": features.ast,
-                            "fingerprint": features.fingerprint,
-                            "embedding": features.embedding,
-                            "ngram": features.ngram,
-                            "winnowing": features.winnowing,
-                            "logic_flow": logic_flow,
-                        }.items()
-                        if v is not None
+                        k: v for k, v in feature_payload.items() if v is not None
                     },
                     contributions=dict(fused.contributions),
                     matching_blocks=matching_blocks,
@@ -313,14 +357,7 @@ class BatchDetectionService:
             features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
             logic_flow = _logic_flow_similarity(ca, cb)
             fused = self.fusion.fuse(features, logic_flow=logic_flow)
-            raw_score = _apply_structure_sensitivity_floor(
-                fused.final_score,
-                features.ast,
-                features.fingerprint,
-                logic_flow,
-                features.ngram,
-                features.winnowing,
-            )
+            raw_score = self._primary_score(features, logic_flow, fused)
 
             # Compute matching blocks
             match_result = highlighter.find_matching_segments(ca, cb)
@@ -365,6 +402,21 @@ class BatchDetectionService:
             baseline_adjusted_score = _subtract_clean_baseline(
                 raw_score, clean_baseline
             )
+            feature_payload = {
+                "ast": features.ast,
+                "fingerprint": features.fingerprint,
+                "embedding": features.embedding,
+                "ngram": features.ngram,
+                "winnowing": features.winnowing,
+                "logic_flow": item["logic_flow"],
+                "coverage": getattr(features, "coverage", 0.0) or 0.0,
+                "fused_score": fused_score,
+                "raw_score": raw_score,
+                "clean_baseline": clean_baseline,
+                "baseline_adjusted_score": baseline_adjusted_score,
+            }
+            if self._learned_available():
+                feature_payload["learned_score"] = round(float(raw_score), 6)
             results.append(
                 ComparisonResult(
                     file_a=item["file_a"],
@@ -372,20 +424,7 @@ class BatchDetectionService:
                     score=raw_score,
                     risk_level=_risk_level(raw_score),
                     features={
-                        k: v
-                        for k, v in {
-                            "ast": features.ast,
-                            "fingerprint": features.fingerprint,
-                            "embedding": features.embedding,
-                            "ngram": features.ngram,
-                            "winnowing": features.winnowing,
-                            "logic_flow": item["logic_flow"],
-                            "fused_score": fused_score,
-                            "raw_score": raw_score,
-                            "clean_baseline": clean_baseline,
-                            "baseline_adjusted_score": baseline_adjusted_score,
-                        }.items()
-                        if v is not None
+                        k: v for k, v in feature_payload.items() if v is not None
                     },
                     contributions=item["contributions"],
                     matching_blocks=item.get("matching_blocks", []),

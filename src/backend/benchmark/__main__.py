@@ -291,6 +291,39 @@ def main() -> int:
         help="Output directory",
     )
 
+    learned_train_parser = subparsers.add_parser(
+        "fusion-train-learned",
+        help=(
+            "Train the production learned-fusion scoring model on combined "
+            "labeled datasets and save the JSON artifact consumed by "
+            "BatchDetectionService"
+        ),
+    )
+    learned_train_parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["IR-Plag-Dataset", "conplag"],
+        help="Labeled datasets to train on (supported: IR-Plag-Dataset, conplag)",
+    )
+    learned_train_parser.add_argument(
+        "--artifact",
+        help="Optional output path for the trained JSON artifact",
+    )
+    learned_train_parser.add_argument(
+        "--threshold-step",
+        type=float,
+        default=0.02,
+        help="Threshold sweep step size",
+    )
+    learned_train_parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed"
+    )
+    learned_train_parser.add_argument(
+        "--output",
+        default="reports/learned_fusion",
+        help="Output directory for training reports",
+    )
+
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -517,8 +550,10 @@ def main() -> int:
             pair_limit=args.pair_limit,
         )
         print("\nEngine Evaluation Completed!\n")
-        print(f"Pairs: {report.pair_count} "
-              f"({report.positive_pairs} positive, {report.negative_pairs} negative)")
+        print(
+            f"Pairs: {report.pair_count} "
+            f"({report.positive_pairs} positive, {report.negative_pairs} negative)"
+        )
         for scorer in sorted(
             [item for item in report.scorers if item.available],
             key=lambda item: item.auc_roc,
@@ -533,6 +568,30 @@ def main() -> int:
                 print(f"  {scorer.name:14} UNAVAILABLE: {scorer.error}")
         print(f"\nJSON report: {args.output}/{report.run_id}.json")
         print(f"Markdown report: {args.output}/{report.run_id}.md")
+
+    elif args.command == "fusion-train-learned":
+        from pathlib import Path
+        from src.backend.benchmark.runners.learned_fusion_training_runner import (
+            run_learned_fusion_training,
+        )
+
+        logger.info("Starting learned fusion training workflow")
+        report = run_learned_fusion_training(
+            output_dir=Path(args.output),
+            artifact_path=Path(args.artifact) if args.artifact else None,
+            threshold_step=args.threshold_step,
+            seed=args.seed,
+            enabled_datasets=args.datasets,
+        )
+        print("\nLearned Fusion Training Completed!\n")
+        print(
+            f"Pairs: {report.pair_count} "
+            f"({report.positive_pairs} positive, {report.negative_pairs} negative)"
+        )
+        print(f"Production fused AUC: {report.production_fused_auc:.4f}")
+        print(f"Learned fusion LOGO AUC: {report.logo_auc:.4f}")
+        print(f"Model artifact: {report.artifact_path}")
+        print(f"Markdown report: {args.output}/learned_fusion_report_*.md")
 
     return 0
 

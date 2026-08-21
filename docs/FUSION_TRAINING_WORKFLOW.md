@@ -7,7 +7,7 @@ follow it on a separate machine without needing to read the code first.
 
 ## What It Does
 
-The workflow now supports two separate commands:
+The workflow now supports three separate commands:
 
 - `fusion-optimize`
   - Runs validation-set fusion experiments on PROGpedia.
@@ -15,6 +15,14 @@ The workflow now supports two separate commands:
 - `fusion-train`
   - Trains supervised fusion models on labeled local datasets.
   - Exports feature tables, trains several candidate models, saves the best model, and writes Markdown and JSON reports.
+- `fusion-train-learned`
+  - Trains the production scorer (a calibrated logistic model over the six
+    production features) on combined labeled datasets.
+  - Writes the JSON artifact consumed by `BatchDetectionService` at
+    `src/backend/engines/similarity/models/learned_fusion_model.json`, so the
+    production similarity score becomes `P(plagiarism | features)` instead of
+    the rule-based confidence. Falls back to rule scoring when the artifact is
+    absent.
 
 ## Supported Local Datasets
 
@@ -177,6 +185,31 @@ $PYTHON_BIN -m src.backend.benchmark fusion-train \
 
 If your server stores the datasets elsewhere, replace `"$DATA_ROOT_1"` and
 `"$DATA_ROOT_2"` with the real folders.
+
+## Step 6: Train The Production Learned-Fusion Artifact
+
+Train the scorer that production actually uses on the two plagiarism datasets
+currently in the repo (IR-Plag + ConPlag):
+
+```bash
+$PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
+  --datasets IR-Plag-Dataset conplag \
+  --output "$REPORT_ROOT/learned_fusion"
+```
+
+What success looks like:
+
+- the report shows `Learned Fusion (LOGO) AUC` above `Production Fused AUC`
+  (recent reference run: 0.8585 vs 0.8145 on 1141 combined pairs)
+- the artifact `src/backend/engines/similarity/models/learned_fusion_model.json`
+  is rewritten
+- the report lists per-dataset LOGO AUC (honest generalization, leaving each
+  plagiarism case or ConPlag problem out)
+
+After this step, `BatchDetectionService` uses the learned score as the primary
+similarity score with the rule-based confidence kept in the `fused_score`
+feature for transparency. Removing the artifact reverts production to the
+rule-based path.
 
 ## Step 5: Compare Runs
 
