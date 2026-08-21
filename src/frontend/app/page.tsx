@@ -4,7 +4,7 @@
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import {
   ArrowLeft,
@@ -290,6 +290,17 @@ export default function Home() {
 
   const recentJobs = jobs.slice(0, 4);
   const latestCompleted = jobs.find((job) => job.status === 'completed');
+  const completedJobs = useMemo(
+    () => jobs.filter((job) => job.status === 'completed'),
+    [jobs]
+  );
+  const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
+
+  useEffect(() => {
+    if (completedJobs.length > 0 && !selectedReportJob) {
+      setSelectedReportJob(completedJobs[0]);
+    }
+  }, [completedJobs, selectedReportJob]);
   const runningCount = jobs.filter((job) => ['processing', 'analyzing'].includes(job.status)).length;
   const latestFlaggedResults = latestCompleted ? getFlaggedResults(latestCompleted) : [];
   const latestPreviewResults = latestFlaggedResults.slice(0, 3);
@@ -422,6 +433,11 @@ export default function Home() {
                 <ChevronRight size={16} />
               </Link>
             </div>
+            <div className="mt-1">
+              <Link href="/history" className="text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                View all past checks →
+              </Link>
+            </div>
           </div>
 
           {loading ? (
@@ -517,50 +533,62 @@ export default function Home() {
               Report center
             </div>
             <h2 className="font-display mt-2 text-xl font-semibold text-[var(--text-primary)]">
-              Export the latest completed check
+              Export reports from any check
             </h2>
           </div>
 
           <div className="px-5 pb-5">
-            {!latestCompleted ? (
+            {completedJobs.length === 0 ? (
               <div className="theme-card-muted rounded-[22px] px-4 py-5 text-sm leading-6 text-[var(--text-secondary)]">
                 Reports appear here after the first assignment finishes. Professors can then export the HTML summary, structured JSON, or committee report directly from the dashboard home.
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="theme-card-muted rounded-[22px] px-4 py-4">
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">{getAssignmentTitle(latestCompleted)}</div>
-                  <div className="mt-1 text-xs text-[var(--text-muted)]">
-                    Ready {formatTimestamp(latestCompleted.created_at)}
-                  </div>
-                </div>
-
-                <ReportLink
-                  href={`${API}/report/${latestCompleted.id}/download`}
-                  icon={FileText}
-                  title="HTML report"
-                  description="Open the formatted report with verdict summary and evidence."
-                />
-                <ReportLink
-                  href={`${API}/report/${latestCompleted.id}/download-json`}
-                  icon={Download}
-                  title="JSON data"
-                  description="Download the structured analysis output for records or tooling."
-                />
-                <ReportLink
-                  href={`${API}/report/${latestCompleted.id}/committee`}
-                  icon={Shield}
-                  title="Committee report"
-                  description="Open the evidence-focused report prepared for formal review."
-                />
-
-                <Link
-                  href={`/results/${latestCompleted.id}`}
-                  className="theme-button-secondary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold"
+                <select
+                  value={selectedReportJob?.id || ''}
+                  onChange={(e) => {
+                    const job = completedJobs.find((j) => j.id === e.target.value);
+                    setSelectedReportJob(job || null);
+                  }}
+                  className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:ring-1 focus:ring-blue-400"
                 >
-                  <FileSearch size={16} />
-                  Open Latest Result
-                </Link>
+                  {completedJobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {getAssignmentTitle(job)} — {formatTimestamp(job.created_at)}
+                    </option>
+                  ))}
+                </select>
+
+                {selectedReportJob && (
+                  <>
+                    <ReportLink
+                      href={`${API}/report/${selectedReportJob.id}/download`}
+                      icon={FileText}
+                      title="HTML report"
+                      description="Open the formatted report with verdict summary and evidence."
+                    />
+                    <ReportLink
+                      href={`${API}/report/${selectedReportJob.id}/download-json`}
+                      icon={Download}
+                      title="JSON data"
+                      description="Download the structured analysis output for records or tooling."
+                    />
+                    <ReportLink
+                      href={`${API}/report/${selectedReportJob.id}/committee`}
+                      icon={Shield}
+                      title="Committee report"
+                      description="Open the evidence-focused report prepared for formal review."
+                    />
+
+                    <Link
+                      href={`/results/${selectedReportJob.id}`}
+                      className="theme-button-secondary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold"
+                    >
+                      <FileSearch size={16} />
+                      Open Result
+                    </Link>
+                  </>
+                )}
               </div>
             )}
           </div>

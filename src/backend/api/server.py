@@ -52,6 +52,7 @@ from fastapi.responses import (
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
 from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
@@ -89,6 +90,7 @@ from src.backend.models.database import (
     CourseInstructor,
     FprValidationRun,
     Job,
+    Report,
     SimilarityResult,
     Submission,
     Tenant,
@@ -3896,71 +3898,65 @@ def _persist_job(job_id: str) -> None:
 
 
 def _persist_ai_detection_results(job_id: str, ai_detection: dict[str, Any]) -> None:
-    """Best-effort persistence of AI detection results to the database.
+    """Persist AI detection results to the database.
 
-    Writes one ``AIDetectionResult`` row per submission. Any failure is logged
-    and swallowed so a DB issue never fails the analysis job itself.
+    Writes one ``AIDetectionResult`` row per submission. Raises on failure
+    so the caller can handle the error appropriately.
     """
     if not ai_detection or not job_id:
         return
-    try:
-        with SessionLocal() as db:
-            existing = (
-                db.query(AIDetectionResult)
-                .filter(AIDetectionResult.job_id == job_id)
-                .first()
-            )
-            if existing:
-                return
-            for entry in ai_detection.get("submissions", []):
-                if not isinstance(entry, dict) or not entry.get("name"):
-                    continue
-                db.add(
-                    AIDetectionResult(
-                        job_id=job_id,
-                        submission_name=str(entry.get("name") or "")[:500],
-                        language=str(entry.get("language") or "python"),
-                        ai_probability=_coerce_float(entry.get("ai_probability")),
-                        confidence=_coerce_float(entry.get("confidence")),
-                        method=str(entry.get("method") or "heuristic"),
-                        model_name=str(entry.get("model") or "")[:500],
-                        status=str(entry.get("status") or ""),
-                        indicators=entry.get("indicators") or [],
-                        signals=entry.get("signals") or {},
-                        signal_labels=entry.get("signal_labels") or {},
-                        flagged_lines=entry.get("flagged_lines") or [],
-                        flagged_regions=entry.get("flagged_regions") or [],
-                        classifier_details=entry.get("classifier"),
-                    )
+    with SessionLocal() as db:
+        existing = (
+            db.query(AIDetectionResult)
+            .filter(AIDetectionResult.job_id == job_id)
+            .first()
+        )
+        if existing:
+            return
+        for entry in ai_detection.get("submissions", []):
+            if not isinstance(entry, dict) or not entry.get("name"):
+                continue
+            db.add(
+                AIDetectionResult(
+                    job_id=job_id,
+                    submission_name=str(entry.get("name") or "")[:500],
+                    language=str(entry.get("language") or "python"),
+                    ai_probability=_coerce_float(entry.get("ai_probability")),
+                    confidence=_coerce_float(entry.get("confidence")),
+                    method=str(entry.get("method") or "heuristic"),
+                    model_name=str(entry.get("model") or "")[:500],
+                    status=str(entry.get("status") or ""),
+                    indicators=entry.get("indicators") or [],
+                    signals=entry.get("signals") or {},
+                    signal_labels=entry.get("signal_labels") or {},
+                    flagged_lines=entry.get("flagged_lines") or [],
+                    flagged_regions=entry.get("flagged_regions") or [],
+                    classifier_details=entry.get("classifier"),
                 )
-            db.commit()
-    except Exception:
-        logger.warning("Failed to persist AI detection results for job %s", job_id)
+            )
+        db.commit()
 
 
 def _update_job_status_in_db(
     job_id: str, status: str, error_message: str | None = None
 ) -> None:
-    """Best-effort sync of job status and timestamps to the database (for admin/results pages)."""
+    """Sync job status and timestamps to the database. Raises on failure."""
     db_status = _db_job_status(status)
-    try:
-        with SessionLocal() as db:
-            db_job = db.query(Job).filter(Job.id == job_id).first()
-            if not db_job:
-                return
-            db_job.status = db_status
-            now = datetime.now()
-            if status == "analyzing" and not db_job.started_at:
-                db_job.started_at = now
-            if status == "completed":
-                db_job.completed_at = now
-            if status == "failed":
-                db_job.failed_at = now
-                if error_message:
-                    db_job.error_message = error_message[:2000]
-            db.commit()
-    except Exception:
-        logger.warning(f"Failed to update job {job_id} status in DB")
+    with SessionLocal() as db:
+        db_job = db.query(Job).filter(Job.id == job_id).first()
+        if not db_job:
+            return
+        db_job.status = db_status
+        now = datetime.now()
+        if status == "analyzing" and not db_job.started_at:
+            db_job.started_at = now
+        if status == "completed":
+            db_job.completed_at = now
+        if status == "failed":
+            db_job.failed_at = now
+            if error_message:
+                db_job.error_message = error_message[:2000]
+        db.commit()
 
 
 def _db_job_status(app_status: str) -> str:
@@ -3973,6 +3969,46 @@ def _db_job_status(app_status: str) -> str:
         "failed": "failed",
         "cancelled": "cancelled",
     }.get(app_status, app_status)
+
+
+def _resolve_default_tenant_id(db) -> str | None:
+    """Return the first existing tenant ID, or None if no tenants exist."""
+    fallback = db.query(Tenant).first()
+    return fallback.id if fallback else None
+
+
+def _persist_report_record(
+    job_id: str,
+    report_type: str,
+    format: str,
+    file_path: str,
+    tenant_id: str | None = None,
+) -> None:
+    """Create a Report row in the database for a generated report file."""
+    from pathlib import Path as PathLib
+
+    p = PathLib(file_path)
+    file_size = p.stat().st_size if p.exists() else None
+    with SessionLocal() as db:
+        if not tenant_id:
+            tenant_id = _resolve_default_tenant_id(db)
+        if not tenant_id:
+            logger.warning("Report record skipped for %s — no tenant", job_id)
+            return
+        db.add(
+            Report(
+                tenant_id=tenant_id,
+                job_id=job_id,
+                report_type=report_type,
+                format=format,
+                version="1.0",
+                status="completed",
+                file_path=str(file_path),
+                file_size_bytes=file_size,
+                generated_at=datetime.now(),
+            )
+        )
+        db.commit()
 
 
 def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
@@ -4893,36 +4929,43 @@ def _build_web_analysis_summary(
 
 
 def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
+    """List all jobs visible to the current user.
+
+    Strategy: DB is primary, in-memory补充, filesystem as fallback for legacy jobs.
+    """
     jobs_by_id: dict[str, dict[str, Any]] = {}
 
-    if REPORTS_DIR.exists():
-        for report_dir in REPORTS_DIR.iterdir():
-            if not report_dir.is_dir():
-                continue
-            job = _get_job(report_dir.name)
-            if job and _job_is_accessible(job, current_user):
-                jobs_by_id[report_dir.name] = job
-
-    for job_id, job in _jobs.items():
-        normalized = _normalize_job(job)
-        if _job_is_accessible(normalized, current_user):
-            jobs_by_id[job_id] = normalized
-
-    # DB-backed listing (D) – pick up jobs persisted via ORM even without local report dir
+    # 1. DB-backed listing (primary source)
     try:
         with SessionLocal() as db:
             tenant_id = current_user.get("tenant_id") if current_user else None
             q = db.query(Job)
             if tenant_id:
                 q = q.filter(Job.tenant_id == tenant_id)
-            db_jobs = q.order_by(Job.created_at.desc()).limit(200).all()
+            db_jobs = q.order_by(Job.created_at.desc()).limit(500).all()
             for db_job in db_jobs:
-                if db_job.id not in jobs_by_id:
-                    loaded = _get_job(db_job.id)  # will hit _load_job_from_db
-                    if loaded and _job_is_accessible(loaded, current_user):
-                        jobs_by_id[db_job.id] = loaded
+                loaded = _get_job(db_job.id)
+                if loaded and _job_is_accessible(loaded, current_user):
+                    jobs_by_id[db_job.id] = loaded
     except Exception:
-        logger.warning("DB job listing fallback failed")
+        logger.warning("DB job listing failed, falling back to filesystem")
+
+    # 2. In-memory补充 (active jobs not yet persisted)
+    for job_id, job in _jobs.items():
+        if job_id not in jobs_by_id:
+            normalized = _normalize_job(job)
+            if _job_is_accessible(normalized, current_user):
+                jobs_by_id[job_id] = normalized
+
+    # 3. Filesystem fallback (legacy jobs without DB rows)
+    if REPORTS_DIR.exists():
+        for report_dir in REPORTS_DIR.iterdir():
+            if not report_dir.is_dir():
+                continue
+            if report_dir.name not in jobs_by_id:
+                job = _get_job(report_dir.name)
+                if job and _job_is_accessible(job, current_user):
+                    jobs_by_id[report_dir.name] = job
 
     return sorted(
         jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True
@@ -5339,6 +5382,55 @@ async def admin_remove_instructor_from_course(request: Request):
         logger.exception("Failed to remove instructor")
         return JSONResponse(
             status_code=500, content={"error": "Failed to remove instructor"}
+        )
+
+
+@app.get("/api/admin/retention")
+async def get_retention_settings(request: Request):
+    """Get the retention settings for the current tenant."""
+    current_user = _require_current_user(request, admin_only=True)
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant associated with user")
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        return JSONResponse(
+            content={
+                "retention_days": tenant.retention_days,
+                "tenant_id": tenant_id,
+            }
+        )
+
+
+@app.put("/api/admin/retention")
+async def update_retention_settings(request: Request):
+    """Update the retention settings for the current tenant."""
+    current_user = _require_current_user(request, admin_only=True)
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant associated with user")
+    payload = await request.json()
+    retention_days = payload.get("retention_days")
+    if retention_days is not None and (
+        not isinstance(retention_days, int) or retention_days < 0
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="retention_days must be a non-negative integer or null",
+        )
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        tenant.retention_days = retention_days
+        db.commit()
+        return JSONResponse(
+            content={
+                "retention_days": tenant.retention_days,
+                "tenant_id": tenant_id,
+            }
         )
 
 
@@ -6990,53 +7082,43 @@ async def _run_analysis(
 
         # Minimal DB wiring for upload flow — persist Job + Submission rows
         # (non-fatal; file-based storage remains primary for now)
-        try:
-            with SessionLocal() as db:
-                if not db.query(Job).filter(Job.id == job_id).first():
-                    tenant_id = _jobs[job_id].get("tenant_id")
-                    if not tenant_id:
-                        # Fallback for public/demo uploads (no logged-in user):
-                        # attribute the job to the first existing tenant so the new
-                        # hierarchy (assignment_id) and results pages can see the data.
-                        fallback = db.query(Tenant).first()
-                        if fallback:
-                            tenant_id = fallback.id
-                            _jobs[job_id]["tenant_id"] = tenant_id
+        # Persist Job + Submission rows to DB (mandatory — raises on failure)
+        with SessionLocal() as db:
+            if not db.query(Job).filter(Job.id == job_id).first():
+                tenant_id = _jobs[job_id].get("tenant_id")
+                if not tenant_id:
+                    fallback = db.query(Tenant).first()
+                    if fallback:
+                        tenant_id = fallback.id
+                        _jobs[job_id]["tenant_id"] = tenant_id
 
-                    if tenant_id:
-                        db_job = Job(
-                            id=job_id,
-                            tenant_id=tenant_id,
-                            assignment_id=_jobs[job_id].get("assignment_id"),
-                            name=_jobs[job_id].get("assignment_name")
-                            or f"Upload {job_id}",
-                            status=_db_job_status(
-                                _jobs[job_id].get("status", "analyzing")
-                            ),
-                            threshold=_jobs[job_id].get("threshold", 0.5),
-                            created_at=datetime.now(),
-                            total_submissions=len(submissions),
-                        )
-                        db.add(db_job)
-                        for sub_name in list(submissions.keys())[:100]:
-                            db.add(
-                                Submission(
-                                    id=str(uuid.uuid4()),
-                                    job_id=job_id,
-                                    name=sub_name,
-                                    file_count=1,
-                                    created_at=datetime.now(),
-                                )
+                if tenant_id:
+                    db_job = Job(
+                        id=job_id,
+                        tenant_id=tenant_id,
+                        assignment_id=_jobs[job_id].get("assignment_id"),
+                        name=_jobs[job_id].get("assignment_name") or f"Upload {job_id}",
+                        status=_db_job_status(_jobs[job_id].get("status", "analyzing")),
+                        threshold=_jobs[job_id].get("threshold", 0.5),
+                        created_at=datetime.now(),
+                        total_submissions=len(submissions),
+                    )
+                    db.add(db_job)
+                    for sub_name in list(submissions.keys())[:100]:
+                        db.add(
+                            Submission(
+                                id=str(uuid.uuid4()),
+                                job_id=job_id,
+                                name=sub_name,
+                                file_count=1,
+                                created_at=datetime.now(),
                             )
-                        db.commit()
-                    else:
-                        logger.warning(
-                            f"DB persist skipped for job {job_id} - no tenant available"
                         )
-        except Exception:
-            logger.warning(
-                f"DB persist skipped for job {job_id} (file storage still used)"
-            )
+                    db.commit()
+                else:
+                    logger.warning(
+                        f"DB persist skipped for job {job_id} - no tenant available"
+                    )
 
         all_pairs = _build_all_submission_pairs(submissions)
         external_tool_results = _run_selected_external_tools(
@@ -7193,6 +7275,21 @@ async def _run_analysis(
             ai_text_trust,
         )
 
+        # Track generated reports in the database
+        tenant_id = _jobs[job_id].get("tenant_id")
+        try:
+            _persist_report_record(
+                job_id, "originality", "html", str(html_report_path), tenant_id
+            )
+            _persist_report_record(
+                job_id, "originality", "json", str(json_report_path), tenant_id
+            )
+            _persist_report_record(
+                job_id, "committee", "html", str(committee_report_path), tenant_id
+            )
+        except SQLAlchemyError:
+            logger.warning("Failed to persist report records for job %s", job_id)
+
         _jobs[job_id].update(
             {
                 "status": "completed",
@@ -7229,58 +7326,73 @@ async def _run_analysis(
         _persist_job(job_id)
         _update_job_status_in_db(job_id, "completed")
 
-        # Persist SimilarityResult rows to DB (minimal wiring for results/[id] page)
-        try:
-            with SessionLocal() as db:
-                for r in results:
-                    external_ev = _external_evidence_for_pair(
-                        r.file_a, r.file_b, external_tool_results
-                    )
-                    mb = getattr(r, "matching_blocks", None) or getattr(
-                        r, "features", {}
-                    ).get("matching_blocks", [])
-                    conf = getattr(r, "confidence", None) or getattr(
-                        r, "confidence_level", None
-                    )
+        # Persist SimilarityResult rows to DB (mandatory — raises on failure)
+        with SessionLocal() as db:
+            for r in results:
+                external_ev = _external_evidence_for_pair(
+                    r.file_a, r.file_b, external_tool_results
+                )
+                mb = getattr(r, "matching_blocks", None) or getattr(
+                    r, "features", {}
+                ).get("matching_blocks", [])
+                conf = getattr(r, "confidence", None) or getattr(
+                    r, "confidence_level", None
+                )
 
-                    a_name, b_name = sorted([r.file_a, r.file_b])
+                a_name, b_name = sorted([r.file_a, r.file_b])
 
-                    db.add(
-                        SimilarityResult(
-                            id=str(uuid.uuid4()),
-                            job_id=job_id,
-                            submission_a_id=a_name,
-                            submission_b_id=b_name,
-                            similarity_score=r.score,
-                            confidence_level=conf,
-                            confidence_lower=getattr(r, "confidence_lower", None),
-                            confidence_upper=getattr(r, "confidence_upper", None),
-                            matching_blocks=mb if isinstance(mb, (list, dict)) else [],
-                            excluded_matches=getattr(r, "excluded_matches", None) or {},
-                            algorithm_scores={
-                                **dict(getattr(r, "features", {})),
-                                "external_evidence": external_ev or {},
-                                "contributions": dict(getattr(r, "contributions", {})),
-                            },
-                            created_at=datetime.now(),
-                        )
+                db.add(
+                    SimilarityResult(
+                        id=str(uuid.uuid4()),
+                        job_id=job_id,
+                        submission_a_id=a_name,
+                        submission_b_id=b_name,
+                        similarity_score=r.score,
+                        confidence_level=conf,
+                        confidence_lower=getattr(r, "confidence_lower", None),
+                        confidence_upper=getattr(r, "confidence_upper", None),
+                        matching_blocks=mb if isinstance(mb, (list, dict)) else [],
+                        excluded_matches=getattr(r, "excluded_matches", None) or {},
+                        algorithm_scores={
+                            **dict(getattr(r, "features", {})),
+                            "external_evidence": external_ev or {},
+                            "contributions": dict(getattr(r, "contributions", {})),
+                        },
+                        created_at=datetime.now(),
                     )
-                db.commit()
-        except Exception:
-            logger.exception(
-                f"DB results persist skipped for job {job_id}"
-            )  # shows full traceback in logs
+                )
+            db.commit()
 
         _update_job_status_in_db(job_id, "completed")
 
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
+    except SQLAlchemyError as e:
+        logger.exception(f"DB persistence failed for job {job_id}")
+        if job_id in _jobs:
+            _jobs[job_id][
+                "persistence_warning"
+            ] = f"Results may not be saved to database: {e!s}"
+            _persist_job(job_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "job_id": job_id,
+                "status": "completed",
+                "persistence_warning": f"Results may not be saved to database: {e!s}",
+            },
+        )
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
         if job_id in _jobs:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(e)
             _persist_job(job_id)
-            _update_job_status_in_db(job_id, "failed", str(e))
+            try:
+                _update_job_status_in_db(job_id, "failed", str(e))
+            except SQLAlchemyError:
+                logger.warning(
+                    "Could not update job status in DB after analysis failure"
+                )
         return JSONResponse(
             status_code=500, content={"error": f"Analysis failed: {e!s}"}
         )
@@ -7328,44 +7440,38 @@ async def update_job_review(job_id: str, request: Request):
 
     # Per-pair review persistence to database (SimilarityResult rows)
     if "pair_reviews" in payload and isinstance(payload.get("pair_reviews"), dict):
-        try:
-            with SessionLocal() as db:
-                for pair_key, review_data in payload["pair_reviews"].items():
-                    if not isinstance(review_data, dict):
-                        continue
-                    parts = (
-                        str(pair_key).split("::")
-                        if "::" in str(pair_key)
-                        else str(pair_key).split(":")
-                    )
-                    if len(parts) >= 2:
-                        a_id, b_id = sorted([parts[0], parts[1]])
-                        sim = (
-                            db.query(SimilarityResult)
-                            .filter(
-                                SimilarityResult.job_id == job_id,
-                                SimilarityResult.submission_a_id == a_id,
-                                SimilarityResult.submission_b_id == b_id,
-                            )
-                            .first()
+        with SessionLocal() as db:
+            for pair_key, review_data in payload["pair_reviews"].items():
+                if not isinstance(review_data, dict):
+                    continue
+                parts = (
+                    str(pair_key).split("::")
+                    if "::" in str(pair_key)
+                    else str(pair_key).split(":")
+                )
+                if len(parts) >= 2:
+                    a_id, b_id = sorted([parts[0], parts[1]])
+                    sim = (
+                        db.query(SimilarityResult)
+                        .filter(
+                            SimilarityResult.job_id == job_id,
+                            SimilarityResult.submission_a_id == a_id,
+                            SimilarityResult.submission_b_id == b_id,
                         )
-                        if sim:
-                            if (
-                                "status" in review_data
-                                or "review_status" in review_data
-                            ):
-                                sim.review_status = review_data.get(
-                                    "status"
-                                ) or review_data.get("review_status")
-                            if "notes" in review_data or "review_notes" in review_data:
-                                sim.review_notes = (
-                                    review_data.get("notes")
-                                    or review_data.get("review_notes")
-                                    or ""
-                                ).strip() or None
-                db.commit()
-        except Exception:
-            logger.warning(f"Failed to persist per-pair reviews for job {job_id}")
+                        .first()
+                    )
+                    if sim:
+                        if "status" in review_data or "review_status" in review_data:
+                            sim.review_status = review_data.get(
+                                "status"
+                            ) or review_data.get("review_status")
+                        if "notes" in review_data or "review_notes" in review_data:
+                            sim.review_notes = (
+                                review_data.get("notes")
+                                or review_data.get("review_notes")
+                                or ""
+                            ).strip() or None
+            db.commit()
 
     # Also reflect in in-memory results if present
     if (
@@ -8026,41 +8132,46 @@ def _persist_benchmark_response(response: dict[str, Any]) -> dict[str, Any]:
     history.insert(0, summary)
     _write_benchmark_history(history)
 
-    # Wire benchmark run metadata to DB (so benchmark/page.tsx + Admin can list/reload from DB)
-    try:
-        with SessionLocal() as db:
-            job_id = summary.get("job_id")
-            if job_id:
-                db_job = db.query(Job).filter(Job.id == job_id).first()
-                benchmark_settings = {
-                    "type": "benchmark",
-                    "dataset": summary.get("dataset"),
-                    "tools": summary.get("tools"),
-                    "summary": summary,
-                }
-                if not db_job:
-                    run_at = summary.get("run_at")
-                    try:
-                        created_at = (
-                            datetime.fromisoformat(run_at) if run_at else datetime.now()
-                        )
-                    except Exception:
-                        created_at = datetime.now()
-
-                    db_job = Job(
-                        id=job_id,
-                        name=f"Benchmark: {summary.get('dataset', 'unknown')}",
-                        status="completed",
-                        settings=benchmark_settings,
-                        created_at=created_at,
+    # Wire benchmark run metadata to DB (mandatory — raises on failure)
+    with SessionLocal() as db:
+        job_id = summary.get("job_id")
+        if job_id:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            benchmark_settings = {
+                "type": "benchmark",
+                "dataset": summary.get("dataset"),
+                "tools": summary.get("tools"),
+                "summary": summary,
+            }
+            if not db_job:
+                run_at = summary.get("run_at")
+                try:
+                    created_at = (
+                        datetime.fromisoformat(run_at) if run_at else datetime.now()
                     )
-                    db.add(db_job)
-                else:
-                    db_job.settings = {**(db_job.settings or {}), **benchmark_settings}
-                    db_job.status = "completed"
-                db.commit()
-    except Exception:
-        logger.warning(f"Failed to persist benchmark run {summary.get('job_id')} to DB")
+                except Exception:
+                    created_at = datetime.now()
+
+                tenant_id = _resolve_default_tenant_id(db)
+                if not tenant_id:
+                    logger.warning(
+                        "Benchmark persist skipped for %s — no tenant available", job_id
+                    )
+                    return response
+
+                db_job = Job(
+                    id=job_id,
+                    tenant_id=tenant_id,
+                    name=f"Benchmark: {summary.get('dataset', 'unknown')}",
+                    status="completed",
+                    settings=benchmark_settings,
+                    created_at=created_at,
+                )
+                db.add(db_job)
+            else:
+                db_job.settings = {**(db_job.settings or {}), **benchmark_settings}
+                db_job.status = "completed"
+            db.commit()
 
     return response
 
@@ -12290,6 +12401,37 @@ async def download_committee_report(request: Request, job_id: str):
     )
 
 
+@app.get("/api/jobs/{job_id}/reports")
+async def list_job_reports(job_id: str, request: Request):
+    """List all generated reports for a job."""
+    _require_job_access(job_id, request)
+    with SessionLocal() as db:
+        reports = (
+            db.query(Report)
+            .filter(Report.job_id == job_id)
+            .order_by(Report.generated_at.desc())
+            .all()
+        )
+        return JSONResponse(
+            content={
+                "reports": [
+                    {
+                        "id": r.id,
+                        "report_type": r.report_type,
+                        "format": r.format,
+                        "status": r.status,
+                        "file_path": r.file_path,
+                        "file_size_bytes": r.file_size_bytes,
+                        "generated_at": (
+                            r.generated_at.isoformat() if r.generated_at else None
+                        ),
+                    }
+                    for r in reports
+                ]
+            }
+        )
+
+
 @app.get("/report/{job_id}/download-pdf")
 async def download_report_pdf(job_id: str, request: Request):
     """Generate and return a PDF version of the originality report."""
@@ -15290,8 +15432,49 @@ async def validate_current_config():
     }
 
 
+def _cleanup_expired_jobs():
+    """Delete jobs older than each tenant's retention_days setting."""
+    import time
+
+    while True:
+        time.sleep(86400)  # Run once per day
+        try:
+            with SessionLocal() as db:
+                tenants = (
+                    db.query(Tenant).filter(Tenant.retention_days.isnot(None)).all()
+                )
+                for tenant in tenants:
+                    cutoff = datetime.now() - timedelta(days=tenant.retention_days)
+                    expired_jobs = (
+                        db.query(Job)
+                        .filter(
+                            Job.tenant_id == tenant.id,
+                            Job.created_at < cutoff,
+                            Job.status.in_(["completed", "failed", "cancelled"]),
+                        )
+                        .all()
+                    )
+                    for job in expired_jobs:
+                        db.delete(job)
+                    if expired_jobs:
+                        db.commit()
+                        logger.info(
+                            "Cleaned up %d expired jobs for tenant %s",
+                            len(expired_jobs),
+                            tenant.id,
+                        )
+        except Exception:
+            logger.exception("Job cleanup worker error")
+
+
 def main():
     import uvicorn
+    import threading
+
+    cleanup_thread = threading.Thread(
+        target=_cleanup_expired_jobs, daemon=True, name="job-cleanup-worker"
+    )
+    cleanup_thread.start()
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("BACKEND_PORT", "8000")))
 

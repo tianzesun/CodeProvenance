@@ -38,6 +38,7 @@ class Tenant(Base):
     concurrent_job_limit = Column(Integer, nullable=True)
     max_payload_mb = Column(Integer, nullable=True)
     rate_limit_per_minute = Column(Integer, nullable=True)
+    retention_days = Column(Integer, nullable=True, default=365)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
         TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
@@ -160,6 +161,7 @@ class Job(Base):
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
+    persistence_warning = Column(Text, nullable=True)
 
     tenant = relationship("Tenant", back_populates="jobs")
     assignment = relationship("Assignment", back_populates="jobs")
