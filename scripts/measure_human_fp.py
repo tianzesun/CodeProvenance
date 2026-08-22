@@ -41,7 +41,11 @@ def _iter_kaggle_student(dataset_root: Path) -> list[tuple[str, str, str]]:
     if not root.exists():
         return []
     return [
-        ("kaggle_student_code", path.name, path.read_text(encoding="utf-8", errors="replace"))
+        (
+            "kaggle_student_code",
+            path.name,
+            path.read_text(encoding="utf-8", errors="replace"),
+        )
         for path in sorted(root.glob("*.py"))
     ]
 
@@ -64,7 +68,9 @@ def _iter_ir_plag_originals(dataset_root: Path) -> list[tuple[str, str, str]]:
     return items
 
 
-def _iter_poolc_sample(dataset_root: Path, sample_size: int) -> list[tuple[str, str, str]]:
+def _iter_poolc_sample(
+    dataset_root: Path, sample_size: int
+) -> list[tuple[str, str, str]]:
     """Yield (corpus, name, code) for a deterministic PoolC code1 sample."""
     import pyarrow.parquet as pq
 
@@ -106,35 +112,66 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--poolc-n", type=int, default=100)
     parser.add_argument("--out", default="reports/human_fp")
+    parser.add_argument(
+        "--corpora",
+        nargs="*",
+        default=None,
+        help="Restrict to named corpora (kaggle_student_code, ir_plag_originals, "
+        "poolc_sample); default runs all",
+    )
+    parser.add_argument(
+        "--dump-scores",
+        action="store_true",
+        help="Also write per-file scores (name, lines, probability) for analysis",
+    )
     args = parser.parse_args()
 
     dataset_root = REPO_ROOT / "data" / "datasets"
-    items = [
+    everything = [
         *_iter_kaggle_student(dataset_root),
         *_iter_ir_plag_originals(dataset_root),
         *_iter_poolc_sample(dataset_root, args.poolc_n),
     ]
+    items = [i for i in everything if not args.corpora or i[0] in args.corpora]
     if not items:
         print("No human corpora found under", dataset_root)
         return 1
 
     detector = AIDetectionOrchestrator()
     by_corpus: dict[str, list[float]] = {}
+    per_file: list[dict[str, object]] = []
     started = time.time()
     for index, (corpus, name, code) in enumerate(items, start=1):
         language = "java" if name.endswith(".java") else "python"
         result = detector.analyze(code, language=language)
-        by_corpus.setdefault(corpus, []).append(float(result["ai_probability"]))
+        probability = float(result["ai_probability"])
+        by_corpus.setdefault(corpus, []).append(probability)
+        per_file.append(
+            {
+                "corpus": corpus,
+                "name": name,
+                "lines": code.count("\n") + 1,
+                "chars": len(code),
+                "ai_probability": probability,
+            }
+        )
         if index % 20 == 0 or index == len(items):
-            print(f"scored {index}/{len(items)} in {time.time() - started:.0f}s", flush=True)
+            print(
+                f"scored {index}/{len(items)} in {time.time() - started:.0f}s",
+                flush=True,
+            )
 
     report = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "detector": "AIDetectionOrchestrator (production safe-blend)",
         "thresholds": list(THRESHOLDS),
-        "corpora": {corpus: _summarize(scores) for corpus, scores in sorted(by_corpus.items())},
+        "corpora": {
+            corpus: _summarize(scores) for corpus, scores in sorted(by_corpus.items())
+        },
         "runtime_seconds": round(time.time() - started, 1),
     }
+    if args.dump_scores:
+        report["per_file"] = per_file
 
     out_dir = REPO_ROOT / args.out
     out_dir.mkdir(parents=True, exist_ok=True)

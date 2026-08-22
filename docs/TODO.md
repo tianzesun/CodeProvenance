@@ -1,5 +1,10 @@
 # CodeGuard Pro - Tasks to Make This Software Great
 
+> **STATUS (2026-08-22):** This is the original 48-week roadmap, kept for
+> reference. Much of Priorities 1–5 is built, and current work is tracked in
+> `docs/CURRENT_FOCUS.md` + `docs/AI_DETECTOR_VS_TURNITIN.md` (honest gaps) —
+> check those and `git log` before planning from this file.
+
 **Last Updated**: 2026-03-31  
 **Purpose**: Comprehensive task list for building the world's best code plagiarism detection system
 

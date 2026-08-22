@@ -60,3 +60,34 @@ precision regressions.
    (`docs/STUDENT_DATA_REQUEST_PACK.md`); the pipeline is proven end-to-end
    (ingestion round-trips exactly, grouped benchmark runs on custom dataset
    dirs).
+
+## Per-file deep-dive (2026-08-22, kaggle corpus, 174 files)
+
+`scripts/measure_human_fp.py --dump-scores` persisted per-file probabilities;
+findings from the rerun:
+
+| Length bucket | n | mean | FP@0.40 | FP@0.50 | FP@0.70 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1–20 lines | 43 | 0.434 | 37.2% | 37.2% | **37.2%** |
+| 21–50 | 106 | 0.450 | 50.0% | 45.3% | 19.8% |
+| 51–100 | 25 | 0.401 | 52.0% | 16.0% | **0.0%** |
+
+- **Raw length is not the driver** (correlation lines↔score = 0.095). The
+  high-band flags concentrate in short files, but the mechanism is style.
+- **The ≥0.75 cluster is 24 files (14% of the corpus), all 13–37 lines, and
+  several score an identical 0.81** — same-assignment solutions producing the
+  same signal profile. Spot-checks show textbook tutorial-style code: sklearn
+  pipelines, psutil utilities, uniformly commented, consistently structured.
+  This is human code that is *stylistically indistinguishable* from AI output
+  — the exact boundary where a detector based on style regularity must fail.
+- **51–100-line files flag 0% at the high band** despite 52% at the medium
+  band: longer student work degrades gracefully (medium concern, review) —
+  short template-style work gets confidently wrong.
+
+**Consequence for mitigation:** a length-based "short submission" uncertainty
+annotation was considered and **rejected on this evidence** — length is a
+crude proxy for the actual driver (template-style regularity), and moving
+bands or annotations on an unlabelled corpus would repeat the calibration
+guesswork this baseline exists to end. The band-relative caveats already
+shipped in-product carry the honest message; the labelled institutional
+holdout decides any band change.
