@@ -10,28 +10,28 @@
     "coverage"
   ],
   "coefficients": [
-    -2.71537550284654,
-    -2.126945142815265,
-    -0.449739169332091,
-    1.8581117596233359,
-    4.2089619255013035,
-    1.4610990783270907,
-    2.4242742349681436
+    -2.937011405055441,
+    -2.0419150256310985,
+    -0.1915566272962189,
+    2.1749715949003225,
+    4.75866004972048,
+    1.0765494781973532,
+    2.2389080630949847
   ],
-  "intercept": -2.0473305598114564,
+  "intercept": -2.1680544144376586,
   "metadata": {
-    "trained_at": "2026-08-19T15:18:57",
+    "trained_at": "2026-08-22T15:04:06",
     "datasets": [
       "IR-Plag-Dataset",
       "conplag"
     ],
-    "pair_count": 1141,
-    "positive_pairs": 541,
-    "negative_pairs": 600,
-    "logo_auc_roc": 0.8673,
-    "production_fused_auc_roc": 0.8145,
+    "pair_count": 1371,
+    "positive_pairs": 606,
+    "negative_pairs": 765,
+    "logo_auc_roc": 0.865,
+    "production_fused_auc_roc": 0.809,
     "model": "LogisticRegression(class_weight=balanced)",
-    "logo_best_f1": 0.7916,
+    "logo_best_f1": 0.7803,
     "logo_best_threshold": 0.48,
     "logo_notes": "leave-one-case/problem-out across IR-Plag + conplag",
     "feature_count": 7
