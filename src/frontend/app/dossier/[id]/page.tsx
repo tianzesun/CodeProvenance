@@ -9,6 +9,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Bot,
+  FileDown,
   GitCompare,
   Globe,
   HelpCircle,
@@ -140,13 +141,24 @@ export default function EvidenceDossierPage() {
               peer similarity and public-source matches.
             </p>
           </div>
-          <Link
-            href={`/results/${dossier.job_id}`}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            <ArrowLeft size={14} />
-            Back to results
-          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/dossier/${dossier.job_id}/download-pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <FileDown size={14} />
+              Download PDF
+            </a>
+            <Link
+              href={`/results/${dossier.job_id}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <ArrowLeft size={14} />
+              Back to results
+            </Link>
+          </div>
         </div>
 
         <div className="mb-6 flex flex-wrap gap-2 text-xs">

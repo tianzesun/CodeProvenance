@@ -7567,6 +7567,76 @@ async def get_job_evidence_dossier(job_id: str, request: Request):
     return JSONResponse(content=EvidenceDossierService().build(job))
 
 
+@app.get("/dossier/{job_id}/download-pdf")
+async def download_dossier_pdf(job_id: str, request: Request):
+    """Generate and return a PDF version of the evidence dossier.
+
+    Checks the reports table for a cached PDF first. If not found, builds the
+    dossier from live job data, renders print-ready HTML, converts to PDF,
+    saves to disk, tracks in DB, and serves.
+    """
+    _require_job_access(job_id, request)
+
+    cached = _resolve_cached_report(job_id, "dossier", "pdf")
+    if cached:
+        return FileResponse(
+            str(cached),
+            media_type="application/pdf",
+            filename=f"integritydesk_dossier_{job_id}.pdf",
+        )
+
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from src.backend.evaluation.evidence_dossier import EvidenceDossierService
+    from src.backend.infrastructure.reporting.dossier_pdf_exporter import (
+        DossierPdfExporter,
+    )
+
+    dossier = EvidenceDossierService().build(job)
+    exporter = DossierPdfExporter()
+
+    try:
+        pdf_bytes = exporter.export_pdf(dossier)
+    except ImportError:
+        logger.warning(
+            "weasyprint not available, returning print-ready dossier HTML for %s",
+            job_id,
+        )
+        html_content = exporter.render_html(dossier)
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={
+                "Content-Disposition": (
+                    f'inline; filename="integritydesk_dossier_{job_id}.html"'
+                ),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    pdf_path = REPORTS_DIR / job_id / f"dossier_{job_id}.pdf"
+    try:
+        _atomic_write(pdf_path, pdf_bytes)
+    except Exception as write_err:
+        logger.warning(
+            "Failed to write dossier PDF to disk for %s: %s", job_id, write_err
+        )
+    else:
+        try:
+            _persist_report_record(job_id, "dossier", "pdf", str(pdf_path))
+        except SQLAlchemyError:
+            logger.warning("Failed to cache dossier PDF report record for job %s", job_id)
+
+    response = Response(content=pdf_bytes, media_type="application/pdf")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="integritydesk_dossier_{job_id}.pdf"'
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.patch("/api/job/{job_id}/review")
 async def update_job_review(job_id: str, request: Request):
     job = _require_job_access(job_id, request)
