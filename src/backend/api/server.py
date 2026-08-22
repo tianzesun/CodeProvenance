@@ -7234,11 +7234,15 @@ async def _run_analysis(
         with SessionLocal() as db:
             if not db.query(Job).filter(Job.id == job_id).first():
                 tenant_id = _jobs[job_id].get("tenant_id")
-                if not tenant_id and current_user:
+                if not tenant_id:
                     fallback = db.query(Tenant).first()
-                    if fallback:
-                        tenant_id = fallback.id
-                        _jobs[job_id]["tenant_id"] = tenant_id
+                    if not fallback:
+                        # Fresh deployment: no tenant exists yet, but jobs.tenant_id
+                        # is NOT NULL — create the default workspace so the job
+                        # (and the submissions below) can persist.
+                        fallback = _create_tenant(db, "Default Workspace")
+                    tenant_id = fallback.id
+                    _jobs[job_id]["tenant_id"] = tenant_id
 
                 db_job = Job(
                     id=job_id,
@@ -12632,10 +12636,11 @@ def _require_current_user(request: Request, admin_only: bool = False) -> dict[st
 def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
     # Deny access if no user is authenticated (except for guest jobs)
     if user is None:
-        # Allow access only to guest jobs (no owner, no tenant)
+        # Guest access applies to unowned jobs. Jobs persisted to the DB always
+        # carry a tenant (jobs.tenant_id is NOT NULL — guest uploads join the
+        # default workspace), so ownership, not tenancy, marks a guest job.
         owner_user_id = str(job.get("owner_user_id") or "")
-        tenant_id = str(job.get("tenant_id") or "")
-        return bool(not owner_user_id and not tenant_id)
+        return not owner_user_id
 
     if user.get("role") == "admin":
         return True
