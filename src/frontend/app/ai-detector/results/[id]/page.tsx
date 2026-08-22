@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   Bot,
   ChevronDown,
@@ -384,6 +385,24 @@ export default function AIDetectorReportPage() {
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [fpBaseline, setFpBaseline] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get('/api/ai-detect/accuracy')
+      .then((res) => {
+        if (!cancelled && res.data?.human_fp_baseline?.corpora) {
+          setFpBaseline(res.data.human_fp_baseline);
+        }
+      })
+      .catch(() => {
+        /* the caveat banner is optional context, never a page error */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -455,6 +474,23 @@ export default function AIDetectorReportPage() {
     <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-6">
+          {fpBaseline && (
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Measured on real student code: this detector flags{' '}
+                {Math.round(
+                  (fpBaseline.corpora?.kaggle_student_code?.['fp_at_0.70'] ?? 0) * 100,
+                )}
+                % of human novice submissions at the high band and{' '}
+                {Math.round(
+                  (fpBaseline.corpora?.kaggle_student_code?.['fp_at_0.40'] ?? 0) * 100,
+                )}
+                % at the medium band. Scores below are screening signals for a human
+                conversation — never proof.
+              </span>
+            </div>
+          )}
 
           {/* Header card */}
           <section className="theme-card-strong rounded-[30px] overflow-hidden">

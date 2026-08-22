@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from src.backend.engines.ai.fp_baseline import band_caveat
+
 logger = logging.getLogger(__name__)
 
 # Severity bands, aligned with the server's AI thresholds and report bands.
@@ -177,7 +179,7 @@ class EvidenceDossierService:
                     severity=severity,
                     title=f"AI likelihood {(dossier.ai_probability or 0.0):.0%}"
                     f" ({ai_entry.get('status') or 'scored'})",
-                    detail=self._ai_detail(ai_entry),
+                    detail=self._ai_detail(ai_entry, severity),
                 )
             )
 
@@ -230,8 +232,12 @@ class EvidenceDossierService:
         return dossier
 
     @staticmethod
-    def _ai_detail(ai_entry: dict[str, Any]) -> str:
-        """Human-readable summary of the AI detection evidence."""
+    def _ai_detail(ai_entry: dict[str, Any], severity: str = "low") -> str:
+        """Human-readable summary of the AI detection evidence.
+
+        Medium/high severity detail carries the measured student-code
+        false-positive caveat so no reader mistakes the score for a verdict.
+        """
         regions = ai_entry.get("flagged_regions") or []
         top_region = regions[0] if regions else None
         parts = []
@@ -243,7 +249,12 @@ class EvidenceDossierService:
         indicators = ai_entry.get("indicators") or []
         if indicators:
             parts.append("; ".join(str(i) for i in indicators[:2]))
-        return "; ".join(parts) or "statistical signal profile"
+        detail = "; ".join(parts) or "statistical signal profile"
+        if severity in ("high", "medium"):
+            caveat = band_caveat(severity)
+            if caveat:
+                detail = f"{detail}; {caveat}"
+        return detail
 
     @staticmethod
     def _peer_similarity_by_name(

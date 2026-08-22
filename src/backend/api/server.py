@@ -6868,6 +6868,7 @@ async def get_ai_detection_accuracy():
     has not been built/benchmarked.
     """
     from src.backend.engines.ai.ensemble import AIEnsembleConfig
+    from src.backend.engines.ai.fp_baseline import load_human_fp_baseline
 
     config = AIEnsembleConfig()
     reports = {
@@ -6891,6 +6892,7 @@ async def get_ai_detection_accuracy():
                 ),
                 "default_engine": "heuristic (ML disabled unless classification.enabled)",
             },
+            "human_fp_baseline": load_human_fp_baseline(),
             "reports": reports,
             "available": any(reports.values()),
         }

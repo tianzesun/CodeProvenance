@@ -243,6 +243,75 @@ function StatBadge({ label, value, on }) {
   );
 }
 
+function HumanFpBaseline({ baseline }) {
+  const student = baseline?.corpora?.kaggle_student_code;
+  if (!student) return null;
+  const rows = Object.entries(baseline.corpora || {});
+  return (
+    <section className="theme-card-strong rounded-[30px] overflow-hidden">
+      <div className="theme-section-line px-6 py-5 lg:px-7">
+        <div className="inline-flex items-center gap-2 rounded-full border border-amber-600/10 bg-amber-500/[0.08] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-700">
+          <AlertTriangle size={13} />
+          Measured on real student code
+        </div>
+        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
+          Human-code false positives
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+          The production detector was run over known-human code. On {student.count}{' '}
+          real novice student Python submissions,{' '}
+          <strong className="text-amber-700">
+            {Math.round((student['fp_at_0.70'] ?? 0) * 100)}% score in the high band (≥ 0.70)
+          </strong>{' '}
+          and{' '}
+          <strong className="text-amber-700">
+            {Math.round((student['fp_at_0.40'] ?? 0) * 100)}% in the medium band (≥ 0.40)
+          </strong>{' '}
+          — while experienced/community human code scores 0%. Treat every AI score as a
+          screening signal for a human conversation, never as a verdict.
+        </p>
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">
+              <tr>
+                <th className="pb-2 pr-4 font-medium">Corpus (all human)</th>
+                <th className="pb-2 pr-4 font-medium">n</th>
+                <th className="pb-2 pr-4 font-medium">FP ≥ 0.40</th>
+                <th className="pb-2 pr-4 font-medium">FP ≥ 0.50</th>
+                <th className="pb-2 font-medium">FP ≥ 0.70</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {rows.map(([name, c]) => (
+                <tr key={name}>
+                  <td className="py-2 pr-4 text-[var(--text-primary)]">
+                    {c.description || name}
+                  </td>
+                  <td className="py-2 pr-4 text-[var(--text-secondary)]">{c.count}</td>
+                  <td className="py-2 pr-4 text-[var(--text-secondary)]">
+                    {Math.round((c['fp_at_0.40'] ?? 0) * 100)}%
+                  </td>
+                  <td className="py-2 pr-4 text-[var(--text-secondary)]">
+                    {Math.round((c['fp_at_0.50'] ?? 0) * 100)}%
+                  </td>
+                  <td className="py-2 font-medium text-amber-700">
+                    {Math.round((c['fp_at_0.70'] ?? 0) * 100)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-[var(--text-secondary)]">
+          {(baseline.caveats || []).map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
 export default function AIDetectionAccuracyPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -306,6 +375,8 @@ export default function AIDetectionAccuracyPage() {
               </div>
             </div>
           </section>
+
+          {data?.human_fp_baseline && <HumanFpBaseline baseline={data.human_fp_baseline} />}
 
           {error && (
             <section className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">

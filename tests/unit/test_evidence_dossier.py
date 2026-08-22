@@ -267,3 +267,34 @@ class TestVivaOutcomeMerge:
             viva_outcomes=[{"submission_name": "ghost.py", "outcome": "inconclusive"}],
         )
         assert all(student["viva_outcome"] is None for student in dossier["students"])
+
+
+class TestAiEvidenceFpCaveat:
+    """AI evidence carries the measured student-code FP caveat by band."""
+
+    def test_high_band_detail_carries_caveat(self):
+        """High-severity AI evidence cites the measured high-band FP rate."""
+        dossier = EvidenceDossierService().build(_job_payload())
+        ai_evidence = [
+            item
+            for student in dossier["students"]
+            for item in student["evidence"]
+            if item["type"] == "ai_detection"
+        ]
+        high = [item for item in ai_evidence if item["severity"] == "high"]
+        assert high, "fixture must contain high-severity AI evidence"
+        assert any(
+            "human submissions score in this band" in item["detail"] for item in high
+        )
+
+    def test_low_band_detail_has_no_caveat(self):
+        """Low-severity AI evidence stays clean of FP warnings."""
+        dossier = EvidenceDossierService().build(_job_payload())
+        low = [
+            item
+            for student in dossier["students"]
+            for item in student["evidence"]
+            if item["type"] == "ai_detection" and item["severity"] == "low"
+        ]
+        assert low, "fixture must contain low-severity AI evidence"
+        assert all("human submissions" not in item["detail"] for item in low)

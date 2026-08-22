@@ -1,0 +1,42 @@
+{
+  "measured_at": "2026-08-22T16:15:32",
+  "method": "scripts/measure_human_fp.py — production AIDetectionOrchestrator (safe-blend) over known-human corpora",
+  "reference_doc": "docs/HUMAN_FP_BASELINE.md",
+  "raw_report": "reports/human_fp/human_fp_report_20260822_161532.json",
+  "corpora": {
+    "kaggle_student_code": {
+      "description": "Real novice student Python submissions (Kaggle corpus)",
+      "count": 174,
+      "mean": 0.4387,
+      "median": 0.373,
+      "p90": 0.761,
+      "max": 0.812,
+      "fp_at_0.40": 0.4713,
+      "fp_at_0.50": 0.3908,
+      "fp_at_0.70": 0.2126
+    },
+    "ir_plag_originals": {
+      "description": "Human student Java originals (IR-Plag cases)",
+      "count": 7,
+      "fp_at_0.40": 0.0,
+      "fp_at_0.50": 0.0,
+      "fp_at_0.70": 0.0
+    },
+    "poolc_sample": {
+      "description": "Human community Python (PoolC contrast sample)",
+      "count": 100,
+      "fp_at_0.40": 0.0,
+      "fp_at_0.50": 0.0,
+      "fp_at_0.70": 0.0
+    }
+  },
+  "caveats": [
+    "Kaggle corpus is human by dataset construction, not per-file ground truth",
+    "Single corpus, Python-only; IR-Plag originals are Java and few (n=7)",
+    "Binoculars layer absent (falls back to heuristics, same as default deployment)"
+  ],
+  "band_caveats": {
+    "high": "On real student code, ~21% of human submissions score in this band (>= 0.70)",
+    "medium": "On real student code, ~47% of human submissions score in this band (>= 0.40)"
+  }
+}
