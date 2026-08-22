@@ -15,7 +15,11 @@ Input (choose one):
    autodetected from the filename (``.csv`` or ``.jsonl``).
 2. **Folder layout** with an ``ai/`` and ``human/`` directory; every source file
    becomes one sample. ``problem_id`` is derived from a ``problem.txt`` next to
-   the file when present, else from the file stem.
+   the file when present, else from the file stem. When the folder already
+   carries a materialised ``samples.jsonl`` index (the output layout of this
+   tool, or AIGCodeSet itself), its ``problem_id`` / ``llm`` / ``submission_id``
+   are reused so re-ingesting a dataset round-trips exactly; the folder
+   position stays the label authority.
 
 Output: a new dataset directory (``--output``) laid out exactly like the
 AIGCodeSet build so the benchmark consumes it with identical grouped-holdout
@@ -137,10 +141,38 @@ def _problem_id_for_file(path: Path) -> str:
     return path.stem
 
 
+def _load_folder_index(path: Path) -> dict[str, dict[str, Any]]:
+    """Map source file basename → metadata from a sibling ``samples.jsonl``.
+
+    A folder that already carries a materialised index (the output layout of
+    this tool, or AIGCodeSet itself) keeps its canonical ``problem_id`` /
+    ``llm`` / ``submission_id`` this way instead of having them re-derived
+    from file stems, so re-ingesting a dataset round-trips exactly. The
+    ai/ vs human/ folder position remains the label authority.
+    """
+    index_path = path / "samples.jsonl"
+    if not index_path.exists():
+        return {}
+    index: dict[str, dict[str, Any]] = {}
+    for line in index_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed index row in %s", index_path)
+            continue
+        name = row.get("file")
+        if name:
+            index[Path(str(name)).name] = row
+    return index
+
+
 def _records_from_folder(path: Path) -> dict[str, Any]:
     """Ingest an ``ai/`` + ``human/`` folder layout into labelled records."""
     records = []
     label_map = {"ai": 1, "human": 0}
+    index = _load_folder_index(path)
     for label_dir, label in label_map.items():
         root = path / label_dir
         if not root.is_dir():
@@ -152,13 +184,15 @@ def _records_from_folder(path: Path) -> dict[str, Any]:
             if len(code) < MIN_CODE_CHARS:
                 continue
             relative = source.relative_to(path)
+            meta = index.get(source.name, {})
             records.append(
                 {
                     "code": code,
                     "label": label,
-                    "problem_id": _problem_id_for_file(source),
-                    "llm": "STUDENT",
-                    "submission_id": str(relative),
+                    "problem_id": meta.get("problem_id")
+                    or _problem_id_for_file(source),
+                    "llm": (meta.get("llm") or "STUDENT").upper(),
+                    "submission_id": str(meta.get("submission_id") or relative),
                 }
             )
     return {"source": f"folder:{path}", "records": records}

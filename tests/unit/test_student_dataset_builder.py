@@ -206,3 +206,86 @@ class TestBenchmarkDatasetDir:
         assert len(codes) == 2
         assert set(labels) == {0, 1}
         assert all(llm == "STUDENT" for llm in llms)
+
+
+class TestFolderIndexRoundTrip:
+    """A folder carrying a materialised samples.jsonl index round-trips."""
+
+    def test_index_metadata_is_reused(self, tmp_path: Path) -> None:
+        """problem_id/llm/submission_id come from the sibling index."""
+        folder = tmp_path / "dataset_data"
+        (folder / "ai").mkdir(parents=True)
+        (folder / "human").mkdir(parents=True)
+        (folder / "ai" / "gen_a.py").write_text(AI_CODE, encoding="utf-8")
+        (folder / "human" / "gen_b.py").write_text(HUMAN_CODE, encoding="utf-8")
+        (folder / "samples.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "file": "gen_a.py",
+                            "label": 1,
+                            "problem_id": "p-canonical-ai",
+                            "llm": "GEMINI",
+                            "submission_id": "s-ai-1",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "file": "gen_b.py",
+                            "label": 0,
+                            "problem_id": "p-canonical-human",
+                            "llm": "HUMAN",
+                            "submission_id": "s-human-1",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        out = tmp_path / "out"
+        builder.materialise(folder, out)
+        meta = _read_meta(out)
+        by_problem = {entry["problem_id"]: entry for entry in meta}
+        assert set(by_problem) == {"p-canonical-ai", "p-canonical-human"}
+        assert by_problem["p-canonical-ai"]["llm"] == "GEMINI"
+        assert by_problem["p-canonical-ai"]["submission_id"] == "s-ai-1"
+
+    def test_folder_position_still_decides_label(self, tmp_path: Path) -> None:
+        """A contradictory index label never overrides the ai/ vs human/ dir."""
+        folder = tmp_path / "dataset_data"
+        (folder / "ai").mkdir(parents=True)
+        (folder / "ai" / "gen_a.py").write_text(AI_CODE, encoding="utf-8")
+        (folder / "samples.jsonl").write_text(
+            json.dumps({"file": "gen_a.py", "label": 0, "problem_id": "p1"}) + "\n",
+            encoding="utf-8",
+        )
+
+        out = tmp_path / "out"
+        builder.materialise(folder, out)
+        meta = _read_meta(out)
+        assert len(meta) == 1
+        assert meta[0]["label"] == 1
+
+    def test_reingestion_preserves_grouping(self, tmp_path: Path) -> None:
+        """materialise(output) keeps every (problem, label, llm, submission) key."""
+        folder = tmp_path / "labelled"
+        (folder / "ai").mkdir(parents=True)
+        (folder / "human").mkdir(parents=True)
+        (folder / "ai" / "gen_a.py").write_text(AI_CODE, encoding="utf-8")
+        (folder / "human" / "gen_b.py").write_text(HUMAN_CODE, encoding="utf-8")
+        first = tmp_path / "first"
+        builder.materialise(folder, first)
+
+        second = tmp_path / "second"
+        builder.materialise(first / "data", second)
+
+        def grouping(rows):
+            return {
+                (e["problem_id"], e["label"], e["llm"], e["submission_id"])
+                for e in rows
+            }
+
+        assert grouping(_read_meta(first)) == grouping(_read_meta(second))

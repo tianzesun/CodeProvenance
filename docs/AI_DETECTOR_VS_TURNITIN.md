@@ -51,7 +51,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 | 12 | Language coverage (detection) | **PARTIAL** | prose: English + others | — | Frontend advertises `.kt`/`.swift`; signals are Python-weighted (AST extractor tuned for Python; other languages fall back to generic signals). **2026-08-14:** tree-sitter AST now parses all advertised languages (Python/Java/C/C++/C#/JS/TS/Go/Rust); fixed TypeScript loader resolving `language_typescript` (was silently falling back to lexical). Kotlin/Swift remain lexical-only (bindings not installed). |
 | 13 | Non-native-English / L2 caveat handling | MISSING (n/a, code) | **LIVE** (documented L2 limitation) | BEST | For code the analogue is "non-expert student style"; not modeled. |
 | 14 | Adversarial / obfuscation resistance testing | **MISSING** | partial | par | No test suite for paraphrasing/refactoring/comment-stripping attacks on our detector. |
-| 15 | Published false-positive-rate targets | **DISABLED** (numbers exist, not surfaced) | **LIVE** (<1% claimed at ≥20% AI; independent: 5–20%) | par | Our real FP numbers exist in `data/datasets/aigcodeset/benchmark_report.json`; not shown in product until the benchmark page ships. |
+| 15 | Published false-positive-rate targets | **PARTIAL** (measured, doc-published) | **LIVE** (<1% claimed at ≥20% AI; independent: 5–20%) | par | Human-code FP now measured and published honestly (`docs/HUMAN_FP_BASELINE.md`): 21% of novice student Python flags at the 0.70 high band, 0% on community code. Not yet surfaced inside the product UI. |
 | 16 | External holdout beyond one dataset | **DISABLED** | **LIVE** | par | We rely on AIGCodeSet (single dataset, competitive-programming style). FPR validation UI exists (`/tools/fpr-validation`). |
 | 17 | Score-as-signal framing (not proof) | **LIVE** | **LIVE** | BEST | Both explicitly tell users not to treat scores as sole basis for action. |
 | 18 | Binoculars / open detection SOTA | MISSING (not installed) | n/a | optional | Not installed in `requirements.txt`. |
@@ -86,6 +86,13 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
    (2026-08-14):** the upload page now qualifies that Kotlin/Swift get lexical +
    statistical signals only (no AST-structure signal) and treats those results
    as review indicators.
+7. **Measured student-code FP is high (2026-08-22).** Running the live
+   safe-blend over 174 real novice student Python submissions (Kaggle corpus)
+   flags **21% at the 0.70 high band and 47% at the 0.40 medium band**
+   (`docs/HUMAN_FP_BASELINE.md`) — while community/expert human code scores
+   0% FP. The weakness is concentrated on exactly the production input
+   distribution. Threshold/banding decisions now have a live number to answer
+   to; the labelled institutional holdout remains the decisive measurement.
 
 ## What we did about this (this work item)
 
