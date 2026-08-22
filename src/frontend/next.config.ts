@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
     return [
       { source: '/api/:path*', destination: `${backendOrigin}/api/:path*` },
       { source: '/report/:path*', destination: `${backendOrigin}/report/:path*` },
+      { source: '/dossier/:path*', destination: `${backendOrigin}/dossier/:path*` },
     ];
   },
   async headers() {
