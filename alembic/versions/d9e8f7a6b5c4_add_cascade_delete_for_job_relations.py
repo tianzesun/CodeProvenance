@@ -13,58 +13,54 @@ migration, update its alembic_version row to ``d9e8f7a6b5c4``.
 """
 
 from alembic import op
+from sqlalchemy import text
 
 revision = "d9e8f7a6b5c4"
 down_revision = "82ef12542137"
 branch_labels = None
 depends_on = None
 
+# (table, constraint, fk column) — the job-FK each statement pair retargets.
+CASCADE_TARGETS = [
+    ("reports", "reports_job_id_fkey", "job_id"),
+    ("notifications", "notifications_related_job_id_fkey", "related_job_id"),
+    ("behavioral_sessions", "behavioral_sessions_job_id_fkey", "job_id"),
+    ("timeline_events", "timeline_events_job_id_fkey", "job_id"),
+]
+
+
+def _existing_tables() -> set:
+    """Tables currently present in the public schema.
+
+    timeline_events is created by Base.metadata.create_all() on live
+    deployments but by no migration, so a from-scratch chain must skip it
+    here rather than fail with "relation ... does not exist".
+    """
+    rows = (
+        op.get_bind()
+        .execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+        .fetchall()
+    )
+    return {row[0] for row in rows}
+
+
+def _retarget(on_delete: str) -> None:
+    """Swap each job FK to the given delete rule, skipping missing tables."""
+    present = _existing_tables()
+    for table, constraint, column in CASCADE_TARGETS:
+        if table not in present:
+            continue
+        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}")
+        rule = f" ON DELETE {on_delete}" if on_delete else ""
+        op.execute(
+            f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+            f"FOREIGN KEY ({column}) REFERENCES jobs(id){rule}"
+        )
+
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_job_id_fkey")
-    op.execute(
-        "ALTER TABLE reports ADD CONSTRAINT reports_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE"
-    )
-    op.execute(
-        "ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_related_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE notifications ADD CONSTRAINT notifications_related_job_id_fkey FOREIGN KEY (related_job_id) REFERENCES jobs(id) ON DELETE CASCADE"
-    )
-    op.execute(
-        "ALTER TABLE behavioral_sessions DROP CONSTRAINT IF EXISTS behavioral_sessions_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE behavioral_sessions ADD CONSTRAINT behavioral_sessions_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE"
-    )
-    op.execute(
-        "ALTER TABLE timeline_events DROP CONSTRAINT IF EXISTS timeline_events_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE timeline_events ADD CONSTRAINT timeline_events_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE"
-    )
+    _retarget("CASCADE")
 
 
 def downgrade() -> None:
-    op.execute(
-        "ALTER TABLE timeline_events DROP CONSTRAINT IF EXISTS timeline_events_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE timeline_events ADD CONSTRAINT timeline_events_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id)"
-    )
-    op.execute(
-        "ALTER TABLE behavioral_sessions DROP CONSTRAINT IF EXISTS behavioral_sessions_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE behavioral_sessions ADD CONSTRAINT behavioral_sessions_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id)"
-    )
-    op.execute(
-        "ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_related_job_id_fkey"
-    )
-    op.execute(
-        "ALTER TABLE notifications ADD CONSTRAINT notifications_related_job_id_fkey FOREIGN KEY (related_job_id) REFERENCES jobs(id)"
-    )
-    op.execute("ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_job_id_fkey")
-    op.execute(
-        "ALTER TABLE reports ADD CONSTRAINT reports_job_id_fkey FOREIGN KEY (job_id) REFERENCES jobs(id)"
-    )
+    _retarget("")

@@ -9,9 +9,15 @@ but the jobs.id and job_id FK columns were UUID. Every upload-side
 DB insert failed with "invalid input syntax for type uuid" and the
 error was swallowed, so jobs/submissions/similarity rows never
 persisted. This migration widens these columns to VARCHAR(36).
+
+Tables that no migration creates (webhook_events, audit_logs,
+timeline_events — they appear via Base.metadata.create_all() on live
+deployments) are skipped when absent, so a from-scratch alembic chain
+no longer dies here with "relation ... does not exist".
 """
 
 from alembic import op
+from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision = "f0a1b2c3d4e5"
@@ -59,66 +65,86 @@ POLICY_SQL = {
 }
 
 
-def _drop_policies() -> None:
+def _existing_tables() -> set:
+    """Tables currently present in the public schema."""
+    rows = (
+        op.get_bind()
+        .execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+        .fetchall()
+    )
+    return {row[0] for row in rows}
+
+
+def _drop_policies(present: set) -> None:
     """Drop RLS policies that reference jobs.id via subquery."""
     for table, policy in POLICIES:
-        op.execute(f"DROP POLICY IF EXISTS {policy} ON {table}")
+        if table in present:
+            op.execute(f"DROP POLICY IF EXISTS {policy} ON {table}")
 
 
-def _recreate_policies() -> None:
-    """Recreate the RLS policies dropped by _drop_policies."""
-    for policy in dict.fromkeys(p for _, p in POLICIES):
-        op.execute(POLICY_SQL[policy])
+def _recreate_policies(present: set) -> None:
+    """Recreate the RLS policies dropped by _drop_policies()."""
+    for table, policy in POLICIES:
+        if table in present:
+            op.execute(POLICY_SQL[policy])
 
 
-def _drop_fks() -> None:
+def _drop_fks(present: set) -> None:
     """Drop foreign keys referencing jobs.id."""
     for table, constraint, _ in FOREIGN_KEYS:
-        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}")
+        if table in present:
+            op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}")
 
 
-def _recreate_fks() -> None:
+def _recreate_fks(present: set) -> None:
     """Recreate the foreign keys referencing jobs.id."""
     for table, constraint, column in FOREIGN_KEYS:
-        op.execute(
-            f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
-            f"FOREIGN KEY ({column}) REFERENCES jobs(id)"
-        )
+        if table in present:
+            op.execute(
+                f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+                f"FOREIGN KEY ({column}) REFERENCES jobs(id)"
+            )
 
 
 def upgrade() -> None:
-    _drop_policies()
-    _drop_fks()
+    present = _existing_tables()
+    _drop_policies(present)
+    _drop_fks(present)
 
     # Alter FK columns before jobs.id so the FK stays type-compatible.
     for table, _, column in FOREIGN_KEYS:
-        op.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR(36)")
+        if table in present:
+            op.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR(36)")
 
     op.execute("ALTER TABLE jobs ALTER COLUMN id TYPE VARCHAR(36)")
     op.execute("ALTER TABLE jobs ALTER COLUMN id DROP DEFAULT")
 
-    _recreate_fks()
-    _recreate_policies()
+    _recreate_fks(present)
+    _recreate_policies(present)
 
 
 def downgrade() -> None:
-    _drop_policies()
-    _drop_fks()
+    present = _existing_tables()
+    _drop_policies(present)
+    _drop_fks(present)
 
     # Casting back to UUID only succeeds when every stored id is a valid UUID.
     # 8-char short ids cannot be cast, so remove those rows first (destructive).
     short_shape = "~ '^[a-fA-F0-9]{8}$'"
     op.execute(f"DELETE FROM jobs WHERE id {short_shape}")
     for table, _, column in FOREIGN_KEYS:
-        op.execute(f"DELETE FROM {table} WHERE {column}::text {short_shape}")
+        if table in present:
+            op.execute(f"DELETE FROM {table} WHERE {column}::text {short_shape}")
 
     op.execute("ALTER TABLE jobs ALTER COLUMN id TYPE UUID USING id::uuid")
     op.execute("ALTER TABLE jobs ALTER COLUMN id SET DEFAULT uuid_generate_v4()")
 
     for table, _, column in FOREIGN_KEYS:
-        op.execute(
-            f"ALTER TABLE {table} ALTER COLUMN {column} TYPE UUID USING {column}::uuid"
-        )
+        if table in present:
+            op.execute(
+                f"ALTER TABLE {table} ALTER COLUMN {column} TYPE UUID "
+                f"USING {column}::uuid"
+            )
 
-    _recreate_fks()
-    _recreate_policies()
+    _recreate_fks(present)
+    _recreate_policies(present)
