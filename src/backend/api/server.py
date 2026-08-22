@@ -4628,6 +4628,7 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
 
     detection_methods = {entry["method"] for entry in entries if entry["method"]}
     using_binoculars = "binoculars" in detection_methods
+    using_ml = not using_binoculars and "ml" in detection_methods
 
     distribution = {"low": 0, "medium": 0, "high": 0}
     for entry in entries:
@@ -4677,13 +4678,21 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
     return {
         "enabled": True,
         "threshold": AI_MEDIUM_RISK_THRESHOLD,
-        "method": "binoculars" if using_binoculars else "heuristic",
+        "method": (
+            "binoculars" if using_binoculars else "ml" if using_ml else "heuristic"
+        ),
         "status_message": (
             "Per-submission AI scoring is available for this assignment."
             if using_binoculars
-            else "Heuristic AI-likelihood estimate — statistical fingerprint "
-            "analysis only, not a trained model. Use as a screening signal, "
-            "not as proof of AI authorship."
+            else (
+                "ML-assisted AI-likelihood estimate — trained classifier blended "
+                "with statistical signals. Use as a screening signal, not as "
+                "proof of AI authorship."
+                if using_ml
+                else "Heuristic AI-likelihood estimate — statistical fingerprint "
+                "analysis only, not a trained model. Use as a screening signal, "
+                "not as proof of AI authorship."
+            )
         ),
         "flagged_count": sum(
             1

@@ -63,6 +63,13 @@ class AIEnsembleConfig:
             "overlap_lines": 5,
             "huggingface_model": "",
         },
+        "orchestrator": {
+            "ml_base_weight": 0.50,
+            "ml_min_lines": 25,
+            "ml_full_lines": 60,
+            "disagreement_gap": 0.35,
+            "disagreement_cap": 0.65,
+        },
     }
 
     @classmethod
@@ -132,6 +139,10 @@ class AIEnsembleConfig:
     def perplexity_config(self) -> dict[str, Any]:
         """Return the perplexity scorer settings."""
         return self._config.get("perplexity", self.DEFAULTS["perplexity"])
+
+    def orchestrator_config(self) -> dict[str, Any]:
+        """Return the orchestrator safe-blend fusion settings."""
+        return self._config.get("orchestrator", self.DEFAULTS["orchestrator"])
 
     def reload(self) -> None:
         """Force a reload from disk."""

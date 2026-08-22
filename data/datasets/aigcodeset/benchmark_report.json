@@ -60,11 +60,11 @@
   },
   "heuristic_comparison": {
     "heuristic_only": {
-      "accuracy": 0.4717,
-      "precision": 0.4016,
-      "recall": 0.7848,
-      "f1": 0.5313,
-      "auc": 0.5241
+      "accuracy": 0.4159,
+      "precision": 0.3879,
+      "recall": 0.9189,
+      "f1": 0.5455,
+      "auc": 0.5314
     },
     "ml_classifier": {
       "accuracy": 0.681,
@@ -73,5 +73,43 @@
       "f1": 0.3629,
       "auc": 0.6641
     }
+  },
+  "safe_blend_comparison": {
+    "heuristic_only": {
+      "accuracy": 0.4159,
+      "precision": 0.3879,
+      "recall": 0.9189,
+      "f1": 0.5455,
+      "auc": 0.5314
+    },
+    "ml_classifier": {
+      "accuracy": 0.681,
+      "precision": 0.7627,
+      "recall": 0.2381,
+      "f1": 0.3629,
+      "auc": 0.6641
+    },
+    "safe_blend": {
+      "accuracy": 0.4913,
+      "precision": 0.4159,
+      "recall": 0.8236,
+      "f1": 0.5527,
+      "auc": 0.5905
+    },
+    "safe_blend_at_040": {
+      "accuracy": 0.4065,
+      "precision": 0.3902,
+      "recall": 0.9877,
+      "f1": 0.5594,
+      "auc": 0.5905
+    },
+    "safe_blend_at_070": {
+      "accuracy": 0.6211,
+      "precision": 0.8333,
+      "recall": 0.0088,
+      "f1": 0.0175,
+      "auc": 0.5905
+    },
+    "disagreement_capped_samples": 0
   }
 }

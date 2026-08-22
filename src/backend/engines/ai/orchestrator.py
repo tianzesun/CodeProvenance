@@ -27,6 +27,97 @@ from src.backend.engines.similarity.ai_detection import AIDetectionEngine
 
 logger = logging.getLogger(__name__)
 
+# Safe-blend defaults; runtime values come from ai_ensemble_config.yaml.
+DEFAULT_ML_BLEND: dict[str, float] = {
+    "ml_base_weight": 0.50,
+    "ml_min_lines": 25,
+    "ml_full_lines": 60,
+    "disagreement_gap": 0.35,
+    "disagreement_cap": 0.65,
+}
+
+
+def blend_ml_heuristic(
+    ml_score: float,
+    heuristic_score: float,
+    line_count: int,
+    config: dict[str, Any] | None = None,
+) -> tuple[float, bool]:
+    """Blend a trained-classifier score with the explainable heuristic score.
+
+    The classifier's weight grows with code length because its features
+    misfire on short files. When the classifier calls AI while the explainable
+    signals call human (the false-positive direction), the blend is capped
+    below the high-risk threshold instead of convicting on the classifier
+    alone. Disagreement in the other direction is never capped — the heuristic
+    fingerprints carry their own precision guards.
+
+    Returns (blended_score, disagreement_capped).
+    """
+    conf = {**DEFAULT_ML_BLEND, **(config or {})}
+    min_lines = float(conf["ml_min_lines"])
+    full_lines = float(conf["ml_full_lines"])
+    if line_count <= min_lines:
+        length_factor = 0.2
+    elif line_count >= full_lines:
+        length_factor = 1.0
+    else:
+        length_factor = 0.2 + 0.8 * (line_count - min_lines) / (full_lines - min_lines)
+    weight = float(conf["ml_base_weight"]) * length_factor
+    blended = weight * ml_score + (1.0 - weight) * heuristic_score
+
+    capped = False
+    if (ml_score - heuristic_score) > float(conf["disagreement_gap"]):
+        cap = float(conf["disagreement_cap"])
+        if blended > cap:
+            blended = cap
+            capped = True
+    return blended, capped
+
+
+def apply_fp_safeguards(
+    ai_probability: float, confidence: float, signals: dict[str, float]
+) -> tuple[float, float, list[str]]:
+    """False-positive safeguards for the live fusion path.
+
+    Ported from ``false_positive_reduction.py`` (the framework path) so the
+    live orchestrator gets the same protections: single-signal dominance,
+    signal contradiction, and extreme signal variance reduce confidence, and a
+    very low safeguarded confidence damps the score toward neutral. The
+    framework's variance check could never fire (variance of [0,1] signals is
+    capped at 0.25 but the threshold was 0.3); here 0.10 is used so extreme
+    spread actually triggers.
+
+    Returns (probability, confidence, notes).
+    """
+    notes: list[str] = []
+    penalty = 0.0
+    values = [value for value in signals.values() if isinstance(value, (int, float))]
+    if len(values) >= 4:
+        ai_like = sum(1 for value in values if value > 0.6)
+        human_like = sum(1 for value in values if value < 0.4)
+        if (ai_like == 1 and human_like >= 6) or (human_like == 1 and ai_like >= 6):
+            penalty += 0.3
+            notes.append("Single-signal dominance — confidence reduced")
+        if any(value > 0.7 for value in values) and any(
+            value < 0.3 for value in values
+        ):
+            penalty += 0.2
+            notes.append("Signal contradiction — confidence reduced")
+        mean = sum(values) / len(values)
+        variance = sum((value - mean) ** 2 for value in values) / len(values)
+        if variance > 0.10:
+            penalty += 0.15
+            notes.append("Extreme signal variance — confidence reduced")
+
+    adjusted = max(0.0, min(1.0, confidence - penalty))
+    if 0.4 <= ai_probability <= 0.6:
+        adjusted = max(adjusted, 0.3)
+    if adjusted < 0.2:
+        ai_probability = ai_probability * 0.8 + 0.1
+        notes.append("Low confidence — score damped toward neutral")
+    return round(ai_probability, 3), round(adjusted, 3), notes
+
 
 class AIDetectionOrchestrator:
     """
@@ -135,22 +226,51 @@ class AIDetectionOrchestrator:
         # Without Binoculars the full grid is too noisy for code (perplexity is
         # ~0 for code, whitespace/vocabulary barely separate), so use the
         # heuristic-only path tuned for the signal ensemble.
+        ml_mode = ensemble_result.get("mode") == "ml"
+        ml_probability = ensemble_result.get("ai_probability")
+        fusion_debug: dict[str, Any] = {}
+        fusion_notes: list[str] = []
         if bino_result.get("available"):
             fused_probability = self._weighted_fuse(signals)
-        elif ensemble_result.get("mode") == "ml" and ensemble_result.get(
-            "ai_probability"
-        ):
-            # A trained classifier is present — trust the ML ensemble score.
-            fused_probability = ensemble_result["ai_probability"]
+        elif ml_mode and ml_probability is not None:
+            # A trained classifier is present — blend it with the explainable
+            # heuristic score rather than trusting it outright (see
+            # blend_ml_heuristic for the length gate and disagreement cap).
+            heuristic_probability = self._heuristic_fuse(signals)
+            line_count = len(code.splitlines())
+            fused_probability, capped = blend_ml_heuristic(
+                float(ml_probability),
+                heuristic_probability,
+                line_count,
+                self._blend_config(),
+            )
+            fusion_debug = {
+                "strategy": "ml_blend",
+                "ml_score": round(float(ml_probability), 3),
+                "heuristic_score": round(heuristic_probability, 3),
+                "line_count": line_count,
+                "disagreement_capped": capped,
+            }
+            if capped:
+                fusion_notes.append(
+                    "Classifier/heuristic disagreement — score capped, "
+                    "manual review advised"
+                )
         else:
             fused_probability = self._heuristic_fuse(signals)
 
-        # Combine confidence
+        # Combine confidence, then apply the false-positive safeguards before
+        # the display floor so penalties (and the low-confidence damping they
+        # enable) can actually take effect.
         legacy_conf = legacy_result.get("confidence", 0.5)
         bino_conf = (
             bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.5
         )
-        combined_confidence = max(0.4, (0.6 * bino_conf + 0.4 * legacy_conf))
+        raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+        fused_probability, safeguarded_confidence, safeguard_notes = (
+            apply_fp_safeguards(fused_probability, raw_confidence, signals)
+        )
+        combined_confidence = max(0.4, safeguarded_confidence)
 
         # Apply the learned calibrator (trained via /api/ai-detect/retrain) to
         # the fused score so shared calibration feedback affects the live path.
@@ -162,11 +282,12 @@ class AIDetectionOrchestrator:
                 pass  # Keep the sigmoid-calibrated score on failure
 
         # Merge indicators (prefer Binoculars evidence when strong)
-        indicators = legacy_result.get("indicators", [])
+        indicators = list(legacy_result.get("indicators", []))
         if bino_result.get("available") and bino_result.get("ai_probability", 0) > 0.65:
             indicators = [
                 f"Binoculars: {bino_result.get('label', 'AI-like')}"
             ] + indicators
+        indicators = fusion_notes + safeguard_notes + indicators
 
         layers = {
             "binoculars": {
@@ -191,6 +312,8 @@ class AIDetectionOrchestrator:
                 "signals": ensemble_result.get("signals", {}),
                 "classifier": ensemble_result.get("classifier"),
             }
+        if fusion_debug:
+            layers["fusion"] = fusion_debug
 
         # Flagged regions from the perplexity/uniformity scanner (line ranges).
         flagged_regions = ensemble_result.get("flagged_regions", [])
@@ -204,14 +327,23 @@ class AIDetectionOrchestrator:
             else {"available": False, "samples": 0}
         )
 
+        using_binoculars = bool(bino_result.get("available"))
+        using_ml = ml_mode and ml_probability is not None and not using_binoculars
         return {
             "ai_probability": round(max(0.0, min(1.0, fused_probability)), 3),
             "confidence": round(max(0.0, min(1.0, combined_confidence)), 3),
-            "method": "binoculars" if bino_result.get("available") else "heuristic",
+            "method": (
+                "binoculars" if using_binoculars else "ml" if using_ml else "heuristic"
+            ),
             "model": (
                 "Binoculars zero-shot detector (ICML 2024) fused with heuristics"
-                if bino_result.get("available")
-                else "Heuristic statistical fingerprint analysis (no trained model)"
+                if using_binoculars
+                else (
+                    "Trained classifier blended with statistical signals "
+                    "(safe-blend fusion)"
+                    if using_ml
+                    else "Heuristic statistical fingerprint analysis (no trained model)"
+                )
             ),
             "signals": {k: round(v, 3) for k, v in signals.items()},
             "signal_labels": self.legacy_engine._signal_labels(signals),
@@ -222,6 +354,15 @@ class AIDetectionOrchestrator:
             "calibration": calibration,
             "layers": layers,
         }
+
+    def _blend_config(self) -> dict[str, Any]:
+        """Load safe-blend settings from the shared ensemble config."""
+        try:
+            from src.backend.engines.ai.ensemble import AIEnsembleConfig
+
+            return AIEnsembleConfig.get_instance().orchestrator_config()
+        except Exception:  # pragma: no cover
+            return dict(DEFAULT_ML_BLEND)
 
     def _weighted_fuse(self, signals: dict[str, float]) -> float:
         """Apply orchestrator weights (Binoculars gets the highest weight)."""

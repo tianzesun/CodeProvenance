@@ -149,6 +149,8 @@ class TestAIDetectionLayerHonesty:
 
     def test_orchestrator_reports_detection_method(self) -> None:
         result = AIDetectionOrchestrator().analyze(AI_CANONICAL, language="python")
-        assert result["method"] in ("binoculars", "heuristic")
+        assert result["method"] in ("binoculars", "heuristic", "ml")
         if result["method"] == "heuristic":
             assert "trained model" in result["model"]
+        elif result["method"] == "ml":
+            assert "safe-blend" in result["model"]

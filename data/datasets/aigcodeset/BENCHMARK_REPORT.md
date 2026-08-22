@@ -110,6 +110,38 @@ remains **disabled by default** pending the short-code false-positive regression
 being resolved. The remaining bottleneck is no longer compute — it is having a
 causal code LM (or larger model) enabled in a production deployment.
 
+## Safe-blend fusion evaluation (2026-08-21)
+
+The classifier is now enabled in production via the orchestrator's
+**safe-blend fusion** (see `orchestrator.blend_ml_heuristic`): the classifier's
+weight grows with code length (its features misfire on short files), and when
+it calls AI while the explainable signals call human, the fused score is
+capped below the 0.70 high-risk threshold. This is what allows
+`classification.enabled: true` without breaking the precision regression suite
+(`tests/unit/test_ai_detector_orchestrator_precision.py`, 7/7 green).
+
+Same leakage-free grouped fold (n=1,467), production blend formula; the ML
+input is the holdout-trained classifier probability (documented approximation
+of the live ml-mode ensemble score):
+
+| Fusion path | Accuracy | Precision | Recall | F1 | AUC |
+|-------------|---------:|----------:|-------:|----:|----:|
+| Heuristic only (previous default) | 0.416 | 0.388 | 0.919 | 0.545 | 0.531 |
+| ML classifier alone (unshippable) | 0.681 | 0.763 | 0.238 | 0.363 | 0.664 |
+| **Safe blend (shipped)** | **0.491** | **0.416** | **0.824** | **0.553** | **0.591** |
+| Safe blend @ 0.40 review threshold | 0.406 | 0.390 | 0.988 | 0.559 | 0.591 |
+| Safe blend @ 0.70 high-risk threshold | 0.621 | 0.833 | 0.009 | 0.018 | 0.591 |
+
+**Honest reading.** The blend recovers roughly half the ML classifier's AUC
+advantage over the heuristic (+0.060 of the +0.133 gap) while keeping recall
+high (0.824) — the length gate and disagreement cap cost raw accuracy by
+design, because the classifier alone (0.238 recall at 0.763 precision) fails
+the product's false-positive contract on short student code. The
+high-risk band stays high-precision (0.833). The disagreement cap fired on 0
+of 1,467 fold samples — it is a guardrail against extreme misfires, not a
+routine adjustment. Full metrics: `safe_blend_comparison` in
+`benchmark_report.json`.
+
 ## Reproduce
 
 ```bash

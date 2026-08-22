@@ -18,6 +18,15 @@ Three evaluations are run:
    path (no classifier) and with the trained classifier, so the improvement
    from ML is explicit.
 
+4. **Safe-blend fusion.** The production orchestrator blend formula
+   (:func:`src.backend.engines.ai.orchestrator.blend_ml_heuristic`) is applied
+   to the same fold using the holdout-trained classifier probability as the
+   ML input and the ensemble heuristic score as the heuristic input, so the
+   shipped fusion's accuracy/precision trade-off is measured, not assumed.
+   (The live orchestrator feeds the ml-mode ensemble score rather than the
+   raw classifier probability into the same formula — a documented
+   approximation for this evaluation.)
+
 Metrics: accuracy, precision, recall, F1, AUC (AI = positive class), plus the
 existing server thresholds (medium risk 0.40 / high risk 0.70).
 
@@ -140,14 +149,19 @@ def _metrics(
     return report
 
 
+_HEURISTIC_SCORER: Any = None
+
+
 def _heuristic_score(code: str) -> float:
     """Score code with the heuristic-only ensemble path (no classifier)."""
-    from src.backend.engines.ai.ensemble import AIEnsembleConfig, AIEnsembleScorer
+    global _HEURISTIC_SCORER
+    if _HEURISTIC_SCORER is None:
+        from src.backend.engines.ai.ensemble import AIEnsembleConfig, AIEnsembleScorer
 
-    config = AIEnsembleConfig()
-    config._config["classification"] = {"enabled": False, "model_dir": None}
-    scorer = AIEnsembleScorer(config=config)
-    return float(scorer.score(code, language="python")["ai_probability"])
+        config = AIEnsembleConfig()
+        config._config["classification"] = {"enabled": False, "model_dir": None}
+        _HEURISTIC_SCORER = AIEnsembleScorer(config=config)
+    return float(_HEURISTIC_SCORER.score(code, language="python")["ai_probability"])
 
 
 def _train_grouped(
@@ -273,6 +287,31 @@ def main() -> None:
         "ml_classifier": _metrics(test_labels, test_probs, 0.5),
     }
 
+    # 4. Safe-blend fusion (production formula) on the same fold.
+    from src.backend.engines.ai.ensemble import AIEnsembleConfig
+    from src.backend.engines.ai.orchestrator import blend_ml_heuristic
+
+    blend_config = AIEnsembleConfig.get_instance().orchestrator_config()
+    blended_probs: list[float] = []
+    capped_count = 0
+    for pos, i in enumerate(test_idx_out):
+        blended, capped = blend_ml_heuristic(
+            test_probs[pos],
+            heuristic_probs[pos],
+            len(codes[i].splitlines()),
+            blend_config,
+        )
+        blended_probs.append(blended)
+        capped_count += 1 if capped else 0
+    report["safe_blend_comparison"] = {
+        "heuristic_only": _metrics(test_labels, heuristic_probs, 0.5),
+        "ml_classifier": _metrics(test_labels, test_probs, 0.5),
+        "safe_blend": _metrics(test_labels, blended_probs, 0.5),
+        "safe_blend_at_040": _metrics(test_labels, blended_probs, 0.40),
+        "safe_blend_at_070": _metrics(test_labels, blended_probs, 0.70),
+        "disagreement_capped_samples": capped_count,
+    }
+
     report_path = Path(args.out) if args.out else REPORT_PATH
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     logger.info("Report written to %s", report_path)
@@ -295,6 +334,14 @@ def main() -> None:
     print("\n=== Heuristic vs ML (same test fold) ===")
     print("  heuristic only:", _fmt(report["heuristic_comparison"]["heuristic_only"]))
     print("  ML classifier :", _fmt(report["heuristic_comparison"]["ml_classifier"]))
+    print("\n=== Safe-blend fusion (production formula, same fold) ===")
+    blend = report["safe_blend_comparison"]
+    print("  heuristic only:", _fmt(blend["heuristic_only"]))
+    print("  ML classifier :", _fmt(blend["ml_classifier"]))
+    print("  safe blend    :", _fmt(blend["safe_blend"]))
+    print("  at 0.40       :", _fmt(blend["safe_blend_at_040"]))
+    print("  at 0.70       :", _fmt(blend["safe_blend_at_070"]))
+    print(f"  disagreement-capped samples: {blend['disagreement_capped_samples']}")
 
 
 if __name__ == "__main__":

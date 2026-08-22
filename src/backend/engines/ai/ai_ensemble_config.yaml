@@ -34,11 +34,12 @@ classification:
   # under src/backend/engines/ai/models/. Grouped-holdout AUC ~0.66 vs ~0.52
   # for the heuristic on unseen problems — a real but modest improvement.
   #
-  # Disabled by default: on short, terse student code (the project's main
-  # input) the classifier raises false positives vs the tuned heuristics
-  # (see tests/unit/test_ai_detector_orchestrator_precision.py). Enable only
-  # after validating on your own student-code distribution.
-  enabled: false
+  # Enabled via the safe-blend fusion (2026-08-21): the orchestrator no longer
+  # trusts the classifier outright. Its weight is gated by code length and the
+  # fused score is capped below high-risk when the classifier disagrees with
+  # the explainable signals, which keeps
+  # tests/unit/test_ai_detector_orchestrator_precision.py green.
+  enabled: true
   # Fallback model dir override (optional)
   model_dir: null
 
@@ -57,3 +58,24 @@ perplexity:
   # explicitly (set huggingface_model or the AICODE_TRANSFORMER_MODEL env var)
   # when latency is acceptable or AI detection runs as a background job.
   huggingface_model: ""
+
+# Safe-blend fusion: how the orchestrator combines the trained classifier with
+# the explainable heuristic signals. The classifier's weight grows with code
+# length (its features misfire on short files), and when it calls AI while the
+# explainable signals call human, the fused score is capped below the 0.70
+# high-risk threshold instead of convicting on the classifier alone.
+orchestrator:
+  # Classifier weight (vs heuristic) once the file is at/above ml_full_lines.
+  ml_base_weight: 0.50
+  # At/below this line count the classifier gets only 20% of its base weight
+  # (its features misfire on short student code).
+  ml_min_lines: 25
+  # At/above this line count the classifier carries its full base weight.
+  ml_full_lines: 60
+  # |ml - heuristic| beyond which the scores count as disagreeing.
+  disagreement_gap: 0.35
+  # Upper bound for the fused score when the classifier is far ABOVE the
+  # heuristic score (the false-positive direction). Disagreement in the other
+  # direction is never capped — heuristic fingerprints carry their own
+  # precision guards.
+  disagreement_cap: 0.65

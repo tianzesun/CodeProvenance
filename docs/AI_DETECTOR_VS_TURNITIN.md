@@ -10,11 +10,18 @@ claim of parity.
 
 The product ships a polished, explainable AI-detection workflow (per-submission
 scorecards, signal breakdown, PDF export, flagged regions) but the underlying
-detection science is **not world-class**. The live engine is a tuned heuristic
+detection science is **not world-class**. The live engine was a tuned heuristic
 ensemble (8 signals) with grouped-holdout AUC **~0.52–0.55**; a trained ML
-classifier reaches AUC **~0.66** but is **disabled by default** because it
-raises false positives on short student code. No accuracy evidence is visible
-in the product today, which the benchmark page (this work item) fixes.
+classifier reaches AUC **~0.66** but could not ship outright because it raises
+false positives on short student code.
+
+**Update (2026-08-21):** the classifier now ships **enabled** via the
+orchestrator's safe-blend fusion — its weight is gated by code length and its
+influence is capped when it disagrees with the explainable signals. Measured on
+the leakage-free grouped fold: heuristic-only AUC 0.531 → safe blend **0.591**
+(recall 0.824), with the precision regression suite green. The ML classifier
+alone (AUC 0.664) remains unshippable standalone. See
+`data/datasets/aigcodeset/BENCHMARK_REPORT.md` § "Safe-blend fusion evaluation".
 
 Turnitin, by contrast, ships a validated detector with published language
 coverage, sentence-level highlights, a non-native-English limitation, and
@@ -32,7 +39,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 |---|-----------|---------------------|----------|----------------|-------|
 | 1 | Core detection on prose/essays | **MISSING** | **LIVE** (98%-accuracy claim at ≥20% AI text; hides 1–19% band) | LIVE | Turnitin is a prose detector; ours is code-only. No essay input path. |
 | 2 | Core detection on code | **LIVE** (heuristic) | PARTIAL (not Turnitin's focus) | LIVE | Ours: 8 signals + tree-sitter AST + statistical perplexity/burstiness. |
-| 3 | ML classifier | **DISABLED** | **LIVE** (validated) | LIVE | Ours trained on AIGCodeSet; grouped-holdout AUC 0.66 > heuristic 0.52, but raises FPs on short code, so off by default. |
+| 3 | ML classifier | **LIVE** (safe-blend fusion, 2026-08-21) | **LIVE** (validated) | LIVE | Ours: blended with heuristics behind a length gate + disagreement cap; blend AUC 0.591 vs heuristic 0.531, ML alone 0.664. |
 | 4 | Transformer (causal code-LM) perplexity | **DISABLED** | n/a | LIVE | `PerplexityScorer` supports causal code LMs (CodeGPT-small-py AUC 0.63); `huggingface_model: ""` by default → statistical bigram only. |
 | 5 | Sentence/region-level highlights | **LIVE** (flagged code regions) | **LIVE** (sentence-level) | LIVE | Ours: annotated code + per-signal evidence. |
 | 6 | % AI score per submission | **LIVE** | **LIVE** (0–100, hides <20%) | LIVE | Ours shows raw 0–100; Turnitin hides 1–19% to cut false positives. |
@@ -55,13 +62,18 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 
 1. **No prose/essay detection.** The biggest scope gap vs Turnitin. Admissible
    only because this is a code-integrity product.
-2. **Live engine is the weakest path.** Default config runs heuristic-only
-   (AUC ~0.52). The ML classifier (0.66) and causal code-LM (0.63) are measured
-   improvements but disabled for false-positive safety.
-3. **False-positive safety is why ML stays off.** On short terse student code,
-   the trained classifier broke 3 precision regression tests
-   (`test_ai_detector_orchestrator_precision.py`). Fixing that (a student-code
-   distribution dataset + threshold tuning) is the precondition for enabling ML.
+2. **Live engine is still the weakest path, but improved.** The default config
+   now runs the safe-blend fusion (AUC ~0.59 on the grouped fold, up from
+   ~0.52 heuristic-only). The full ML classifier (0.66) and causal code-LM
+   (0.63) remain stronger individually but cannot ship standalone: the
+   classifier fails the short-code false-positive contract, and the code-LM
+   costs ~6s/score on CPU against a synchronous endpoint.
+3. **False-positive safety is why ML only ships blended.** On short terse
+   student code, the trained classifier broke 3 precision regression tests
+   (`test_ai_detector_orchestrator_precision.py`). The safe-blend fusion
+   (length gate + disagreement cap, 2026-08-21) resolves this for the blended
+   path; standalone enablement still requires a student-code distribution
+   dataset + threshold tuning.
 4. **Single-dataset validation.** All published accuracy numbers come from
    AIGCodeSet (competitive-programming style). Not representative of the
    product's real input (short assignment submissions). Needs an external
@@ -90,12 +102,12 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 ## Suggested ordering to close the gap
 
 1. Enable ML classifier after validating on a student-code holdout (seed
-   precision regression tests). **Pipeline ready (2026-08-14):** the blocker is
-   data, not tooling — `build_student_dataset.py` now ingests a labelled
-   student-code holdout (folder/CSV/JSONL) into the benchmark format, and
-   `benchmark_classifier --dataset-dir <dir>` runs the same grouped-holdout
-   methodology on it. Validate the classifier on a real holdout, fix the
-   short-code false-positive regression, and enable it.
+   precision regression tests). **Partially done (2026-08-21):** the
+   safe-blend fusion (length gate + disagreement cap) lets the classifier ship
+   enabled with the precision suite green and blend AUC 0.591 on AIGCodeSet.
+   Full standalone validation on a real student-code holdout is still the
+   ceiling-raiser — the ingestion pipeline (`build_student_dataset.py`) is
+   ready; the blocker is data, not tooling.
 2. Wire causal code-LM perplexity (`huggingface_model`) for a default-on
    transformer signal. **Decision (2026-08-14):** measured ~6s/score + ~17s
    one-time load on CPU vs near-instant for the statistical model, and
