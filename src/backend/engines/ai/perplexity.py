@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import re
+import threading
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -30,6 +31,48 @@ _MODEL_BITS_REF = {
     "statistical": 2.2,
     "huggingface": 8.0,
 }
+
+# Process-wide cache of loaded code LMs: name -> (tokenizer, model). Loading a
+# causal LM costs ~17s on CPU, and scorers are constructed per analysis job, so
+# without this cache every job would reload the model from disk.
+_TRANSFORMER_CACHE: dict[str, tuple[Any, Any]] = {}
+_TRANSFORMER_CACHE_LOCK = threading.Lock()
+
+
+def _load_cached_transformer(model_name: str) -> tuple[Any, Any] | None:
+    """Load a HuggingFace causal LM once per process (no network access).
+
+    Returns (tokenizer, model) or None when the checkpoint is not available
+    locally, so callers fall back to the statistical model.
+    """
+    with _TRANSFORMER_CACHE_LOCK:
+        cached = _TRANSFORMER_CACHE.get(model_name)
+        if cached is not None:
+            return cached
+
+    try:
+        # Intentionally imported here so missing deps don't break launches.
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        # A causal (autoregressive) code LM: next-token log-likelihoods are
+        # cheap to compute and well-calibrated. Encoder-only checkpoints
+        # (e.g. microsoft/codebert-base) carry no LM head, so loading them as
+        # MaskedLM yields a random head and meaningless perplexity; the
+        # CausalLM load fails fast on those instead.
+        model = AutoModelForCausalLM.from_pretrained(model_name, local_files_only=True)
+        model.eval()
+    except Exception as exc:
+        logger.info(
+            "HF code LM %s unavailable locally, using statistical model: %s",
+            model_name,
+            exc,
+        )
+        return None
+
+    with _TRANSFORMER_CACHE_LOCK:
+        _TRANSFORMER_CACHE[model_name] = (tokenizer, model)
+    return tokenizer, model
 
 
 def _bits_per_token(model: str, perplexity: float) -> float:
@@ -236,52 +279,19 @@ class PerplexityScorer:
             self._load_from_local_cache()
             return
 
-        try:
-            # Intentionally import inside the method so missing deps don't break
-            # launches. Never triggers a network download.
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                model_name, local_files_only=True
-            )
-            # A causal (autoregressive) code LM: next-token log-likelihoods are
-            # cheap to compute and well-calibrated. Encoder-only checkpoints
-            # (e.g. microsoft/codebert-base) advertise `RobertaModel` and carry
-            # no LM head, so loading them as MaskedLM yields a random head and
-            # meaningless perplexity; CausalLM load fails fast on those instead.
-            self._huggingface = AutoModelForCausalLM.from_pretrained(
-                model_name, local_files_only=True
-            )
-            self._huggingface.eval()
+        loaded = _load_cached_transformer(model_name)
+        if loaded is not None:
+            self._tokenizer, self._huggingface = loaded
             self._transformer_available = True
-            logger.info("Loaded HF code LM %s for perplexity", model_name)
-        except Exception as exc:  # pragma: no cover
-            logger.info(
-                "HF code LM %s unavailable locally, using statistical model: %s",
-                model_name,
-                exc,
-            )
 
     def _load_from_local_cache(self) -> None:
         """Try common local cache names for a code LM (no network)."""
-        candidates = ["microsoft/CodeGPT-small-py", "microsoft/codegen-350M-mono"]
-        for candidate in candidates:
-            try:
-                from transformers import AutoModelForCausalLM, AutoTokenizer
-
-                self._tokenizer = AutoTokenizer.from_pretrained(
-                    candidate, local_files_only=True
-                )
-                self._huggingface = AutoModelForCausalLM.from_pretrained(
-                    candidate, local_files_only=True
-                )
-                self._huggingface.eval()
+        for candidate in ["microsoft/CodeGPT-small-py", "microsoft/codegen-350M-mono"]:
+            loaded = _load_cached_transformer(candidate)
+            if loaded is not None:
+                self._tokenizer, self._huggingface = loaded
                 self._transformer_available = True
-                logger.info("Loaded HF code LM %s from local cache", candidate)
                 return
-            except Exception:
-                logger.debug("Failed to load HF model %s", candidate, exc_info=True)
-                continue
 
     def train(self, texts: list[str]) -> None:
         """Train the statistical model on a set of code strings."""

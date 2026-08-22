@@ -40,7 +40,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 | 1 | Core detection on prose/essays | **MISSING** | **LIVE** (98%-accuracy claim at ≥20% AI text; hides 1–19% band) | LIVE | Turnitin is a prose detector; ours is code-only. No essay input path. |
 | 2 | Core detection on code | **LIVE** (heuristic) | PARTIAL (not Turnitin's focus) | LIVE | Ours: 8 signals + tree-sitter AST + statistical perplexity/burstiness. |
 | 3 | ML classifier | **LIVE** (safe-blend fusion, 2026-08-21) | **LIVE** (validated) | LIVE | Ours: blended with heuristics behind a length gate + disagreement cap; blend AUC 0.591 vs heuristic 0.531, ML alone 0.664. |
-| 4 | Transformer (causal code-LM) perplexity | **DISABLED** | n/a | LIVE | `PerplexityScorer` supports causal code LMs (CodeGPT-small-py AUC 0.63); `huggingface_model: ""` by default → statistical bigram only. |
+| 4 | Transformer (causal code-LM) perplexity | **LIVE** (default-on, 2026-08-21) | n/a | LIVE | `PerplexityScorer` uses CodeGPT-small-py (AUC 0.63 vs 0.545 statistical), loaded once per process and shared across jobs; falls back to the statistical model when the checkpoint is not cached locally. Enabled by making AI detection a background job. |
 | 5 | Sentence/region-level highlights | **LIVE** (flagged code regions) | **LIVE** (sentence-level) | LIVE | Ours: annotated code + per-signal evidence. |
 | 6 | % AI score per submission | **LIVE** | **LIVE** (0–100, hides <20%) | LIVE | Ours shows raw 0–100; Turnitin hides 1–19% to cut false positives. |
 | 7 | Scorecard / evidence detail | **LIVE** | PARTIAL | BEST | Ours shows per-signal signal values (entropy, burstiness, stylometry…) — more explainable than Turnitin. |
@@ -109,13 +109,11 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
    ceiling-raiser — the ingestion pipeline (`build_student_dataset.py`) is
    ready; the blocker is data, not tooling.
 2. Wire causal code-LM perplexity (`huggingface_model`) for a default-on
-   transformer signal. **Decision (2026-08-14):** measured ~6s/score + ~17s
-   one-time load on CPU vs near-instant for the statistical model, and
-   `/api/ai-detect` scores synchronously — default-on would stall 20-file
-   submissions ~2 minutes. Kept off by default; the opt-in (config or
-   `AICODE_TRANSFORMER_MODEL` env var) is documented in
-   `ai_ensemble_config.yaml`. Revisit when AI detection becomes a background
-   job.
+   transformer signal. **Done (2026-08-21):** AI detection now runs as a
+   background job (`/api/ai-detect` returns a job id immediately; the upload
+   flow offloads scoring off the event loop), loaded models are cached
+   process-wide, and `huggingface_model` defaults to CodeGPT-small-py with a
+   graceful statistical fallback when the checkpoint is not cached.
 3. Build adversarial-resistance tests (paraphrase, comment-strip, refactor).
    **Done (2026-08-14):** `tests/unit/test_ai_detector_adversarial.py`.
 4. Document per-language support honestly (drop/qualify `.kt`/`.swift` claims).

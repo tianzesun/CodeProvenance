@@ -61,7 +61,7 @@ class AIEnsembleConfig:
         "perplexity": {
             "window_lines": 25,
             "overlap_lines": 5,
-            "huggingface_model": "",
+            "huggingface_model": "microsoft/CodeGPT-small-py",
         },
         "orchestrator": {
             "ml_base_weight": 0.50,

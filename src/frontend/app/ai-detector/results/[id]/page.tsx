@@ -386,21 +386,40 @@ export default function AIDetectorReportPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    apiClient
-      .get(`/api/job/${id}`)
-      .then((res) => {
-        if (res.data?.job_type && res.data.job_type !== 'ai_detector' && !res.data?.ai_detection) {
-          router.replace(`/results/${id}`);
-          return;
-        }
-        setJob(res.data);
-        setError('');
-      })
-      .catch((err) => {
-        setError(err?.response?.data?.detail || 'Failed to load AI Detector report.');
-        setJob(null);
-      })
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const loadJob = () =>
+      apiClient
+        .get(`/api/job/${id}`)
+        .then((res) => {
+          if (cancelled) return;
+          const data = res.data;
+          if (data?.job_type && data.job_type !== 'ai_detector' && !data?.ai_detection) {
+            router.replace(`/results/${id}`);
+            return;
+          }
+          if (data?.status === 'processing') return; // keep polling
+          if (data?.status === 'failed') {
+            setError('AI detection failed for this job. Please try again.');
+            setJob(null);
+            setLoading(false);
+            return;
+          }
+          setJob(data);
+          setError('');
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err?.response?.data?.detail || 'Failed to load AI Detector report.');
+          setJob(null);
+          setLoading(false);
+        });
+    loadJob();
+    const timer = setInterval(loadJob, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [id, router]);
 
   const ai = job?.ai_detection || {};
@@ -413,7 +432,7 @@ export default function AIDetectorReportPage() {
       <DashboardLayout>
         <div className="flex min-h-[60vh] items-center justify-center gap-3 text-slate-500">
           <Loader2 size={18} className="animate-spin" />
-          Loading AI Detector report...
+          Analyzing submissions — this can take up to a minute for large batches...
         </div>
       </DashboardLayout>
     );

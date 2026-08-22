@@ -49,15 +49,16 @@ perplexity:
   # Optional: name of a locally cached, CAUSAL code LM (e.g.
   # microsoft/CodeGPT-small-py) to prefer transformer-based perplexity. Must
   # have a trained LM head; encoder-only models like microsoft/codebert-base
-  # yield meaningless perplexity. Leave empty for the statistical model.
+  # yield meaningless perplexity. Falls back to the statistical model when the
+  # checkpoint is not in the local HuggingFace cache (no network download is
+  # ever attempted).
   #
-  # Latency note (measured on CPU, 2026-08-14): with the code LM enabled each
-  # score costs ~6s (statistical is near-instant) plus a ~17s one-time model
-  # load, and /api/ai-detect scores every uploaded file synchronously. A 20-file
-  # submission would wait ~2 minutes. Off by default for that reason; enable
-  # explicitly (set huggingface_model or the AICODE_TRANSFORMER_MODEL env var)
-  # when latency is acceptable or AI detection runs as a background job.
-  huggingface_model: ""
+  # Default-on since 2026-08-21: AI detection now runs as a background job
+  # (/api/ai-detect returns immediately; the upload flow offloads scoring off
+  # the event loop) and loaded models are cached process-wide, so the ~6s/sample
+  # cost and the ~17s one-time load no longer stall requests. Measured signal:
+  # AUC 0.630 with the code LM vs 0.545 statistical (500-sample grouped fold).
+  huggingface_model: "microsoft/CodeGPT-small-py"
 
 # Safe-blend fusion: how the orchestrator combines the trained classifier with
 # the explainable heuristic signals. The classifier's weight grows with code

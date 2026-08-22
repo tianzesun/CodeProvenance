@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 from fastapi import (
+    BackgroundTasks,
     FastAPI,
     File,
     Form,
@@ -6613,16 +6614,88 @@ async def upload_zip(
     )
 
 
+def _ensure_job_row_for_ai_detector(
+    job_id: str, job: dict[str, Any], total_submissions: int
+) -> None:
+    """Create the DB Job row for an AI-detector job so result rows satisfy the FK.
+
+    Guest jobs (no tenant) skip DB persistence entirely: ``jobs.tenant_id`` is
+    NOT NULL, so no row can exist for them and ``AIDetectionResult`` rows are
+    in-memory/report-only by design.
+    """
+    tenant_id = job.get("tenant_id")
+    if not tenant_id:
+        return
+    try:
+        with SessionLocal() as db:
+            if db.query(Job).filter(Job.id == job_id).first():
+                return
+            db.add(
+                Job(
+                    id=job_id,
+                    tenant_id=tenant_id,
+                    name=job.get("assignment_name") or f"AI Detector {job_id}",
+                    status="completed",
+                    threshold=0.5,
+                    created_at=datetime.now(),
+                    total_submissions=total_submissions,
+                )
+            )
+            db.commit()
+    except Exception:
+        logger.warning(
+            "Could not create job row for ai-detector job %s", job_id, exc_info=True
+        )
+
+
+def _finalize_ai_detection_job(job_id: str, submissions: dict[str, str]) -> None:
+    """Score AI detection for a job in the background worker pool.
+
+    Runs as a FastAPI background task (sync functions run off the event
+    loop): /api/ai-detect returns immediately with a processing job and the
+    results page polls /api/job/{id} until this completes.
+    """
+    try:
+        ai_detection = _build_ai_detection_summary(submissions)
+        job = _jobs[job_id]
+        job["status"] = "completed"
+        job["ai_detection"] = ai_detection
+        job["summary"] = {
+            "total_files": len(submissions),
+            "flagged_files": ai_detection.get("flagged_count", 0),
+            "highest_ai_probability": ai_detection.get("highest_score", 0.0),
+            "average_ai_probability": ai_detection.get("average_score", 0.0),
+        }
+        _persist_job(job_id)
+        _ensure_job_row_for_ai_detector(job_id, job, len(submissions))
+        try:
+            _persist_ai_detection_results(job_id, ai_detection)
+        except Exception:
+            # Persistence failure must not fail an analysis that succeeded.
+            logger.warning(
+                "AI detection result persistence skipped for %s",
+                job_id,
+                exc_info=True,
+            )
+    except Exception:
+        logger.exception("AI detection job %s failed", job_id)
+        _jobs[job_id]["status"] = "failed"
+        _persist_job(job_id)
+
+
 @app.post("/api/ai-detect")
 async def detect_ai_generated_code(
     request: Request,
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
 ):
     """Run AI-generated code detection for one or more uploaded submissions.
 
-    Accessible to both authenticated users and guests.
+    Accessible to both authenticated users and guests. Returns a job id
+    immediately; scoring (which may load a local code LM) runs in the
+    background so the HTTP call never blocks on model work.
     """
     current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())[:8]
@@ -6649,22 +6722,21 @@ async def detect_ai_generated_code(
             content={"error": "Upload at least one valid code file or ZIP archive."},
         )
 
-    ai_detection = _build_ai_detection_summary(submissions)
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id,
         "job_type": "ai_detector",
         "course_name": course_name or "AI Detector",
         "assignment_name": assignment_name or "AI Generated Code Review",
-        "status": "completed",
+        "status": "processing",
         "created_at": datetime.now().isoformat(),
         "file_count": len(submissions),
         "results": [],
         "summary": {
             "total_files": len(submissions),
-            "flagged_files": ai_detection.get("flagged_count", 0),
-            "highest_ai_probability": ai_detection.get("highest_score", 0.0),
-            "average_ai_probability": ai_detection.get("average_score", 0.0),
+            "flagged_files": 0,
+            "highest_ai_probability": 0.0,
+            "average_ai_probability": 0.0,
         },
         "review_status": "unreviewed",
         "review_notes": "",
@@ -6674,15 +6746,12 @@ async def detect_ai_generated_code(
         "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": ["ai_detector"],
         "selected_tools": ["AI Detector"],
-        "ai_detection": ai_detection,
         # Store first 4 KB of each file for the report code preview
         "submissions": {k: v[:4096] for k, v in submissions.items()},
     }
     _persist_job(job_id)
-    _persist_ai_detection_results(job_id, ai_detection)
-    return JSONResponse(
-        content={"job_id": job_id, "status": "completed", "ai_detection": ai_detection}
-    )
+    background_tasks.add_task(_finalize_ai_detection_job, job_id, submissions)
+    return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
 
 # AI Detection Calibration Training
@@ -7207,7 +7276,9 @@ async def _run_analysis(
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
-        ai_detection = _build_ai_detection_summary(submissions)
+        # AI detection is CPU-bound (and may load a local code LM); offload it
+        # like the engine work so the event loop stays responsive.
+        ai_detection = await run_in_threadpool(_build_ai_detection_summary, submissions)
         settings_payload = _build_settings_payload(
             current_user.get("tenant_id") if current_user else None
         )
