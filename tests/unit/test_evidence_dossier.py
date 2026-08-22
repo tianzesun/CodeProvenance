@@ -232,3 +232,38 @@ class TestGenerateVivaQuestions:
         questions = generate_viva_questions(dossier)
         assert len(questions) <= 5
         assert all(isinstance(question, str) for question in questions)
+
+
+class TestVivaOutcomeMerge:
+    """Recorded viva outcomes merge into the matching student dossier."""
+
+    def test_outcome_attached_to_matching_student(self):
+        """A recorded outcome lands on its student, not on the others."""
+        dossier = EvidenceDossierService().build(
+            _job_payload(),
+            viva_outcomes=[
+                {
+                    "submission_name": "alice.py",
+                    "outcome": "authorship_confirmed",
+                    "notes": "Explained the decomposition clearly.",
+                    "conducted_at": "2026-08-22T10:00:00",
+                }
+            ],
+        )
+        by_name = {student["student"]: student for student in dossier["students"]}
+        assert by_name["alice.py"]["viva_outcome"]["outcome"] == "authorship_confirmed"
+        assert by_name["alice.py"]["viva_outcome"]["notes"]
+        assert by_name["bob.py"]["viva_outcome"] is None
+
+    def test_no_outcomes_leaves_students_untouched(self):
+        """Without outcomes every student has a null viva_outcome."""
+        dossier = EvidenceDossierService().build(_job_payload())
+        assert all(student["viva_outcome"] is None for student in dossier["students"])
+
+    def test_outcome_for_unknown_student_is_ignored(self):
+        """Outcomes naming a student not in the job are dropped."""
+        dossier = EvidenceDossierService().build(
+            _job_payload(),
+            viva_outcomes=[{"submission_name": "ghost.py", "outcome": "inconclusive"}],
+        )
+        assert all(student["viva_outcome"] is None for student in dossier["students"])

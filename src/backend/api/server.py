@@ -96,6 +96,7 @@ from src.backend.models.database import (
     Submission,
     Tenant,
     User,
+    VivaOutcome,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -428,6 +429,12 @@ def _normalize_engine_weights(raw: Any) -> dict[str, float]:
 _jobs: dict[str, dict[str, Any]] = {}
 JOB_METADATA_FILENAME = "job.json"
 REVIEW_STATUSES = {"unreviewed", "needs_review", "confirmed", "dismissed", "escalated"}
+VIVA_OUTCOMES = {
+    "authorship_confirmed",
+    "concerns_unresolved",
+    "breach_identified",
+    "inconclusive",
+}
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
 AI_MEDIUM_RISK_THRESHOLD = 0.4
 AI_HIGH_RISK_THRESHOLD = 0.7
@@ -7549,13 +7556,39 @@ async def get_job_status(job_id: str, request: Request):
     return JSONResponse(content=job)
 
 
+def _load_viva_outcomes(job_id: str) -> list[dict[str, Any]]:
+    """Load recorded viva outcomes for a job as serialized dicts.
+
+    Returns an empty list when the table has not been migrated yet so the
+    dossier endpoints keep working on pre-migration deployments.
+    """
+    try:
+        with SessionLocal() as db:
+            rows = db.query(VivaOutcome).filter(VivaOutcome.job_id == job_id).all()
+            return [
+                {
+                    "submission_name": row.submission_name,
+                    "outcome": row.outcome,
+                    "notes": row.notes,
+                    "conducted_at": (
+                        row.conducted_at.isoformat() if row.conducted_at else None
+                    ),
+                }
+                for row in rows
+            ]
+    except SQLAlchemyError as exc:
+        logger.info("Viva outcomes unavailable for %s (%s)", job_id, exc)
+        return []
+
+
 @app.get("/api/job/{job_id}/dossier")
 async def get_job_evidence_dossier(job_id: str, request: Request):
     """Unified per-student evidence dossier with viva questions.
 
     Fuses the job's AI detection, pairwise similarity and public-web
     provenance evidence into one severity-banded dossier per student, with
-    targeted viva questions for authorship verification.
+    targeted viva questions for authorship verification and any recorded
+    viva outcomes merged in.
     """
     _require_job_access(job_id, request)
     job = _get_job(job_id)
@@ -7564,7 +7597,80 @@ async def get_job_evidence_dossier(job_id: str, request: Request):
 
     from src.backend.evaluation.evidence_dossier import EvidenceDossierService
 
-    return JSONResponse(content=EvidenceDossierService().build(job))
+    return JSONResponse(
+        content=EvidenceDossierService().build(
+            job, viva_outcomes=_load_viva_outcomes(job_id)
+        )
+    )
+
+
+@app.put("/api/job/{job_id}/viva")
+async def record_viva_outcome(job_id: str, request: Request):
+    """Record (upsert) the viva outcome for one student submission.
+
+    Closes the dossier's case loop: after interviewing the student, the
+    instructor records the conclusion. Re-recording overwrites the previous
+    outcome for the same (job, submission).
+    """
+    _require_job_access(job_id, request)
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid viva payload")
+
+    submission_name = str(payload.get("submission_name") or "").strip()
+    outcome = str(payload.get("outcome") or "").strip()
+    if not submission_name:
+        raise HTTPException(status_code=400, detail="submission_name is required")
+    if outcome not in VIVA_OUTCOMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"outcome must be one of: {', '.join(sorted(VIVA_OUTCOMES))}",
+        )
+
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise HTTPException(status_code=400, detail="notes must be a string")
+
+    conducted_at = None
+    raw_conducted = payload.get("conducted_at")
+    if raw_conducted:
+        try:
+            conducted_at = datetime.fromisoformat(
+                str(raw_conducted).replace("Z", "+00:00")
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="conducted_at must be an ISO timestamp"
+            )
+
+    saved_notes = (notes or "").strip() or None
+    with SessionLocal() as db:
+        record = (
+            db.query(VivaOutcome)
+            .filter(
+                VivaOutcome.job_id == job_id,
+                VivaOutcome.submission_name == submission_name,
+            )
+            .first()
+        )
+        if record is None:
+            record = VivaOutcome(job_id=job_id, submission_name=submission_name)
+            db.add(record)
+        record.outcome = outcome
+        record.notes = saved_notes
+        record.conducted_at = conducted_at
+        db.commit()
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "submission_name": submission_name,
+            "outcome": outcome,
+            "notes": saved_notes,
+            "conducted_at": conducted_at.isoformat() if conducted_at else None,
+        }
+    )
 
 
 @app.get("/dossier/{job_id}/download-pdf")
@@ -7594,7 +7700,9 @@ async def download_dossier_pdf(job_id: str, request: Request):
         DossierPdfExporter,
     )
 
-    dossier = EvidenceDossierService().build(job)
+    dossier = EvidenceDossierService().build(
+        job, viva_outcomes=_load_viva_outcomes(job_id)
+    )
     exporter = DossierPdfExporter()
 
     try:
@@ -7627,7 +7735,9 @@ async def download_dossier_pdf(job_id: str, request: Request):
         try:
             _persist_report_record(job_id, "dossier", "pdf", str(pdf_path))
         except SQLAlchemyError:
-            logger.warning("Failed to cache dossier PDF report record for job %s", job_id)
+            logger.warning(
+                "Failed to cache dossier PDF report record for job %s", job_id
+            )
 
     response = Response(content=pdf_bytes, media_type="application/pdf")
     response.headers["Content-Disposition"] = (

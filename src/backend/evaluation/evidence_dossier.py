@@ -62,6 +62,7 @@ class StudentDossier:
     web_best_match_source: str | None = None
     evidence: list[EvidenceItem] = field(default_factory=list)
     viva_questions: list[str] = field(default_factory=list)
+    viva_outcome: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for API responses and reports."""
@@ -77,19 +78,27 @@ class StudentDossier:
             "web_best_match_source": self.web_best_match_source,
             "evidence": [item.to_dict() for item in self.evidence],
             "viva_questions": self.viva_questions,
+            "viva_outcome": self.viva_outcome,
         }
 
 
 class EvidenceDossierService:
     """Build per-student evidence dossiers from an analyzed job payload."""
 
-    def build(self, job: dict[str, Any]) -> dict[str, Any]:
+    def build(
+        self,
+        job: dict[str, Any],
+        viva_outcomes: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Fuse AI, pairwise and web evidence from a job into student dossiers.
 
         Args:
             job: The job payload as returned by ``GET /api/job/{id}``
                 (needs ``results``, optionally ``ai_detection`` and
                 ``web_analysis``).
+            viva_outcomes: Optional recorded viva outcomes (rows with
+                ``submission_name``, ``outcome``, ``notes``, ``conducted_at``)
+                merged into the matching students' dossiers.
 
         Returns:
             Dict with ``job_id``, ``generated_at``, source ``coverage`` flags
@@ -122,6 +131,18 @@ class EvidenceDossierService:
             )
             for name in names
         ]
+        if viva_outcomes:
+            outcome_by_name = {
+                str(entry.get("submission_name")): entry for entry in viva_outcomes
+            }
+            for dossier in students:
+                outcome = outcome_by_name.get(dossier.student)
+                if outcome is not None:
+                    dossier.viva_outcome = {
+                        "outcome": str(outcome.get("outcome") or ""),
+                        "notes": outcome.get("notes"),
+                        "conducted_at": outcome.get("conducted_at"),
+                    }
         students.sort(key=lambda dossier: (_band_rank(dossier.band), dossier.student))
 
         return {

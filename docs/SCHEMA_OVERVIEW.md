@@ -46,6 +46,7 @@ Organization
 | `CaseResultLink` | Join table: Case ↔ SimilarityResult |
 | `CaseComment` | Discussion on a Case |
 | `CaseAssignee` | Who is reviewing the Case |
+| `VivaOutcome` | Recorded viva (authorship interview) outcome per job submission — closes the dossier case loop; unique on (job_id, submission_name) |
 
 ### Supporting Tables
 - `User` — Dashboard users (professors, admins)

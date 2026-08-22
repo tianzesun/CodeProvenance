@@ -28,6 +28,18 @@ TYPE_LABELS = {
     "peer_similarity": "Peer similarity",
     "web_provenance": "Web provenance",
 }
+OUTCOME_LABELS = {
+    "authorship_confirmed": "Authorship confirmed",
+    "concerns_unresolved": "Concerns unresolved",
+    "breach_identified": "Breach identified",
+    "inconclusive": "Inconclusive",
+}
+OUTCOME_COLORS = {
+    "authorship_confirmed": "#15803d",
+    "concerns_unresolved": "#b45309",
+    "breach_identified": "#b91c1c",
+    "inconclusive": "#475569",
+}
 
 DISCLAIMER = (
     "Evidence and questions are decision support for a human reviewer, never "
@@ -65,6 +77,7 @@ h1 { font-size: 18pt; margin: 0 0 2pt 0; }
 }
 .stats { color: #475569; font-size: 9pt; margin-top: 3pt; }
 .evidence-item { margin: 5pt 0 0 0; font-size: 9.5pt; }
+.viva-outcome { margin: 5pt 0 0 0; font-size: 9.5pt; }
 .evidence-title { font-weight: 600; }
 .evidence-detail { color: #64748b; font-size: 8.5pt; margin-top: 0.5pt; }
 .questions {
@@ -169,6 +182,27 @@ Job {_esc(dossier.get("job_id", ""))} &middot; {len(students)} student
                 )
             )
 
+        viva_outcome = student.get("viva_outcome") or {}
+        outcome_html = ""
+        if viva_outcome.get("outcome"):
+            key = str(viva_outcome.get("outcome"))
+            label = OUTCOME_LABELS.get(key, key)
+            conducted = str(viva_outcome.get("conducted_at") or "")[:10]
+            notes = viva_outcome.get("notes")
+            outcome_html = (
+                '<p class="viva-outcome">'
+                f'<span style="color:{OUTCOME_COLORS.get(key, "#475569")}">'
+                "&#9679;</span> Viva outcome: "
+                f"<strong>{_esc(label)}</strong>"
+                + (f" &middot; conducted {conducted}" if conducted else "")
+                + (
+                    f'<br><span class="evidence-detail">{_esc(notes)}</span>'
+                    if notes
+                    else ""
+                )
+                + "</p>"
+            )
+
         evidence_items = "".join(
             (
                 f'<p class="evidence-item">'
@@ -206,7 +240,7 @@ Job {_esc(dossier.get("job_id", ""))} &middot; {len(students)} student
             f"{_esc(BAND_LABELS.get(band, band))}</span>"
             "</div>"
             f'<p class="stats">{" &middot; ".join(stats)}</p>'
-            f"{evidence_items}{questions_html}"
+            f"{outcome_html}{evidence_items}{questions_html}"
             "</div>"
         )
 

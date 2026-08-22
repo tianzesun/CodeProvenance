@@ -9,6 +9,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Bot,
+  ClipboardCheck,
   FileDown,
   GitCompare,
   Globe,
@@ -26,6 +27,12 @@ interface EvidenceItem {
   detail: string;
 }
 
+interface VivaOutcome {
+  outcome: string;
+  notes: string | null;
+  conducted_at: string | null;
+}
+
 interface StudentDossier {
   student: string;
   band: string;
@@ -38,6 +45,7 @@ interface StudentDossier {
   web_best_match_source: string | null;
   evidence: EvidenceItem[];
   viva_questions: string[];
+  viva_outcome: VivaOutcome | null;
 }
 
 interface DossierPayload {
@@ -77,6 +85,20 @@ const typeIcon: Record<string, typeof Bot> = {
   web_provenance: Globe,
 };
 
+const outcomeLabels: Record<string, string> = {
+  authorship_confirmed: 'Authorship confirmed',
+  concerns_unresolved: 'Concerns unresolved',
+  breach_identified: 'Breach identified',
+  inconclusive: 'Inconclusive',
+};
+
+const outcomeStyles: Record<string, string> = {
+  authorship_confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  concerns_unresolved: 'bg-amber-50 text-amber-700 border-amber-200',
+  breach_identified: 'bg-red-50 text-red-700 border-red-200',
+  inconclusive: 'bg-slate-100 text-slate-600 border-slate-200',
+};
+
 function pct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
   return `${Math.round(Number(value) * 100)}%`;
@@ -87,6 +109,59 @@ export default function EvidenceDossierPage() {
   const [dossier, setDossier] = useState<DossierPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [outcomeDrafts, setOutcomeDrafts] = useState<
+    Record<string, { outcome: string; notes: string }>
+  >({});
+  const [savingStudent, setSavingStudent] = useState('');
+
+  const draftFor = (student: StudentDossier) =>
+    outcomeDrafts[student.student] ?? {
+      outcome: student.viva_outcome?.outcome ?? '',
+      notes: student.viva_outcome?.notes ?? '',
+    };
+
+  const saveOutcome = async (
+    student: StudentDossier,
+    draft: { outcome: string; notes: string },
+  ) => {
+    if (!draft.outcome || !id) return;
+    setSavingStudent(student.student);
+    try {
+      const conductedAt = new Date().toISOString();
+      await apiClient.put(`/api/job/${id}/viva`, {
+        submission_name: student.student,
+        outcome: draft.outcome,
+        notes: draft.notes || null,
+        conducted_at: conductedAt,
+      });
+      setDossier((prev) =>
+        prev
+          ? {
+              ...prev,
+              students: prev.students.map((s) =>
+                s.student === student.student
+                  ? {
+                      ...s,
+                      viva_outcome: {
+                        outcome: draft.outcome,
+                        notes: draft.notes || null,
+                        conducted_at: conductedAt,
+                      },
+                    }
+                  : s,
+              ),
+            }
+          : prev,
+      );
+    } catch (err) {
+      setError(
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          'Failed to save viva outcome.',
+      );
+    } finally {
+      setSavingStudent('');
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -191,6 +266,7 @@ export default function EvidenceDossierPage() {
             {dossier.students.map((student) => {
               const band = bandStyles[student.band] || bandStyles.low;
               const BandIcon = band.icon;
+              const draft = draftFor(student);
               return (
                 <div
                   key={student.student}
@@ -269,6 +345,69 @@ export default function EvidenceDossierPage() {
                       </ol>
                     </div>
                   )}
+
+                  {student.viva_outcome && (
+                    <div
+                      className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
+                        outcomeStyles[student.viva_outcome.outcome] ||
+                        outcomeStyles.inconclusive
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-1.5 font-medium">
+                        <ClipboardCheck size={14} />
+                        Viva outcome: {outcomeLabels[student.viva_outcome.outcome] ||
+                          student.viva_outcome.outcome}
+                        {student.viva_outcome.conducted_at &&
+                          ` · ${new Date(
+                            student.viva_outcome.conducted_at,
+                          ).toLocaleString()}`}
+                      </span>
+                      {student.viva_outcome.notes && (
+                        <p className="mt-1 text-xs opacity-80">
+                          {student.viva_outcome.notes}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <select
+                      value={draft.outcome}
+                      onChange={(e) =>
+                        setOutcomeDrafts((prev) => ({
+                          ...prev,
+                          [student.student]: { ...draft, outcome: e.target.value },
+                        }))
+                      }
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                      aria-label={`Viva outcome for ${student.student}`}
+                    >
+                      <option value="">Record viva outcome…</option>
+                      {Object.entries(outcomeLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={draft.notes}
+                      onChange={(e) =>
+                        setOutcomeDrafts((prev) => ({
+                          ...prev,
+                          [student.student]: { ...draft, notes: e.target.value },
+                        }))
+                      }
+                      placeholder="Interview notes (optional)"
+                      className="min-w-[12rem] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                    />
+                    <button
+                      onClick={() => saveOutcome(student, draft)}
+                      disabled={!draft.outcome || savingStudent === student.student}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+                    >
+                      {savingStudent === student.student ? 'Saving…' : 'Save outcome'}
+                    </button>
+                  </div>
                 </div>
               );
             })}

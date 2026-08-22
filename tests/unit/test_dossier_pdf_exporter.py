@@ -122,3 +122,25 @@ class TestExportPdf:
         assert pdf_bytes.startswith(b"%PDF")
         assert len(pdf_bytes) > 1000
         assert weasyprint.__name__ == "weasyprint"
+
+
+class TestVivaOutcomeRendering:
+    """Recorded viva outcomes appear on the printed dossier."""
+
+    def test_renders_recorded_outcome(self):
+        """Outcome label, date and notes are rendered and escaped."""
+        dossier = _dossier()
+        dossier["students"][0]["viva_outcome"] = {
+            "outcome": "authorship_confirmed",
+            "notes": "Explained the design choices.",
+            "conducted_at": "2026-08-22T10:00:00",
+        }
+        html_content = DossierPdfExporter().render_html(dossier)
+        assert "Viva outcome: <strong>Authorship confirmed</strong>" in html_content
+        assert "conducted 2026-08-22" in html_content
+        assert "Explained the design choices." in html_content
+
+    def test_no_outcome_renders_nothing(self):
+        """Students without a recorded outcome get no outcome line."""
+        html_content = DossierPdfExporter().render_html(_dossier())
+        assert "Viva outcome:" not in html_content

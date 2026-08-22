@@ -172,6 +172,7 @@ class Job(Base):
     ai_detection_results = relationship(
         "AIDetectionResult", back_populates="job", lazy="dynamic"
     )
+    viva_outcomes = relationship("VivaOutcome", back_populates="job", lazy="dynamic")
     # New relationships
     reports = relationship("Report", back_populates="job")
     behavioral_sessions = relationship("BehavioralSession", back_populates="job")
@@ -283,6 +284,43 @@ class AIDetectionResult(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
     job = relationship("Job", back_populates="ai_detection_results")
+
+
+class VivaOutcome(Base):
+    """Recorded outcome of a viva (authorship interview) for one submission.
+
+    Closes the dossier's case loop: the instructor interviews the student
+    using the generated questions, then records the conclusion here. One row
+    per (job, submission); re-recording upserts.
+    """
+
+    __tablename__ = "viva_outcomes"
+
+    __table_args__ = (
+        Index("idx_viva_outcomes_outcome", "outcome"),
+        Index(
+            "uq_viva_outcomes_job_submission",
+            "job_id",
+            "submission_name",
+            unique=True,
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    submission_name = Column(String(500), nullable=False)
+    # authorship_confirmed | concerns_unresolved | breach_identified | inconclusive
+    outcome = Column(String(50), nullable=False)
+    notes = Column(Text, nullable=True)
+    conducted_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at = Column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+    job = relationship("Job", back_populates="viva_outcomes")
 
 
 class WebhookEvent(Base):
