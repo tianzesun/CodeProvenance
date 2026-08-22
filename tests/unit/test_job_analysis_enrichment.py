@@ -68,6 +68,64 @@ def test_build_web_analysis_summary_defaults_to_disabled(monkeypatch) -> None:
     assert "disabled in admin settings" in summary["status_message"]
 
 
+def test_build_web_analysis_summary_scans_public_sources(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("STACKEXCHANGE_API_KEY", "key")
+    monkeypatch.setattr(
+        "src.backend.infrastructure.indexing.web_search.WebSearchService."
+        "scan_public_sources",
+        lambda self, code, language, sites: {
+            "web_results": [
+                {
+                    "name": "org/repo/stats.py",
+                    "url": "https://github.com/org/repo/blob/main/stats.py",
+                    "source": "github",
+                    "similarity": 0.72,
+                }
+            ],
+            "max_web_similarity": 0.72,
+            "source_counts": {"github": 1},
+            "configured_sources": [],
+        },
+    )
+
+    summary = _build_web_analysis_summary(
+        {"example.py": "def compute_weighted_average(scores, weights):\n    return 0"},
+        {"source_scan_enabled": True, "source_scan_sites": []},
+    )
+
+    assert summary["enabled"] is True
+    assert summary["matched_submissions"] == 1
+    assert summary["highest_similarity"] == 0.72
+    assert summary["source_totals"] == {"github": 1}
+    assert summary["submissions"][0]["sources"][0]["name"] == "org/repo/stats.py"
+    assert "Stack Overflow" in summary["status_message"]
+    assert "GITHUB_TOKEN" not in summary["status_message"]
+
+
+def test_build_web_analysis_summary_notes_missing_github_token(monkeypatch) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "src.backend.infrastructure.indexing.web_search.WebSearchService."
+        "scan_public_sources",
+        lambda self, code, language, sites: {
+            "web_results": [],
+            "max_web_similarity": 0.0,
+            "source_counts": {},
+            "configured_sources": [],
+        },
+    )
+
+    summary = _build_web_analysis_summary(
+        {"example.py": "def compute_weighted_average(scores, weights):\n    return 0"},
+        {"source_scan_enabled": True, "source_scan_sites": []},
+    )
+
+    assert summary["enabled"] is True
+    assert "GITHUB_TOKEN is not configured" in summary["status_message"]
+
+
 def test_normalize_job_preserves_analysis_sections() -> None:
     ai_detection = _build_ai_detection_summary({"sample.py": "print('hello world')"})
     normalized = _normalize_job(

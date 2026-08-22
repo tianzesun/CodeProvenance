@@ -1,5 +1,8 @@
+"""Web-scale public source search for external code provenance checks."""
+
 import logging
 import re
+from html import unescape
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
@@ -7,6 +10,26 @@ from urllib.parse import urlparse
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Maximum characters for a search probe; keeps API queries within provider limits.
+_PROBE_MAX_CHARS = 120
+
+# Minimum characters for a probe or code block to be considered signal.
+_PROBE_MIN_CHARS = 15
+_CODE_BLOCK_MIN_CHARS = 30
+
+# Lines that never carry distinctive signal for code search queries: comment
+# prefixes, dependency/import statements, and idiomatic entry-point guards.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"^(?:"
+    r"[#*]|//|/\*|<!--|--|;"
+    r"|if\s+__name__\s*=="
+    r"|(?:import|from|package|using|include|require|extern)\b"
+    r")"
+)
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_CODE_BLOCK_RE = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL | re.IGNORECASE)
 
 
 class WebSearchService:
@@ -27,6 +50,43 @@ class WebSearchService:
         self.github_headers = (
             {"Authorization": f"token {github_token}"} if github_token else {}
         )
+
+    # ------------------------------------------------------------------
+    # Query construction and similarity scoring
+    # ------------------------------------------------------------------
+
+    def _extract_probe_queries(self, query_code: str, max_probes: int = 2) -> list[str]:
+        """Build distinctive search probes from a code snippet's salient lines.
+
+        Imports, comments, and idiomatic boilerplate are skipped because they
+        match millions of unrelated files; identifier-dense lines are the most
+        selective queries for public code search.
+        """
+        scored: list[tuple[float, str]] = []
+        for raw_line in (query_code or "").splitlines():
+            line = raw_line.strip()
+            if len(line) < _PROBE_MIN_CHARS or self._is_boilerplate_line(line):
+                continue
+            tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", line)
+            if len(tokens) < 2:
+                continue
+            avg_token_len = sum(len(token) for token in tokens) / len(tokens)
+            scored.append((avg_token_len, line))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        probes: list[str] = []
+        for _, line in scored:
+            probe = re.sub(r"\s+", " ", line)[:_PROBE_MAX_CHARS].strip()
+            if len(probe) >= _PROBE_MIN_CHARS and probe not in probes:
+                probes.append(probe)
+            if len(probes) >= max_probes:
+                break
+        return probes
+
+    @staticmethod
+    def _is_boilerplate_line(line: str) -> bool:
+        """Return True for imports, comments, and other non-distinctive lines."""
+        return bool(_BOILERPLATE_LINE_RE.match(line))
 
     def _tokenize_text(self, text: str) -> set[str]:
         return {
@@ -57,54 +117,96 @@ class WebSearchService:
 
         return round(min(1.0, max(base_score, (jaccard * 0.85) + phrase_boost)), 4)
 
+    def _code_similarity(
+        self, query_code: str, candidate_code: str, k: int = 5
+    ) -> float:
+        """Fraction of the query's token k-grams found verbatim in the candidate.
+
+        Containment (rather than symmetric similarity) answers the provenance
+        question directly: how much of the submission appears in the public
+        source, regardless of how much extra content that source carries.
+        """
+        query_grams = self._shingle_tokens(query_code, k)
+        if not query_grams:
+            return 0.0
+        candidate_grams = self._shingle_tokens(candidate_code, k)
+        if not candidate_grams:
+            return 0.0
+        containment = len(query_grams & candidate_grams) / len(query_grams)
+        return round(min(1.0, containment), 4)
+
+    @staticmethod
+    def _shingle_tokens(code: str, k: int) -> set[tuple[str, ...]]:
+        """Return the set of token k-grams (shingles) for a code snippet."""
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", (code or "").lower())
+        if len(tokens) < k:
+            return set()
+        return {
+            tuple(tokens[index : index + k]) for index in range(len(tokens) - k + 1)
+        }
+
+    # ------------------------------------------------------------------
+    # GitHub
+    # ------------------------------------------------------------------
+
     def search_github(
         self, query_code: str, language: str = "python"
     ) -> list[dict[str, Any]]:
-        """Search GitHub for code snippets using the Code Search API."""
+        """Search GitHub public code using the submission's distinctive lines.
+
+        Results are scored against the matched file fragments returned by the
+        text-match media type, so similarity reflects actual code content
+        rather than repository metadata.
+        """
         if not self.github_token:
             logger.warning(
                 "No GitHub token provided. GitHub search will be limited or disabled."
             )
             return []
 
-        # Simplified: in a real system, you'd extract key tokens from the code for the query.
-        # GitHub Code Search has strict rate limits.
-        tokens = query_code.split()[:5]  # Use the first 5 words as a query
-        query_str = " ".join(tokens) + f" language:{language}"
-
-        url = "https://api.github.com/search/code"
-        params = {"q": query_str}
-
-        try:
-            response = requests.get(
-                url, headers=self.github_headers, params=params, timeout=8
-            )
-            response.raise_for_status()
-            results = response.json().get("items", [])
-
-            # Map GitHub response to internal result format
-            mapped_results = []
-            for r in results:
-                candidate_text = " ".join(
-                    [
-                        r.get("name", ""),
-                        r.get("path", ""),
-                        r.get("repository", {}).get("full_name", ""),
-                    ]
+        probes = self._extract_probe_queries(query_code)
+        mapped: dict[str, dict[str, Any]] = {}
+        for probe in probes:
+            try:
+                response = requests.get(
+                    "https://api.github.com/search/code",
+                    headers={
+                        **self.github_headers,
+                        "Accept": "application/vnd.github.text-match+json",
+                    },
+                    params={"q": f"{probe} language:{language}", "per_page": 5},
+                    timeout=8,
                 )
-                mapped_results.append(
-                    {
-                        "id": f"gh_{r['sha']}",
-                        "name": r["repository"]["full_name"],
-                        "url": r["html_url"],
-                        "source": "github",
-                        "similarity": self._score_match(query_code, candidate_text),
-                    }
+                response.raise_for_status()
+                items = response.json().get("items", [])
+            except Exception as exc:
+                logger.error("GitHub search failed: %s", exc)
+                continue
+
+            for item in items:
+                url = str(item.get("html_url") or "")
+                if not url or url in mapped:
+                    continue
+                fragments = "\n".join(
+                    str(match.get("fragment") or "")
+                    for match in item.get("text_matches", [])
                 )
-            return mapped_results
-        except Exception as e:
-            logger.error(f"GitHub search failed: {e}")
-            return []
+                similarity = self._code_similarity(query_code, fragments)
+                if similarity <= 0:
+                    continue
+                repository = item.get("repository") or {}
+                mapped[url] = {
+                    "id": f"gh_{item.get('sha', '')}",
+                    "name": f"{repository.get('full_name', '')}/{item.get('path', '')}",
+                    "url": url,
+                    "source": "github",
+                    "similarity": similarity,
+                }
+
+        ranked = sorted(
+            mapped.values(), key=lambda item: item["similarity"], reverse=True
+        )
+        return ranked[:5]
 
     def scan_github_repo(
         self, query_code: str, repo_url: str, language: str = "python"
@@ -145,7 +247,7 @@ class WebSearchService:
                 logger.debug("Failed to fetch raw source %s", raw_url, exc_info=True)
                 continue
 
-            score = self._score_match(query_code, raw.text)
+            score = self._code_similarity(query_code, raw.text)
             if score <= 0:
                 continue
             matches.append(
@@ -161,6 +263,109 @@ class WebSearchService:
                 break
 
         return sorted(matches, key=lambda item: item["similarity"], reverse=True)[:10]
+
+    # ------------------------------------------------------------------
+    # Stack Overflow
+    # ------------------------------------------------------------------
+
+    def search_stackoverflow(self, query_code: str) -> list[dict[str, Any]]:
+        """Search Stack Overflow answers whose code blocks resemble the submission.
+
+        Two steps: excerpt search to locate candidate questions, then an
+        answer fetch with bodies so similarity is scored against the actual
+        posted code, not just question titles and excerpts.
+        """
+        probes = self._extract_probe_queries(query_code, max_probes=1)
+        if not probes:
+            return []
+
+        params = {
+            "q": probes[0],
+            "site": "stackoverflow",
+            "pagesize": 10,
+        }
+        if self.stackoverflow_api_key:
+            params["key"] = self.stackoverflow_api_key
+        try:
+            response = requests.get(
+                "https://api.stackexchange.com/2.3/search/excerpts",
+                params=params,
+                timeout=8,
+            )
+            response.raise_for_status()
+            items = response.json().get("items", [])
+        except Exception as exc:
+            logger.error("Stack Overflow search failed: %s", exc)
+            return []
+
+        titles: dict[int, str] = {}
+        for item in items:
+            question_id = int(item.get("question_id") or 0)
+            if question_id and question_id not in titles:
+                titles[question_id] = str(item.get("title") or "")
+        question_ids = list(titles.keys())[:5]
+        if not question_ids:
+            return []
+
+        ids_param = ";".join(str(question_id) for question_id in question_ids)
+        answer_params = {
+            "site": "stackoverflow",
+            "filter": "withbody",
+            "pagesize": 30,
+        }
+        if self.stackoverflow_api_key:
+            answer_params["key"] = self.stackoverflow_api_key
+        try:
+            response = requests.get(
+                f"https://api.stackexchange.com/2.3/questions/{ids_param}/answers",
+                params=answer_params,
+                timeout=8,
+            )
+            response.raise_for_status()
+            answers = response.json().get("items", [])
+        except Exception as exc:
+            logger.error("Stack Overflow answer fetch failed: %s", exc)
+            return []
+
+        best_by_question: dict[int, float] = {}
+        for answer in answers:
+            question_id = int(answer.get("question_id") or 0)
+            if not question_id:
+                continue
+            for block in self._extract_code_blocks(str(answer.get("body") or "")):
+                score = self._code_similarity(query_code, block)
+                best_by_question[question_id] = max(
+                    best_by_question.get(question_id, 0.0), score
+                )
+
+        mapped = [
+            {
+                "id": f"so_{question_id}",
+                "name": titles.get(
+                    question_id, f"Stack Overflow question {question_id}"
+                ),
+                "url": f"https://stackoverflow.com/questions/{question_id}",
+                "source": "stackoverflow",
+                "similarity": score,
+            }
+            for question_id, score in best_by_question.items()
+            if score > 0
+        ]
+        return sorted(mapped, key=lambda item: item["similarity"], reverse=True)[:5]
+
+    @staticmethod
+    def _extract_code_blocks(html_body: str) -> list[str]:
+        """Extract unescaped code blocks from a Stack Overflow HTML body."""
+        blocks: list[str] = []
+        for raw in _CODE_BLOCK_RE.findall(html_body or ""):
+            text = unescape(_HTML_TAG_RE.sub("", raw)).strip()
+            if len(text) >= _CODE_BLOCK_MIN_CHARS:
+                blocks.append(text)
+        return blocks
+
+    # ------------------------------------------------------------------
+    # Orchestration
+    # ------------------------------------------------------------------
 
     def scan_configured_sources(
         self, query_code: str, language: str, source_sites: list[str]
@@ -193,6 +398,44 @@ class WebSearchService:
             "configured_sources": configured_sources,
         }
 
+    def scan_public_sources(
+        self, query_code: str, language: str, source_sites: list[str]
+    ) -> dict[str, Any]:
+        """Scan built-in public sources plus administrator-configured locations.
+
+        Built-in sources are GitHub code search (requires a token) and Stack
+        Overflow (works without a key). Failures in any source never raise;
+        they only shrink the result set.
+        """
+        configured = self.scan_configured_sources(query_code, language, source_sites)
+        all_results: list[dict[str, Any]] = list(configured.get("web_results", []))
+        all_results.extend(self.search_github(query_code, language))
+        all_results.extend(self.search_stackoverflow(query_code))
+
+        deduped: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for result in all_results:
+            url = str(result.get("url") or "")
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            deduped.append(result)
+        deduped.sort(key=lambda item: item.get("similarity", 0), reverse=True)
+
+        source_counts: dict[str, int] = {}
+        for result in deduped:
+            source = str(result.get("source") or "web")
+            source_counts[source] = source_counts.get(source, 0) + 1
+
+        skipped = [] if self.github_token else ["github"]
+        return {
+            "web_results": deduped[:10],
+            "max_web_similarity": deduped[0]["similarity"] if deduped else 0.0,
+            "source_counts": source_counts,
+            "configured_sources": configured.get("configured_sources", []),
+            "skipped_sources": skipped,
+        }
+
     def _scan_raw_source_url(
         self, query_code: str, source_url: str
     ) -> list[dict[str, Any]]:
@@ -204,7 +447,7 @@ class WebSearchService:
             logger.warning("Configured source fetch failed for %s: %s", source_url, exc)
             return []
 
-        score = self._score_match(query_code, response.text)
+        score = self._code_similarity(query_code, response.text)
         return [
             {
                 "id": f"web_{hash(source_url)}",
@@ -235,43 +478,6 @@ class WebSearchService:
             "cpp": (".cpp", ".cc", ".cxx", ".h", ".hpp"),
             "c": (".c", ".h"),
         }.get(language, (".py", ".java", ".js", ".ts", ".c", ".cpp"))
-
-    def search_stackoverflow(self, query_code: str) -> list[dict[str, Any]]:
-        """Search Stack Overflow for code snippets."""
-        # Simplified: Stack Overflow API search (SE API)
-        url = "https://api.stackexchange.com/2.3/search/excerpts"
-        params = {
-            "q": " ".join(query_code.split()[:5]),
-            "site": "stackoverflow",
-            "key": self.stackoverflow_api_key,
-        }
-
-        try:
-            response = requests.get(url, params=params, timeout=8)
-            response.raise_for_status()
-            results = response.json().get("items", [])
-
-            mapped_results = []
-            for r in results:
-                candidate_text = " ".join(
-                    [
-                        r.get("title", ""),
-                        str(r.get("excerpt", "")),
-                    ]
-                )
-                mapped_results.append(
-                    {
-                        "id": f"so_{r['question_id']}",
-                        "name": r["title"],
-                        "url": f"https://stackoverflow.com/questions/{r['question_id']}",
-                        "source": "stackoverflow",
-                        "similarity": self._score_match(query_code, candidate_text),
-                    }
-                )
-            return mapped_results
-        except Exception as e:
-            logger.error(f"Stack Overflow search failed: {e}")
-            return []
 
     def perform_full_web_scan(self, code: str, language: str) -> dict[str, Any]:
         """Perform a comprehensive web-scale scan."""

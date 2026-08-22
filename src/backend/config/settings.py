@@ -119,6 +119,10 @@ class AppSettings(BaseSettings):
     # Integrations
     WEBHOOK_URL: str = ""
 
+    # Public source scanning (GitHub / Stack Overflow provenance checks)
+    SOURCE_SCAN_ENABLED: bool = False
+    SOURCE_SCAN_SITES: list[str] = Field(default_factory=lambda: ["https://github.com"])
+
     # Audit & Compliance
     AUDIT_LOG_LEVEL: str = "INFO"
     AUDIT_RETENTION_DAYS: int = 365

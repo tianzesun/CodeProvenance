@@ -4888,11 +4888,9 @@ def _build_web_analysis_summary(
     source_sites = _normalize_source_scan_sites(
         settings_payload.get("source_scan_sites")
     )
-    web_enabled = bool(settings_payload.get("source_scan_enabled")) and bool(
-        source_sites
-    )
     github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
     stackoverflow_api_key = os.getenv("STACKEXCHANGE_API_KEY")
+    web_enabled = bool(settings_payload.get("source_scan_enabled"))
 
     if not web_enabled:
         return {
@@ -4907,6 +4905,17 @@ def _build_web_analysis_summary(
             "submissions": [],
         }
 
+    scanned_sources = ["Stack Overflow"]
+    skipped_note = ""
+    if github_token:
+        scanned_sources.insert(0, "GitHub code search")
+    else:
+        skipped_note = (
+            " GITHUB_TOKEN is not configured, so GitHub code search was skipped."
+        )
+    if source_sites:
+        scanned_sources.append(f"{len(source_sites)} configured source(s)")
+
     from src.backend.infrastructure.indexing.web_search import WebSearchService
 
     service = WebSearchService(
@@ -4917,7 +4926,7 @@ def _build_web_analysis_summary(
     source_totals: dict[str, int] = {}
 
     for name, code in submissions.items():
-        result = service.scan_configured_sources(
+        result = service.scan_public_sources(
             code, _infer_language_from_filename(name), source_sites
         )
         sources = []
@@ -4964,8 +4973,13 @@ def _build_web_analysis_summary(
 
     return {
         "enabled": True,
-        "configured": True,
-        "status_message": "External source checks scanned administrator-configured sources.",
+        "configured": bool(source_sites),
+        "status_message": (
+            "External source checks scanned: "
+            + ", ".join(scanned_sources)
+            + "."
+            + skipped_note
+        ),
         "matched_submissions": sum(1 for entry in entries if entry["match_count"] > 0),
         "highest_similarity": round(
             max((entry["max_similarity"] for entry in entries), default=0.0), 3
