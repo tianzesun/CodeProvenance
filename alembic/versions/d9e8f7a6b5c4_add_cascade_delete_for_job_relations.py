@@ -1,14 +1,20 @@
 """add cascade delete for job-related tables
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: d9e8f7a6b5c4
 Revises: 82ef12542137
 Create Date: 2026-08-21 16:00:00.000000
 
+Originally committed with revision id ``a1b2c3d4e5f6``, which collided with
+the older ``add_organization_id_to_users`` migration — alembic cannot load a
+script directory containing two revisions with the same id, so every alembic
+command failed. Re-issued here under a fresh id; nothing ever chained onto
+the old id. If an environment stamped ``a1b2c3d4e5f6`` while intending this
+migration, update its alembic_version row to ``d9e8f7a6b5c4``.
 """
 
 from alembic import op
 
-revision = "a1b2c3d4e5f6"
+revision = "d9e8f7a6b5c4"
 down_revision = "82ef12542137"
 branch_labels = None
 depends_on = None
