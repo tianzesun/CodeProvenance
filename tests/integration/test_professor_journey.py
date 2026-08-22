@@ -142,6 +142,8 @@ class TestProfessorJourney:
             # covered directly below via the job record. Accept any non-500 here
             # (401 means auth is correctly enforced).
             assert resp.status_code != 500, f"{endpoint} server error"
+        resp = client.get(f"/dossier/{job_id}/download-pdf")
+        assert resp.status_code != 500, "dossier download-pdf server error"
 
         # Stage 4: the job, its submissions, and similarity results persist to DB.
         from src.backend.config.database import SessionLocal
