@@ -7549,6 +7549,24 @@ async def get_job_status(job_id: str, request: Request):
     return JSONResponse(content=job)
 
 
+@app.get("/api/job/{job_id}/dossier")
+async def get_job_evidence_dossier(job_id: str, request: Request):
+    """Unified per-student evidence dossier with viva questions.
+
+    Fuses the job's AI detection, pairwise similarity and public-web
+    provenance evidence into one severity-banded dossier per student, with
+    targeted viva questions for authorship verification.
+    """
+    _require_job_access(job_id, request)
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from src.backend.evaluation.evidence_dossier import EvidenceDossierService
+
+    return JSONResponse(content=EvidenceDossierService().build(job))
+
+
 @app.patch("/api/job/{job_id}/review")
 async def update_job_review(job_id: str, request: Request):
     job = _require_job_access(job_id, request)

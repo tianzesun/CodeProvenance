@@ -598,12 +598,20 @@ export default function ResultsPage() {
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
 
         {/* ── Header ──────────────────────────────────────────────────────────── */}
-        <PageHeader
-          eyebrow="Review workspace"
-          title={getAssignmentTitle(job)}
-          description={job?.course_name ? `${job.course_name} · ${job?.created_at ? new Date(job.created_at).toLocaleString() : ''}` : ''}
-          eyebrowStyle="badge"
-        />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <PageHeader
+            eyebrow="Review workspace"
+            title={getAssignmentTitle(job)}
+            description={job?.course_name ? `${job.course_name} · ${job?.created_at ? new Date(job.created_at).toLocaleString() : ''}` : ''}
+            eyebrowStyle="badge"
+          />
+          <ButtonLink
+            href={`/dossier/${id}`}
+            variant="secondary"
+          >
+            Evidence Dossier & Viva Questions
+          </ButtonLink>
+        </div>
 
         {/* ── Summary chips ────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-2">
