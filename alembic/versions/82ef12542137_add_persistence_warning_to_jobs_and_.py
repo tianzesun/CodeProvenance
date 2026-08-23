@@ -4,10 +4,14 @@ Revision ID: 82ef12542137
 Revises: f7e8d9c0b1a2
 Create Date: 2026-08-21 11:31:31.154189
 
+Made idempotent (ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS): the app's
+create_all() had already added these columns to live databases while this
+migration could not run — alembic was broken by the duplicate revision id —
+so applying the chain to a drifted database must not fail on existing
+columns (the same pattern as e5f6d1e2f3a4).
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 revision = "82ef12542137"
 down_revision = "f7e8d9c0b1a2"
@@ -16,13 +20,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("jobs", sa.Column("persistence_warning", sa.Text(), nullable=True))
-    op.add_column(
-        "tenants",
-        sa.Column("retention_days", sa.Integer(), nullable=True, server_default="365"),
+    op.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS persistence_warning TEXT"
+    )
+    op.execute(
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS retention_days INTEGER "
+        "DEFAULT 365"
     )
 
 
 def downgrade() -> None:
-    op.drop_column("tenants", "retention_days")
-    op.drop_column("jobs", "persistence_warning")
+    op.execute("ALTER TABLE tenants DROP COLUMN IF EXISTS retention_days")
+    op.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS persistence_warning")
