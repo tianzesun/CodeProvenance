@@ -15,6 +15,50 @@ env:
   NEXT_PUBLIC_API_URL: "http://localhost:8000"
 
 jobs:
+  migrations:
+    name: "Migrations (fresh Postgres: upgrade, rollback, re-apply)"
+    runs-on: ubuntu-latest
+    # Catches the failure classes that hit this repo in August 2026: a
+    # duplicate revision id (alembic cannot even load the script directory),
+    # from-scratch breakage (migrations referencing tables no migration
+    # creates), and non-idempotent migrations colliding with drifted schemas.
+    # The workflow-level DATABASE_URL points at this service.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_pass
+          POSTGRES_DB: ci_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Full chain applies from scratch
+        run: python -m alembic upgrade head
+
+      - name: Head revision rolls back and re-applies
+        run: |
+          python -m alembic downgrade -1
+          python -m alembic upgrade head
+
   secret-scan:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
