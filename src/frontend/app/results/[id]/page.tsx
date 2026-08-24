@@ -1,4 +1,5 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
+
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';

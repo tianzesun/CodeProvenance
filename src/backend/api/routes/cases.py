@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -18,6 +19,8 @@ from src.backend.config.database import get_db
 from src.backend.models.database import Case, CaseComment, User
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
@@ -199,9 +202,10 @@ def get_current_user(request: Request = None) -> dict:
                                 else None
                             ),
                         }
-        except Exception:  # noqa: S110
-            pass
-    # Development fallback
+        except Exception as e:
+            logger.warning("Failed to resolve user from session: %s", e)
+    # Development fallback — log warning so production misconfigurations are visible
+    logger.warning("No valid session found; falling back to dev user")
     return {"id": uuid.uuid4(), "email": "user@example.com", "role": "professor"}
 
 

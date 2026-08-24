@@ -1,24 +1,19 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
-
 import { Brain, AlertTriangle, CheckCircle2, TrendingUp, FileCode, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
-
 /**
  * AI Detection Panel Component
  * Displays AI-generated code detection results with visual indicators
  */
-
 export function AIDetectionScore({ probability, confidence, indicators = [] }) {
   const getRiskLevel = (prob) => {
     if (prob >= 0.7) return { level: 'High', color: 'red', tone: 'critical' };
     if (prob >= 0.4) return { level: 'Medium', color: 'orange', tone: 'warning' };
     return { level: 'Low', color: 'blue', tone: 'low' };
   };
-
   const risk = getRiskLevel(probability);
   const confidencePercent = Math.round(confidence * 100);
-
   const toneMap = {
     critical: 'border-red-500/20 bg-red-500/[0.08] text-red-600',
     warning: 'border-orange-500/20 bg-orange-500/[0.08] text-orange-600',
@@ -26,7 +21,6 @@ export function AIDetectionScore({ probability, confidence, indicators = [] }) {
     low: 'border-blue-600/20 bg-blue-600/[0.08] text-blue-600',
     safe: 'border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-600',
   };
-
   const dotMap = {
     critical: 'bg-red-500',
     warning: 'bg-orange-500',
@@ -34,7 +28,6 @@ export function AIDetectionScore({ probability, confidence, indicators = [] }) {
     low: 'bg-blue-600',
     safe: 'bg-emerald-500',
   };
-
   return (
     <div className={`rounded-[24px] border px-5 py-5 ${toneMap[risk.tone]}`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -49,17 +42,14 @@ export function AIDetectionScore({ probability, confidence, indicators = [] }) {
             <span className="text-3xl font-bold">{Math.round(probability * 100)}%</span>
             <span className="text-sm font-medium">AI Probability</span>
           </div>
-
           <div className="text-sm">
             Risk Level: <span className="font-semibold">{risk.level}</span>
           </div>
-
           <div className="flex items-center gap-2 text-sm">
             <TrendingUp size={14} />
             <span>Confidence: {confidencePercent}%</span>
           </div>
         </div>
-
         <div className="flex flex-wrap gap-2">
           {indicators.slice(0, 3).map((indicator, idx) => (
             <span
@@ -75,7 +65,6 @@ export function AIDetectionScore({ probability, confidence, indicators = [] }) {
     </div>
   );
 }
-
 export function AIDetectionSummary({ results }) {
   if (!results || results.length === 0) {
     return (
@@ -88,11 +77,9 @@ export function AIDetectionSummary({ results }) {
       </div>
     );
   }
-
   const flaggedCount = results.filter((r) => r.ai_probability >= 0.4).length;
   const avgProbability = results.reduce((sum, r) => sum + r.ai_probability, 0) / results.length;
   const highRiskCount = results.filter((r) => r.ai_probability >= 0.7).length;
-
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-3">
@@ -104,7 +91,6 @@ export function AIDetectionSummary({ results }) {
             {results.length}
           </div>
         </div>
-
         <div className="theme-card-muted rounded-[22px] px-4 py-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
             AI-Flagged
@@ -113,7 +99,6 @@ export function AIDetectionSummary({ results }) {
             {flaggedCount}
           </div>
         </div>
-
         <div className="theme-card-muted rounded-[22px] px-4 py-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
             Avg AI Score
@@ -123,7 +108,6 @@ export function AIDetectionSummary({ results }) {
           </div>
         </div>
       </div>
-
       {highRiskCount > 0 && (
         <div className="rounded-[20px] border border-red-500/20 bg-red-500/[0.08] px-4 py-4">
           <div className="flex items-center gap-2 text-red-600">
@@ -134,7 +118,6 @@ export function AIDetectionSummary({ results }) {
           </div>
         </div>
       )}
-
       <div className="space-y-3">
         <div className="text-sm font-semibold text-[var(--text-primary)]">AI Detection Results by File</div>
         {results
@@ -146,23 +129,19 @@ export function AIDetectionSummary({ results }) {
     </div>
   );
 }
-
 function AIDetectionResultRow({ result }) {
   const getTone = (prob) => {
     if (prob >= 0.7) return 'border-red-500/20 bg-red-500/[0.08]';
     if (prob >= 0.4) return 'border-orange-500/20 bg-orange-500/[0.08]';
     return 'border-[color:var(--border)] bg-[var(--surface)]';
   };
-
   const getColor = (prob) => {
     if (prob >= 0.7) return 'text-red-600';
     if (prob >= 0.4) return 'text-orange-600';
     return 'text-[var(--text-secondary)]';
   };
-
   const regions = result.flagged_regions || [];
   const [showRegions, setShowRegions] = useState(false);
-
   return (
     <div className={`theme-card rounded-[22px] px-4 py-4 ${getTone(result.ai_probability)}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -179,7 +158,6 @@ function AIDetectionResultRow({ result }) {
             </div>
           )}
         </div>
-
         <div className="flex items-center gap-3 shrink-0">
           <div className="text-right">
             <div className={`text-xl font-bold ${getColor(result.ai_probability)}`}>
@@ -194,7 +172,6 @@ function AIDetectionResultRow({ result }) {
           </div>
         </div>
       </div>
-
       {/* Progress bar */}
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--border)]">
         <div
@@ -208,7 +185,6 @@ function AIDetectionResultRow({ result }) {
           style={{ width: `${result.ai_probability * 100}%` }}
         />
       </div>
-
       {regions.length > 0 && (
         <div className="mt-3">
           <button
@@ -240,7 +216,6 @@ function AIDetectionResultRow({ result }) {
     </div>
   );
 }
-
 export function AIDetectionSignals({ signals = {} }) {
   const signalLabels = {
     perplexity: 'Perplexity Score',
@@ -248,14 +223,12 @@ export function AIDetectionSignals({ signals = {} }) {
     stylometry: 'Stylometric Patterns',
     pattern_repetition: 'Pattern Repetition',
   };
-
   const signalDescriptions = {
     perplexity: 'Measures code predictability - lower entropy suggests AI generation',
     burstiness: 'Analyzes variation in code complexity - uniform patterns suggest AI',
     stylometry: 'Examines writing style - formal comments and generic names are indicators',
     pattern_repetition: 'Detects repeated LLM-specific code patterns',
   };
-
   return (
     <div className="space-y-4">
       <div className="text-sm font-semibold text-[var(--text-primary)]">Detection Signals</div>

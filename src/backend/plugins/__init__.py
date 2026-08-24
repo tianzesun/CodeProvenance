@@ -21,12 +21,15 @@ Example plugin (plugins/my_engine.py):
 
 import importlib
 import importlib.util
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from benchmark.registry import registry
+
+logger = logging.getLogger(__name__)
 
 
 def load_plugins(plugins_dir: str = "plugins") -> list[str]:
@@ -53,9 +56,7 @@ def load_plugins(plugins_dir: str = "plugins") -> list[str]:
             _load_plugin(py_file)
             loaded.append(py_file.stem)
         except Exception as e:
-            print(
-                f"Warning: Failed to load plugin {py_file.name}: {e}", file=sys.stderr
-            )
+            logger.warning("Failed to load plugin %s: %s", py_file.name, e)
 
     return loaded
 

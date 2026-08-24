@@ -1,6 +1,5 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
-
 import DashboardLayout from '@/components/DashboardLayout';
 import { apiClient } from '@/lib/apiClient';
 import Link from 'next/link';
@@ -17,24 +16,19 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-
 function formatSize(bytes) {
   return bytes < 1024 * 1024
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
-
 function getTone(score) {
   if (score >= 0.7) return 'border-red-200 bg-red-50 text-red-700';
   if (score >= 0.45) return 'border-amber-200 bg-amber-50 text-amber-700';
   return 'border-emerald-200 bg-emerald-50 text-emerald-700';
 }
-
 function getApiErrorMessage(error) {
   return error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Analysis failed';
 }
-
 export default function AIDetectorPage() {
   const router = useRouter();
   const fileInputRef = useRef(null);
@@ -44,7 +38,6 @@ export default function AIDetectorPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [history, setHistory] = useState([]);
-
   const loadHistory = async () => {
     try {
       const res = await apiClient.get('/api/jobs');
@@ -53,13 +46,10 @@ export default function AIDetectorPage() {
       setHistory([]);
     }
   };
-
   useEffect(() => {
     loadHistory();
   }, []);
-
   const canRun = files.length > 0 && !uploading;
-
   const runDetection = async () => {
     if (!canRun) return;
     setUploading(true);
@@ -68,7 +58,6 @@ export default function AIDetectorPage() {
     files.forEach((file) => fd.append('files', file));
     fd.append('course_name', courseName || 'Academic Integrity Review');
     fd.append('assignment_name', assignmentName || 'AI-Generated Code Analysis Report');
-
     try {
       const res = await apiClient.post('/api/ai-detect', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -85,7 +74,6 @@ export default function AIDetectorPage() {
       setUploading(false);
     }
   };
-
   return (
     <DashboardLayout>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -119,7 +107,6 @@ export default function AIDetectorPage() {
               </div>
             </div>
           </section>
-
           <section className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Course Identifier</label>
@@ -140,7 +127,6 @@ export default function AIDetectorPage() {
               />
             </div>
           </section>
-
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             {files.length === 0 ? (
               <button
@@ -195,14 +181,12 @@ export default function AIDetectorPage() {
               }}
             />
           </section>
-
           {error && (
             <section className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </section>
           )}
-
           <section className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
             <div className="font-semibold text-slate-700 mb-2">About AI Detection Signals</div>
 <p className="leading-relaxed">
@@ -219,7 +203,6 @@ export default function AIDetectorPage() {
               comparatively weaker. Treat those results as review indicators, not definitive verdicts.
             </p>
           </section>
-
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
               <div>

@@ -1,6 +1,5 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
-
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
@@ -17,7 +16,6 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
-
 // ── Tool definitions ──────────────────────────────────────────────────────
 const TOOLS = [
   {
@@ -76,7 +74,6 @@ const TOOLS = [
     status: 'Setup needed', runnable: false,
   },
 ];
-
 function mergeToolsWithAvailability(apiTools = []) {
   if (!apiTools.length) return TOOLS;
   return TOOLS.map(toolDef => {
@@ -90,7 +87,6 @@ function mergeToolsWithAvailability(apiTools = []) {
     };
   });
 }
-
 // ── Dataset metadata ───────────────────────────────────────────────────────
 const DATASET_CATEGORY_META = {
   guided: {
@@ -109,7 +105,6 @@ const DATASET_CATEGORY_META = {
     panelClass: 'border-blue-200 bg-blue-50/70', summaryLabel: 'Demo dataset',
   },
 };
-
 const PRESET_DATASET_META = {
   clough_stevenson_style: { order: 5, presetCategory: 'Controlled plagiarism corpus', badgeLabel: 'Gold Standard', eyebrow: 'Controlled original-vs-plagiarized benchmark', summary: 'Balanced exact, renamed, restructured, semantic, and hard-negative code pairs' },
   conplag_classroom_java: { order: 10, presetCategory: 'Classroom-style', badgeLabel: 'Classroom Java', eyebrow: 'Best Java submission corpus', summary: 'Assignment-grouped Java submissions with labels' },
@@ -123,32 +118,27 @@ const PRESET_DATASET_META = {
   codexglue_defect: { order: 80, presetCategory: 'Research benchmark', badgeLabel: 'Research Benchmark', eyebrow: 'C code technical benchmark', summary: 'Useful for stress testing, less classroom-like' },
   poolc_600k_python: { order: 85, presetCategory: 'Large-scale technical corpus', badgeLabel: 'Technical Corpus', eyebrow: 'Large Python code collection', summary: '600k Python snippets for extensive similarity testing and scale evaluation' },
 };
-
 // ── Pure helpers ───────────────────────────────────────────────────────────
 function getPresetDatasetMeta(dataset) {
   if (!dataset || dataset.is_demo || dataset.cases) return null;
   return PRESET_DATASET_META[dataset.id] || null;
 }
-
 function getDatasetCategory(dataset) {
   if (!dataset) return null;
   if (dataset.datasetType) return dataset.datasetType;
   if (dataset.cases) return 'guided';
   return dataset.is_demo ? 'demo' : 'preset';
 }
-
 function getDatasetCategoryMeta(dataset) {
   const category = getDatasetCategory(dataset);
   return category ? DATASET_CATEGORY_META[category] : null;
 }
-
 function formatDatasetDate(value) {
   if (!value) return 'Recently created';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(parsed);
 }
-
 function summarizeDataset(dataset) {
   if (!dataset) return '';
   if (dataset.cases) return `${dataset.cases.length} guided scenarios`;
@@ -163,9 +153,6 @@ function summarizeDataset(dataset) {
   if (presetMeta?.presetCategory) return `${presetMeta.presetCategory} • ${languageLabel} • ${sizeLabel}`;
   return `${languageLabel} • ${sizeLabel}`;
 }
-
-
-
 function sortDatasets(datasets, demo = false) {
   const items = [...datasets];
   if (demo) return items.sort((a, b) => (Date.parse(b.created_at || '') || 0) - (Date.parse(a.created_at || '') || 0));
@@ -175,12 +162,10 @@ function sortDatasets(datasets, demo = false) {
     return aOrder !== bOrder ? aOrder - bOrder : (a.name || '').localeCompare(b.name || '');
   });
 }
-
 function buildDatasetLibrary(benchmarkDatasets = [], benchmarkMode = 'comparison') {
   // Determine if the current benchmark mode requires labeled ground truth
   const requiresGroundTruth = benchmarkMode === 'development' || benchmarkMode === 'calibration' ||
     benchmarkMode === 'release' || benchmarkMode === 'regression';
-
   // Filter datasets based on ground truth requirement
   const filteredDatasets = benchmarkDatasets.filter(dataset => {
     if (requiresGroundTruth) {
@@ -191,12 +176,10 @@ function buildDatasetLibrary(benchmarkDatasets = [], benchmarkMode = 'comparison
       return true;
     }
   });
-
   const presetDatasets = sortDatasets(filteredDatasets.filter(d => !d.is_demo).map(d => ({ ...d, datasetType: 'preset' })));
   const demoDatasets = sortDatasets(filteredDatasets.filter(d => d.is_demo).map(d => ({ ...d, datasetType: 'demo' })), true);
   return { presetDatasets, demoDatasets, allDatasets: [...presetDatasets, ...demoDatasets] };
 }
-
 function formatDelta(value, lowerIsBetter = false) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   const numeric = Number(value);
@@ -204,42 +187,35 @@ function formatDelta(value, lowerIsBetter = false) {
   const sign = adjusted > 0 ? '+' : '';
   return `${sign}${(adjusted * 100).toFixed(1)}%`;
 }
-
 function deltaTone(value, lowerIsBetter = false) {
   const numeric = Number(value || 0);
   if (Math.abs(numeric) < 0.0001) return 'text-slate-500 bg-slate-100';
   const improved = lowerIsBetter ? numeric < 0 : numeric > 0;
   return improved ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50';
 }
-
 function formatChartPercent(value) { return `${Number(value || 0).toFixed(1)}%`; }
-
 function formatMetric(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   return Number(value).toFixed(3);
 }
-
 function formatEngineContribution(contribution = {}) {
   const entries = Object.entries(contribution || {})
     .filter(([, value]) => typeof value === 'number' && value > 0).slice(0, 3);
   if (!entries.length) return 'N/A';
   return entries.map(([name, value]) => `${name}: ${(Number(value) * 100).toFixed(0)}%`).join(', ');
 }
-
 function formatPanMetricValue(metric) {
   if (metric.value === null || metric.value === undefined || Number.isNaN(Number(metric.value))) return 'N/A';
   if (metric.format === 'seconds') return `${Number(metric.value).toFixed(3)}s`;
   if (metric.format === 'plain') return Number(metric.value).toFixed(3);
   return `${(Number(metric.value) * 100).toFixed(1)}%`;
 }
-
 function apiErrorMessage(err, fallback) {
   const detail = err?.response?.data?.detail ?? err?.response?.data?.error;
   if (typeof detail === 'string') return detail;
   if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
   return err?.message || fallback;
 }
-
 function metricBarWidth(metric) {
   const v = Math.max(0, Math.min(1, Number(metric.value || 0)));
   if (metric.mode === 'runtime') return `${Math.max(8, Math.min(100, (2 - Math.min(v * 10, 2)) / 2 * 100))}%`;
@@ -250,20 +226,17 @@ function metricBarWidth(metric) {
   }
   return `${Math.max(8, Math.min(100, v * 100))}%`;
 }
-
 function metricTone(score, mode = 'higher') {
   if (mode === 'lower') { if (score <= 0.05) return 'good'; if (score <= 0.15) return 'watch'; return 'bad'; }
   if (mode === 'granularity') { if (score <= 1.05) return 'good'; if (score <= 1.2) return 'watch'; return 'bad'; }
   if (mode === 'runtime') { if (score <= 0.5) return 'good'; if (score <= 2) return 'watch'; return 'bad'; }
   if (score >= 0.9) return 'good'; if (score >= 0.75) return 'watch'; return 'bad';
 }
-
 function metricToneClasses(tone) {
   if (tone === 'good') return { border: 'border-emerald-200', bg: 'bg-emerald-50', text: 'text-emerald-700', bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700', label: 'Strong' };
   if (tone === 'watch') return { border: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-700', bar: 'bg-amber-500', badge: 'bg-amber-100 text-amber-700', label: 'Needs attention' };
   return { border: 'border-red-200', bg: 'bg-red-50', text: 'text-red-700', bar: 'bg-red-500', badge: 'bg-red-100 text-red-700', label: 'Optimization priority' };
 }
-
 function configPathEffect(path) {
   if (!path) return 'Controls one part of the IntegrityDesk score pipeline.';
   if (path === 'decision.default_threshold') return 'Final cutoff: higher values reduce positives, usually improving precision but lowering recall.';
@@ -291,7 +264,6 @@ function configPathEffect(path) {
   if (path.startsWith('thresholds.')) return 'Classification threshold used by one similarity tier or report category.';
   return 'Affects how raw engine evidence is converted into the final fused score.';
 }
-
 function optimizationControlSpec(path, current, proposed) {
   const values = [Number(current), Number(proposed)].filter(Number.isFinite);
   const maxObserved = values.length ? Math.max(...values) : 1;
@@ -302,7 +274,6 @@ function optimizationControlSpec(path, current, proposed) {
   }
   return { min: 0, max: Math.max(10, maxObserved), step: 0.1 };
 }
-
 function normalizeOptimizationValue(value, spec) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return spec.min;
@@ -310,7 +281,6 @@ function normalizeOptimizationValue(value, spec) {
   if (spec.step === 1) return Math.round(clamped);
   return Math.round(clamped * 10000) / 10000;
 }
-
 function buildPanFeedback(row) {
   if (!row) return [];
   if (row.tuningRecommendations?.available && row.tuningRecommendations.actions?.length) {
@@ -330,7 +300,6 @@ function buildPanFeedback(row) {
   if (!suggestions.length) suggestions.push({ title: 'PAN metrics look balanced', detail: 'Keep this engine mix as the baseline. Next improvements should be validated with harder obfuscation sets and a larger negative corpus.' });
   return suggestions;
 }
-
 function buildPanMetricDiagnostics(row) {
   if (!row) return [];
   const scoreDiagnostics = row.scoreDiagnostics || {};
@@ -348,7 +317,6 @@ function buildPanMetricDiagnostics(row) {
   ];
   return metrics.map(metric => ({ ...metric, tone: metricTone(Number(metric.value || 0), metric.mode) }));
 }
-
 // ── Shared UI atoms ────────────────────────────────────────────────────────
 function ToolBadge({ toolId, compact = false }) {
   const tool = TOOLS.find(t => t.id === toolId);
@@ -363,7 +331,6 @@ function ToolBadge({ toolId, compact = false }) {
     </span>
   );
 }
-
 // ── Tooltip components ─────────────────────────────────────────────────────
 function PairScoreTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -386,7 +353,6 @@ function PairScoreTooltip({ active, payload, label }) {
     </div>
   );
 }
-
 function LeaderboardTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload;
@@ -410,7 +376,6 @@ function LeaderboardTooltip({ active, payload }) {
     </div>
   );
 }
-
 // ── StepIndicator ──────────────────────────────────────────────────────────
 function StepIndicator({ steps, currentStep, completedSteps }) {
   return (
@@ -439,7 +404,6 @@ function StepIndicator({ steps, currentStep, completedSteps }) {
     </div>
   );
 }
-
 // ── RunConfigBar ───────────────────────────────────────────────────────────
 function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, modeName, modeColor }) {
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
@@ -461,7 +425,6 @@ function RunConfigBar({ selectedTools, selectedDataset, uploadMode, files, bench
     </div>
   );
 }
-
 // ── ToolGrid — shared tool card grid (eliminates duplication) ──────────────
 function ToolGrid({ tools, selectedTools, onToggle }) {
   return (
@@ -509,7 +472,6 @@ function ToolGrid({ tools, selectedTools, onToggle }) {
     </div>
   );
 }
-
 // ── Tool loading skeleton ──────────────────────────────────────────────────
 function ToolSkeleton() {
   return (
@@ -528,18 +490,15 @@ function ToolSkeleton() {
     </div>
   );
 }
-
 // ── Step 1: Tool Selection (unified — no duplicate render path) ────────────
 function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loading, error, benchmarkMode }) {
   const runnableTools = tools.filter(t => t.available !== false && t.runnable !== false);
-
   const toggleTool = useCallback((tool) => {
     if (tool.available === false || tool.runnable === false) return;
     setSelectedTools(prev =>
       prev.includes(tool.id) ? prev.filter(t => t !== tool.id) : [...prev, tool.id]
     );
   }, [setSelectedTools]);
-
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -556,15 +515,12 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
           <button onClick={() => setSelectedTools([])} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Clear</button>
         </div>
       </div>
-
       {error && (
         <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
           <AlertCircle size={14} className="shrink-0" />{error}
         </div>
       )}
-
       {loading ? <ToolSkeleton /> : <ToolGrid tools={tools} selectedTools={selectedTools} onToggle={toggleTool} />}
-
       <div className="flex justify-end mt-6">
         <button
           onClick={onNext}
@@ -577,7 +533,6 @@ function ToolSelectionStep({ tools, selectedTools, setSelectedTools, onNext, loa
     </div>
   );
 }
-
 // ── DatasetCard ────────────────────────────────────────────────────────────
 function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
   const categoryMeta = getDatasetCategoryMeta(dataset);
@@ -608,7 +563,6 @@ function DatasetCard({ dataset, isActive, onSelect, disabled = false }) {
     </button>
   );
 }
-
 // ── Step 2: Dataset Selection ──────────────────────────────────────────────
 function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploadMode, files, setFiles, benchmarkDatasets, benchmarkMode, canManageDemoDatasets, onBack, onNext }) {
   const [libraryFilter, setLibraryFilter] = useState('all');
@@ -617,9 +571,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
   const [creatingDataset, setCreatingDataset] = useState(false);
   const [createError, setCreateError] = useState('');
   const [datasetForm, setDatasetForm] = useState({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
-
   const handleDatasetFormChange = useCallback((field, value) => setDatasetForm(prev => ({ ...prev, [field]: value })), []);
-
   const createDemoDataset = async (event) => {
     event.preventDefault();
     setCreatingDataset(true);
@@ -634,21 +586,17 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
       setCreatingDataset(false);
     }
   };
-
   const closeModal = () => {
     setShowCreateModal(false);
     setCreateError('');
     setDatasetForm({ name: '', description: '', language: 'python', numFiles: 10, similarityType: 'type1_exact' });
   };
-
   const handleDrop = useCallback(e => { e.preventDefault(); setFiles(Array.from(e.dataTransfer.files)); }, [setFiles]);
-
   const { presetDatasets, demoDatasets, allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets, benchmarkMode), [benchmarkDatasets, benchmarkMode]);
   const availableLanguages = useMemo(() => {
     const langs = new Set(allDatasets.map(d => d.language?.toLowerCase() || 'mixed').filter(Boolean));
     return Array.from(langs).sort();
   }, [allDatasets]);
-
   const visibleLibraryDatasets = allDatasets.filter(dataset => {
     if (libraryFilter === 'preset') return dataset.datasetType === 'preset';
     if (libraryFilter === 'demo') return dataset.datasetType === 'demo';
@@ -657,13 +605,11 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     if (languageFilter === 'all') return true;
     return dataset.language?.toLowerCase() === languageFilter.toLowerCase();
   });
-
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const activeDatasetMeta = getDatasetCategoryMeta(activeDataset);
   const activePresetMeta = getPresetDatasetMeta(activeDataset);
   const hasZipUpload = files.some(f => f.name?.toLowerCase().endsWith('.zip'));
   const canProceed = uploadMode === 'builtin' ? !!selectedDataset : hasZipUpload || files.length >= 2;
-
   return (
     <div className="space-y-5">
       <div>
@@ -671,7 +617,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Database size={18} className="text-violet-500" />Choose What To Benchmark</h2>
           <p className="text-sm text-slate-500 mt-0.5">Select a reusable dataset for tool comparison, or upload your own files.</p>
         </div>
-
         <div className="flex border-b border-slate-200 mb-5">
           {[{ id: 'builtin', label: 'Dataset Library', icon: FlaskConical }, { id: 'upload', label: 'Upload Files or ZIP', icon: FileUp }].map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => { setUploadMode(id); setFiles([]); if (id !== 'builtin') setSelectedDataset(null); }}
@@ -680,7 +625,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             </button>
           ))}
         </div>
-
         {uploadMode === 'builtin' && (
           <div className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
@@ -723,7 +667,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                 </div>
               )}
             </div>
-
             {activeDataset && activeDatasetMeta && (
               <div className={`rounded-2xl border p-5 ${activeDatasetMeta.panelClass}`}>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -741,9 +684,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                 </div>
                 <div className="mt-4 text-sm leading-6 text-slate-600">{activeDataset.desc}</div>
                 {activePresetMeta?.summary && <div className="mt-3 text-sm text-slate-500">{activePresetMeta.summary}</div>}
-
-
-
                 {activeDataset.cases ? (
                   <div className="mt-5 grid md:grid-cols-3 gap-2">
                     {activeDataset.cases.map(tc => (
@@ -775,7 +715,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
             )}
           </div>
         )}
-
         {uploadMode === 'upload' && (
           <div>
             <div
@@ -814,7 +753,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           </div>
         )}
       </div>
-
       <div className="flex items-center justify-between">
         <button onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm">← Back</button>
         <button onClick={onNext} disabled={!canProceed}
@@ -822,7 +760,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
           <Play size={18} />Start Benchmark
         </button>
       </div>
-
       {/* Create Demo Dataset Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -899,7 +836,6 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
     </div>
   );
 }
-
 // ── Step 3: Run ────────────────────────────────────────────────────────────
 function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkMode, autoStart = false, onBack, onComplete }) {
   const { token } = useAuth();
@@ -908,12 +844,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
   const [progressPct, setProgressPct] = useState(0);
   const [progressMode, setProgressMode] = useState('indeterminate');
   const [error, setError] = useState('');
-
   // Use a ref to hold the run function so the autoStart effect always calls the latest version
   const runRef = useRef(null);
   const requestControllerRef = useRef(null);
   const autoStartedRef = useRef(false);
-
   const { allDatasets } = useMemo(() => buildDatasetLibrary(benchmarkDatasets), [benchmarkDatasets]);
   const activeDataset = allDatasets.find(d => d.id === selectedDataset);
   const activeDatasetMeta = activeDataset ? getDatasetCategoryMeta(activeDataset) : null;
@@ -923,14 +857,12 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     : benchmarkMode === 'development' || benchmarkMode === 'calibration'
       ? 'pan_optimization'
       : 'tool_comparison';
-
   const run = useCallback(async () => {
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setError(''); setRunning(true);
     setProgress([]); setProgressPct(0); setProgressMode('indeterminate');
-
     try {
       if (uploadMode === 'builtin' && activeDataset) {
         if (activeDataset.cases) {
@@ -941,12 +873,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           const toolNames = selectedTools.map(t => TOOLS.find(tool => tool.id === t)?.name || t).join(', ');
           setProgress(prev => [...prev, `Dataset: ${activeDataset.name} (${cases.length} guided test cases)`]);
           setProgress(prev => [...prev, `Tools: ${toolNames}`]);
-
           for (let i = 0; i < cases.length; i++) {
             const tc = cases[i];
             setProgress(prev => [...prev, `[${i + 1}/${cases.length}] Analyzing "${tc.label}" using ${toolNames}…`]);
             setProgressPct(Math.round(((i + 0.5) / cases.length) * 100));
-
             const blobA = new Blob([tc.codeA], { type: 'text/plain' });
             const blobB = new Blob([tc.codeB], { type: 'text/plain' });
             const formData = new FormData();
@@ -955,7 +885,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             formData.append('benchmark_type', benchmarkType);
             if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
             selectedTools.forEach(t => formData.append('tools', t));
-
             try {
               const res = await apiClient.post('/api/benchmark', formData, {
                 signal: controller.signal
@@ -967,7 +896,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
               // Continue with other test cases, but don't fail the whole benchmark
             }
           }
-
           if (allResults.length > 0) {
             setProgress(prev => [...prev, `✓ Completed ${allResults.length}/${cases.length} test cases`]);
             setProgressPct(100);
@@ -983,12 +911,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           formData.append('dataset', activeDataset.id);
           formData.append('benchmark_type', benchmarkType);
           if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
-
           try {
             const toolNames = selectedTools.map(t => TOOLS.find(x => x.id === t)?.name || t).join(', ');
             setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
             setProgress(prev => [...prev, `Tools: ${toolNames}`]);
-
             // Start the job in the background
             const startRes = await apiClient.post('/api/benchmark/start', formData, {
               signal: controller.signal,
@@ -997,19 +923,16 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
             });
             const { job_id } = startRes.data;
             setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
-
             // Poll for completion
             let seenLines = 0;
             while (!controller.signal.aborted) {
               await new Promise(r => setTimeout(r, 2000));
               if (controller.signal.aborted) break;
-
               const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
                 signal: controller.signal,
                 timeout: 10000,
               });
               const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
-
               // Show any new progress lines from the server
               if (serverProgress && serverProgress.length > seenLines) {
                 const newLines = serverProgress.slice(seenLines);
@@ -1017,7 +940,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
                 seenLines = serverProgress.length;
                 setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
               }
-
               if (status === 'done' && result) {
                 setProgress(prev => [...prev, `✓ Benchmark complete — ${result?.pair_results?.length || 0} similarity pairs found`]);
                 setProgressPct(100);
@@ -1050,10 +972,8 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
         formData.append('benchmark_type', benchmarkType);
         if (selectedPreset?.id) formData.append('preset_id', selectedPreset.id);
         selectedTools.forEach(t => formData.append('tools', t));
-
         try {
           setProgress(prev => [...prev, `🚀 Starting benchmark…`]);
-
           const startRes = await apiClient.post('/api/benchmark/start', formData, {
             signal: controller.signal,
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -1061,25 +981,21 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           });
           const { job_id } = startRes.data;
           setProgress(prev => [...prev, `Job ${job_id} queued — running analysis…`]);
-
           let seenLines = 0;
           while (!controller.signal.aborted) {
             await new Promise(r => setTimeout(r, 2000));
             if (controller.signal.aborted) break;
-
             const pollRes = await apiClient.get(`/api/benchmark/status/${job_id}`, {
               signal: controller.signal,
               timeout: 10000,
             });
             const { status, progress: serverProgress, result, error: serverError } = pollRes.data;
-
             if (serverProgress && serverProgress.length > seenLines) {
               const newLines = serverProgress.slice(seenLines);
               newLines.forEach((line: string) => setProgress(prev => [...prev, line]));
               seenLines = serverProgress.length;
               setProgressPct(Math.min(90, Math.round((seenLines / Math.max(seenLines + 2, 5)) * 90)));
             }
-
             if (status === 'done' && result) {
               setProgress(prev => [...prev, `✓ Analysis complete — ${result?.pair_results?.length || 0} pairs analyzed`]);
               setProgressPct(100);
@@ -1111,30 +1027,24 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
       setRunning(false);
     }
   }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
-
   // Keep ref current so autoStart fires the latest version
   runRef.current = run;
-
   useEffect(() => {
     if (!autoStart || autoStartedRef.current) return;
     autoStartedRef.current = true;
     const timer = window.setTimeout(() => runRef.current?.(), 0);
     return () => window.clearTimeout(timer);
   }, [autoStart]);
-
   useEffect(() => {
     return () => requestControllerRef.current?.abort();
   }, []);
-
   const stop = () => {
     requestControllerRef.current?.abort();
     setRunning(false);
     setProgress(prev => [...prev, '⨯ Cancelling…']);
     setProgressPct(0);
   };
-
   const isDeterminateProgress = progressMode === 'determinate';
-
   return (
     <div className="space-y-5">
       <div>
@@ -1155,7 +1065,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
                 {isDeterminateProgress ? `${Math.round(progressPct)}%` : 'Running'}
               </span>
             </div>
-
             {/* Terminal-like console output */}
             <div className="bg-slate-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
               <div className="space-y-1">
@@ -1173,7 +1082,6 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
                 )}
               </div>
             </div>
-
             {/* Progress bar */}
             <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mt-3">
               <div
@@ -1195,31 +1103,24 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
           )}
         </div>
       </div>
-
       <div className="flex items-center justify-between">
         <button onClick={onBack} disabled={running} className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-slate-800 font-medium rounded-xl hover:border-slate-300 transition-all text-sm disabled:opacity-50">← Back</button>
       </div>
     </div>
   );
 }
-
 // ── ComparisonProofHeader — dominant proof banner for multi-tool runs ─────
 function ComparisonProofHeader({ rows }) {
   if (!rows || rows.length < 2) return null;
-
   const winner = rows[0];
   const integrityDeskRow = rows.find(r => r.toolId === 'integritydesk' || r.toolId === 'codeprovenance');
   const isOurWin = winner.toolId === 'integritydesk' || winner.toolId === 'codeprovenance';
-
   const mossRow = rows.find(r => r.toolId === 'moss');
   const dolosRow = rows.find(r => r.toolId === 'dolos');
-
   const second = rows[1];
   const deltaF1 = second ? ((winner.f1Score - second.f1Score) * 100) : 0;
-
   const mossDelta = mossRow ? ((winner.f1Score - mossRow.f1Score) * 100) : null;
   const dolosDelta = dolosRow ? ((winner.f1Score - dolosRow.f1Score) * 100) : null;
-
   return (
     <div className="rounded-3xl border border-violet-300 bg-gradient-to-br from-violet-900 via-violet-800 to-slate-900 p-6 text-white shadow-2xl">
       <div className="flex items-start justify-between gap-4">
@@ -1238,7 +1139,6 @@ function ComparisonProofHeader({ rows }) {
             </div>
           </div>
         </div>
-
         {isOurWin && (
           <div className="rounded-2xl bg-white/10 px-5 py-2 text-right border border-white/20">
             <div className="text-[10px] uppercase tracking-[2px] text-violet-300">World-Class Result</div>
@@ -1246,7 +1146,6 @@ function ComparisonProofHeader({ rows }) {
           </div>
         )}
       </div>
-
       {/* Explicit competitor deltas — this is the "proof" users care about */}
       <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-2xl bg-white/10 border border-white/20 p-4">
@@ -1256,7 +1155,6 @@ function ComparisonProofHeader({ rows }) {
             PlagDet {(winner.plagdet * 100).toFixed(1)}% • F1 {(winner.f1Score * 100).toFixed(1)}%
           </div>
         </div>
-
         {mossRow && (
           <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
             <div className="text-xs text-violet-300">vs MOSS</div>
@@ -1266,7 +1164,6 @@ function ComparisonProofHeader({ rows }) {
             <div className="text-xs text-violet-200 mt-1">MOSS F1: {(mossRow.f1Score * 100).toFixed(1)}%</div>
           </div>
         )}
-
         {dolosRow && (
           <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
             <div className="text-xs text-violet-300">vs Dolos</div>
@@ -1277,7 +1174,6 @@ function ComparisonProofHeader({ rows }) {
           </div>
         )}
       </div>
-
       {isOurWin && (
         <div className="mt-4 inline-flex items-center rounded-full bg-emerald-500/20 border border-emerald-400/30 px-4 py-1 text-sm font-semibold text-emerald-300">
           ✓ Statistically stronger performance on obfuscated and semantic clones
@@ -1286,11 +1182,9 @@ function ComparisonProofHeader({ rows }) {
     </div>
   );
 }
-
 // ── PanLeaderboard — multi-tool ranked comparison table ────────────────────
 function PanLeaderboard({ rows }) {
   if (!rows || rows.length < 2) return null;
-
   const leaderboardChartData = rows.map(row => ({
     id: row.toolId,
     name: row.name,
@@ -1301,11 +1195,8 @@ function PanLeaderboard({ rows }) {
     recall: Number((row.recall * 100).toFixed(1)),
     fpr: Number((row.falsePositiveRate * 100).toFixed(1)),
   }));
-
   const medals = ['🥇', '🥈', '🥉'];
-
   const isIntegrityDesk = (id: string) => id === 'integritydesk' || id === 'codeprovenance';
-
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-2">
@@ -1315,7 +1206,6 @@ function PanLeaderboard({ rows }) {
           <p className="text-sm text-slate-500 mt-0.5">Ranked by PlagDet score on the same labeled benchmark.</p>
         </div>
       </div>
-
       {/* Horizontal bar chart */}
       <div className="px-6 pt-5 h-56">
         <ResponsiveContainer width="100%" height="100%">
@@ -1332,7 +1222,6 @@ function PanLeaderboard({ rows }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-
       {/* Ranked table with auto-highlighting */}
       <div className="px-6 pb-6 mt-4">
         <div className="overflow-x-auto">
@@ -1350,7 +1239,6 @@ function PanLeaderboard({ rows }) {
                 const isWinner = i === 0;
                 const isID = isIntegrityDesk(row.toolId);
                 const deltaVsWinner = i === 0 ? 0 : ((row.f1Score - rows[0].f1Score) * 100);
-
                 return (
                   <tr
                     key={row.toolId}
@@ -1395,7 +1283,6 @@ function PanLeaderboard({ rows }) {
     </div>
   );
 }
-
 // ── Error boundary for ReportStep ─────────────────────────────────────────
 class ReportErrorBoundary extends Component {
   constructor(props) {
@@ -1426,7 +1313,6 @@ class ReportErrorBoundary extends Component {
     return this.props.children;
   }
 }
-
 // ── Step 4: Report ─────────────────────────────────────────────────────────
 function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const { user } = useAuth();
@@ -1439,7 +1325,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const [optimizationMessage, setOptimizationMessage] = useState('');
   const [optimizationError, setOptimizationError] = useState('');
   const [editableOptimizationChanges, setEditableOptimizationChanges] = useState([]);
-
   // Add error checking for results data
   if (!results || typeof results !== 'object') {
     return (
@@ -1455,7 +1340,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       </div>
     );
   }
-
   const { tool_scores, pair_results } = results;
   const itemsPerPage = 20;
   const totalPairs = (pair_results || []).length;
@@ -1463,17 +1347,14 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const pageStart = (currentPage - 1) * itemsPerPage;
   const pageEnd = Math.min(pageStart + itemsPerPage, totalPairs);
   const visiblePairResults = (pair_results || []).slice(pageStart, pageEnd);
-
   const activeTools = Object.keys(tool_scores || {}).length
     ? Object.keys(tool_scores || {})
     : Array.from(new Set((pair_results || []).flatMap(pair => (pair.tool_results || []).map(e => e.tool))));
-
   const chartData = (pair_results || []).map(pair => {
     const d = { pair: pair.label };
     activeTools.forEach(t => { const tr = pair.tool_results?.find(r => r.tool === t); d[t] = tr ? Math.round(tr.score * 1000) / 10 : 0; });
     return d;
   });
-
   const panEvaluationRows = Object.entries(results.evaluation || {})
     .filter(([, metrics]) => metrics && !metrics.error)
     .map(([toolId, metrics]) => {
@@ -1500,7 +1381,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
         tuningRecommendations: metrics.tuning_recommendations || null,
       };
     }).sort((a, b) => b.plagdet - a.plagdet);
-
   const topPanResult = panEvaluationRows[0] || null;
   const integrityDeskPanResult = panEvaluationRows.find(r => r.toolId === 'integritydesk') || null;
   const productPanResult = integrityDeskPanResult || topPanResult;
@@ -1511,12 +1391,10 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const isFocusedMetricReport = isCalibrationReport || isRegressionReport;
   const isComparisonReport = !isFocusedMetricReport;
   const hasMultiToolPanResults = panEvaluationRows.length >= 2;
-
   // All-modes tool failure warnings
   const toolFailureRows = Object.entries(results.tool_scores || {})
     .filter(([, meta]) => meta?.error)
     .map(([toolId, meta]) => ({ toolId, name: TOOLS.find(t => t.id === toolId)?.name || toolId, error: String(meta.error || 'Tool did not return scores.') }));
-
   const comparison = results.comparison || {};
   const comparisonDeltas = comparison.metrics || {};
   const qualityGates = results.quality_gates || null;
@@ -1525,16 +1403,13 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     ...(pairSamplingAudit?.warnings || []),
     ...(pairSamplingAudit?.blockers || []),
   ];
-
   const pairKey = (pair, idx) => `${pair.file_a || 'a'}::${pair.file_b || 'b'}::${pair.label || idx}`;
   const togglePair = (key) => setExpandedPairs(prev => ({ ...prev, [key]: !prev[key] }));
-
   const downloadJSON = () => {
     const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(url);
   };
-
   const downloadCSV = () => {
     const rows = [['Pair', 'File A', 'File B', ...activeTools.map(id => TOOLS.find(t => t.id === id)?.name || id), 'Max', 'Min']];
     (pair_results || []).forEach(pair => {
@@ -1547,7 +1422,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
-
   const downloadPDF = async (format = 'legacy') => {
     try {
       setPdfDownloading(true); setPdfError('');
@@ -1562,42 +1436,31 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     } catch { setPdfError('Could not export the benchmark report as PDF. Please try again.'); }
     finally { setPdfDownloading(false); }
   };
-
   const applyOptimization = async () => {
     if (!tuningConfigChanges.length) return;
     setApplyingOptimization(true);
     setOptimizationMessage('');
     setOptimizationError('');
-
     // Check if user has admin privileges
     const hasAdminAccess = user?.role === 'admin';
     const jobId = results.job_id || results.id || results.report_id;
-
     if (!hasAdminAccess) {
       setOptimizationError('Admin access required. Please log in as an administrator to apply optimizations.');
       return;
     }
-
     if (!jobId) {
       setOptimizationError('Job ID not found in results. Cannot apply optimization without a valid job reference.');
       return;
     }
-
     try {
-      console.log('Applying optimization with changes:', tuningConfigChanges);
-      console.log('Using job ID:', jobId);
-
       const res = await apiClient.post('/api/benchmark/apply-optimization', {
         config_changes: tuningConfigChanges,
         source_job_id: jobId,
       });
-
       setOptimizationMessage(res.data?.message || 'Proposed optimization applied.');
     } catch (err) {
       console.error('Optimization application failed:', err.response?.data || err.message);
-
       let errorMsg = 'Could not apply proposed optimization.';
-
       if (err.response?.status === 401) {
         errorMsg = 'Admin access required. Please log in as an administrator to apply optimizations.';
       } else if (err.response?.status === 403) {
@@ -1609,13 +1472,11 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       } else if (err.message) {
         errorMsg = `Network error: ${err.message}`;
       }
-
       setOptimizationError(errorMsg);
     } finally {
       setApplyingOptimization(false);
     }
   };
-
   const metricIntegrity = productPanResult?.metricIntegrity || {};
   const tuningRecommendations = productPanResult?.tuningRecommendations || null;
   const automaticConfigChanges = tuningRecommendations?.config_changes || [];
@@ -1623,7 +1484,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const showingManualConfigOptions = automaticConfigChanges.length === 0 && manualConfigOptions.length > 0;
   const tuningConfigSource = automaticConfigChanges.length ? automaticConfigChanges : manualConfigOptions;
   const tuningConfigSourceKey = JSON.stringify(tuningConfigSource);
-
   useEffect(() => {
     setEditableOptimizationChanges(
       tuningConfigSource.map(change => ({
@@ -1638,14 +1498,12 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     setOptimizationError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tuningConfigSourceKey]);
-
   const tuningConfigChanges = editableOptimizationChanges;
   const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
   const confidenceIntervals = productPanResult?.confidenceIntervals || {};
   const splitProtocol = productPanResult?.splitProtocol || {};
   const metricWarnings = metricIntegrity.warnings || [];
   const decisionThreshold = Number(productPanResult?.threshold ?? productPanResult?.fixedThreshold ?? 0.5);
-
   const labeledPairAudit = (pair_results || [])
     .map((pair) => {
       if (pair.ground_truth_label === undefined || pair.ground_truth_label === null) return null;
@@ -1656,7 +1514,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
       return { ...pair, score: Number(toolResult.score), actual, predicted };
     })
     .filter(Boolean);
-
   const localConfusion = labeledPairAudit.reduce((acc, pair) => {
     if (pair.actual && pair.predicted) acc.tp += 1;
     else if (!pair.actual && pair.predicted) acc.fp += 1;
@@ -1664,7 +1521,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     else acc.fn += 1;
     return acc;
   }, { tp: 0, fp: 0, tn: 0, fn: 0 });
-
   const heldoutConfusion = metricIntegrity.heldout_confusion_matrix || {};
   const confusion = labeledPairAudit.length ? localConfusion : {
     tp: Number(heldoutConfusion.tp || 0), fp: Number(heldoutConfusion.fp || 0),
@@ -1676,7 +1532,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const hasHoldout = splitProtocol.protocol === 'deterministic_stratified_calibration_holdout';
   const hasConfidenceInterval = Boolean(confidenceIntervals.available && confidenceIntervals.f1);
   const benchmarkTrust = productPanResult?.benchmarkTrust || metricIntegrity.benchmark_trust || results.benchmark_trust || {};
-
   const trustStyles = {
     strong: { label: 'Strong', className: 'bg-emerald-100 text-emerald-700', description: 'Enough labeled evaluation pairs and confidence intervals for internal regression decisions.' },
     moderate: { label: 'Moderate', className: 'bg-amber-100 text-amber-700', description: 'Useful for internal decisions, but expand the labeled set before relying on it as the only gate.' },
@@ -1691,7 +1546,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
         : trustStyles.limited
   );
   const trustMessages = [...(benchmarkTrust.blockers || []), ...(benchmarkTrust.warnings || [])];
-
   return (
     <div className="space-y-6">
       {/* Report header */}
@@ -1729,11 +1583,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           <button onClick={onRestart} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition-all text-sm">New Benchmark</button>
         </div>
       </div>
-
       {pdfError && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2"><AlertCircle size={14} className="shrink-0" />{pdfError}</div>}
-
-
-
       {/* ── FIX: Tool failures shown in all modes ── */}
       {toolFailureRows.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
@@ -1743,7 +1593,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
       )}
-
       {pairSamplingAudit && (
         <div className={`rounded-2xl border px-5 py-4 text-sm leading-6 ${pairSamplingAudit.blockers?.length ? 'border-red-200 bg-red-50 text-red-800' : pairSamplingWarnings.length ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1778,7 +1627,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
       )}
-
       {isRegressionReport && qualityGates && (
         <div className={`rounded-2xl border p-5 shadow-sm ${qualityGates.passed ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1810,12 +1658,10 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
       )}
-
       {/* ── DOMINANT: Multi-tool comparison proof (shown first when multiple tools ran on labeled data) ── */}
       {hasMultiToolPanResults && (
         <div className="space-y-4">
           <ComparisonProofHeader rows={panEvaluationRows} />
-
           <div className="flex justify-end -mt-2 mb-1 gap-2">
             <button
               onClick={() => {
@@ -1838,7 +1684,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             >
               <Download size={15} /> Download Proof (JSON)
             </button>
-
             <button
               onClick={() => {
                 const w = panEvaluationRows[0];
@@ -1846,7 +1691,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                 const dolos = panEvaluationRows.find(r => r.toolId === 'dolos');
                 const idesk = panEvaluationRows.find(r => r.toolId === 'integritydesk' || r.toolId === 'codeprovenance');
                 const isIntegrityDeskWin = w.toolId === 'integritydesk' || w.toolId === 'codeprovenance';
-
                 const lines = [
                   `# IntegrityDesk Benchmark Proof Report`,
                   ``,
@@ -1857,7 +1701,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                   `---`,
                   ``,
                 ];
-
                 // Winner summary
                 lines.push(`## 🏆 Winner: ${w.name}`);
                 lines.push(``);
@@ -1872,17 +1715,14 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                   lines.push(`| Avg Runtime| ${w.avgRuntimeSeconds.toFixed(2)}s |`);
                 }
                 lines.push(``);
-
                 // Proof statement
                 if (isIntegrityDeskWin) {
                   lines.push(`> **Proof Statement**: IntegrityDesk achieved the highest PlagDet and F1 score on this labeled academic dataset, outperforming all other evaluated tools.`);
                   lines.push(``);
                 }
-
                 // Head-to-head deltas
                 lines.push(`## Head-to-Head Performance`);
                 lines.push(``);
-
                 if (moss) {
                   const delta = ((w.f1Score - moss.f1Score) * 100);
                   lines.push(`- **vs MOSS**: +${delta.toFixed(1)} F1 points (MOSS F1: ${(moss.f1Score * 100).toFixed(1)}%)`);
@@ -1896,13 +1736,11 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                   lines.push(`- IntegrityDesk ranked #${rank} with F1 ${(idesk.f1Score * 100).toFixed(1)}%`);
                 }
                 lines.push(``);
-
                 // Professional leaderboard table
                 lines.push(`## Full Leaderboard (sorted by PlagDet)`);
                 lines.push(``);
                 lines.push(`| Rank | Tool              | PlagDet | F1     | Precision | Recall | FPR    | Runtime |`);
                 lines.push(`|------|-------------------|---------|--------|-----------|--------|--------|---------|`);
-
                 panEvaluationRows.forEach((r, i) => {
                   const rank = i + 1;
                   const medal = rank === 1 ? '🥇 ' : rank === 2 ? '🥈 ' : rank === 3 ? '🥉 ' : '';
@@ -1911,13 +1749,11 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                     `| ${medal}${rank} | ${r.name.padEnd(17)} | ${(r.plagdet * 100).toFixed(1)}% | ${(r.f1Score * 100).toFixed(1)}% | ${(r.precision * 100).toFixed(1)}% | ${(r.recall * 100).toFixed(1)}% | ${(r.falsePositiveRate * 100).toFixed(1)}% | ${runtime} |`
                   );
                 });
-
                 lines.push(``);
                 lines.push(`---`);
                 lines.push(``);
                 lines.push(`*Report generated by IntegrityDesk Benchmark System*`);
                 lines.push(`*For academic integrity and plagiarism detection research*`);
-
                 const md = lines.join('\n');
                 const blob = new Blob([md], { type: 'text/markdown' });
                 const url = URL.createObjectURL(blob);
@@ -1931,7 +1767,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             >
               <Download size={15} /> Download Proof (Markdown)
             </button>
-
             <button
               onClick={() => downloadPDF('proof')}
               disabled={pdfDownloading}
@@ -1940,9 +1775,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
               <Download size={15} />{pdfDownloading ? 'Preparing…' : 'Download Proof (PDF)'}
             </button>
           </div>
-
           <PanLeaderboard rows={panEvaluationRows} />
-
           {/* Improved pair-level code diff viewer */}
           {results.pair_results && results.pair_results.length > 0 && (
             <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-5">
@@ -1954,13 +1787,11 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                   const hasCode = pair.code_a || pair.source_a || pair.content_a;
                   const codeA = pair.code_a || pair.source_a || pair.content_a || pair.file_a;
                   const codeB = pair.code_b || pair.source_b || pair.content_b || pair.file_b;
-
                   return (
                     <details key={idx} className="border rounded-xl p-3 bg-slate-50/50">
                       <summary className="cursor-pointer font-mono text-[10px] text-slate-600 truncate">
                         {pair.file_a || pair.label} ↔ {pair.file_b}
                       </summary>
-
                       <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
                         {/* Tool scores */}
                         <div>
@@ -1973,7 +1804,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                             ))}
                           </div>
                         </div>
-
                         {/* Actual code diff when available */}
                         {hasCode ? (
                           <div className="lg:col-span-2">
@@ -2010,11 +1840,9 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           )}
         </div>
       )}
-
       {/* PAN scorecard — heavy single-tool diagnostics only when not a clear multi-tool comparison */}
       {isFocusedMetricReport && productPanResult && !hasMultiToolPanResults && (
         <div className="space-y-6">
-
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2045,7 +1873,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">Detailed Evaluation Scorecard</h2>
@@ -2111,7 +1938,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
               })}
             </div>
           </div>
-
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
               <h2 className="font-semibold text-slate-900">Engine Tuning Feedback</h2>
@@ -2137,7 +1963,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                 </div>
               </div>
             )}
-
             {(tuningConfigChanges.length > 0 || tuningRecommendations?.available) && (
               <div className="border-t border-slate-100 px-6 pb-6">
                 <div className="pt-5">
@@ -2215,7 +2040,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
       )}
-
       {/* Comparison charts */}
       {chartData.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -2237,7 +2061,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           </div>
         </div>
       )}
-
       {/* Detailed pair results */}
       {(pair_results?.length || 0) > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -2245,7 +2068,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             <h2 className="font-semibold text-slate-900">Detailed Pair Results</h2>
             <p className="text-sm text-slate-500 mt-0.5">Click any pair to expand individual tool scores</p>
           </div>
-
           <div
             className="hidden lg:grid px-6 py-3 bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-400 font-semibold"
             style={{ gridTemplateColumns: `2fr repeat(${activeTools.length}, 1fr) 60px 60px 70px` }}
@@ -2261,7 +2083,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
             <div className="text-center">Min</div>
             <div className="text-center">Spread</div>
           </div>
-
           <div className="divide-y divide-slate-50">
             {visiblePairResults.map((pair, idx) => {
               const key = pairKey(pair, pageStart + idx);
@@ -2272,7 +2093,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
               const minScore = valid.length ? Math.min(...valid) : 0;
               const spread = maxScore - minScore;
               const riskColor = maxScore >= 0.9 ? 'bg-red-500' : maxScore >= 0.75 ? 'bg-amber-500' : maxScore >= 0.5 ? 'bg-yellow-500' : 'bg-emerald-500';
-
               return (
                 <div key={key}>
                   <button
@@ -2299,7 +2119,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                     <div className="text-center text-xs font-bold text-emerald-600">{(minScore * 100).toFixed(0)}%</div>
                     <div className={`text-center text-xs font-bold ${spread >= 0.3 ? 'text-red-600' : 'text-emerald-600'}`}>{(spread * 100).toFixed(0)}%</div>
                   </button>
-
                   <button onClick={() => togglePair(key)} className="lg:hidden w-full px-4 py-3 hover:bg-slate-50/50 text-left flex items-center gap-3">
                     <div className={`w-2 h-8 rounded-full shrink-0 ${riskColor}`} />
                     <div className="flex-1">
@@ -2308,7 +2127,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                     </div>
                     {isExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
                   </button>
-
                   {isExpanded && (
                     <div className="px-6 pb-5 bg-slate-50/50">
                       <div className="grid md:grid-cols-2 gap-3 mt-3">
@@ -2337,7 +2155,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
               );
             })}
           </div>
-
           {totalPairs > itemsPerPage && (
             <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="text-xs font-medium text-slate-500">Showing {pageStart + 1}–{pageEnd} of {totalPairs} pairs</div>
@@ -2352,7 +2169,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
           )}
         </div>
       )}
-
       {/* Empty state for focused mode with no pair results */}
       {isFocusedMetricReport && !productPanResult && (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -2364,7 +2180,6 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
     </div>
   );
 }
-
 // ── Benchmark mode definitions ─────────────────────────────────────────────
 const BENCHMARK_MODES = [
   {
@@ -2396,7 +2211,6 @@ const BENCHMARK_MODES = [
     detailNote: 'A ranked multi-tool leaderboard showing whether IntegrityDesk beats the external baselines on the same benchmark data.',
   },
 ];
-
 // ── IntegrityDesk run protocols (sub-modes of the Evaluate & Improve tab) ──
 const BENCHMARK_PROTOCOLS = [
   {
@@ -2410,7 +2224,6 @@ const BENCHMARK_PROTOCOLS = [
     hint: 'regression_test',
   },
 ];
-
 // ── Shared Workbench ───────────────────────────────────────────────────────
 export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'benchmark' | 'comparison' }) {
   const { user, loading: authLoading } = useAuth();
@@ -2432,9 +2245,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState('');
   const [results, setResults] = useState(null);
-
   const availableTools = useMemo(() => mergeToolsWithAvailability(rawApiTools), [rawApiTools]);
-
   useEffect(() => {
     // Load tools and datasets regardless of auth state - these endpoints are public
     setToolsLoading(true);
@@ -2449,11 +2260,9 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
       .then(res => { if (res.data?.datasets) setBenchmarkDatasets(res.data.datasets); })
       .catch(() => { });
   }, []);
-
   const activeMode = availableModes.find(m => m.id === activeModeId) || availableModes[0];
   const activeProtocol = BENCHMARK_PROTOCOLS.find(p => p.id === activeProtocolId) || BENCHMARK_PROTOCOLS[0];
   const effectiveBenchmarkMode = activeModeId === 'development' ? activeProtocolId : activeModeId;
-
   // Reset wizard state when modeScope changes
   useEffect(() => {
     setActiveModeId(defaultModeId);
@@ -2465,7 +2274,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     setSelectedDataset(null);
     setFiles([]);
   }, [modeScope, defaultModeId]);
-
   const switchMode = useCallback((modeId) => {
     setActiveModeId(modeId);
     setActiveProtocolId('development');
@@ -2476,7 +2284,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     setSelectedDataset(null);
     setFiles([]);
   }, []);
-
   const switchProtocol = useCallback((protocolId) => {
     setActiveProtocolId(protocolId);
     setStep(0);
@@ -2486,35 +2293,29 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
     setSelectedDataset(null);
     setFiles([]);
   }, []);
-
   const goToStep = useCallback((next, currentCompleted) => {
     setCompletedSteps(prev => [...new Set([...prev, currentCompleted])]);
     setStep(next);
     setTimeout(() => document.getElementById('step-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   }, []);
-
   const restart = useCallback(() => { setStep(0); setCompletedSteps([]); setResults(null); }, []);
   const rerunBenchmark = useCallback(() => {
     setResults(null);
     setCompletedSteps([0, 1]);
     setStep(2);
   }, []);
-
   const STEPS = [
     { label: 'Tools', subtitle: 'Choose what to run' },
     { label: 'Dataset', subtitle: 'Pick or upload data' },
     { label: 'Run', subtitle: 'Execute benchmark' },
     { label: 'Report', subtitle: 'View results' },
   ];
-
   const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
-
   return (
     <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
         <div className="space-y-6">
-
           {/* ── Page header ─────────────────────────────────────────────── */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
@@ -2529,7 +2330,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
             </div>
           </div>
-
           {/* ── Mode selector (only when multiple modes available) ────── */}
           {availableModes.length > 1 && (
             <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -2553,7 +2353,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               })}
             </div>
           )}
-
           {/* ── Protocol selector (Evaluate & Improve sub-modes) ───────── */}
           {activeModeId === 'development' && (
             <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -2575,7 +2374,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
               })}
             </div>
           )}
-
           {/* ── Step wizard ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             {/* Run config summary bar — visible in steps 1 and 2 */}
@@ -2592,7 +2390,6 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 />
               </div>
             )}
-
             <div id="step-content" className="p-5 sm:p-6">
               {step === 0 && (
                 <ToolSelectionStep
@@ -2645,19 +2442,13 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                 </ReportErrorBoundary>
               )}
             </div>
-
-
-
           </div>
         </div>
       </div>
     </DashboardLayout>
   );
 }
-
 // ── Route Page ─────────────────────────────────────────────────────────────
 export default function BenchmarkPage() {
   return <BenchmarkWorkbench modeScope="benchmark" />;
 }
-
-

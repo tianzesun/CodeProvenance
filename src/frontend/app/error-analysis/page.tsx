@@ -1,6 +1,5 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
-
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { apiClient } from '@/lib/apiClient';
@@ -23,10 +22,8 @@ import {
   Database,
   Info,
 } from 'lucide-react';
-
 /* ─── helpers ──────────────────────────────────────────────────────────── */
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
-
 /* ─── sub-components ───────────────────────────────────────────────────── */
 function MetricCard({ label, value, sub, color, icon: Icon }) {
   const palette = {
@@ -35,7 +32,6 @@ function MetricCard({ label, value, sub, color, icon: Icon }) {
     amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: 'text-amber-500', sub: 'text-amber-500' },
     violet: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', icon: 'text-violet-500', sub: 'text-violet-500' },
   }[color];
-
   return (
     <div className={`${palette.bg} ${palette.border} border rounded-2xl p-5 flex flex-col gap-3`}>
       <div className="flex items-center justify-between">
@@ -47,7 +43,6 @@ function MetricCard({ label, value, sub, color, icon: Icon }) {
     </div>
   );
 }
-
 function ConfusionMatrix({ tp, fp, fn, tn }) {
   const total = tp + fp + fn + tn || 1;
   const cell = (value, label, sub, bg, text, border) => (
@@ -78,14 +73,12 @@ function ConfusionMatrix({ tp, fp, fn, tn }) {
     </div>
   );
 }
-
 function ErrorCaseRow({ item, prefix, isOpen, onToggle }) {
   const scorePct = (item.score * 100).toFixed(1);
   const scoreColor =
     item.score >= 0.7 ? 'text-rose-600 bg-rose-50 border-rose-200' :
       item.score >= 0.4 ? 'text-amber-600 bg-amber-50 border-amber-200' :
         'text-slate-600 bg-slate-50 border-slate-200';
-
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden transition-shadow hover:shadow-sm">
       <button
@@ -105,7 +98,6 @@ function ErrorCaseRow({ item, prefix, isOpen, onToggle }) {
           {isOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
         </div>
       </button>
-
       {isOpen && (
         <div className="px-5 pb-5 border-t border-slate-100 space-y-4 pt-4">
           <div className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-100 text-slate-700 rounded-full px-3 py-1">
@@ -113,7 +105,6 @@ function ErrorCaseRow({ item, prefix, isOpen, onToggle }) {
             {item.reason}
           </div>
           <p className="text-sm text-slate-600 leading-relaxed">{item.explanation}</p>
-
           {/* Engine feature breakdown */}
           {item.features && Object.keys(item.features).length > 0 && (
             <div>
@@ -134,14 +125,12 @@ function ErrorCaseRow({ item, prefix, isOpen, onToggle }) {
               </div>
             </div>
           )}
-
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Feature Summary</p>
             <pre className="bg-slate-950 text-slate-100 rounded-xl p-4 text-xs font-mono leading-relaxed overflow-x-auto">
               {item.codeSnippet}
             </pre>
           </div>
-
           <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-100 rounded-xl p-4">
             <Lightbulb size={15} className="text-blue-500 mt-0.5 shrink-0" />
             <div>
@@ -154,7 +143,6 @@ function ErrorCaseRow({ item, prefix, isOpen, onToggle }) {
     </div>
   );
 }
-
 function EngineBar({ engine, percent, color }) {
   return (
     <div className="space-y-1.5">
@@ -168,7 +156,6 @@ function EngineBar({ engine, percent, color }) {
     </div>
   );
 }
-
 function SectionHeader({ icon: Icon, iconClass, title, count, description }) {
   return (
     <div className="mb-5">
@@ -187,7 +174,6 @@ function SectionHeader({ icon: Icon, iconClass, title, count, description }) {
     </div>
   );
 }
-
 /* ─── main page ────────────────────────────────────────────────────────── */
 export default function ErrorAnalysisPage() {
   const { user } = useAuth();
@@ -195,7 +181,6 @@ export default function ErrorAnalysisPage() {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [expandedErrors, setExpandedErrors] = useState(new Set());
-
   const fetchData = async () => {
     setLoading(true);
     setError('');
@@ -208,9 +193,7 @@ export default function ErrorAnalysisPage() {
       setLoading(false);
     }
   };
-
   useEffect(() => { fetchData(); }, []);
-
   const toggleError = (key) => {
     setExpandedErrors((prev) => {
       const next = new Set(prev);
@@ -218,7 +201,6 @@ export default function ErrorAnalysisPage() {
       return next;
     });
   };
-
   if (loading) {
     return (
       <DashboardLayout>
@@ -229,7 +211,6 @@ export default function ErrorAnalysisPage() {
       </DashboardLayout>
     );
   }
-
   if (error) {
     return (
       <DashboardLayout>
@@ -243,18 +224,13 @@ export default function ErrorAnalysisPage() {
       </DashboardLayout>
     );
   }
-
   if (!data) return null;
-
   const { summary, falsePositives, falseNegatives, engineContributions, recommendations, source, dataset, has_ground_truth } = data;
-
   const noData = summary.totalPairs === 0;
-
   return (
     <DashboardLayout>
       <div className="p-4">
         <div className="space-y-6">
-
           {/* ── Page Header ── */}
           <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
@@ -284,7 +260,6 @@ export default function ErrorAnalysisPage() {
               </button>
             </div>
           </div>
-
           {/* ── No data state ── */}
           {noData && (
             <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center shadow-sm">
@@ -303,7 +278,6 @@ export default function ErrorAnalysisPage() {
               </div>
             </div>
           )}
-
           {!noData && (
             <>
               {/* ── Ground truth notice ── */}
@@ -317,7 +291,6 @@ export default function ErrorAnalysisPage() {
                   </div>
                 </div>
               )}
-
               {/* ── Metric Cards ── */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <MetricCard label="Accuracy" value={pct(summary.accuracy)} sub="Overall correctness" color="blue" icon={BarChart3} />
@@ -325,7 +298,6 @@ export default function ErrorAnalysisPage() {
                 <MetricCard label="Recall" value={pct(summary.recall)} sub="Real cases detected" color="amber" icon={TrendingUp} />
                 <MetricCard label="F1 Score" value={pct(summary.f1)} sub="Precision–recall balance" color="violet" icon={Zap} />
               </div>
-
               {/* ── Confusion Matrix ── */}
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                 <div className="flex items-center gap-2 mb-6">
@@ -342,7 +314,6 @@ export default function ErrorAnalysisPage() {
                   tn={summary.trueNegatives}
                 />
               </div>
-
               {/* ── False Positives ── */}
               <div className="bg-white border border-rose-100 rounded-2xl p-6 shadow-sm">
                 <SectionHeader
@@ -371,7 +342,6 @@ export default function ErrorAnalysisPage() {
                   </div>
                 )}
               </div>
-
               {/* ── False Negatives ── */}
               <div className="bg-white border border-orange-100 rounded-2xl p-6 shadow-sm">
                 <SectionHeader
@@ -400,7 +370,6 @@ export default function ErrorAnalysisPage() {
                   </div>
                 )}
               </div>
-
               {/* ── Engine Contribution ── */}
               {(Object.keys(engineContributions.falsePositives || {}).length > 0 ||
                 Object.keys(engineContributions.falseNegatives || {}).length > 0) && (
@@ -438,7 +407,6 @@ export default function ErrorAnalysisPage() {
                     </div>
                   </div>
                 )}
-
               {/* ── Recommendations ── */}
               {recommendations && recommendations.length > 0 && (
                 <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm">
