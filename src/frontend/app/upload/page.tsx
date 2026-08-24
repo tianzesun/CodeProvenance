@@ -16,7 +16,6 @@ import {
   AlertCircle,
   Settings2,
   Layers3,
-  Sparkles,
   ArrowRight,
   Zap,
   Shield,
@@ -149,10 +148,6 @@ type AssignmentMode = {
   id: string; name: string; category?: string; access?: string;
   context?: string; version?: string; overlay?: boolean; warnings?: string[]; pipelines?: string[];
 };
-type ModeSuggestion = {
-  recommended_mode_id: string; recommended_mode_name: string;
-  confidence?: number; reasons?: string[];
-};
 
 function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
   if (axios.isAxiosError(error)) {
@@ -202,21 +197,11 @@ export default function UploadPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [starterFiles, setStarterFiles] = useState<File[]>([]);
   const [isStarterDragOver, setIsStarterDragOver] = useState(false);
-  const [courseName, setCourseName] = useState('');
-  const [assignmentName, setAssignmentName] = useState('');
-  const [assignmentId, setAssignmentId] = useState('');
-  const [courses, setCourses] = useState<any[]>([]);
-  const [coursesLoading, setCoursesLoading] = useState(false);
-  const [selectedCourseId, setSelectedCourseId] = useState('');
-  const [assignments, setAssignments] = useState<any[]>([]);
-  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
   const [activeEngines, setActiveEngines] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
   const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
-  const [modeSuggestion, setModeSuggestion] = useState<ModeSuggestion | null>(null);
-  const [modeSuggesting, setModeSuggesting] = useState(false);
   const [toolOptions, setToolOptions] = useState<DetectionTool[]>(FALLBACK_TOOL_OPTIONS);
   const [thresholdLoading, setThresholdLoading] = useState(true);
   const [modesLoading, setModesLoading] = useState(true);
@@ -350,9 +335,6 @@ export default function UploadPage() {
       const raw = window.localStorage.getItem(uploadFormStorageKey);
       if (!raw) return;
       const p = JSON.parse(raw);
-      if (typeof p.course_name === 'string') setCourseName(p.course_name);
-      if (typeof p.assignment_name === 'string') setAssignmentName(p.assignment_name);
-      if (typeof p.assignment_id === 'string') setAssignmentId(p.assignment_id);
       if (typeof p.assignment_mode === 'string') setSelectedAssignmentModeId(p.assignment_mode);
     } catch { }
   }, [authLoading, uploadFormStorageKey]);
@@ -360,48 +342,9 @@ export default function UploadPage() {
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') return;
     window.localStorage.setItem(uploadFormStorageKey, JSON.stringify({
-      course_name: courseName, assignment_name: assignmentName, assignment_id: assignmentId, assignment_mode: selectedAssignmentModeId,
+      assignment_mode: selectedAssignmentModeId,
     }));
-  }, [assignmentId, assignmentName, authLoading, courseName, selectedAssignmentModeId, uploadFormStorageKey]);
-
-  // Fetch courses for the new hierarchy selector
-  useEffect(() => {
-    if (authLoading) return;
-    setCoursesLoading(true);
-    apiClient.get('/api/courses')
-      .then((res) => setCourses(res.data?.courses || []))
-      .catch(() => setCourses([]))
-      .finally(() => setCoursesLoading(false));
-  }, [authLoading]);
-
-  // Fetch assignments when a course is selected
-  useEffect(() => {
-    if (!selectedCourseId) {
-      setAssignments([]);
-      setAssignmentId('');
-      return;
-    }
-    setAssignmentsLoading(true);
-    apiClient.get(`/api/assignments?course_id=${selectedCourseId}`)
-      .then((res) => setAssignments(res.data?.assignments || []))
-      .catch(() => setAssignments([]))
-      .finally(() => setAssignmentsLoading(false));
-  }, [selectedCourseId]);
-
-  useEffect(() => {
-    if (modesLoading || assignmentModes.length === 0) return;
-    if (!courseName.trim() && !assignmentName.trim() && files.length === 0) { setModeSuggestion(null); return; }
-    const timer = window.setTimeout(async () => {
-      setModeSuggesting(true);
-      try {
-        const res = await apiClient.post('/api/assignment-modes/suggest', {
-          course_name: courseName, assignment_name: assignmentName, filenames: files.map((f) => f.name),
-        });
-        setModeSuggestion(res.data);
-      } catch { setModeSuggestion(null); } finally { setModeSuggesting(false); }
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [assignmentModes.length, assignmentName, courseName, files, modesLoading]);
+  }, [authLoading, selectedAssignmentModeId, uploadFormStorageKey]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
@@ -426,9 +369,8 @@ export default function UploadPage() {
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     starterFiles.forEach((f) => fd.append('starter_files', f));
-    fd.append('course_name', courseName || assignmentName || 'Assignment Check');
-    fd.append('assignment_name', assignmentName || courseName || 'Assignment Check');
-    if (assignmentId) fd.append('assignment_id', assignmentId);
+    fd.append('course_name', 'Assignment Check');
+    fd.append('assignment_name', 'Assignment Check');
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_keys', JSON.stringify(activeEngines));
@@ -558,90 +500,35 @@ export default function UploadPage() {
              </div>
            )}
 
-            {/* Context Fields - DB-backed hierarchy only (legacy free-text inputs removed) */}
-           <div className="mb-4">
-             <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <div>
-                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Course</label>
-                   <select
-                     value={selectedCourseId}
-                     onChange={(e) => {
-                       const cid = e.target.value;
-                       setSelectedCourseId(cid);
-                       const found = courses.find((c: any) => c.id === cid);
-                       if (found) setCourseName(found.name);
-                       setAssignmentId('');
-                       setAssignments([]);
-                     }}
-                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white"
-                     disabled={coursesLoading}
-                   >
-                     <option value="">
-                       {coursesLoading ? 'Loading courses...' : courses.length === 0 ? '-- No courses yet --' : '-- Select Course --'}
-                     </option>
-                     {courses.map((c: any) => (
-                       <option key={c.id} value={c.id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
-                     ))}
-                   </select>
-                    {courses.length === 0 && !coursesLoading && (
-                      <p className="text-[10px] text-amber-600 mt-1">
-                        No courses assigned. Ask an admin to add you as instructor.
-                      </p>
+            {/* External Source Scan status + per-submission control */}
+            <div className="mb-4">
+              <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500">External Source Scan:</span>
+                    {tenantExternalScanEnabled === true ? (
+                      <span className="font-medium text-emerald-700">
+                        Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
+                      </span>
+                    ) : tenantExternalScanEnabled === false ? (
+                      <span className="font-medium text-amber-700">Disabled</span>
+                    ) : (
+                      <span className="text-slate-400">Loading…</span>
                     )}
-                 </div>
+                  </div>
 
-                 <div>
-                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assignment</label>
-                   <select
-                     value={assignmentId}
-                     onChange={(e) => {
-                       const aid = e.target.value;
-                       setAssignmentId(aid);
-                       const found = assignments.find((a: any) => a.id === aid);
-                       if (found) setAssignmentName(found.name);
-                     }}
-                     disabled={!selectedCourseId || assignmentsLoading}
-                     className="w-full h-11 px-4 rounded-xl border text-sm outline-none bg-white disabled:opacity-60"
-                   >
-                     <option value="">
-                       {assignmentsLoading ? 'Loading assignments...' : !selectedCourseId ? 'Select a course first' : assignments.length === 0 ? '-- No assignments for this course --' : '-- Select Assignment --'}
-                     </option>
-                     {assignments.map((a: any) => (
-                       <option key={a.id} value={a.id}>{a.name}</option>
-                     ))}
-                   </select>
-                 </div>
-               </div>
-                 <p className="text-[10px] text-slate-500 mt-2">Selecting an Assignment links this upload in the database for reporting and review.</p>
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={sourceScanEnabled}
+                      onChange={(e) => setSourceScanEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>Scan for this submission</span>
+                  </label>
 
-                 {/* External Source Scan status + per-submission control */}
-                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                   <div className="flex items-center gap-2">
-                     <span className="text-slate-500">External Source Scan:</span>
-                     {tenantExternalScanEnabled === true ? (
-                       <span className="font-medium text-emerald-700">
-                         Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
-                       </span>
-                     ) : tenantExternalScanEnabled === false ? (
-                       <span className="font-medium text-amber-700">Disabled</span>
-                     ) : (
-                       <span className="text-slate-400">Loading…</span>
-                     )}
-                   </div>
-
-                   <label className="flex items-center gap-2 cursor-pointer text-slate-700">
-                     <input
-                       type="checkbox"
-                       checked={sourceScanEnabled}
-                       onChange={(e) => setSourceScanEnabled(e.target.checked)}
-                       className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                     />
-                     <span>Scan for this submission</span>
-                   </label>
-
-                   <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
-                 </div>
+                  <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
+                </div>
               </div>
             </div>
 
@@ -1071,53 +958,6 @@ export default function UploadPage() {
                       </div>
                     ) : null}
 
-                    {/* AI Suggestion */}
-                    <div
-                      className="mt-3 rounded-xl px-3.5 py-3.5 transition-all duration-300"
-                      style={modeSuggestion
-                        ? { background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)', border: '1px solid #bfdbfe' }
-                        : { background: '#f8fafc', border: '1px solid #f1f5f9' }}
-                    >
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <Sparkles size={11} style={{ color: modeSuggestion ? '#60a5fa' : '#cbd5e1' }} />
-                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Recommended Mode</span>
-                      </div>
-                      {modeSuggesting ? (
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
-                          <Loader2 size={11} className="animate-spin" /> Reading assignment context…
-                        </div>
-                      ) : modeSuggestion ? (
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold leading-snug" style={{ color: '#1e3a5f' }}>
-                              {modeSuggestion.recommended_mode_name}
-                              {typeof modeSuggestion.confidence === 'number' && (
-                                <span className="ml-1.5 text-[11px] font-normal" style={{ color: '#60a5fa' }}>
-                                  {Math.round(modeSuggestion.confidence * 100)}% match
-                                </span>
-                              )}
-                            </p>
-                            {modeSuggestion.reasons?.[0] && (
-                              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#3b82f6' }}>
-                                {modeSuggestion.reasons[0]}
-                              </p>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedAssignmentModeId(modeSuggestion.recommended_mode_id)}
-                            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:opacity-90"
-                            style={{ ...blueBg, boxShadow: '0 1px 3px rgba(37,99,235,0.3)' }}
-                          >
-                            <Check size={10} strokeWidth={3} />Apply
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                          Add files or assignment details for a recommendation.
-                        </p>
-                      )}
-                    </div>
                   </div>
                 </div>
               )}
