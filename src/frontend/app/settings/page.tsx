@@ -243,8 +243,11 @@ export default function SettingsPage() {
       setWeightsDirty(false);
       setSuccess('Settings saved. Recommended profile applied.');
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to save settings');
+    } catch (err: unknown) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.detail
+        : null;
+      setError(message || "Failed to save settings");
     } finally {
       setSaving(false);
     }
