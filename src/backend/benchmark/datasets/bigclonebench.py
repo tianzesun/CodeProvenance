@@ -215,7 +215,7 @@ class BigCloneBenchDataset(DatasetContract):
         """Load from processed CSV file."""
         pairs = []
         with open(pairs_file, 'r', encoding='utf-8') as f:
-            header = f.readline()
+            f.readline()  # consume header row
             for line in f:
                 if max_pairs and len(pairs) >= max_pairs:
                     break
@@ -306,10 +306,6 @@ class BigCloneBenchDataset(DatasetContract):
 
         if not self.bcb_reduced_dir.exists():
             return []
-
-        functionalities = [
-            d for d in self.bcb_reduced_dir.iterdir() if d.is_dir()
-        ]
 
         pairs: List[NonClonePair] = []
         all_files = list(self.bcb_reduced_dir.rglob("*.java"))

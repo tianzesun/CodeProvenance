@@ -259,7 +259,6 @@ class DatasetBuilder:
         
         # Hard negatives
         for i in range(n_neg_hard):
-            base = self.pool.sample()
             code_a, code_b = generate_negative_pair(
                 self.pool, difficulty="hard", seed=self.seed + i + n_neg_easy
             )

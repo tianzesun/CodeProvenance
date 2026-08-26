@@ -111,8 +111,8 @@ class LineOverlapToolAdapter(BaseToolAdapter):
     def score(self, code_a: str, code_b: str) -> float:
         lines_a = set(code_a.strip().splitlines())
         lines_b = set(code_b.strip().splitlines())
-        lines_a = {l.strip() for l in lines_a if l.strip()}
-        lines_b = {l.strip() for l in lines_b if l.strip()}
+        lines_a = {line.strip() for line in lines_a if line.strip()}
+        lines_b = {line.strip() for line in lines_b if line.strip()}
         if not lines_a and not lines_b:
             return 1.0
         if not lines_a or not lines_b:
@@ -418,8 +418,8 @@ class JPlagAdapter(BaseToolAdapter):
         h = hashlib.sha256((code_a + "||" + code_b).encode()).hexdigest()
         seed = int(h[:8], 16)
         rng = __import__("random").Random(seed)
-        lines_a = set(l.strip() for l in code_a.splitlines() if l.strip())
-        lines_b = set(l.strip() for l in code_b.splitlines() if l.strip())
+        lines_a = set(line.strip() for line in code_a.splitlines() if line.strip())
+        lines_b = set(line.strip() for line in code_b.splitlines() if line.strip())
         if not lines_a or not lines_b:
             return 0.0
         overlap = len(lines_a & lines_b) / len(lines_a | lines_b)
@@ -600,8 +600,8 @@ class SherlockAdapter(BaseToolAdapter):
         h = hashlib.sha256((code_a + "||" + code_b).encode()).hexdigest()
         seed = int(h[:8], 16)
         rng = __import__("random").Random(seed)
-        lines_a = set(l.strip() for l in code_a.splitlines() if l.strip())
-        lines_b = set(l.strip() for l in code_b.splitlines() if l.strip())
+        lines_a = set(line.strip() for line in code_a.splitlines() if line.strip())
+        lines_b = set(line.strip() for line in code_b.splitlines() if line.strip())
         if not lines_a or not lines_b:
             return 0.0
         overlap = len(lines_a & lines_b) / len(lines_a | lines_b)
@@ -692,8 +692,8 @@ class NiCadAdapter(BaseToolAdapter):
         h = hashlib.sha256((code_a + "||" + code_b).encode()).hexdigest()
         seed = int(h[:8], 16)
         rng = __import__("random").Random(seed)
-        lines_a = set(l.strip() for l in code_a.splitlines() if l.strip())
-        lines_b = set(l.strip() for l in code_b.splitlines() if l.strip())
+        lines_a = set(line.strip() for line in code_a.splitlines() if line.strip())
+        lines_b = set(line.strip() for line in code_b.splitlines() if line.strip())
         if not lines_a or not lines_b:
             return 0.0
         overlap = len(lines_a & lines_b) / len(lines_a | lines_b)

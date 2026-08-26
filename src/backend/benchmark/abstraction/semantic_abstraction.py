@@ -421,7 +421,7 @@ class SemanticAbstractor:
         Returns:
             Dict of metric name to value.
         """
-        lines = [l for l in code.split('\n') if l.strip()]
+        lines = [line for line in code.split('\n') if line.strip()]
         
         return {
             "logical_lines": len(lines),

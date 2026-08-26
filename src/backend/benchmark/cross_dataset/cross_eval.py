@@ -200,7 +200,6 @@ class CrossDatasetEvaluator:
             ds: [] for ds in dataset_names
         }
 
-        total = len(dataset_names) * len(tool_names)
         done = 0
 
         for ds_name in dataset_names:

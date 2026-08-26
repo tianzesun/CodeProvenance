@@ -1078,7 +1078,7 @@ def compare_codes_deep(
 
 def _dict_similarity(dict_a: Any, dict_b: Any) -> float:
     """Calculate similarity between two dict structures."""
-    if type(dict_a) != type(dict_b):
+    if type(dict_a) is not type(dict_b):
         return 0.0
 
     if isinstance(dict_a, dict):

@@ -266,7 +266,7 @@ def generate_type3_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     
     # Strategy 1: Add redundant statements
     lines = base_code.split('\n')
-    non_empty = [i for i, l in enumerate(lines) if l.strip()]
+    non_empty = [i for i, line in enumerate(lines) if line.strip()]
     
     if len(non_empty) > 2:
         # Add a redundant comment line
@@ -299,8 +299,6 @@ def generate_type4_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     Returns:
         Tuple of (code_a, code_b) with semantically equivalent code.
     """
-    rng = random.Random(seed)
-    
     # Apply semantic-preserving transformations
     modified = base_code
     
@@ -446,8 +444,6 @@ def generate_type6_llm_rewrite_pair(base_code: str, seed: int = 42) -> Tuple[str
     Returns:
         Tuple of (code_a, code_b) with LLM rewritten semantically identical code.
     """
-    rng = random.Random(seed)
-    
     # Apply full LLM style rewrite patterns
     modified = base_code
     

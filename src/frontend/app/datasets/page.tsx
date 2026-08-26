@@ -40,15 +40,17 @@ export default function DatasetsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Dataset creation state - same implementation as admin page
-  const datasetFormRef = useRef({
+  const initialDatasetForm = {
     name: '',
     description: '',
     language: 'python',
     numFiles: 10,
     similarityType: 'type1_exact',
-  });
+  };
 
-  const [datasetForm, setDatasetForm] = useState(datasetFormRef.current);
+  const datasetFormRef = useRef(initialDatasetForm);
+
+  const [datasetForm, setDatasetForm] = useState(initialDatasetForm);
 
   // Optimized form change handlers to prevent unnecessary re-renders
   const handleDatasetFormChange = useCallback((field: string, value: string | number) => {

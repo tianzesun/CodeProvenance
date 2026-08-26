@@ -104,7 +104,7 @@ class StylometryExtractor:
             "comment_density": comment_lines / len(lines),
             "tab_usage_ratio": tabs / (tabs + spaces + 1e-9),
             "docstring_count": docstrings,
-            "avg_line_length": np.mean([len(l) for l in lines]),
+            "avg_line_length": np.mean([len(line) for line in lines]),
         }
 
 

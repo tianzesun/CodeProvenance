@@ -637,7 +637,7 @@ class EnhancedWinnowingSimilarity(BaseSimilarityAlgorithm):
             lengths = [len(t.get("value", "")) for t in tokens]
             if lengths:
                 mean_len = sum(lengths) / len(lengths)
-                variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
+                variance = sum((line - mean_len) ** 2 for line in lengths) / len(lengths)
                 # Lower variance = more likely AI
                 if variance < 10:
                     score += 0.2

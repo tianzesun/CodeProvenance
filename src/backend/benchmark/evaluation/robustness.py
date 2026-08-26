@@ -236,7 +236,7 @@ def stratified_evaluation(scores: List[float],
         thresholds = np.linspace(0.1, 0.9, 17)
     
     # Binary labels: label >= 2 is positive
-    binary_labels = [1 if l >= 2 else 0 for l in labels]
+    binary_labels = [1 if label >= 2 else 0 for label in labels]
     
     results = {}
     
@@ -283,7 +283,7 @@ def stratified_evaluation(scores: List[float],
     # Per-clone-type performance
     clone_type_metrics = {}
     for label in range(5):  # C0-C4
-        mask = [l == label for l in labels]
+        mask = [label == label for label in labels]
         if any(mask):
             type_scores = [s for s, m in zip(scores, mask) if m]
             clone_type_metrics[f"C{label}"] = {
@@ -308,7 +308,7 @@ def stratified_evaluation(scores: List[float],
         
         if bin_count > 0:
             bin_scores = [s for s, m in zip(scores, bin_mask) if m]
-            bin_labels = [1 if l >= 2 else 0 for l, m in zip(labels, bin_mask) if m]
+            bin_labels = [1 if label >= 2 else 0 for label, m in zip(labels, bin_mask) if m]
             
             avg_score = np.mean(bin_scores)
             avg_acc = np.mean(bin_labels)

@@ -166,13 +166,22 @@ def _serialize_orm_event(event: Any) -> dict:
     return data
 
 
-def get_current_user(request: Request = None) -> dict:
-    """Resolve the current user from the dashboard session cookie.
+DEV_FALLBACK_TENANT_ID = "2bde87ba-3ad4-4282-b199-02243991150e"
 
-    Falls back to a mock user when no valid session is present (dev mode)
-    so read-only case listing and detail views keep working unauthenticated.
+
+def get_current_user(request: Request = None) -> dict:
+    """Resolve the current user from the authenticated request or session cookie.
+
+    Prefers the user attached by the dashboard auth middleware, then validates
+    the session cookie directly. Raises 401 for unauthenticated requests unless
+    DEBUG_MODE is enabled, which keeps the mock-user fallback for local
+    development only.
     """
     from src.backend.config.settings import settings
+
+    middleware_user = getattr(request.state, "user", None) if request else None
+    if isinstance(middleware_user, dict) and middleware_user.get("id"):
+        return middleware_user
 
     token = (request.cookies if request else {}).get("integritydesk_session")
     if token and settings.AUTH_JWT_SECRET:
@@ -202,19 +211,30 @@ def get_current_user(request: Request = None) -> dict:
                                 else None
                             ),
                         }
-        except Exception as e:
-            logger.warning("Failed to resolve user from session: %s", e)
-    # Development fallback — log warning so production misconfigurations are visible
-    logger.warning("No valid session found; falling back to dev user")
-    return {"id": uuid.uuid4(), "email": "user@example.com", "role": "professor"}
+        except Exception:  # noqa: S110
+            pass
+
+    if settings.DEBUG_MODE:
+        return {
+            "id": uuid.uuid4(),
+            "email": "user@example.com",
+            "role": "professor",
+            "tenant_id": DEV_FALLBACK_TENANT_ID,
+            "organization_id": DEV_FALLBACK_TENANT_ID,
+        }
+
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
-    """Get current organization from the resolved user (mock fallback)."""
+    """Get current organization from the resolved authenticated user."""
     org_id = user.get("organization_id") or user.get("tenant_id")
     if org_id:
-        return {"id": uuid.UUID(org_id)}
-    return {"id": uuid.UUID("2bde87ba-3ad4-4282-b199-02243991150e")}
+        return {"id": uuid.UUID(str(org_id))}
+    raise HTTPException(
+        status_code=403,
+        detail="User is not associated with an organization",
+    )
 
 
 @router.get("/cases", response_model=list[dict])

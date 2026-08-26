@@ -136,10 +136,10 @@ class HistoricalFingerprintAnalyzer:
             StyleFeatures with extracted metrics.
         """
         lines = code.splitlines()
-        non_empty_lines = [l for l in lines if l.strip()]
+        non_empty_lines = [line for line in lines if line.strip()]
 
         # Line length metrics
-        line_lengths = [len(l) for l in lines]
+        line_lengths = [len(line) for line in lines]
         avg_line_length = sum(line_lengths) / len(line_lengths) if lines else 0.0
         max_line_length = max(line_lengths) if lines else 0
 
@@ -152,11 +152,11 @@ class HistoricalFingerprintAnalyzer:
         avg_indent = sum(indentations) / len(indentations) if indentations else 0.0
 
         # Comment ratio
-        comment_lines = sum(1 for l in lines if l.strip().startswith(("#", "//", "/*")))
+        comment_lines = sum(1 for line in lines if line.strip().startswith(("#", "//", "/*")))
         comment_ratio = comment_lines / len(lines) if lines else 0.0
 
         # Blank line ratio
-        blank_lines = sum(1 for l in lines if not l.strip())
+        blank_lines = sum(1 for line in lines if not line.strip())
         blank_ratio = blank_lines / len(lines) if lines else 0.0
 
         # Naming convention

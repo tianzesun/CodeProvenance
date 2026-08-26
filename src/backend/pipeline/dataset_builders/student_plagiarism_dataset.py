@@ -811,8 +811,8 @@ class KaggleStudentCodeDataset:
                 "name": "Kaggle Student Code Similarity",
                 "source": "https://www.kaggle.com/datasets/ehsankhani/student-code-similarity-and-plagiarism-labels",
                 "total_pairs": len(self._pairs),
-                "positive_pairs": sum(1 for l in labels if l == 1),
-                "negative_pairs": sum(1 for l in labels if l == 0),
+                "positive_pairs": sum(1 for line in labels if line == 1),
+                "negative_pairs": sum(1 for line in labels if line == 0),
                 "pos_ratio": sum(labels) / len(labels) if labels else 0,
             }
         return {

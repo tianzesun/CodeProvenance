@@ -324,10 +324,10 @@ def rank_tools(
             scores, labels, threshold, ci_level, n_bootstrap
         )
 
-        tp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 1)
-        fp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 0)
-        tn = sum(1 for s, l in zip(scores, labels) if s < threshold and l == 0)
-        fn = sum(1 for s, l in zip(scores, labels) if s < threshold and l == 1)
+        tp = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 1)
+        fp = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 0)
+        tn = sum(1 for s, line in zip(scores, labels) if s < threshold and line == 0)
+        fn = sum(1 for s, line in zip(scores, labels) if s < threshold and line == 1)
 
         precision = ci["precision"]["value"]
         recall = ci["recall"]["value"]

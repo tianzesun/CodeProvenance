@@ -50,7 +50,6 @@ class MossParser(BaseToolParser):
         pairs = []
         row_pat = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL | re.IGNORECASE)
         cell_pat = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL | re.IGNORECASE)
-        pct_pat = re.compile(r'(\d+(?:\.\d+)?)\s*%')
         for row_m in row_pat.finditer(content):
             cells = cell_pat.findall(row_m.group(1))
             if len(cells) < 2:

@@ -306,7 +306,6 @@ class CompetitorComparisonReport:
             )
 
         # Winner info
-        f1_winner = self.result.rankings.get("f1", ["N/A"])[0]
         id_m = next((m for m in self.result.tool_metrics if m.tool_name == "IntegrityDesk"), None)
         best_comp = next(
             (m for m in sorted_metrics if m.tool_name != "IntegrityDesk"), None

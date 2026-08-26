@@ -218,8 +218,8 @@ class Evaluator:
         sorted_labels = [labels[i] for i in sorted_indices]
 
         # Compute TPR and FPR at each threshold
-        n_pos = sum(1 for l in labels if l == 1)
-        n_neg = sum(1 for l in labels if l == 0)
+        n_pos = sum(1 for line in labels if line == 1)
+        n_neg = sum(1 for line in labels if line == 0)
 
         if n_pos == 0 or n_neg == 0:
             return None

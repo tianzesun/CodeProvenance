@@ -111,6 +111,30 @@ class TestCaseEndpoints:
         payload = response.json()
         assert isinstance(payload, (list, dict))
 
+    def test_case_subpaths_require_auth_when_debug_off(self, client, monkeypatch):
+        """Case detail/update endpoints must not fall back to a mock user.
+
+        Regression test: /api/cases/{id} bypasses both auth middlewares via the
+        exempt-prefix list, so the route-level dependency must enforce 401 when
+        DEBUG_MODE is off (production posture).
+        """
+        from src.backend.config import settings as settings_module
+
+        monkeypatch.setattr(
+            settings_module.settings, "DEBUG_MODE", False, raising=False
+        )
+        try:
+            case_id = str(uuid.uuid4())
+            assert client.get(f"/api/cases/{case_id}").status_code == 401
+            assert (
+                client.patch(
+                    f"/api/cases/{case_id}", json={"title": "tampered"}
+                ).status_code
+                == 401
+            )
+        finally:
+            monkeypatch.undo()
+
 
 class TestConfigEndpoints:
     """Tests for read-only configuration endpoints."""

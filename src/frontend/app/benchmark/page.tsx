@@ -1028,7 +1028,10 @@ function RunStep({ selectedTools, selectedDataset, uploadMode, files, benchmarkD
     }
   }, [selectedTools, selectedDataset, uploadMode, files, benchmarkDatasets, selectedPreset, benchmarkType, onComplete, activeDataset]);
   // Keep ref current so autoStart fires the latest version
-  runRef.current = run;
+  useEffect(() => {
+    runRef.current = run;
+  }, [run]);
+
   useEffect(() => {
     if (!autoStart || autoStartedRef.current) return;
     autoStartedRef.current = true;
@@ -1314,6 +1317,18 @@ class ReportErrorBoundary extends Component {
   }
 }
 // ── Step 4: Report ─────────────────────────────────────────────────────────
+function selectTuningConfigSource(results) {
+  if (!results || typeof results !== 'object') return [];
+  const entries = Object.entries(results.evaluation || {}).filter(([, m]) => m && !m.error);
+  const pd = (m) => Number((m.plagdet ?? m.f1_score ?? m.best_f1 ?? 0) || 0);
+  const integ = entries.find(([id]) => id === 'integritydesk');
+  const pan = integ || entries.sort(([, a], [, b]) => pd(b) - pd(a))[0];
+  const recs = pan?.[1]?.tuning_recommendations || null;
+  const auto = recs?.config_changes || [];
+  const manual = recs?.manual_config_options || [];
+  return auto.length ? auto : manual;
+}
+
 function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const { user } = useAuth();
   const [expandedPairs, setExpandedPairs] = useState({});
@@ -1325,6 +1340,26 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const [optimizationMessage, setOptimizationMessage] = useState('');
   const [optimizationError, setOptimizationError] = useState('');
   const [editableOptimizationChanges, setEditableOptimizationChanges] = useState([]);
+
+  // Hooks must be called before the invalid-results early return below so the
+  // hook call order stays identical in every render.
+  const tuningConfigSourceKey = JSON.stringify(selectTuningConfigSource(results));
+
+  useEffect(() => {
+    setEditableOptimizationChanges(
+      selectTuningConfigSource(results).map(change => ({
+        ...change,
+        proposed: normalizeOptimizationValue(
+          change.proposed,
+          optimizationControlSpec(change.path, change.current, change.proposed)
+        ),
+      }))
+    );
+    setOptimizationMessage('');
+    setOptimizationError('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tuningConfigSourceKey]);
+
   // Add error checking for results data
   if (!results || typeof results !== 'object') {
     return (
@@ -1483,21 +1518,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
   const manualConfigOptions = tuningRecommendations?.manual_config_options || [];
   const showingManualConfigOptions = automaticConfigChanges.length === 0 && manualConfigOptions.length > 0;
   const tuningConfigSource = automaticConfigChanges.length ? automaticConfigChanges : manualConfigOptions;
-  const tuningConfigSourceKey = JSON.stringify(tuningConfigSource);
-  useEffect(() => {
-    setEditableOptimizationChanges(
-      tuningConfigSource.map(change => ({
-        ...change,
-        proposed: normalizeOptimizationValue(
-          change.proposed,
-          optimizationControlSpec(change.path, change.current, change.proposed)
-        ),
-      }))
-    );
-    setOptimizationMessage('');
-    setOptimizationError('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tuningConfigSourceKey]);
+
   const tuningConfigChanges = editableOptimizationChanges;
   const fixedThresholdMetrics = productPanResult?.fixedThresholdMetrics || {};
   const confidenceIntervals = productPanResult?.confidenceIntervals || {};

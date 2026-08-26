@@ -51,13 +51,13 @@ class ThresholdOptimizer:
         curve = []
         for t in _linspace(0.5, 0.95, self.n_points):
             tp = fp = fn = tn = 0
-            for s, l in zip(scores, labels):
+            for s, label in zip(scores, labels):
                 pr = 1 if s >= t else 0
-                if l and pr:
+                if label and pr:
                     tp += 1
-                elif l and not pr:
+                elif label and not pr:
                     fn += 1
-                elif not l and pr:
+                elif not label and pr:
                     fp += 1
                 else:
                     tn += 1
@@ -83,9 +83,9 @@ class ThresholdOptimizer:
                 if tl >= th:
                     continue
                 tp_h = tp_s = fp_h = fp_s = fn = 0
-                for s, l in zip(scores, labels):
+                for s, label in zip(scores, labels):
                     pr = 2 if s >= th else (1 if s >= tl else 0)
-                    if l:
+                    if label:
                         fn += pr == 0
                         tp_h += pr == 2
                         tp_s += pr == 1
@@ -118,13 +118,13 @@ class FeedbackLoopPipeline:
             best = self.optimizer.find_best_f1(curve)
             th = tl = best.threshold
         tp = fp = fn = tn = 0
-        for s, l in zip(scores, labels):
+        for s, label in zip(scores, labels):
             pr = 1 if s >= (tl if strategy != "dual" else th) else 0
-            if l and pr:
+            if label and pr:
                 tp += 1
-            elif l and not pr:
+            elif label and not pr:
                 fn += 1
-            elif not l and pr:
+            elif not label and pr:
                 fp += 1
             else:
                 tn += 1

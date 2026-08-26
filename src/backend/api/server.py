@@ -4514,9 +4514,9 @@ def _compute_code_metrics(code: str) -> dict[str, Any]:
     Returns dictionary with code statistics.
     """
     lines = code.splitlines()
-    non_empty_lines = [l for l in lines if l.strip()]
-    comment_lines = [l for l in lines if l.strip().startswith("#")]
-    docstring_lines = len([l for l in lines if '"""' in l or "'''" in l])
+    non_empty_lines = [line for line in lines if line.strip()]
+    comment_lines = [line for line in lines if line.strip().startswith("#")]
+    docstring_lines = len([line for line in lines if '"""' in line or "'''" in line])
 
     # Count functions and classes
     import re
@@ -4531,7 +4531,7 @@ def _compute_code_metrics(code: str) -> dict[str, Any]:
 
     # Average line length
     avg_line_length = (
-        sum(len(l) for l in non_empty_lines) / len(non_empty_lines)
+        sum(len(line) for line in non_empty_lines) / len(non_empty_lines)
         if non_empty_lines
         else 0
     )

@@ -158,7 +158,7 @@ def build_moss_graph(run_id: str, top_pairs: list[dict[str, Any]], min_weight: f
         link_count=len(links),
         components=components,
         nodes=sorted(node_map.values(), key=lambda n: (-n.degree, -n.max_similarity, n.label)),
-        links=sorted(links, key=lambda l: (-l.weight, l.source, l.target)),
+        links=sorted(links, key=lambda link: (-link.weight, link.source, link.target)),
     )
 
     return asdict(result)

@@ -81,9 +81,9 @@ def _bootstrap_metrics(
         }
 
     # Compute point estimate
-    tp_total = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 1)
-    fp_total = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 0)
-    fn_total = sum(1 for s, l in zip(scores, labels) if s < threshold and l == 1)
+    tp_total = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 1)
+    fp_total = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 0)
+    fn_total = sum(1 for s, line in zip(scores, labels) if s < threshold and line == 1)
 
     point_f1 = _compute_f1(tp_total, fp_total, fn_total)
     point_prec = _compute_precision(tp_total, fp_total)
@@ -433,10 +433,10 @@ def add_significance_to_results(
     ci = bootstrap_confidence_interval(scores, labels, threshold, ci_level, n_bootstrap)
 
     # Also compute per-class confusion matrix
-    tp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 1)
-    fp = sum(1 for s, l in zip(scores, labels) if s >= threshold and l == 0)
-    tn = sum(1 for s, l in zip(scores, labels) if s < threshold and l == 0)
-    fn = sum(1 for s, l in zip(scores, labels) if s < threshold and l == 1)
+    tp = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 1)
+    fp = sum(1 for s, line in zip(scores, labels) if s >= threshold and line == 0)
+    tn = sum(1 for s, line in zip(scores, labels) if s < threshold and line == 0)
+    fn = sum(1 for s, line in zip(scores, labels) if s < threshold and line == 1)
 
     return {
         "threshold": threshold,

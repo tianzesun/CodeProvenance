@@ -271,7 +271,6 @@ class EvaluationRunner:
     ) -> float:
         desc_indices = np.argsort(-y_score)
         y_true_sorted = y_true[desc_indices]
-        y_score_sorted = y_score[desc_indices]
 
         total_pos = np.sum(y_true)
         if total_pos == 0:

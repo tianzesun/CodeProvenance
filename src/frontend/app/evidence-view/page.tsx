@@ -19,6 +19,22 @@ interface EvidenceViewProps {
   onBack?: () => void;
 }
 
+function VerdictBadge({ v }: { v: string }) {
+  const styles = {
+    TRUE: 'bg-red-100 text-red-700 border-red-200',
+    PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200',
+    REVIEW: 'bg-blue-100 text-blue-700 border-blue-200',
+    FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  };
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${styles[v as keyof typeof styles] || styles.REVIEW}`}>
+      <CheckCircle2 size={14} />
+      {v}
+    </span>
+  );
+}
+
 export default function EvidenceViewerPage() {
   const { user } = useAuth();
   const [fileA, setFileA] = useState('');
@@ -77,22 +93,6 @@ export default function EvidenceViewerPage() {
     setVerdict('PROBABLE');
     loadEvidenceView(mockCodeA, mockCodeB);
   }, []);
-
-  const VerdictBadge = ({ v }: { v: string }) => {
-    const styles = {
-      TRUE: 'bg-red-100 text-red-700 border-red-200',
-      PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200',
-      REVIEW: 'bg-blue-100 text-blue-700 border-blue-200',
-      FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    };
-    return (
-      <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${styles[v as keyof typeof styles] || styles.REVIEW}`}>
-        <CheckCircle2 size={14} />
-        {v}
-      </span>
-    );
-  };
 
   return (
     <DashboardLayout>

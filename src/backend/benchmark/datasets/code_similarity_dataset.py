@@ -75,8 +75,7 @@ class CodeSimilarityDataset:
             List of SimilarityPair objects
         """
         pairs = []
-        pair_id = 0
-        
+
         # Load from full_metadata.csv if available
         full_metadata = self.data_dir / "full_metadata.csv"
         if full_metadata.exists():

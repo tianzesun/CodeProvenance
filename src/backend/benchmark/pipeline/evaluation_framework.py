@@ -65,7 +65,7 @@ class RestructureStatements(PlagiarismTechnique):
     description = "Reorder independent statements"
     def apply(self, code: str, seed: int = 42) -> str:
         rng = random.Random(seed)
-        lines = [l for l in code.split('\n') if l.strip()]
+        lines = [line for line in code.split('\n') if line.strip()]
         if len(lines) > 3:
             mid = lines[1:-1]
             rng.shuffle(mid)
@@ -615,8 +615,7 @@ class ThreeLayerBenchmarkRunner:
         dataset = generator.generate(base_codes, codes_per_technique=20)
         
         results = []
-        ground_truth = dataset.get_ground_truth()
-        
+
         for pair in dataset.pairs:
             score = self._engine.compare(pair.code_a, pair.code_b)
             results.append({
@@ -757,14 +756,9 @@ class ThreeLayerBenchmarkRunner:
             })
         
         # Calculate metrics
-        tp = sum(1 for s in score_details if s["predicted"] == 1 and s["label"] == 1)
         fp = sum(1 for s in score_details if s["predicted"] == 1 and s["label"] == 0)
         tn = sum(1 for s in score_details if s["predicted"] == 0 and s["label"] == 0)
-        fn = sum(1 for s in score_details if s["predicted"] == 0 and s["label"] == 1)
-        
-        precision_val = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall_val = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1_val = 2 * precision_val * recall_val / (precision_val + recall_val) if (precision_val + recall_val) > 0 else 0.0
+
         fpr_val = fp / (fp + tn) if (fp + tn) > 0 else 0.0  # False positive rate
         
         # Score distributions by class
@@ -812,7 +806,6 @@ class ThreeLayerBenchmarkRunner:
         Args:
             student_assignments: Real student submission samples.
         """
-        rng = random.Random(self._seed + 2000)
         threshold = 0.5
         
         # Create pairs from different students (should be non-clones)

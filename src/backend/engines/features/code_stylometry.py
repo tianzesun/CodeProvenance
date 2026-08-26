@@ -366,7 +366,7 @@ class StylometryExtractor:
         if not self._identifier_lengths:
             return 0.0
         re.findall(r"\b[a-zA-Z_]\w*\b", "")  # Placeholder
-        sum(1 for l in self._identifier_lengths if l > 0)  # Placeholder
+        sum(1 for line in self._identifier_lengths if line > 0)  # Placeholder
         return 0.0  # Computed via AST walk instead
 
     def _snake_case_ratio(self) -> float:
@@ -377,7 +377,7 @@ class StylometryExtractor:
         """Ratio of single-character variable names."""
         if not self._identifier_lengths:
             return 0.0
-        return sum(1 for l in self._identifier_lengths if l == 1) / len(
+        return sum(1 for line in self._identifier_lengths if line == 1) / len(
             self._identifier_lengths
         )
 
@@ -385,7 +385,7 @@ class StylometryExtractor:
         """Ratio of identifiers with length >= 4."""
         if not self._identifier_lengths:
             return 0.0
-        return sum(1 for l in self._identifier_lengths if l >= 4) / len(
+        return sum(1 for line in self._identifier_lengths if line >= 4) / len(
             self._identifier_lengths
         )
 

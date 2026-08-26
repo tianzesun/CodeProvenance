@@ -162,12 +162,7 @@ class LabelValidator:
         
         # Agreement between all three
         perfect_agreement = np.sum((labels == rater1_arr) & (labels == rater2_arr))
-        two_agree = (
-            np.sum((labels == rater1_arr) & (labels != rater2_arr)) +
-            np.sum((labels != rater1_arr) & (labels == rater2_arr)) +
-            np.sum((rater1_arr == rater2_arr) & (rater1_arr != labels))
-        )
-        
+
         # Observed agreement
         p_o = perfect_agreement / len(labels) if len(labels) > 0 else 0
         
@@ -205,8 +200,7 @@ class LabelValidator:
         
         rater1_arr = np.array(rater1)
         rater2_arr = np.array(rater2)
-        labels = rater1_arr  # Use rater1 as reference
-        
+
         # Observed agreement
         perfect_agreement = np.sum(rater1_arr == rater2_arr)
         p_o = perfect_agreement / len(rater1) if len(rater1) > 0 else 0
@@ -333,12 +327,12 @@ class LabelValidator:
             rater1_arr = np.array(rater1)
             rater2_arr = np.array(rater2)
             
-            for i, (l, r1, r2) in enumerate(zip(labels, rater1_arr, rater2_arr)):
+            for i, (label, r1, r2) in enumerate(zip(labels, rater1_arr, rater2_arr)):
                 # If all three disagree, flag as suspicious
-                if l != r1 and l != r2 and r1 != r2:
+                if label != r1 and label != r2 and r1 != r2:
                     suspicious.append(i)
                 # If 2-out-of-3 agree but primary label disagrees
-                elif (r1 == r2 and r1 != l):
+                elif (r1 == r2 and r1 != label):
                     suspicious.append(i)
         
         return suspicious

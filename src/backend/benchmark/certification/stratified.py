@@ -128,10 +128,10 @@ def compute_metrics_from_records(
     decisions = np.array([r.decision for r in records])
 
     # Compute confusion matrix
-    tp = np.sum((labels == 1) & (decisions == True))
-    fp = np.sum((labels == 0) & (decisions == True))
-    fn = np.sum((labels == 1) & (decisions == False))
-    tn = np.sum((labels == 0) & (decisions == False))
+    tp = np.sum((labels == 1) & decisions)
+    fp = np.sum((labels == 0) & decisions)
+    fn = np.sum((labels == 1) & ~decisions)
+    tn = np.sum((labels == 0) & ~decisions)
 
     # Compute metrics
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
@@ -141,19 +141,19 @@ def compute_metrics_from_records(
 
     # Compute confidence intervals using bootstrap
     def precision_fn(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        tp = np.sum((y_true == 1) & (y_pred == True))
-        fp = np.sum((y_true == 0) & (y_pred == True))
+        tp = np.sum((y_true == 1) & y_pred)
+        fp = np.sum((y_true == 0) & y_pred)
         return tp / (tp + fp) if (tp + fp) > 0 else 0.0
 
     def recall_fn(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        tp = np.sum((y_true == 1) & (y_pred == True))
-        fn = np.sum((y_true == 1) & (y_pred == False))
+        tp = np.sum((y_true == 1) & y_pred)
+        fn = np.sum((y_true == 1) & ~y_pred)
         return tp / (tp + fn) if (tp + fn) > 0 else 0.0
 
     def f1_fn(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        tp = np.sum((y_true == 1) & (y_pred == True))
-        fp = np.sum((y_true == 0) & (y_pred == True))
-        fn = np.sum((y_true == 1) & (y_pred == False))
+        tp = np.sum((y_true == 1) & y_pred)
+        fp = np.sum((y_true == 0) & y_pred)
+        fn = np.sum((y_true == 1) & ~y_pred)
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         return 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
@@ -228,10 +228,10 @@ def compute_stratified_metrics(
     decisions = np.array([r.decision for r in records])
 
     # Compute confusion matrix
-    tp = np.sum((labels == 1) & (decisions == True))
-    fp = np.sum((labels == 0) & (decisions == True))
-    fn = np.sum((labels == 1) & (decisions == False))
-    tn = np.sum((labels == 0) & (decisions == False))
+    tp = np.sum((labels == 1) & decisions)
+    fp = np.sum((labels == 0) & decisions)
+    fn = np.sum((labels == 1) & ~decisions)
+    tn = np.sum((labels == 0) & ~decisions)
 
     # Compute metrics
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
@@ -247,9 +247,9 @@ def compute_stratified_metrics(
     if len(records) >= 30 and n_bootstrap > 0:
         try:
             def f1_fn(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-                tp = np.sum((y_true == 1) & (y_pred == True))
-                fp = np.sum((y_true == 0) & (y_pred == True))
-                fn = np.sum((y_true == 1) & (y_pred == False))
+                tp = np.sum((y_true == 1) & y_pred)
+                fp = np.sum((y_true == 0) & y_pred)
+                fn = np.sum((y_true == 1) & ~y_pred)
                 prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
                 rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
                 return 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
@@ -304,8 +304,6 @@ def compute_operational_metrics(
             "false_accusation_rate": 0.0,
         }
 
-    results = {}
-
     # Sort by predicted score descending
     sorted_records = sorted(records, key=lambda r: r.score, reverse=True)
 
@@ -318,8 +316,6 @@ def compute_operational_metrics(
 
     # Alerts at threshold (what professor sees)
     alerts = [r for r in sorted_records if r.score >= threshold]
-    fp_in_alerts = sum(1 for r in alerts if r.label == 0)
-    false_ac_in_alerts = fp_in_alerts / len(alerts) if alerts else 0.0
 
     # Review burden
     review_burden = len(alerts)
@@ -356,8 +352,6 @@ def analyze_fpr_by_subgroup(
     Returns:
         Dictionary with FPR analysis by subgroup.
     """
-    from collections import defaultdict
-
     # Group by attribute
     groups = defaultdict(list)
     for r in records:

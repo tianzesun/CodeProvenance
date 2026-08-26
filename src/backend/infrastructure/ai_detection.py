@@ -94,9 +94,9 @@ class AICodeDetector:
         Uses simple bigram frequency analysis as a proxy for perplexity.
         """
         lines = [
-            l.strip()
-            for l in code.split("\n")
-            if l.strip() and not l.strip().startswith("#")
+            line.strip()
+            for line in code.split("\n")
+            if line.strip() and not line.strip().startswith("#")
         ]
         if len(lines) < 3:
             return 0.5  # Not enough data
@@ -134,15 +134,15 @@ class AICodeDetector:
 
         Human code has high variance in line length; AI code is more uniform.
         """
-        lines = [l.strip() for l in code.split("\n") if l.strip()]
+        lines = [line.strip() for line in code.split("\n") if line.strip()]
         if len(lines) < 3:
             return 0.5
 
-        lengths = [len(l) for l in lines]
+        lengths = [len(line) for line in lines]
         mean_len = sum(lengths) / len(lengths)
         if mean_len == 0:
             return 0.5
-        variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
+        variance = sum((line - mean_len) ** 2 for line in lengths) / len(lengths)
         cv = (variance**0.5) / mean_len  # Coefficient of variation
 
         # Low CV = uniform = AI-like
@@ -171,7 +171,7 @@ class AICodeDetector:
 
         High repetition of identical or near-identical lines suggests AI.
         """
-        lines = [l.strip() for l in code.split("\n") if l.strip()]
+        lines = [line.strip() for line in code.split("\n") if line.strip()]
         if len(lines) < 5:
             return 0.0  # Not enough data
 

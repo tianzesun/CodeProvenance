@@ -272,6 +272,17 @@ export default function AdminPage() {
 
   // ── Panel open/close ──────────────────────────────────────────────────────────
 
+  const resetForm = () => {
+    setForm({ full_name: '', email: '', password: '', role: 'professor', tenant_name: '' });
+    setFormError('');
+  };
+
+  const closeCreatePanel = () => {
+    setShowCreatePanel(false);
+    resetForm();
+    setTimeout(() => createButtonRef.current?.focus(), 0);
+  };
+
   useEffect(() => {
     if (showCreatePanel) {
       document.body.style.overflow = 'hidden';
@@ -312,21 +323,10 @@ export default function AdminPage() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  const resetForm = () => {
-    setForm({ full_name: '', email: '', password: '', role: 'professor', tenant_name: '' });
-    setFormError('');
-  };
-
   const openCreatePanel = () => {
     setSuccessMessage('');
     setFormError('');
     setShowCreatePanel(true);
-  };
-
-  const closeCreatePanel = () => {
-    setShowCreatePanel(false);
-    resetForm();
-    setTimeout(() => createButtonRef.current?.focus(), 0);
   };
 
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {

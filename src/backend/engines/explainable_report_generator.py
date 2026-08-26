@@ -193,40 +193,40 @@ class GSTAligner:
                     if marked_b[j]:
                         continue
 
-                    l = 0
+                    length = 0
                     while (
-                        i + l < len(tokens_a)
-                        and j + l < len(tokens_b)
-                        and not marked_a[i + l]
-                        and not marked_b[j + l]
-                        and tokens_a[i + l] == tokens_b[j + l]
+                        i + length < len(tokens_a)
+                        and j + length < len(tokens_b)
+                        and not marked_a[i + length]
+                        and not marked_b[j + length]
+                        and tokens_a[i + length] == tokens_b[j + length]
                     ):
-                        l += 1
+                        length += 1
 
-                    if l > max_len:
-                        max_len = l
-                        matches_found = [(i, j, l)]
-                    elif l == max_len:
-                        matches_found.append((i, j, l))
+                    if length > max_len:
+                        max_len = length
+                        matches_found = [(i, j, length)]
+                    elif length == max_len:
+                        matches_found.append((i, j, length))
 
             if max_len < min_match:
                 break
 
             # Mark matches
-            for i, j, l in matches_found:
+            for i, j, length in matches_found:
                 overlap = False
-                for k in range(l):
+                for k in range(length):
                     if marked_a[i + k] or marked_b[j + k]:
                         overlap = True
                         break
                 if overlap:
                     continue
 
-                for k in range(l):
+                for k in range(length):
                     marked_a[i + k] = True
                     marked_b[j + k] = True
 
-                matches.append((i, j, l))
+                matches.append((i, j, length))
 
         return matches
 

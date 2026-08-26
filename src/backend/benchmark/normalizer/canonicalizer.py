@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -138,7 +138,6 @@ class Canonicalizer:
         Returns:
             CanonicalizationResult with canonical code and metadata.
         """
-        original = code
         result = CanonicalizationResult(
             original=code,
             canonical=code,

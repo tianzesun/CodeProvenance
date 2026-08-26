@@ -446,7 +446,6 @@ class ExternalDatasetLoader:
 
         pairs: List[CodePair] = []
         pair_id = 0
-        limit = max_pairs if max_pairs else len(data) * 2
 
         # Create positive pairs from problems with similar prompts
         for i in range(len(data)):
@@ -459,9 +458,6 @@ class ExternalDatasetLoader:
                     break
                 item_b = data[j]
                 code_b = item_b.get("canonical_solution", "")
-                # Label based on prompt similarity (simple heuristic)
-                prompt_a = item_a.get("prompt", "").lower()
-                prompt_b = item_b.get("prompt", "").lower()
                 # Very different problems = non-clone
                 label = 0
                 pairs.append(

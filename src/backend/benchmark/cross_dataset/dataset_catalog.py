@@ -346,7 +346,6 @@ def _generate_hf_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None, s
 
     # Positive pairs: adjacent items with same label=1
     pos_items = [x for x in items if x["label"] == 1]
-    neg_items = [x for x in items if x["label"] == 0]
 
     # Generate positive pairs
     for i in range(0, len(pos_items) - 1, 2):

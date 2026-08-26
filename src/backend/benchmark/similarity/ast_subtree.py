@@ -190,10 +190,10 @@ def _extract_structural_features(code: str) -> Dict[str, int]:
     features["comparison"] = len(re.findall(r'==|!=|<=|>=|<|>', code))
     
     # Line-based features
-    lines = [l.strip() for l in code.split('\n') if l.strip()]
+    lines = [line.strip() for line in code.split('\n') if line.strip()]
     features["total_lines"] = len(lines)
     features["non_comment_lines"] = len([
-        l for l in lines if not l.startswith('//') and not l.startswith('#')
+        line for line in lines if not line.startswith('//') and not line.startswith('#')
     ])
     
     return dict(features)

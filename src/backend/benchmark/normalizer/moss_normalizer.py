@@ -20,7 +20,6 @@ class MossNormalizer(BaseNormalizer):
         results = []
         row_pat = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL|re.IGNORECASE)
         cell_pat = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL|re.IGNORECASE)
-        pct_pat = re.compile(r'(\d+(?:\.\d+)?)\s*%')
         for rm in row_pat.finditer(content):
             cells = cell_pat.findall(rm.group(1))
             if len(cells) < 2:

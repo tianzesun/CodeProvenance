@@ -209,11 +209,12 @@ class CausalGraphGenerator:
             ax: Matplotlib axis.
         """
         try:
+            import matplotlib.pyplot as plt
             import networkx as nx
         except ImportError:
             raise ImportError(
-                "networkx is required for graph generation. "
-                "Install with: pip install networkx"
+                "matplotlib and networkx are required for graph generation. "
+                "Install with: pip install matplotlib networkx"
             )
         
         if len(graph.nodes) == 0:

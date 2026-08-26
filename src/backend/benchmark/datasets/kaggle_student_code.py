@@ -103,7 +103,7 @@ class KaggleStudentCodeDataset:
             labels = [p.label for p in self._pairs_cache]
             stats["label_range"] = (min(labels), max(labels))
             stats["avg_label"] = sum(labels) / len(labels)
-            positives = sum(1 for l in labels if l == 1)
+            positives = sum(1 for label in labels if label == 1)
             stats["positive_pairs"] = positives
             stats["negative_pairs"] = len(labels) - positives
         return stats

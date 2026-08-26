@@ -829,7 +829,7 @@ class StressBenchmarkSuite:
 
         # False accusation rate (false positives relative to total population)
         total_pairs = len(records)
-        false_positives = sum(1 for r in records if r.label == 0 and r.decision == True)
+        false_positives = sum(1 for r in records if r.label == 0 and r.decision)
         fp_rate = false_positives / total_pairs if total_pairs > 0 else 0.0
 
         results["false_accusation_rate"] = fp_rate

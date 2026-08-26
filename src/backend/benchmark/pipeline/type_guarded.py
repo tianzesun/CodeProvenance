@@ -94,7 +94,6 @@ class EvaluationStage(TypedStage[EnrichedPair, EvaluationResult]):
     
     def execute(self, input_data: EnrichedPair, context: PipelineContext) -> EvaluationResult:
         """Execute evaluation."""
-        threshold = context.get("threshold", 0.75)
         raw_result = self.engine.evaluate(input_data)
         validated = validate_evaluation_result(raw_result)
         return validated

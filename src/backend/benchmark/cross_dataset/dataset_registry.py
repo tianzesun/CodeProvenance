@@ -141,33 +141,6 @@ class DatasetRegistry:
                 print(f"Warning: Failed to load dataset '{name}': {e}")
         return result
 
-    def has(self, name: str) -> bool:
-        return name in self._loaders
-
-    def names(self) -> List[str]:
-        return sorted(self._loaders.keys())
-
-    def get_metadata(self, name: str) -> Dict[str, Any]:
-        if name not in self._loaders:
-            return {}
-        return dict(self._metadata.get(name, {}))
-
-    def load_all(
-        self,
-        names: Optional[List[str]] = None,
-        use_cache: bool = True,
-        **kwargs,
-    ) -> Dict[str, UnifiedDataset]:
-        if names is None:
-            names = self.list_datasets()
-        result = {}
-        for name in names:
-            try:
-                result[name] = self.load(name, use_cache=use_cache, **kwargs)
-            except Exception as e:
-                print(f"Warning: Failed to load dataset '{name}': {e}")
-        return result
-
 
 def build_default_registry(
     data_root: str = "data/datasets",
