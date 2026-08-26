@@ -241,7 +241,7 @@ export function useAuth() {
         bootstrapAdmin: async () => {},
         logout: async () => {},
         listUsers: async () => [],
-        createUser: async () => ({} as any),
+        createUser: async () => ({} as AuthUser),
         handleSessionExpired: async () => {},
       };
     }

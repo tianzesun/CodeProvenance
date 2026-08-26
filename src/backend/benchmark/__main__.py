@@ -223,6 +223,51 @@ def main() -> int:
         nargs="+",
         help="Optional dataset root directories to search before built-in defaults",
     )
+
+    weight_tune_parser = subparsers.add_parser(
+        "weight-tune",
+        help="Run the DOCX weight tuning plan on a scored pair export",
+    )
+    weight_tune_parser.add_argument(
+        "--input",
+        required=True,
+        help="JSON or CSV scored pairs with label plus ast/fingerprint/embedding/execution/ngram scores",
+    )
+    weight_tune_parser.add_argument(
+        "--output",
+        default="results/weight_tuning",
+        help="Output directory for plan artifacts",
+    )
+    weight_tune_parser.add_argument(
+        "--train-ratio",
+        type=float,
+        default=0.70,
+        help="Locked train split ratio",
+    )
+    weight_tune_parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    weight_tune_parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.50,
+        help="Initial decision threshold used for baseline, solo, and weight search",
+    )
+    weight_tune_parser.add_argument(
+        "--grid-step",
+        type=float,
+        default=0.05,
+        help="Grid-search step for normalized weights",
+    )
+    weight_tune_parser.add_argument(
+        "--fpr-limit",
+        type=float,
+        default=0.03,
+        help="False-positive-rate limit used by the precision-sensitive objective",
+    )
+    weight_tune_parser.add_argument(
+        "--max-grid-runs",
+        type=int,
+        help="Optional cap for smoke tests or quick exploratory runs",
+    )
     fusion_train_parser.add_argument(
         "--train-pairs",
         type=int,
@@ -497,6 +542,30 @@ def main() -> int:
         )
         print(f"Markdown report: {markdown_path}")
         print(f"JSON results: {json_path}")
+    elif args.command == "weight-tune":
+        from pathlib import Path
+
+        from src.backend.benchmark.runners.weight_tuning_plan_runner import (
+            run_weight_tuning_plan,
+        )
+
+        summary = run_weight_tuning_plan(
+            scored_pairs_path=Path(args.input),
+            output_dir=Path(args.output),
+            train_ratio=args.train_ratio,
+            seed=args.seed,
+            threshold=args.threshold,
+            grid_step=args.grid_step,
+            fpr_limit=args.fpr_limit,
+            max_grid_runs=args.max_grid_runs,
+        )
+        print("\nWeight Tuning Plan Completed!\n")
+        print(f"Artifacts: {summary['output_dir']}")
+        print(f"Pairs: {summary['pair_count']}")
+        print(f"Baseline F1: {summary['baseline_f1']:.4f}")
+        print(f"Training F1: {summary['best_training_f1']:.4f}")
+        print(f"Final test F1: {summary['final_test_f1']:.4f}")
+        print(f"Best threshold: {summary['best_threshold']:.2f}")
 
     elif args.command == "fusion-train":
         from pathlib import Path

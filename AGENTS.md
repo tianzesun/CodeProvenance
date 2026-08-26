@@ -19,7 +19,7 @@
 - Use 4 spaces for indentation (no tabs)
 
 ## Project Specific
-- This is a **Python 3.10** project using FastAPI (see requirements.txt for pinned versions)
+- This is a **Python 3.12** project using FastAPI (see requirements.txt for pinned versions, and use venv/)
 - Use type hints for all new code
 - Follow existing patterns in src/ directory
 - Test changes: run relevant unit tests first with `pytest tests/unit/`, then integration tests when appropriate
