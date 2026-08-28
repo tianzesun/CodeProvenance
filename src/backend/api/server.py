@@ -191,6 +191,11 @@ AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
 # In-memory progress tracking for benchmark jobs
 import threading
 
+# Short-lived cache for /api/jobs listings (keyed by user id) so repeated
+# dashboard polls don't re-read every job report from disk.
+_JOB_LIST_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_JOB_LIST_CACHE_TTL = 10.0  # seconds
+
 BENCHMARK_PROGRESS: dict[str, list[str]] = {}
 
 # Rate limiting for login attempts
@@ -3900,6 +3905,10 @@ def _persist_job(job_id: str) -> None:
     normalized = _normalize_job(job)
     _jobs[job_id] = normalized
 
+    # New/updated jobs must appear in /api/jobs immediately, so drop any
+    # cached per-user listings.
+    _JOB_LIST_CACHE.clear()
+
     metadata_path = _job_metadata_path(job_id)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
@@ -5012,7 +5021,15 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
     """List all jobs visible to the current user.
 
     Strategy: DB is primary, in-memory补充, filesystem as fallback for legacy jobs.
+    Results are cached briefly per user because building the list re-reads every
+    job's report data from disk, which can exceed the dashboard's API timeout.
     """
+    cache_key = str(current_user.get("id") or "") if current_user else ""
+    now = time.time()
+    cached = _JOB_LIST_CACHE.get(cache_key)
+    if cached and now - cached[0] < _JOB_LIST_CACHE_TTL:
+        return cached[1]
+
     jobs_by_id: dict[str, dict[str, Any]] = {}
 
     # 1. DB-backed listing (primary source)
@@ -5047,9 +5064,11 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
                 if job and _job_is_accessible(job, current_user):
                     jobs_by_id[report_dir.name] = job
 
-    return sorted(
+    result = sorted(
         jobs_by_id.values(), key=lambda entry: entry.get("created_at", ""), reverse=True
     )
+    _JOB_LIST_CACHE[cache_key] = (now, result)
+    return result
 
 
 @app.get("/api/auth/status")
