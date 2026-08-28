@@ -473,9 +473,26 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
     assert "poj104" in dataset_ids
     if (server.BENCHMARK_DATA_DIR / "poolc_600k_python").exists():
         assert "poolc_600k_python" in dataset_ids
-    assert "codexglue_clone" not in dataset_ids  # Not runnable - missing HF splits
-    assert "google_codejam" not in dataset_ids
-    assert "codesearchnet" not in dataset_ids
+
+    # Download-dependent datasets appear only when their data is complete.
+    # Expectations must mirror the server's readiness checks rather than
+    # hardcode a machine's download state.
+    def _downloaded(dataset_id: str, marker: str) -> bool:
+        return (server.BENCHMARK_DATA_DIR / dataset_id / marker).exists()
+
+    for dataset_id, marker in (
+        ("codexglue_clone", "huggingface"),
+        ("google_codejam", "ground_truth.json"),
+        ("codesearchnet", "huggingface"),
+    ):
+        if _downloaded(dataset_id, marker):
+            assert dataset_id in dataset_ids, (
+                f"{dataset_id} data is complete; it should be listed as runnable"
+            )
+        else:
+            assert dataset_id not in dataset_ids, (
+                f"{dataset_id} data is incomplete; it should be hidden"
+            )
 
 
 def test_xiangtan_loader_produces_positive_and_negative_pairs(tmp_path) -> None:
