@@ -12611,9 +12611,10 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
-        if key in merged:
-            if not hasattr(settings, attr):
-                continue
+        if attr is None or key not in merged:
+            continue
+        if not hasattr(settings, attr):
+            continue
             if key in SECRET_SETTING_KEYS and merged[key]:
                 os.environ[attr] = str(merged[key])
 
