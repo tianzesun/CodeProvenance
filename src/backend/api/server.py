@@ -16111,6 +16111,68 @@ def _cleanup_expired_jobs():
             logger.exception("Job cleanup worker error")
 
 
+# ============================================================
+# Integrity Assessment Report — Dean/Chair-grade export
+# ============================================================
+
+
+@app.get("/api/reports/integrity-assessment/{job_id}")
+async def get_integrity_assessment_report(
+    job_id: str,
+    format: str = Query("html", description="Output format: html, pdf, or json"),
+):
+    """Generate a Dean/Chair-grade Integrity Assessment Report.
+
+    A 12-section report that surpasses Turnitin with:
+    - Multi-engine code forensics (AST, token, semantic, winnowing)
+    - Plagiarism type classification (T1-T5)
+    - AI-generated code detection with 8-signal analysis
+    - Statistical confidence intervals (95% bootstrap)
+    - Due-process-ready evidence chain with student response template
+    - Digital signature and reproducibility hash
+    """
+    from src.backend.infrastructure.integrity_assessment_report import (
+        IntegrityAssessmentReportGenerator,
+    )
+    from src.backend.infrastructure.integrity_assessment_report_html import (
+        render_integrity_report_html,
+    )
+
+    job_data = _get_job(job_id)
+    if job_data is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    generator = IntegrityAssessmentReportGenerator()
+    report = generator.generate_from_job(job_data)
+
+    if format == "json":
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(content=report.to_dict())
+
+    html_content = render_integrity_report_html(report)
+
+    if format == "html":
+        return HTMLResponse(content=html_content)
+
+    # PDF
+    from src.backend.infrastructure.integrity_assessment_report_pdf import (
+        export_integrity_report_pdf,
+    )
+
+    pdf_bytes = export_integrity_report_pdf(report, html_content=html_content)
+    # Check if it's actually HTML (PDF generation failed)
+    if pdf_bytes[:15] == b"<!DOCTYPE html>" or pdf_bytes[:6] == b"<html>":
+        logger.warning("PDF generation failed for %s; serving HTML", job_id)
+        return HTMLResponse(content=pdf_bytes.decode("utf-8"))
+
+    response = Response(content=pdf_bytes, media_type="application/pdf")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="integrity_report_{job_id}.pdf"'
+    )
+    return response
+
+
 def main():
     import uvicorn
     import threading
