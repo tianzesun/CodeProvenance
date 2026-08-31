@@ -311,6 +311,7 @@ class SourceProvenance:
     """Source file provenance information."""
 
     filename: str = ""
+    language: str = ""
     editor: str = ""
     last_modified: str = ""
     created: str = ""
@@ -323,6 +324,7 @@ class SourceProvenance:
     def to_dict(self) -> dict[str, Any]:
         return {
             "filename": self.filename,
+            "language": self.language,
             "editor": self.editor,
             "last_modified": self.last_modified,
             "created": self.created,
@@ -485,43 +487,48 @@ class IntegrityAssessmentReportGenerator:
     def generate_from_job(self, job_data: dict[str, Any]) -> IntegrityAssessmentReport:
         """Build a report from the standard job JSON stored on disk.
 
-        Args:
-            job_data: The full job dict (from /api/jobs/{id} or disk).
+        The job dict shape (after _normalize_job):
+            {
+                "id": "...",
+                "results": [{"file_a", "file_b", "score", "features", "matching_blocks", ...}],
+                "summary": {"total_files", "total_pairs", "suspicious_pairs", "average_similarity"},
+                "submissions": {"filename.py": "source code", ...},
+                "ai_detection": {"enabled", "flagged_count", "total_files", "submissions": [...]},
+                "assignment_name": "...", "course_name": "...", "created_at": "...",
+            }
         """
         job_id = job_data.get("id", job_data.get("job_id", ""))
         report = IntegrityAssessmentReport(
             case_id=job_id,
-            assignment_name=job_data.get("assignment_name", job_data.get("assignment", "")),
-            course_name=job_data.get("course_name", job_data.get("course", "")),
+            assignment_name=job_data.get("assignment_name", ""),
+            course_name=job_data.get("course_name", ""),
             instructor_name=job_data.get("instructor_name", ""),
-            student_id=job_data.get("student_id", job_data.get("user_id", "")),
-            student_display=job_data.get("student_name", job_data.get("user_email", "")),
-            analysis_timestamp=job_data.get("created_at", job_data.get("timestamp", "")),
+            student_id=job_data.get("student_id", job_data.get("owner_user_id", "")),
+            student_display=job_data.get("student_name", job_data.get("owner_user_email", "")),
+            analysis_timestamp=job_data.get("created_at", ""),
         )
 
-        pair_results_raw = job_data.get("pair_results", [])
-        tool_scores_raw = job_data.get("tool_scores", {})
-        evaluation_raw = job_data.get("evaluation", {})
-        ai_detection_raw = job_data.get("ai_detection", job_data.get("ai_results", {}))
+        # Real keys from _normalize_job
+        results_raw = job_data.get("results", [])
+        summary_raw = job_data.get("summary", {})
+        submissions_raw = job_data.get("submissions", {})
+        ai_detection_raw = job_data.get("ai_detection", {})
 
-        # ── Engine scores (overall) ──
-        report.engine_scores = self._build_engine_scores(tool_scores_raw)
+        # ── Pair results (from results list) ──
+        report.pair_results = self._build_pair_results(results_raw)
 
-        # ── Pair results ──
-        report.pair_results = self._build_pair_results(pair_results_raw)
+        # ── Engine scores (aggregate features across all results) ──
+        report.engine_scores = self._aggregate_engine_scores(results_raw)
 
         # ── Overall similarity ──
         if report.pair_results:
             report.overall_similarity = max(
                 p.overall_score for p in report.pair_results
             )
-        elif tool_scores_raw:
-            # Fallback to tool_scores average
-            scores = [
-                v for v in tool_scores_raw.values()
-                if isinstance(v, (int, float))
-            ]
-            report.overall_similarity = sum(scores) / len(scores) if scores else 0.0
+        elif summary_raw:
+            report.overall_similarity = float(
+                summary_raw.get("average_similarity", 0)
+            )
 
         # ── Confidence interval ──
         report.confidence_interval = self._compute_ci(report.pair_results)
@@ -539,22 +546,24 @@ class IntegrityAssessmentReportGenerator:
 
         # ── File analysis (AI detection) ──
         report.files = self._build_file_analysis(
-            job_data.get("files", []), ai_detection_raw
+            submissions_raw, ai_detection_raw
         )
-        report.ai_detection_summary = self._build_ai_summary(report.files)
+        report.ai_detection_summary = self._build_ai_summary(
+            report.files, ai_detection_raw
+        )
 
         # ── Executive summary ──
         report.executive_summary = self._build_executive_summary(report)
         report.recommended_action = self._build_recommendation(report)
 
-        # ── Class context ──
-        report.class_context = self._build_class_context(job_data)
+        # ── Class context (from summary) ──
+        report.class_context = self._build_class_context(summary_raw)
 
-        # ── Sources ──
-        report.sources = self._build_sources(job_data)
+        # ── Sources (from submissions + results) ──
+        report.sources = self._build_sources(submissions_raw, results_raw)
 
-        # ── Historical ──
-        report.historical = self._build_historical(job_data)
+        # ── Historical (not available in pipeline) ──
+        report.historical = HistoricalContext()
 
         # ── Policy ──
         report.policy_references = self._default_policy_references()
@@ -565,32 +574,32 @@ class IntegrityAssessmentReportGenerator:
 
         return report
 
-    # ── Engine scores ──
+    # ── Engine scores (aggregate from all results' features) ──
 
-    def _build_engine_scores(
-        self, tool_scores: dict[str, Any]
+    def _aggregate_engine_scores(
+        self, results: list[dict[str, Any]]
     ) -> list[EngineScore]:
+        """Aggregate per-engine average scores across all result pairs."""
+        from collections import defaultdict
+
+        engine_totals: dict[str, list[float]] = defaultdict(list)
+        for r in results:
+            features = r.get("features", {})
+            for engine, value in features.items():
+                if isinstance(value, (int, float)):
+                    engine_totals[engine].append(float(value))
+
         scores = []
-        for engine, value in tool_scores.items():
-            if isinstance(value, (int, float)):
-                scores.append(
-                    EngineScore(
-                        engine=engine,
-                        score=float(value),
-                        confidence=min(1.0, float(value) * 1.1),
-                        label=ENGINE_LABELS.get(engine, engine),
-                    )
+        for engine, values in engine_totals.items():
+            avg = sum(values) / len(values) if values else 0.0
+            scores.append(
+                EngineScore(
+                    engine=engine,
+                    score=avg,
+                    confidence=min(1.0, avg * 1.1),
+                    label=ENGINE_LABELS.get(engine, engine),
                 )
-            elif isinstance(value, dict):
-                scores.append(
-                    EngineScore(
-                        engine=engine,
-                        score=float(value.get("score", value.get("similarity", 0))),
-                        confidence=float(value.get("confidence", 0)),
-                        label=ENGINE_LABELS.get(engine, engine),
-                        explanation=value.get("explanation", ""),
-                    )
-                )
+            )
         return sorted(scores, key=lambda s: s.score, reverse=True)
 
     # ── Pair results ──
@@ -600,23 +609,22 @@ class IntegrityAssessmentReportGenerator:
     ) -> list[PairResult]:
         results = []
         for pair in pairs:
+            # Normalized result shape: {file_a, file_b, score, features, matching_blocks}
             pr = PairResult(
-                file_a=pair.get("file_a", pair.get("file1", "")),
-                file_b=pair.get("file_b", pair.get("file2", "")),
-                overall_score=float(
-                    pair.get("score", pair.get("similarity_score", pair.get("overall_score", 0)))
-                ),
-                confidence=float(pair.get("confidence", 0.8)),
+                file_a=pair.get("file_a", ""),
+                file_b=pair.get("file_b", ""),
+                overall_score=float(pair.get("score", 0)),
+                confidence=0.8,  # default confidence
             )
-            # Engine sub-scores
-            for engine in ["ast", "token", "semantic", "winnowing", "ngram", "embedding"]:
-                val = pair.get(engine, pair.get(f"{engine}_score", 0))
-                if isinstance(val, (int, float)):
+            # Engine sub-scores from features dict
+            features = pair.get("features", {})
+            for engine, value in features.items():
+                if isinstance(value, (int, float)):
                     pr.engine_scores.append(
-                        EngineScore(engine=engine, score=float(val))
+                        EngineScore(engine=engine, score=float(value))
                     )
             # Matched blocks
-            for block in pair.get("matched_blocks", pair.get("matches", [])):
+            for block in pair.get("matching_blocks", []):
                 if isinstance(block, dict):
                     pr.matched_blocks.append(
                         MatchedBlock(
@@ -703,44 +711,52 @@ class IntegrityAssessmentReportGenerator:
         total = len(pairs)
         return {k: round(v / total, 4) for k, v in breakdown.items() if v > 0}
 
-    # ── File analysis ──
+    # ── File analysis (from submissions + ai_detection) ──
 
     def _build_file_analysis(
-        self, files_raw: list[dict[str, Any]], ai_raw: dict[str, Any]
+        self, submissions: dict[str, str], ai_raw: dict[str, Any]
     ) -> list[FileAnalysis]:
+        """Build file analysis from submissions dict and ai_detection data."""
         files = []
-        for f in files_raw:
-            fa = FileAnalysis(
-                filename=f.get("filename", f.get("name", "")),
-                file_hash=f.get("hash", f.get("sha256", "")),
-                language=f.get("language", ""),
-                line_count=int(f.get("line_count", 0)),
-            )
-            # AI detection
-            fname = fa.filename
-            if fname in ai_raw:
-                ai = ai_raw[fname]
-                fa.ai_probability = float(ai.get("probability", ai.get("ai_probability", 0)))
-                fa.ai_confidence = float(ai.get("confidence", 0))
-                fa.ai_signals = ai.get("signals", ai.get("signal_scores", {}))
+        # submissions is {filename: source_code}
+        for fname in submissions:
+            fa = FileAnalysis(filename=fname)
+            # Match AI detection by filename
+            ai_subs = ai_raw.get("submissions", []) if isinstance(ai_raw, dict) else []
+            for ai_entry in ai_subs:
+                if isinstance(ai_entry, dict) and ai_entry.get("filename") == fname:
+                    fa.ai_probability = float(ai_entry.get("ai_probability", 0))
+                    fa.ai_confidence = float(ai_entry.get("confidence", 0))
+                    fa.ai_signals = {
+                        k: float(v)
+                        for k, v in (ai_entry.get("signals") or {}).items()
+                        if isinstance(v, (int, float))
+                    }
+                    break
             files.append(fa)
         return files
 
-    def _build_ai_summary(self, files: list[FileAnalysis]) -> dict[str, Any]:
-        if not files:
-            return {"available": False}
-        flagged = [f for f in files if f.ai_probability >= 0.5]
+    def _build_ai_summary(
+        self, files: list[FileAnalysis], ai_raw: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build AI detection summary from files and raw ai_detection dict."""
+        if not ai_raw or not ai_raw.get("enabled"):
+            return {"available": bool(ai_raw)}
         return {
             "available": True,
-            "total_files": len(files),
-            "flagged_count": len(flagged),
-            "flagged_ratio": round(len(flagged) / len(files), 4) if files else 0,
+            "total_files": int(ai_raw.get("total_files", len(files))),
+            "flagged_count": int(ai_raw.get("flagged_count", 0)),
+            "flagged_ratio": round(
+                int(ai_raw.get("flagged_count", 0))
+                / max(int(ai_raw.get("total_files", 1)), 1),
+                4,
+            ),
             "average_probability": round(
-                sum(f.ai_probability for f in files) / len(files), 4
-            ) if files else 0,
+                float(ai_raw.get("average_score", 0)), 4
+            ),
             "max_probability": round(
-                max(f.ai_probability for f in files), 4
-            ) if files else 0,
+                float(ai_raw.get("highest_score", 0)), 4
+            ),
         }
 
     # ── Executive summary ──
@@ -808,48 +824,46 @@ class IntegrityAssessmentReportGenerator:
                 "preponderance-of-evidence standard."
             )
 
-    # ── Class context ──
+    # ── Class context (from summary dict) ──
 
-    def _build_class_context(self, job_data: dict[str, Any]) -> ClassContext:
-        stats = job_data.get("class_stats", job_data.get("statistics", {}))
+    def _build_class_context(self, summary: dict[str, Any]) -> ClassContext:
         return ClassContext(
-            total_students=int(stats.get("total_students", 0)),
-            total_pairs=int(stats.get("total_pairs", 0)),
-            average_similarity=float(stats.get("average_similarity", 0)),
-            median_similarity=float(stats.get("median_similarity", 0)),
-            percentile_rank=float(stats.get("percentile_rank", 0)),
-            flagged_ratio=float(stats.get("flagged_ratio", 0)),
+            total_pairs=int(summary.get("total_pairs", 0)),
+            average_similarity=float(summary.get("average_similarity", 0)),
         )
 
-    # ── Sources ──
+    # ── Sources (from submissions + results) ──
 
-    def _build_sources(self, job_data: dict[str, Any]) -> list[SourceProvenance]:
+    def _build_sources(
+        self, submissions: dict[str, str], results: list[dict[str, Any]]
+    ) -> list[SourceProvenance]:
+        """Build source provenance from submissions dict."""
+        import hashlib
+
+        _EXT_MAP = {
+            ".py": "Python", ".js": "JavaScript", ".ts": "TypeScript",
+            ".java": "Java", ".cpp": "C++", ".c": "C", ".cs": "C#",
+            ".go": "Go", ".rs": "Rust", ".rb": "Ruby", ".php": "PHP",
+            ".swift": "Swift", ".kt": "Kotlin", ".scala": "Scala",
+            ".r": "R", ".m": "MATLAB", ".sh": "Shell", ".sql": "SQL",
+            ".html": "HTML", ".css": "CSS", ".json": "JSON", ".yaml": "YAML",
+        }
         sources = []
-        for f in job_data.get("files", []):
+        for fname, content in submissions.items():
+            import os
+
+            ext = os.path.splitext(fname)[1].lower()
+            sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest() if content else ""
             sources.append(
                 SourceProvenance(
-                    filename=f.get("filename", f.get("name", "")),
-                    editor=f.get("editor", ""),
-                    last_modified=f.get("last_modified", ""),
-                    created=f.get("created", ""),
-                    file_size=int(f.get("file_size", 0)),
-                    line_count=int(f.get("line_count", 0)),
-                    sha256=f.get("hash", f.get("sha256", "")),
+                    filename=fname,
+                    language=_EXT_MAP.get(ext, ext.lstrip(".").upper() if ext else "Unknown"),
+                    line_count=content.count("\n") + 1 if content else 0,
+                    file_size=len(content.encode("utf-8")) if content else 0,
+                    sha256=sha256,
                 )
             )
         return sources
-
-    # ── Historical ──
-
-    def _build_historical(self, job_data: dict[str, Any]) -> HistoricalContext:
-        hist = job_data.get("historical", {})
-        return HistoricalContext(
-            student_fingerprint=hist.get("fingerprint", ""),
-            prior_submissions=int(hist.get("prior_submissions", 0)),
-            style_consistency=float(hist.get("style_consistency", 0)),
-            cross_assignment_matches=hist.get("cross_assignment_matches", []),
-            repeat_offender=bool(hist.get("repeat_offender", False)),
-        )
 
     # ── Defaults ──
 
