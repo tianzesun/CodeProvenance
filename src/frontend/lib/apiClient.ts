@@ -37,7 +37,7 @@ function flushQueue(error?: unknown) {
 export const apiClient: AxiosInstance = axios.create({
   baseURL: '',
   withCredentials: true,
-  timeout: 30000, // /api/jobs re-reads job reports from disk on a cold cache and can take >15s
+  timeout: 120000, // 2 minutes for plagiarism checks and long-running operations
 });
 
 async function refreshAuthSession() {

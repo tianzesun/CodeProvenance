@@ -6514,6 +6514,7 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -6560,7 +6561,9 @@ async def upload_files(
             status_code=400, content={"error": "At least 2 code files are required"}
         )
 
-    return await _run_analysis(
+    # Start background processing and return immediately
+    background_tasks.add_task(
+        _run_analysis_background,
         job_id,
         job_dir,
         course_name,
@@ -6574,10 +6577,13 @@ async def upload_files(
         starter_sources,
     )
 
+    return JSONResponse(content={"job_id": job_id, "status": "processing"})
+
 
 @app.post("/api/upload-zip")
 async def upload_zip(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -6625,7 +6631,9 @@ async def upload_zip(
                 target.write_bytes(content)
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
 
-    return await _run_analysis(
+    # Start background processing and return immediately
+    background_tasks.add_task(
+        _run_analysis_background,
         job_id,
         job_dir,
         course_name,
@@ -6638,6 +6646,8 @@ async def upload_zip(
         tool_ids,
         starter_sources,
     )
+
+    return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
 
 def _ensure_job_row_for_ai_detector(
@@ -7126,6 +7136,65 @@ def _run_analysis_engines(
     return results, report
 
 
+def _run_analysis_background(
+    job_id: str,
+    job_dir: PathLib,
+    course_name: str,
+    assignment_name: str,
+    assignment_id: str | None = None,
+    assignment_mode: str = "",
+    threshold: float = 0.5,
+    current_user: dict[str, Any] | None = None,
+    engine_keys_raw: str = "",
+    tool_ids_raw: str = "",
+    starter_sources: list[str] | None = None,
+) -> None:
+    """Run analysis in a background task (synchronous function runs off the event loop).
+
+    Plagiarism analysis is CPU-intensive. Running it synchronously in the API
+    endpoint blocks the server and causes timeouts. This wrapper runs the analysis
+    as a FastAPI background task so the upload endpoints can return immediately
+    with a 'processing' status, and the frontend polls /api/jobs/{id} until complete.
+    """
+    import asyncio
+
+    try:
+        # Create a new event loop for this background thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Run the async function in the new loop
+            loop.run_until_complete(
+                _run_analysis(
+                    job_id,
+                    job_dir,
+                    course_name,
+                    assignment_name,
+                    assignment_id,
+                    assignment_mode,
+                    threshold,
+                    current_user,
+                    engine_keys_raw,
+                    tool_ids_raw,
+                    starter_sources,
+                )
+            )
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.exception(f"Background analysis failed for job {job_id}")
+        if job_id in _jobs:
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["error"] = str(e)
+            _persist_job(job_id)
+            try:
+                _update_job_status_in_db(job_id, "failed", str(e))
+            except Exception:
+                logger.warning(
+                    "Could not update job status in DB after background analysis failure"
+                )
+
+
 async def _run_analysis(
     job_id,
     job_dir,
@@ -7535,7 +7604,8 @@ async def _run_analysis(
 
         _update_job_status_in_db(job_id, "completed")
 
-        return JSONResponse(content={"job_id": job_id, "status": "completed"})
+        # When running as background task, don't return JSONResponse
+        logger.info(f"Analysis completed for job {job_id}")
     except SQLAlchemyError as e:
         logger.exception(f"DB persistence failed for job {job_id}")
         if job_id in _jobs:
@@ -7543,14 +7613,8 @@ async def _run_analysis(
                 "persistence_warning"
             ] = f"Results may not be saved to database: {e!s}"
             _persist_job(job_id)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "job_id": job_id,
-                "status": "completed",
-                "persistence_warning": f"Results may not be saved to database: {e!s}",
-            },
-        )
+        # When running as background task, log warning but mark as completed
+        logger.warning(f"Job {job_id} completed with persistence warning: {e!s}")
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
         if job_id in _jobs:
@@ -7563,9 +7627,8 @@ async def _run_analysis(
                 logger.warning(
                     "Could not update job status in DB after analysis failure"
                 )
-        return JSONResponse(
-            status_code=500, content={"error": f"Analysis failed: {e!s}"}
-        )
+        # When running as background task, just log the error
+        raise
 
 
 @app.get("/api/jobs")
