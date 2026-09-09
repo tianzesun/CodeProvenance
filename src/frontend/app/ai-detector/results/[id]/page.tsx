@@ -10,7 +10,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
-  Bot,
   ChevronDown,
   ChevronUp,
   Download,
@@ -505,15 +504,11 @@ export default function AIDetectorReportPage() {
               </Link>
               <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                 <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
-                    <Bot size={13} />
-                    AI-Generated Code Analysis Report
-                  </div>
-                  <h1 className="font-display mt-4 text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                    {job.assignment_name || 'AI-Generated Code Analysis Report'}
+                  <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
+                    {job.assignment_name || job.course_name || 'AI Detection Report'}
                   </h1>
-                  <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
-                    {job.course_name || 'Course'} &middot; {getCreatedAt(job.created_at)}
+                  <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {getCreatedAt(job.created_at)}
                   </p>
                 </div>
                 <div className="no-print flex flex-wrap items-center gap-3">

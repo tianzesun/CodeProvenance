@@ -9,13 +9,15 @@ import {
   ArrowRight,
   Bot,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   FileUp,
   Loader2,
   Shield,
   Upload,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 function formatSize(bytes) {
   return bytes < 1024 * 1024
     ? `${(bytes / 1024).toFixed(1)} KB`
@@ -29,6 +31,20 @@ function getTone(score) {
 function getApiErrorMessage(error) {
   return error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Analysis failed';
 }
+const PAGE_SIZES = [5, 10, 25];
+function buildPageNumbers(current, total) {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) pages.push('…');
+  for (let i = start; i <= end; i += 1) pages.push(i);
+  if (end < total - 1) pages.push('…');
+  pages.push(total);
+  return pages;
+}
 export default function AIDetectorPage() {
   const router = useRouter();
   const fileInputRef = useRef(null);
@@ -38,10 +54,12 @@ export default function AIDetectorPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [history, setHistory] = useState([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(5);
   const loadHistory = async () => {
     try {
       const res = await apiClient.get('/api/jobs');
-      setHistory((res.data?.jobs || []).filter((job) => job.job_type === 'ai_detector').slice(0, 6));
+      setHistory((res.data?.jobs || []).filter((job) => job.job_type === 'ai_detector'));
     } catch {
       setHistory([]);
     }
@@ -49,6 +67,16 @@ export default function AIDetectorPage() {
   useEffect(() => {
     loadHistory();
   }, []);
+  const totalHistoryPages = Math.max(1, Math.ceil(history.length / historyPageSize));
+  const safeHistoryPage = Math.min(historyPage, totalHistoryPages);
+  const paginatedHistory = useMemo(() => {
+    const start = (safeHistoryPage - 1) * historyPageSize;
+    return history.slice(start, start + historyPageSize);
+  }, [history, safeHistoryPage, historyPageSize]);
+  const historyPageNumbers = useMemo(
+    () => buildPageNumbers(safeHistoryPage, totalHistoryPages),
+    [safeHistoryPage, totalHistoryPages]
+  );
   const canRun = files.length > 0 && !uploading;
   const runDetection = async () => {
     if (!canRun) return;
@@ -91,9 +119,7 @@ export default function AIDetectorPage() {
                       AI-Generated Code Review
                     </h1>
                     <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                      Upload student submissions for automated similarity and assistance analysis. 
-                      Results include explainable signals: token entropy, code burstiness, stylometry, reasoning consistency, 
-                      source verification, and structural patterns. Use scores as review indicators - not definitive proof.
+                      Upload student submissions for automated assistance analysis. Scores are review indicators, not proof.
                     </p>
                   </div>
                 </div>
@@ -214,26 +240,92 @@ export default function AIDetectorPage() {
             {history.length === 0 ? (
               <div className="px-5 py-8 text-sm text-slate-500">No prior assessments recorded.</div>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {history.map((job) => (
-                  <Link
-                    key={job.id}
-                    href={`/ai-detector/results/${job.id}`}
-                    className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
-                  >
-                    <div>
-                      <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
-                      <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(job.summary?.highest_ai_probability || 0)}`}>
-                        {Math.round((job.summary?.highest_ai_probability || 0) * 100)}% highest risk
+              <>
+                <div className="divide-y divide-slate-100">
+                  {paginatedHistory.map((job) => (
+                    <Link
+                      key={job.id}
+                      href={`/ai-detector/results/${job.id}`}
+                      className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
+                    >
+                      <div>
+                        <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                        <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(job.summary?.highest_ai_probability || 0)}`}>
+                          {Math.round((job.summary?.highest_ai_probability || 0) * 100)}% highest risk
+                        </span>
+                        <ArrowRight size={16} className="text-slate-400" />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                {totalHistoryPages > 1 && (
+                  <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <span>Rows per page</span>
+                      <select
+                        value={historyPageSize}
+                        onChange={(event) => {
+                          setHistoryPageSize(Number(event.target.value));
+                          setHistoryPage(1);
+                        }}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                      >
+                        {PAGE_SIZES.map((size) => (
+                          <option key={size} value={size}>
+                            {size}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="ml-2 text-xs text-slate-500">
+                        Page {safeHistoryPage} of {totalHistoryPages}
                       </span>
-                      <ArrowRight size={16} className="text-slate-400" />
                     </div>
-                  </Link>
-                ))}
-              </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={safeHistoryPage <= 1}
+                        onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                        aria-label="Previous page"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ChevronLeft size={15} />
+                      </button>
+                      {historyPageNumbers.map((num, i) =>
+                        num === '…' ? (
+                          <span key={`gap-${i}`} className="px-1 text-xs text-slate-400">
+                            …
+                          </span>
+                        ) : (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setHistoryPage(Number(num))}
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${
+                              safeHistoryPage === num
+                                ? 'bg-slate-900 text-white'
+                                : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {num}
+                          </button>
+                        )
+                      )}
+                      <button
+                        type="button"
+                        disabled={safeHistoryPage >= totalHistoryPages}
+                        onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                        aria-label="Next page"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ChevronRight size={15} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>

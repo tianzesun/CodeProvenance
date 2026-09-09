@@ -249,7 +249,6 @@ export default function HistoryPage() {
         <PageHeader
           eyebrow="History"
           title="Browse past plagiarism check history."
-          description="View, search, and download reports from previous similarity analyses."
           action={
             <label className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 lg:w-80">
               <Search size={16} />

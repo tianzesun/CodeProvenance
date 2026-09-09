@@ -235,7 +235,7 @@ export default function CasesQueuePage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
         <PageHeader
           eyebrow="Cases"
           title="An inbox for academic integrity review."
@@ -256,13 +256,13 @@ export default function CasesQueuePage() {
         />
 
         {error && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mb-6 mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
         {/* Status tabs */}
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="mt-8 mb-6 flex flex-wrap items-center gap-2">
           {STATUS_TABS.map((tab) => {
             const isActive = activeStatus === tab.key;
             const count = statusCounts[tab.key];

@@ -215,12 +215,28 @@ def get_current_user(request: Request = None) -> dict:
             pass
 
     if settings.DEBUG_MODE:
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import Organization
+
+        # In dev mode, prefer the first existing organization so seeded data
+        # is visible. Fall back to a stable dev tenant ID otherwise.
+        dev_org_id: str | None = None
+        try:
+            with SessionLocal() as dev_db:
+                org = dev_db.query(Organization).first()
+                if org is not None:
+                    dev_org_id = str(org.id)
+        except Exception:  # noqa: S110
+            pass
+        if dev_org_id is None:
+            dev_org_id = DEV_FALLBACK_TENANT_ID
+
         return {
             "id": uuid.uuid4(),
             "email": "user@example.com",
             "role": "professor",
-            "tenant_id": DEV_FALLBACK_TENANT_ID,
-            "organization_id": DEV_FALLBACK_TENANT_ID,
+            "tenant_id": dev_org_id,
+            "organization_id": dev_org_id,
         }
 
     raise HTTPException(status_code=401, detail="Authentication required")
