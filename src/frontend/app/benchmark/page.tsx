@@ -2236,13 +2236,17 @@ const BENCHMARK_MODES = [
 const BENCHMARK_PROTOCOLS = [
   {
     id: 'development',
+    icon: Settings2,
     label: 'Tune threshold',
     hint: 'pan_optimization',
+    desc: 'Tune the decision threshold and inspect misses and false alarms.',
   },
   {
     id: 'release',
+    icon: ShieldCheck,
     label: 'Locked validation',
     hint: 'regression_test',
+    desc: 'Run the fixed production threshold against pass/fail quality gates.',
   },
 ];
 // ── Shared Workbench ───────────────────────────────────────────────────────
@@ -2353,7 +2357,11 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
           </div>
           {/* ── Mode selector (only when multiple modes available) ────── */}
           {availableModes.length > 1 && (
-            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <div
+              role="tablist"
+              aria-label="Benchmark mode"
+              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-100/80 p-1 shadow-sm"
+            >
               {availableModes.map(mode => {
                 const Icon = mode.icon;
                 const isActive = activeModeId === mode.id;
@@ -2361,40 +2369,64 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
                   <button
                     key={mode.id}
                     type="button"
+                    role="tab"
+                    aria-selected={isActive}
                     onClick={() => switchMode(mode.id)}
-                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${isActive
-                      ? 'bg-slate-900 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-1 ${isActive
+                      ? `bg-gradient-to-r ${mode.accent} text-white shadow-md`
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm'
                       }`}
                   >
-                    <Icon size={15} />
+                    <Icon size={15} className={isActive ? 'text-white/90' : ''} />
                     <span>{mode.label}</span>
                   </button>
                 );
               })}
             </div>
           )}
-          {/* ── Protocol selector (Evaluate & Improve sub-modes) ───────── */}
-          {activeModeId === 'development' && (
-            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-              {BENCHMARK_PROTOCOLS.map(protocol => {
-                const isActive = activeProtocolId === protocol.id;
-                return (
-                  <button
-                    key={protocol.id}
-                    type="button"
-                    onClick={() => switchProtocol(protocol.id)}
-                    className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${isActive
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                  >
-                    <span>{protocol.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* ── Protocol selector (IntegrityDesk sub-modes) ──────────── */}
+          {(() => {
+            const protocolsEnabled = activeModeId === 'development';
+            return (
+              <div className="space-y-2" aria-disabled={!protocolsEnabled}>
+                <div
+                  role="tablist"
+                  aria-label="Benchmark protocol"
+                  className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-100/80 p-1 shadow-sm"
+                >
+                  {BENCHMARK_PROTOCOLS.map(protocol => {
+                    const PIcon = protocol.icon;
+                    const isActive = activeProtocolId === protocol.id;
+                    return (
+                      <button
+                        key={protocol.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        disabled={!protocolsEnabled}
+                        onClick={() => switchProtocol(protocol.id)}
+                        className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-1 ${
+                          !protocolsEnabled
+                            ? 'cursor-not-allowed text-slate-400 opacity-60'
+                            : isActive
+                              ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-md'
+                              : 'text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm'
+                        }`}
+                      >
+                        <PIcon size={15} className={isActive && protocolsEnabled ? 'text-white/90' : ''} />
+                        <span>{protocol.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="px-1 text-xs font-medium text-slate-500">
+                  {protocolsEnabled
+                    ? (activeProtocol.desc || 'Choose a benchmark protocol.')
+                    : 'Threshold tuning applies to a single IntegrityDesk run and is not available in Compare Tools mode.'}
+                </p>
+              </div>
+            );
+          })()}
           {/* ── Step wizard ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             {/* Run config summary bar — visible in steps 1 and 2 */}

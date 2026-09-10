@@ -198,7 +198,9 @@ export default function UploadPage() {
   const [starterFiles, setStarterFiles] = useState<File[]>([]);
   const [isStarterDragOver, setIsStarterDragOver] = useState(false);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(['integritydesk']);
-  const [activeEngines, setActiveEngines] = useState<string[]>([]);
+  const [activeEngines, setActiveEngines] = useState<string[]>(
+    UPLOAD_ENGINE_OPTIONS.map((e) => e.key)
+  );
   const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
   const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('intro_programming');
@@ -362,7 +364,9 @@ export default function UploadPage() {
     setError('');
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
     if (selectedToolIds.length === 0) { setError('Select at least one tool.'); return; }
-    if (selectedToolIds.includes('integritydesk') && activeEngines.length === 0) { setError('Select at least one engine.'); return; }
+    // Skip engine validation until /api/upload-settings has populated the
+    // defaults, otherwise a fast click blocks submission spuriously.
+    if (selectedToolIds.includes('integritydesk') && !thresholdLoading && activeEngines.length === 0) { setError('Select at least one engine.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
     setProgress(0.18);
@@ -911,6 +915,63 @@ export default function UploadPage() {
                   </div>
                 )}
               </div>
+
+              {/* Engines - Only show for IntegrityDesk (engine weights drive its fusion engine) */}
+              {selectedToolIds.includes('integritydesk') && (
+                <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
+                          <SearchCheck size={13} style={{ color: '#64748b' }} />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-800">Similarity Engines</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveEngines(
+                          activeEngines.length === UPLOAD_ENGINE_OPTIONS.length ? [] : UPLOAD_ENGINE_OPTIONS.map((e) => e.key)
+                        )}
+                        className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors"
+                      >
+                        {activeEngines.length === UPLOAD_ENGINE_OPTIONS.length ? 'Unselect all' : 'Select all'}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {UPLOAD_ENGINE_OPTIONS.map((engine) => {
+                        const on = activeEngines.includes(engine.key);
+                        return (
+                          <button
+                            key={engine.key}
+                            type="button"
+                            onClick={() => toggleEngine(engine.key)}
+                            className="w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200"
+                            style={on
+                              ? { borderColor: '#bfdbfe', background: '#eff6ff' }
+                              : { borderColor: '#f1f5f9', background: '#f8fafc' }}
+                          >
+                            <div
+                              className="w-4 h-4 rounded flex items-center justify-center border-2 transition-all duration-200 shrink-0"
+                              style={on ? { borderColor: '#2563eb', background: '#2563eb' } : { borderColor: '#cbd5e1', background: 'white' }}
+                            >
+                              {on && <Check size={9} className="text-white" strokeWidth={3} />}
+                            </div>
+                            <p className="text-sm font-semibold flex-1" style={{ color: on ? '#1d4ed8' : '#374151' }}>{engine.label}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {activeEngines.length === 0 && (
+                      <div className="mt-3 border-t border-amber-100 bg-amber-50 px-3.5 py-3 flex items-center gap-2 rounded-xl">
+                        <AlertCircle size={12} className="text-amber-500" />
+                        <p className="text-xs text-amber-700">Select at least one engine to proceed.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Mode - Only show for IntegrityDesk (assignment modes are specific to IntegrityDesk fusion engine) */}
               {selectedToolIds.includes('integritydesk') && (
