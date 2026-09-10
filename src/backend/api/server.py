@@ -176,6 +176,11 @@ app.include_router(auth.router, prefix="/api/auth")
 app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+# Public REST API (documented in docs/product/API_REFERENCE.md). Submissions
+# are processed by the same background pipeline as the upload flow.
+from src.backend.api.routes import analyze as analyze_router  # noqa: E402
+
+app.include_router(analyze_router.router, prefix="/api")
 
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -7253,12 +7258,24 @@ async def _run_analysis(
             current_user.get("tenant_id") if current_user else None,
             [str(key) for key in requested_engine_keys],
         )
+
+    # Honor the engines the user enabled on the form even when an assignment
+    # mode ships its own preset weights. Without this, a mode with `weights`
+    # silently overrides the on/off engine toggles on the upload page.
+    if requested_engine_keys:
+        engine_weights = _apply_upload_engine_selection(
+            engine_weights, [str(key) for key in requested_engine_keys]
+        )
+
     selected_engine_keys = [
         key for key, value in engine_weights.items() if _coerce_float(value) > 0
     ]
     fusion_weights = _build_fusion_weights(engine_weights)
 
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
+    # Preserve the per-submission source-scan override set by the upload
+    # endpoint. `_jobs[job_id]` is fully rebuilt below, so capture it first.
+    _source_scan_override = _jobs.get(job_id, {}).get("source_scan_enabled_override")
     _jobs[job_id] = {
         "id": job_id,
         "course_name": course_name or "Unnamed Course",
@@ -7303,6 +7320,8 @@ async def _run_analysis(
             else []
         ),
     }
+    if _source_scan_override is not None:
+        _jobs[job_id]["source_scan_enabled_override"] = bool(_source_scan_override)
     _persist_job(job_id)
 
     try:
@@ -12735,16 +12754,56 @@ def _get_upload_engine_weights(
     return {key: _coerce_float(engine_weights.get(key)) for key in UPLOAD_ENGINE_KEYS}
 
 
+# Alias pairs that resolve to the same underlying fusion engine. Used by
+# `_apply_upload_engine_selection` and kept in sync with `_build_fusion_weights`.
+# The key is the canonical upload key (present in UPLOAD_ENGINE_KEYS) and the
+# value is the alternate name that assignment-mode weight dicts may use.
+_ENGINE_ALIASES: dict[str, str] = {
+    "token": "fingerprint",
+    "embedding": "semantic",
+}
+
+
+def _apply_upload_engine_selection(
+    engine_weights: dict[str, float], selected_keys: list[str]
+) -> dict[str, float]:
+    """Zero out upload engines the user disabled, regardless of weights source.
+
+    ``selected_keys`` are the on/off engine toggles submitted from the upload
+    form. Only engines the fusion pipeline actually consumes
+    (``UPLOAD_ENGINE_KEYS``) are filtered, along with their aliases
+    (``token``/``fingerprint``, ``embedding``/``semantic``); mode-only signals
+    (e.g. ``tree_kernel``, ``cfg``, ``web``) are left untouched.
+    """
+    selected = {key for key in selected_keys if key in UPLOAD_ENGINE_KEYS}
+    if not selected:
+        return engine_weights
+    for key in UPLOAD_ENGINE_KEYS:
+        if key in selected:
+            continue
+        engine_weights[key] = 0.0
+        alias = _ENGINE_ALIASES.get(key)
+        if alias in engine_weights:
+            engine_weights[alias] = 0.0
+    return engine_weights
+
+
 def _build_fusion_weights(engine_weights: dict[str, float]) -> dict[str, float]:
     fusion_weights = {
-        "fingerprint": _coerce_float(engine_weights.get("token")),
+        # `token` and `fingerprint` both denote the token-level engine.
+        "fingerprint": (
+            _coerce_float(engine_weights.get("token"))
+            + _coerce_float(engine_weights.get("fingerprint"))
+        ),
         "winnowing": _coerce_float(engine_weights.get("winnowing")),
         "string_tiling": _coerce_float(engine_weights.get("gst")),
         "ast": _coerce_float(engine_weights.get("ast")),
         "ngram": _coerce_float(engine_weights.get("ngram")),
         "graph": _coerce_float(engine_weights.get("graph")),
-        "embedding": _coerce_float(
-            engine_weights.get("embedding", engine_weights.get("semantic"))
+        # `semantic` and `embedding` both denote the semantic/embedding engine.
+        "embedding": (
+            _coerce_float(engine_weights.get("semantic"))
+            + _coerce_float(engine_weights.get("embedding"))
         ),
         "static_rules": _coerce_float(engine_weights.get("static_rules")),
     }

@@ -8,6 +8,7 @@ retrieving results, and managing webhook notifications.
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -128,15 +129,55 @@ async def analyze_submissions(
         )
         submission_ids.append(str(submission.id))
 
-    # Calculate estimated completion time
+    # Materialize submissions to disk so the shared analysis pipeline
+    # (`_run_analysis_background` → `_run_analysis`) can read them the same
+    # way it reads web uploads. Imported lazily to avoid a circular import
+    # (server.py mounts this router).
+    from src.backend.api.server import (
+        ALLOWED_EXTENSIONS,
+        REPORTS_DIR,
+        _run_analysis_background,
+    )
+
+    job_dir = REPORTS_DIR / str(job.id) / "submissions"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    for index, submission_data in enumerate(analysis_data["submissions"], start=1):
+        raw_name = str(submission_data.get("name") or f"submission_{index}")
+        # Strip path components to prevent traversal outside the job dir.
+        safe_name = Path(raw_name).name.replace("\\", "_") or f"submission_{index}"
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            # The pipeline only reads recognized code extensions; default to
+            # `.py` (the documented API example language) when unspecified.
+            safe_name = f"{safe_name}.py"
+        (job_dir / safe_name).write_text(
+            str(submission_data.get("content", "")), encoding="utf-8"
+        )
+
+    # Queue background processing using the same engine as the upload flow.
+    background_tasks.add_task(
+        _run_analysis_background,
+        str(job.id),
+        job_dir,
+        analysis_data.get("name", "Unnamed Analysis"),
+        analysis_data.get("name", "Unnamed Analysis"),
+        analysis_data.get("assignment_id"),
+        str(analysis_data.get("options", {}).get("assignment_mode", "")),
+        float(analysis_data.get("threshold", 0.2)),
+        None,
+        "",
+        "",
+        None,
+    )
+
+    # Calculate estimated completion time based on the number of pairwise
+    # comparisons the fusion pipeline must run (roughly 2 seconds per pair).
     num_submissions = len(analysis_data["submissions"])
-    estimated_seconds = num_submissions * 2  # Rough estimate: 2 seconds per submission
+    num_pairs = num_submissions * (num_submissions - 1) // 2
+    estimated_seconds = max(10, num_pairs * 2)
     estimated_completion = datetime.fromtimestamp(
         time.time() + estimated_seconds
     ).isoformat()
-
-    # Queue background processing
-    # background_tasks.add_task(process_analysis_job, str(job.id), tenant_id)
 
     return {
         "job_id": str(job.id),
