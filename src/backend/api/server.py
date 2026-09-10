@@ -7216,8 +7216,31 @@ async def _run_analysis(
     starter_sources: list[str] | None = None,
 ):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
+    from src.backend.engines.scoring.uts_course_mapping import get_mode_for_course
 
-    mode = get_assignment_mode(assignment_mode)
+    # Determine assignment mode: if user selected "auto_detect" or left empty, try to infer from course code.
+    effective_mode = assignment_mode
+    if effective_mode in ("", "auto_detect") and assignment_id:
+        try:
+            with SessionLocal() as db:
+                assignment = (
+                    db.query(Assignment)
+                    .options(joinedload(Assignment.course))
+                    .filter(Assignment.id == assignment_id)
+                    .first()
+                )
+                if assignment and getattr(assignment, "course", None):
+                    course_code = getattr(assignment.course, "code", None)
+                    if course_code:
+                        mapped_mode = get_mode_for_course(course_code)
+                        if mapped_mode:
+                            effective_mode = mapped_mode
+        except Exception:
+            logger.warning(
+                f"Failed to resolve assignment_id={assignment_id} for mode inference"
+            )
+
+    mode = get_assignment_mode(effective_mode)
 
     # Resolve authoritative course/assignment names from DB when assignment_id is provided.
     # This wires the new Organization → Course → Assignment hierarchy into the upload flow
@@ -7339,6 +7362,40 @@ async def _run_analysis(
         _persist_job(job_id)
         _update_job_status_in_db(job_id, "analyzing")
 
+        # Try to build a student lookup map from course enrollments if assignment_id provided
+        student_lookup = {}
+        assignment_id = _jobs[job_id].get("assignment_id")
+        if assignment_id:
+            try:
+                with SessionLocal() as lookup_db:
+                    assignment = (
+                        lookup_db.query(Assignment)
+                        .options(joinedload(Assignment.course))
+                        .filter(Assignment.id == assignment_id)
+                        .first()
+                    )
+                    if assignment and assignment.course:
+                        enrollments = (
+                            lookup_db.query(Enrollment)
+                            .options(joinedload(Enrollment.student))
+                            .filter(Enrollment.course_id == assignment.course.id)
+                            .all()
+                        )
+                        for e in enrollments:
+                            if e.student:
+                                # Map by email prefix, student number, and full name variants
+                                student = e.student
+                                if student.email:
+                                    student_lookup[student.email.split("@")[0].lower()] = student.id
+                                if student.student_number:
+                                    student_lookup[student.student_number.lower()] = student.id
+                                if student.full_name:
+                                    # Simple name normalization
+                                    name_key = "".join(student.full_name.lower().split())
+                                    student_lookup[name_key] = student.id
+            except Exception as e:
+                logger.warning(f"Could not build student lookup: {e}")
+
         # Minimal DB wiring for upload flow — persist Job + Submission rows
         # (non-fatal; file-based storage remains primary for now)
         # Persist Job + Submission rows to DB (mandatory — raises on failure)
@@ -7367,6 +7424,25 @@ async def _run_analysis(
                 )
                 db.add(db_job)
                 for sub_name in list(submissions.keys())[:100]:
+                    # Try to match student from filename
+                    student_id = None
+                    if student_lookup:
+                        # Extract potential student identifier from filename
+                        # e.g., "student1_solution.py" -> "student1"
+                        # or "john_doe_hw1.py" -> "john_doe"
+                        base = sub_name.split(".")[0]
+                        parts = base.replace("-", "_").replace(".", "_").split("_")
+                        for part in parts:
+                            part_lower = part.lower()
+                            if part_lower in student_lookup:
+                                student_id = student_lookup[part_lower]
+                                break
+                            # Also try common prefixes
+                            if part_lower.startswith("student"):
+                                suffix = part_lower[7:]  # remove "student"
+                                if suffix and suffix in student_lookup:
+                                    student_id = student_lookup[suffix]
+                                    break
                     db.add(
                         Submission(
                             id=str(uuid.uuid4()),
@@ -7374,6 +7450,7 @@ async def _run_analysis(
                             name=sub_name,
                             file_count=1,
                             created_at=datetime.now(),
+                            student_id=student_id,
                         )
                     )
                     db.commit()

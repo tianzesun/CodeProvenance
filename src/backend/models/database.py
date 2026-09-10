@@ -185,6 +185,7 @@ class Submission(Base):
 
     __table_args__ = (
         Index("idx_submissions_job", "job_id"),
+        Index("idx_submissions_student", "student_id"),
         Index("idx_submissions_created_at", "created_at"),
     )
 
@@ -192,6 +193,9 @@ class Submission(Base):
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
     )
     job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    student_id = Column(
+        UUID(as_uuid=False), ForeignKey("students.id"), nullable=True
+    )
     name = Column(String(255), nullable=False)
     file_count = Column(Integer, default=1)
     language_detected = Column(String(50), nullable=True)
@@ -206,6 +210,7 @@ class Submission(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
     job = relationship("Job", back_populates="submissions")
+    student = relationship("Student", back_populates="submissions")
     # New relationship
     behavioral_sessions = relationship("BehavioralSession", back_populates="submission")
 
@@ -438,7 +443,10 @@ class Course(Base):
 
     __tablename__ = "courses"
 
-    __table_args__ = (Index("idx_courses_organization", "organization_id"),)
+    __table_args__ = (
+        Index("idx_courses_organization", "organization_id"),
+        Index("idx_courses_organization_code", "organization_id", "code"),
+    )
 
     id = Column(
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
@@ -448,6 +456,9 @@ class Course(Base):
     )
     name = Column(String(255), nullable=False)
     code = Column(String(50), nullable=True)
+    # Academic term support
+    term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
+    year = Column(Integer, nullable=True)
     settings = Column(JSONB, default=dict)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
@@ -459,6 +470,8 @@ class Course(Base):
     instructors = relationship(
         "CourseInstructor", back_populates="course", lazy="dynamic"
     )
+    # Student enrollments
+    enrollments = relationship("Enrollment", back_populates="course", lazy="dynamic")
 
 
 class Assignment(Base):
@@ -466,13 +479,18 @@ class Assignment(Base):
 
     __tablename__ = "assignments"
 
-    __table_args__ = (Index("idx_assignments_course", "course_id"),)
+    __table_args__ = (
+        Index("idx_assignments_course", "course_id"),
+        Index("idx_assignments_course_term", "course_id", "term"),
+    )
 
     id = Column(
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
     )
     course_id = Column(UUID(as_uuid=False), ForeignKey("courses.id"), nullable=False)
     name = Column(String(255), nullable=False)
+    term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
+    version = Column(Integer, default=1)  # Assignment version within course
     due_at = Column(TIMESTAMP(timezone=True), nullable=True)
     settings = Column(JSONB, default=dict)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
@@ -482,6 +500,98 @@ class Assignment(Base):
 
     course = relationship("Course", back_populates="assignments")
     jobs = relationship("Job", back_populates="assignment", lazy="dynamic")
+    versions = relationship("AssignmentVersion", back_populates="assignment", lazy="dynamic")
+
+
+class Enrollment(Base):
+    """Student enrollment in a course."""
+
+    __tablename__ = "enrollments"
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_enrollment"),
+        Index("idx_enrollments_course", "course_id"),
+        Index("idx_enrollments_student", "student_id"),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    course_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    student_id = Column(
+        UUID(as_uuid=False), ForeignKey("students.id", ondelete="CASCADE"), nullable=False
+    )
+    enrolled_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    role = Column(String(20), default="student")
+
+    course = relationship("Course", back_populates="enrollments")
+    student = relationship("Student", back_populates="enrollments")
+
+
+class Student(Base):
+    """Student profile (can exist across courses/terms)."""
+
+    __tablename__ = "students"
+
+    __table_args__ = (
+        Index("idx_students_organization", "organization_id"),
+        Index("idx_students_email", "email"),
+        Index("idx_students_student_number", "student_number"),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    organization_id = Column(
+        UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
+    )
+    email = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=False)
+    student_number = Column(String(50), nullable=True)
+    settings = Column(JSONB, default=dict)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at = Column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+    organization = relationship("Organization")
+    enrollments = relationship("Enrollment", back_populates="student")
+    submissions = relationship("Submission", back_populates="student", lazy="dynamic")
+
+
+class AssignmentVersion(Base):
+    """Versioned assignment content for cross-semester comparison."""
+
+    __tablename__ = "assignment_versions"
+
+    __table_args__ = (
+        Index("idx_assignment_versions_assignment", "assignment_id"),
+        Index("idx_assignment_versions_course", "course_id"),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    assignment_id = Column(
+        UUID(as_uuid=False), ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False
+    )
+    course_id = Column(
+        UUID(as_uuid=False), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
+    version = Column(Integer, nullable=False, default=1)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    starter_files = Column(JSONB, nullable=True)
+    settings = Column(JSONB, default=dict)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    is_active = Column(Boolean, default=True)
+
+    assignment = relationship("Assignment")
+    course = relationship("Course")
 
 
 class CourseInstructor(Base):

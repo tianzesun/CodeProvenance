@@ -260,6 +260,7 @@ class SubmissionService:
         languages_detected: list[str] | None = None,
         storage_path: str | None = None,
         checksum: str | None = None,
+        student_id: str | None = None,
     ) -> Submission:
         """
         Create a new submission.
@@ -274,6 +275,7 @@ class SubmissionService:
             languages_detected: Optional list of detected languages
             storage_path: Optional storage path
             checksum: Optional file checksum
+            student_id: Optional student UUID
 
         Returns:
             Created Submission instance
@@ -288,6 +290,7 @@ class SubmissionService:
             languages_detected=languages_detected,
             storage_path=storage_path,
             checksum=checksum,
+            student_id=student_id,
         )
         db.add(submission)
         db.commit()
