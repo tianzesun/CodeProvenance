@@ -59,6 +59,7 @@ from sqlalchemy.orm import joinedload
 
 from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
 from src.backend.api.middleware.request_id import RequestIdMiddleware
+from src.backend.api.middleware.auth import api_key_manager
 from src.backend.api.routes import auth, cases, users
 from src.backend.api.routes import settings as settings_router
 from src.backend.application.services.batch_detection_service import (
@@ -12853,6 +12854,28 @@ def _authenticate_request(request: Request) -> dict[str, Any]:
         token = auth_header.split(" ", 1)[1].strip()
 
     if not token:
+        # Programmatic access: a valid X-API-Key authenticates the tenant
+        # without a dashboard session (documented REST API contract).
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key:
+            key_data = api_key_manager.validate_key(api_key)
+            if not key_data:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            allowed, retry_after = api_key_manager.check_rate_limit(api_key)
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "Rate limit exceeded",
+                        "retry_after": retry_after,
+                    },
+                )
+            return {
+                "id": "",
+                "role": "api",
+                "tenant_id": key_data["tenant_id"],
+                "permissions": key_data["permissions"],
+            }
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
@@ -12942,9 +12965,12 @@ async def dashboard_auth_middleware(request: Request, call_next):
     request.state.user_id = user["id"]
     request.state.user_role = user["role"]
     request.state.tenant_id = user.get("tenant_id")
-    _apply_runtime_settings_from_record(
-        _load_tenant_settings_record(user.get("tenant_id"))
-    )
+    if user.get("role") != "api":
+        # API-key principals have no dashboard user; tenant runtime settings
+        # are loaded for interactive sessions only.
+        _apply_runtime_settings_from_record(
+            _load_tenant_settings_record(user.get("tenant_id"))
+        )
     return await call_next(request)
 
 

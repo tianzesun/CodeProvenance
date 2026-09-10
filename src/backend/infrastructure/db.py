@@ -7,6 +7,7 @@ for common database tasks.
 
 from datetime import datetime, timedelta
 from typing import Any
+import uuid
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -121,9 +122,13 @@ class JobService:
             Created Job instance
         """
         job = Job(
+            id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             assignment_id=assignment_id,  # NEW
             name=name,
+            # "queued" is the DB-valid initial state (ck_jobs_status allows
+            # queued/processing/completed/failed/cancelled, not "pending").
+            status="queued",
             threshold=threshold,
             webhook_url=webhook_url,
             idempotency_key=idempotency_key,

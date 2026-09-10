@@ -5,6 +5,7 @@ Provides REST API for submitting code for plagiarism analysis,
 retrieving results, and managing webhook notifications.
 """
 
+import hashlib
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,13 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
 from src.backend.api.middleware.auth import get_current_tenant
 from src.backend.api.middleware.rate_limit import RateLimiter
 from src.backend.config.database import get_db, set_tenant_context
-from src.backend.models.database import Job, SimilarityResult
+from src.backend.models.database import Job, SimilarityResult, Submission
 from src.backend.utils.database import (
     JobService,
     SimilarityResultService,
@@ -114,20 +115,7 @@ async def analyze_submissions(
         ),  # NEW - wiring to normalized Assignment
         threshold=analysis_data.get("threshold", 0.2),
         webhook_url=analysis_data.get("webhook_url"),
-        options=analysis_data.get("options", {}),
     )
-
-    # Create submissions
-    submission_ids = []
-    for submission_data in analysis_data["submissions"]:
-        submission = SubmissionService.create_submission(
-            db=db,
-            job_id=str(job.id),
-            name=submission_data.get("name", "Untitled"),
-            content=submission_data.get("content", ""),
-            language=submission_data.get("language", "auto"),
-        )
-        submission_ids.append(str(submission.id))
 
     # Materialize submissions to disk so the shared analysis pipeline
     # (`_run_analysis_background` → `_run_analysis`) can read them the same
@@ -141,6 +129,7 @@ async def analyze_submissions(
 
     job_dir = REPORTS_DIR / str(job.id) / "submissions"
     job_dir.mkdir(parents=True, exist_ok=True)
+    materialized: list[tuple[str, Path]] = []
     for index, submission_data in enumerate(analysis_data["submissions"], start=1):
         raw_name = str(submission_data.get("name") or f"submission_{index}")
         # Strip path components to prevent traversal outside the job dir.
@@ -150,9 +139,27 @@ async def analyze_submissions(
             # The pipeline only reads recognized code extensions; default to
             # `.py` (the documented API example language) when unspecified.
             safe_name = f"{safe_name}.py"
-        (job_dir / safe_name).write_text(
-            str(submission_data.get("content", "")), encoding="utf-8"
+        target = job_dir / safe_name
+        target.write_text(str(submission_data.get("content", "")), encoding="utf-8")
+        materialized.append((safe_name, target))
+
+    # Create submissions referencing the materialized files.
+    submission_ids = []
+    for submission_data, (safe_name, target) in zip(
+        analysis_data["submissions"], materialized, strict=True
+    ):
+        submission = SubmissionService.create_submission(
+            db=db,
+            job_id=str(job.id),
+            name=submission_data.get("name") or safe_name,
+            file_paths=[str(target.relative_to(REPORTS_DIR))],
+            language_detected=submission_data.get("language"),
+            storage_path=str(job_dir),
+            checksum=hashlib.sha256(
+                str(submission_data.get("content", "")).encode("utf-8")
+            ).hexdigest(),
         )
+        submission_ids.append(str(submission.id))
 
     # Queue background processing using the same engine as the upload flow.
     background_tasks.add_task(
@@ -181,7 +188,8 @@ async def analyze_submissions(
 
     return {
         "job_id": str(job.id),
-        "status": "pending",
+        # Matches the DB-valid initial state set by JobService.create_job.
+        "status": "queued",
         "status_url": f"/api/v1/jobs/{job.id}",
         "estimated_completion": estimated_completion,
         "submission_count": num_submissions,
@@ -203,7 +211,7 @@ async def get_job_status(
     **Response:**
     - `job_id`: Job identifier
     - `name`: Job name
-    - `status`: Current status (pending, processing, completed, failed)
+    - `status`: Current status (queued, processing, completed, failed)
     - `progress`: Percentage complete (0-100)
     - `submission_count`: Number of submissions
     - `completed_at`: Completion timestamp (if completed)
@@ -242,12 +250,23 @@ async def get_job_status(
             for r in similarity_results
         ]
 
+    # Count submissions via a real SQL COUNT — `job.submissions` is a lazy
+    # AppenderQuery, which has no len(). The DB column is VARCHAR(36) while
+    # the model declares UUID, so cast to avoid `varchar = uuid` errors.
+    submission_count = (
+        db.query(Submission)
+        .filter(cast(Submission.job_id, String) == str(job_id))
+        .count()
+    )
+
     return {
         "job_id": str(job.id),
         "name": job.name,
         "status": job.status,
-        "progress": job.progress or 0,
-        "submission_count": len(job.submissions) if hasattr(job, "submissions") else 0,
+        # The Job model has no progress column; derive a coarse value from
+        # the status lifecycle instead of reading a non-existent attribute.
+        "progress": 100 if job.status == "completed" else 0,
+        "submission_count": submission_count,
         "threshold": float(job.threshold),
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,
