@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { apiClient } from '@/lib/apiClient';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   Bot,
   ChevronDown,
-  Cpu,
   Database,
   ExternalLink,
   FileCog,
@@ -71,15 +70,11 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showEngineWeights, setShowEngineWeights] = useState(false);
-  const [weightsDirty, setWeightsDirty] = useState(false);
   const [showPerformanceAdvanced, setShowPerformanceAdvanced] = useState(false);
   const [validationResult, setValidationResult] = useState<any | null>(null);
   const [validationLoading, setValidationLoading] = useState<boolean>(false);
   const [calibrating, setCalibrating] = useState<boolean>(false);
   const [showCalibrateConfirm, setShowCalibrateConfirm] = useState<boolean>(false);
-  const [engineConfig, setEngineConfig] = useState<any | null>(null);
-  const [configLoading, setConfigLoading] = useState<boolean>(false);
 
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     systemLimits: true,
@@ -108,13 +103,6 @@ export default function SettingsPage() {
   const profile = settings?.professor_profile || DEFAULT_PROFILE;
   const catalog = settings?.professor_profile_catalog || {};
   const applied = settings?.applied_professor_profile || {};
-  const engineWeightTotal = useMemo(
-    () => {
-      const weights = settings?.engine_weights || {};
-      return Object.values(weights).reduce((sum: number, weight: unknown) => sum + Number(weight || 0), 0);
-    },
-    [settings?.engine_weights],
-  );
 
   const updateSetting = (key: string, value: unknown) => {
     setSettings((current: any) => ({ ...current, [key]: value }));
@@ -175,28 +163,15 @@ export default function SettingsPage() {
     }
   };
 
-  const loadEngineConfig = async () => {
-    setConfigLoading(true);
-    try {
-      const res = await apiClient.get('/api/settings/engine-config');
-      setEngineConfig(res.data);
-    } catch {
-      setEngineConfig(null);
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
   const triggerCalibration = async () => {
     setCalibrating(true);
     try {
       const res = await apiClient.post('/api/settings/calibrate');
       setSuccess('Calibration completed: ' + (res.data?.message || 'OK'));
       setTimeout(() => setSuccess(null), 5000);
-      // Refresh settings & engine config after calibration
+      // Refresh settings after calibration
       const fresh = await apiClient.get('/api/settings');
       setSettings(fresh.data);
-      loadEngineConfig();
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Calibration failed');
     } finally {
@@ -235,13 +210,9 @@ export default function SettingsPage() {
         audit_retention_days: settings.audit_retention_days,
         debug_mode: settings.debug_mode,
       };
-      if (weightsDirty) {
-        (payload as { engine_weights?: unknown }).engine_weights = settings.engine_weights;
-      }
       await apiClient.patch('/api/settings', payload);
       const fresh = await apiClient.get('/api/settings');
       setSettings(fresh.data);
-      setWeightsDirty(false);
       setSuccess('Settings saved. Recommended profile applied.');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: unknown) {
@@ -312,37 +283,7 @@ export default function SettingsPage() {
           {/* DETECTION SETTINGS */}
           {activeTab === 'detection' && (
             <div className="space-y-6">
-              {/* Detection Overview */}
-              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <Cpu size={20} className="mt-0.5 shrink-0 text-slate-600" />
-                  <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950">Detection Engines Overview</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
-                      IntegrityDesk uses 8 detection engines operating simultaneously. Each engine scores submission pairs independently, then a fusion layer combines them into a single confidence score.
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {[
-                    { name: 'Token', desc: 'Identifier & literal normalization' },
-                    { name: 'Winnowing', desc: 'Fingerprint hashing' },
-                    { name: 'GST', desc: 'Greedy string tiling' },
-                    { name: 'AST', desc: 'Abstract syntax tree' },
-                    { name: 'N-Gram', desc: 'N-gram frequency analysis' },
-                    { name: 'Graph', desc: 'Control/data flow graphs' },
-                    { name: 'Embedding', desc: 'Code vector similarity' },
-                    { name: 'Static Rules', desc: 'Heuristic pattern rules' },
-                  ].map((engine) => (
-                    <div key={engine.name} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-center">
-                      <div className="text-xs font-semibold text-slate-800">{engine.name}</div>
-                      <div className="mt-0.5 text-[10px] leading-tight text-slate-500">{engine.desc}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Default Threshold card */}
+              {/* Default Threshold card - professor-friendly */}
               <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-start gap-3">
                   <Target size={20} className="mt-0.5 shrink-0 text-slate-600" />
@@ -394,47 +335,6 @@ export default function SettingsPage() {
                   <strong className="font-semibold">Tip:</strong> For large classes (&gt;100 students), increase batch size to 50-100 for faster processing. Reduce max file size if submissions contain large data files or binaries.
                 </div>
               </Accordion>
-
-              {/* Engine Weights - Advanced */}
-              <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-                <div
-                  className="flex cursor-pointer items-center justify-between"
-                  onClick={() => setShowEngineWeights(!showEngineWeights)}
-                >
-                  <div className="flex items-center gap-2">
-                    <Activity size={16} className="text-amber-700" />
-                    <span className="text-sm font-semibold text-amber-900">Advanced: Engine Weights</span>
-                  </div>
-                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800">Admin</span>
-                </div>
-                <p className="mt-2 text-sm leading-5 text-amber-700">
-                  Fine-tune the contribution of each detection engine. For administrators validating custom presets only.
-                </p>
-
-                {showEngineWeights && (
-                  <div className="mt-4 space-y-3 border-t border-amber-300/50 pt-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-semibold text-amber-900">Total allocation</span>
-                      <span className={`font-bold ${Math.abs(engineWeightTotal - 1.0) < 0.001 ? 'text-emerald-700' : 'text-red-600'}`}>
-                        {(engineWeightTotal * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    {Object.entries(settings.engine_weights || {}).map(([key, value]) => (
-                      <AdvancedSlider
-                        key={key}
-                        label={key}
-                        value={Number(value || 0)}
-                        onChange={(next) => { setWeightsDirty(true); updateSetting('engine_weights', { ...settings.engine_weights, [key]: next }); }}
-                      />
-                    ))}
-                    {Math.abs(engineWeightTotal - 1.0) >= 0.001 && (
-                      <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                        Weights should sum to 100% (currently {(engineWeightTotal * 100).toFixed(0)}%). Adjust sliders to balance.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
             </div>
           )}
 
@@ -724,27 +624,16 @@ export default function SettingsPage() {
                       {applied.summary}
                     </div>
 
-                    {/* Detection Policy Details */}
+                    {/* What this means for you */}
                     <div className="mt-5 space-y-2 border-t border-slate-100 pt-4">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Derived Detection Policy</div>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                          <span className="text-xs font-semibold text-slate-500">Threshold</span>
-                          <div className="font-semibold text-slate-900">{(applied.threshold * 100)?.toFixed(0) || '-'}%</div>
+                          <span className="text-xs font-semibold text-slate-500">Flag threshold</span>
+                          <div className="font-semibold text-slate-900">{(applied.threshold * 100)?.toFixed(0) || '-'}% similar</div>
                         </div>
                         <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                          <span className="text-xs font-semibold text-slate-500">Result Limit</span>
+                          <span className="text-xs font-semibold text-slate-500">Reviews shown</span>
                           <div className="font-semibold text-slate-900">{applied.result_limit ?? 'All'}</div>
-                        </div>
-                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 col-span-2">
-                          <span className="text-xs font-semibold text-slate-500">Weights</span>
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {Object.entries(applied.weights || {}).map(([key, value]) => (
-                              <span key={key} className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                                {key}: {((value as number) * 100).toFixed(0)}%
-                              </span>
-                            ))}
-                          </div>
                         </div>
                       </div>
                     </div>
@@ -881,8 +770,8 @@ export default function SettingsPage() {
 
               {/* Configuration Validation */}
               <Accordion
-                title="Configuration Validation"
-                description="Validate the current engine configuration for issues like weight sum, threshold ranges, and governance."
+                title="Configuration Check"
+                description="Check your settings for common issues before running detection."
                 isOpen={accordions.configValidation}
                 onToggle={() => { setAccordions(prev => ({ ...prev, configValidation: !prev.configValidation })); if (!accordions.configValidation && !validationResult) validateConfig(); }}
               >
@@ -894,16 +783,7 @@ export default function SettingsPage() {
                     className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
                   >
                     {validationLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    {validationLoading ? 'Validating...' : 'Run Validation'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { loadEngineConfig(); setAccordions(prev => ({ ...prev, configValidation: true })); }}
-                    disabled={configLoading}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {configLoading ? <Loader2 size={16} className="animate-spin" /> : <FileCog size={16} />}
-                    {configLoading ? 'Loading...' : 'View Engine Config'}
+                    {validationLoading ? 'Checking...' : 'Check My Settings'}
                   </button>
                 </div>
 
@@ -924,25 +804,18 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-
-                {engineConfig && (
-                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-3 text-sm font-semibold text-slate-800">Current Engine Configuration</div>
-                    <pre className="max-h-64 overflow-auto rounded bg-slate-800 p-3 text-xs text-green-300">{JSON.stringify(engineConfig, null, 2)}</pre>
-                  </div>
-                )}
               </Accordion>
 
-              {/* Calibrate Engine */}
+              {/* Improve accuracy from past reviews */}
               <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
                       <Activity size={16} />
-                      Automatic Engine Calibration
+                      Improve accuracy from past reviews
                     </div>
                     <p className="mt-1 text-sm leading-6 text-amber-700">
-                      Automatically tune engine weights based on known labeled data. This will adjust the detection profile to maximize F1 score on past validated pairs.
+                      Use your past confirmed cases to fine-tune flagging for this course. Recommended only after you have reviewed at least 10 pairs.
                     </p>
                   </div>
                   {showCalibrateConfirm ? (
@@ -1089,18 +962,6 @@ function SegmentedOptions({ options, value, onChange }: { options: { id: string;
           {option.label}
         </button>
       ))}
-    </div>
-  );
-}
-
-function AdvancedSlider({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return (
-    <div className="rounded-xl border border-slate-200 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm font-semibold capitalize text-slate-950">{label.replaceAll('_', ' ')}</div>
-        <div className="text-sm font-semibold text-blue-600">{Math.round(value * 100)}%</div>
-      </div>
-      <input type="range" min="0" max="1" step="0.05" value={value} onChange={(event) => onChange(Number(event.target.value))} className="w-full accent-blue-600" />
     </div>
   );
 }
