@@ -990,12 +990,32 @@ def _build_benchmark_dataset_readiness(
     if dataset_id == "google_codejam":
         gt_path = dataset_root / "ground_truth.json"
         runnable = gt_path.exists()
+        total = positives = negatives = 0
         if runnable:
             try:
                 gt = json.loads(gt_path.read_text())
-                total = len(gt)
-                positives = sum(1 for v in gt.values() if v.get("plagiarism", False))
-                negatives = total - positives
+                if isinstance(gt, dict) and isinstance(gt.get("pairs"), list):
+                    pairs = gt["pairs"]
+                    total = len(pairs)
+                    positives = sum(
+                        1
+                        for pair in pairs
+                        if isinstance(pair, dict)
+                        and (
+                            pair.get("plagiarism", False)
+                            or int(pair.get("label", 0) or 0) >= 1
+                        )
+                    )
+                    negatives = total - positives
+                else:
+                    total = len(gt)
+                    positives = sum(
+                        1
+                        for v in gt.values()
+                        if isinstance(v, dict) and v.get("plagiarism", False)
+                    )
+                    negatives = total - positives
+                runnable = total > 0
             except Exception:
                 runnable = False
         return {
@@ -7386,12 +7406,18 @@ async def _run_analysis(
                                 # Map by email prefix, student number, and full name variants
                                 student = e.student
                                 if student.email:
-                                    student_lookup[student.email.split("@")[0].lower()] = student.id
+                                    student_lookup[
+                                        student.email.split("@")[0].lower()
+                                    ] = student.id
                                 if student.student_number:
-                                    student_lookup[student.student_number.lower()] = student.id
+                                    student_lookup[student.student_number.lower()] = (
+                                        student.id
+                                    )
                                 if student.full_name:
                                     # Simple name normalization
-                                    name_key = "".join(student.full_name.lower().split())
+                                    name_key = "".join(
+                                        student.full_name.lower().split()
+                                    )
                                     student_lookup[name_key] = student.id
             except Exception as e:
                 logger.warning(f"Could not build student lookup: {e}")

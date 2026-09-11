@@ -71,11 +71,19 @@ def test_benchmark_pair_scores_keep_raw_score_as_primary() -> None:
     """Benchmark gates should evaluate the detector score, not baseline-adjusted diagnostics."""
 
     class Extractor:
-        def extract(self, code_a: str, code_b: str, filename_a: str = None, filename_b: str = None) -> _DummyFeatures:
+        def extract(
+            self,
+            code_a: str,
+            code_b: str,
+            filename_a: str = None,
+            filename_b: str = None,
+        ) -> _DummyFeatures:
             return _DummyFeatures(0.60 if "plag" in code_b else 0.60)
 
     class Fusion:
-        def fuse(self, features: _DummyFeatures, logic_flow: float = 0.0) -> _DummyFused:
+        def fuse(
+            self, features: _DummyFeatures, logic_flow: float = 0.0
+        ) -> _DummyFused:
             return _DummyFused(features.ast)
 
     service = BatchDetectionService.__new__(BatchDetectionService)
@@ -478,7 +486,12 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
     # Expectations must mirror the server's readiness checks rather than
     # hardcode a machine's download state.
     def _downloaded(dataset_id: str, marker: str) -> bool:
-        return (server.BENCHMARK_DATA_DIR / dataset_id / marker).exists()
+        dataset_root = server.BENCHMARK_DATA_DIR / dataset_id
+        return bool(
+            server._build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
+                "runnable"
+            )
+        )
 
     for dataset_id, marker in (
         ("codexglue_clone", "huggingface"),
@@ -486,13 +499,13 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
         ("codesearchnet", "huggingface"),
     ):
         if _downloaded(dataset_id, marker):
-            assert dataset_id in dataset_ids, (
-                f"{dataset_id} data is complete; it should be listed as runnable"
-            )
+            assert (
+                dataset_id in dataset_ids
+            ), f"{dataset_id} data is complete; it should be listed as runnable"
         else:
-            assert dataset_id not in dataset_ids, (
-                f"{dataset_id} data is incomplete; it should be hidden"
-            )
+            assert (
+                dataset_id not in dataset_ids
+            ), f"{dataset_id} data is incomplete; it should be hidden"
 
 
 def test_xiangtan_loader_produces_positive_and_negative_pairs(tmp_path) -> None:
