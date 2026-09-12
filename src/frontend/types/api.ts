@@ -2,7 +2,7 @@
  * Shared API response types for IntegrityDesk frontend.
  */
 
-export interface Job {
+export interface LegacyJobSummary {
   id: string;
   tenant_id: string;
   name: string;
@@ -18,7 +18,7 @@ export interface Job {
   result_count?: number;
 }
 
-export interface Submission {
+export interface LegacySubmission {
   id: string;
   job_id: string;
   name: string;
@@ -27,7 +27,7 @@ export interface Submission {
   created_at: string;
 }
 
-export interface SimilarityResult {
+export interface LegacySimilarityResult {
   id: string;
   job_id: string;
   submission_a_id: string;

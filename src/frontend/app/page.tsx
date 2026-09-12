@@ -2,8 +2,9 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { Job, SimilarityResult } from '@/types/api';
+import { Job, JobStatus, ReviewStatus, SimilarityResult } from '@/types/api';
 import Link from 'next/link';
+import type { ComponentType } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -83,21 +84,25 @@ function getReferenceLabel(job: Job): string {
   return job.course_name;
 }
 
-function getThreshold(job) {
+function getThreshold(job: Job | null | undefined): number {
   const threshold = Number(job?.threshold);
   return Number.isFinite(threshold) ? threshold : 0.5;
 }
 
-function getReviewStatus(job) {
-  return REVIEW_STATUS_LABELS[job?.review_status] ? job.review_status : 'unreviewed';
+function getReviewStatus(job: Job | null | undefined): ReviewStatus {
+  const status = job?.review_status;
+  return status && REVIEW_STATUS_LABELS[status] ? status : 'unreviewed';
 }
 
-function formatReviewStatus(status) {
-  return REVIEW_STATUS_LABELS[status] || REVIEW_STATUS_LABELS.unreviewed;
+function formatReviewStatus(status: string | null | undefined): string {
+  if (status && status in REVIEW_STATUS_LABELS) {
+    return REVIEW_STATUS_LABELS[status as ReviewStatus];
+  }
+  return REVIEW_STATUS_LABELS.unreviewed;
 }
 
-function getReviewTone(status) {
-  const toneMap = {
+function getReviewTone(status: string | null | undefined): string {
+  const toneMap: Record<ReviewStatus, string> = {
     unreviewed: 'border-slate-500/20 bg-slate-500/10 text-slate-600',
     needs_review: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
     confirmed: 'border-red-500/20 bg-red-500/10 text-red-600',
@@ -105,18 +110,21 @@ function getReviewTone(status) {
     escalated: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
   };
 
-  return toneMap[status] || toneMap.unreviewed;
+  if (status && status in toneMap) {
+    return toneMap[status as ReviewStatus];
+  }
+  return toneMap.unreviewed;
 }
 
-function truncateText(value, max = 120) {
+function truncateText(value: string | null | undefined, max = 120): string {
   if (!value || value.length <= max) {
-    return value;
+    return value || '';
   }
 
   return `${value.slice(0, max - 1)}…`;
 }
 
-function getFlaggedResults(job) {
+function getFlaggedResults(job: Job | null | undefined): SimilarityResult[] {
   if (!job?.results?.length) {
     return [];
   }
@@ -127,7 +135,7 @@ function getFlaggedResults(job) {
     .sort((a, b) => b.score - a.score);
 }
 
-function getTopFeature(result) {
+function getTopFeature(result: SimilarityResult | null | undefined): string {
   const topFeature = Object.entries(result?.features || {}).sort((a, b) => b[1] - a[1])[0];
 
   if (!topFeature) {
@@ -137,23 +145,26 @@ function getTopFeature(result) {
   return `${topFeature[0]} strongest`;
 }
 
-function getHomeCardStorageKey(userId) {
+function getHomeCardStorageKey(userId: string | null | undefined): string {
   return `${HOME_CARD_STORAGE_KEY}:${userId || 'guest'}`;
 }
 
-function getHomeLayoutTipStorageKey(userId) {
+function getHomeLayoutTipStorageKey(userId: string | null | undefined): string {
   return `${HOME_LAYOUT_TIP_STORAGE_KEY}:${userId || 'guest'}`;
 }
 
-function normalizeCardOrder(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]) {
+function normalizeCardOrder(
+  value: unknown,
+  validIds: string[] = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
+): string[] {
   const validIdSet = new Set(validIds);
   const preferredOrder = validIds;
-  const seen = new Set();
-  const normalized = [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
 
   if (Array.isArray(value)) {
     value.forEach((id) => {
-      if (validIdSet.has(id) && !seen.has(id)) {
+      if (typeof id === 'string' && validIdSet.has(id) && !seen.has(id)) {
         normalized.push(id);
         seen.add(id);
       }
@@ -169,17 +180,20 @@ function normalizeCardOrder(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HO
   return normalized;
 }
 
-function normalizeHiddenCards(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]) {
+function normalizeHiddenCards(
+  value: unknown,
+  validIds: string[] = [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
+): string[] {
   const validIdSet = new Set(validIds);
-  const seen = new Set();
-  const normalized = [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
 
   if (!Array.isArray(value)) {
     return normalized;
   }
 
   value.forEach((id) => {
-    if (validIdSet.has(id) && !seen.has(id)) {
+    if (typeof id === 'string' && validIdSet.has(id) && !seen.has(id)) {
       normalized.push(id);
       seen.add(id);
     }
@@ -190,16 +204,16 @@ function normalizeHiddenCards(value, validIds = [...HOME_CARD_DEFAULT_ORDER, ...
 
 export default function Home() {
   const { user, loading: authLoading } = useAuth();
-  const [jobs, setJobs] = useState([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cardOrder, setCardOrder] = useState(HOME_CARD_DEFAULT_ORDER);
-  const [hiddenCards, setHiddenCards] = useState([]);
+  const [cardOrder, setCardOrder] = useState<string[]>(HOME_CARD_DEFAULT_ORDER);
+  const [hiddenCards, setHiddenCards] = useState<string[]>([]);
   const [editMode, setEditMode] = useState(false);
-  const [activeCardId, setActiveCardId] = useState(null);
-  const [draggedCardId, setDraggedCardId] = useState(null);
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [showLayoutTip, setShowLayoutTip] = useState(false);
-  const longPressTimerRef = useRef(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const availableCardIds = user?.role === 'admin'
     ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
@@ -294,14 +308,7 @@ export default function Home() {
     () => jobs.filter((job) => job.status === 'completed'),
     [jobs]
   );
-  const [selectedReportJob, setSelectedReportJob] = useState<{
-    id: string;
-    status: string;
-    summary?: Record<string, unknown>;
-    results?: unknown[];
-    threshold?: number;
-    review_status?: string;
-  } | null>(null);
+  const [selectedReportJob, setSelectedReportJob] = useState<Job | null>(null);
 
   useEffect(() => {
     if (completedJobs.length > 0 && !selectedReportJob) {
@@ -317,7 +324,7 @@ export default function Home() {
   const latestReviewStatus = getReviewStatus(latestCompleted);
   const visibleCardIds = normalizeCardOrder(cardOrder, availableCardIds).filter((id) => !hiddenCards.includes(id));
 
-  const startCardPress = (cardId) => {
+  const startCardPress = (cardId: string) => {
     if (editMode) {
       return;
     }
@@ -341,7 +348,7 @@ export default function Home() {
     }
   };
 
-  const handleCardClickCapture = (event) => {
+  const handleCardClickCapture = (event: React.SyntheticEvent) => {
     if (longPressTriggeredRef.current) {
       event.preventDefault();
       event.stopPropagation();
@@ -349,7 +356,7 @@ export default function Home() {
     }
   };
 
-  const moveCard = (cardId, direction) => {
+  const moveCard = (cardId: string, direction: number) => {
     const currentVisible = visibleCardIds;
     const currentIndex = currentVisible.indexOf(cardId);
     const nextIndex = currentIndex + direction;
@@ -369,7 +376,7 @@ export default function Home() {
     setActiveCardId(cardId);
   };
 
-  const moveCardBefore = (draggedId, targetId) => {
+  const moveCardBefore = (draggedId: string | null, targetId: string) => {
     if (!draggedId || !targetId || draggedId === targetId) {
       return;
     }
@@ -386,7 +393,7 @@ export default function Home() {
     setActiveCardId(draggedId);
   };
 
-  const hideCard = (cardId) => {
+  const hideCard = (cardId: string) => {
     if (hiddenCards.includes(cardId)) {
       return;
     }
@@ -395,7 +402,7 @@ export default function Home() {
     setActiveCardId((current) => (current === cardId ? null : current));
   };
 
-  const restoreCard = (cardId) => {
+  const restoreCard = (cardId: string) => {
     setHiddenCards((current) => current.filter((id) => id !== cardId));
     setCardOrder((current) => normalizeCardOrder(current, availableCardIds));
     setEditMode(true);
@@ -417,7 +424,10 @@ export default function Home() {
     }
   };
 
-  const dashboardCards = {
+  const dashboardCards: Record<
+    string,
+    { id: string; label: string; className: string; content: React.ReactNode }
+  > = {
     'recent-checks': {
       id: 'recent-checks',
       label: 'Recent checks',
@@ -1036,6 +1046,26 @@ const EditableDashboardCard = ({
   onPressStart,
   onPressEnd,
   onClickCapture,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  label: string;
+  editMode: boolean;
+  isActive: boolean;
+  isDragging: boolean;
+  canMoveEarlier: boolean;
+  canMoveLater: boolean;
+  onActivate: () => void;
+  onMoveEarlier: () => void;
+  onMoveLater: () => void;
+  onHide: () => void;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDrop?: () => void;
+  onDragEnd?: () => void;
+  onPressStart?: () => void;
+  onPressEnd?: () => void;
+  onClickCapture?: (event: React.SyntheticEvent) => void;
 }) => (
   <div
     className={`relative ${className || ''}`}
@@ -1140,20 +1170,20 @@ const EditableDashboardCard = ({
   </div>
 );
 
-const SummaryChip = ({ label, value }) => (
+const SummaryChip = ({ label, value }: { label: string; value: React.ReactNode }) => (
   <div className="theme-card-muted rounded-[22px] px-4 py-4">
     <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{label}</div>
     <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
   </div>
 );
 
-const ReviewBadge = ({ status }) => (
+const ReviewBadge = ({ status }: { status: string }) => (
   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReviewTone(status)}`}>
     {formatReviewStatus(status)}
   </span>
 );
 
-const FindingPreviewRow = ({ result }) => {
+const FindingPreviewRow = ({ result }: { result: SimilarityResult }) => {
   const risk = result.score >= 0.9 ? 'Critical' : result.score >= 0.75 ? 'High' : 'Review';
   const badgeTone = result.score >= 0.9
     ? 'border-red-500/20 bg-red-500/10 text-red-600'
@@ -1187,7 +1217,17 @@ const FindingPreviewRow = ({ result }) => {
   );
 };
 
-const ReportLink = ({ href, icon: Icon, title, description }) => (
+const ReportLink = ({
+  href,
+  icon: Icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: ComponentType<{ size?: number | string; className?: string }>;
+  title: string;
+  description: string;
+}) => (
   <a
     href={href}
     className="theme-card-muted group flex items-start gap-4 rounded-[22px] px-5 py-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
@@ -1203,7 +1243,17 @@ const ReportLink = ({ href, icon: Icon, title, description }) => (
   </a>
 );
 
-const ActionCard = ({ href, icon: Icon, title, description }) => (
+const ActionCard = ({
+  href,
+  icon: Icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: ComponentType<{ size?: number | string; className?: string }>;
+  title: string;
+  description: string;
+}) => (
   <Link
     href={href}
     className="theme-card group block rounded-[28px] px-6 py-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
@@ -1219,12 +1269,13 @@ const ActionCard = ({ href, icon: Icon, title, description }) => (
   </Link>
 );
 
-const StatusBadge = ({ status }) => {
-  const toneMap = {
+const StatusBadge = ({ status }: { status: JobStatus }) => {
+  const toneMap: Record<JobStatus, string> = {
     analyzing: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
     completed: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
     failed: 'border-red-500/20 bg-red-500/10 text-red-600',
     processing: 'border-blue-600/20 bg-blue-600/10 text-blue-600',
+    pending: 'border-slate-500/20 bg-slate-500/10 text-slate-600',
   };
 
   return (
