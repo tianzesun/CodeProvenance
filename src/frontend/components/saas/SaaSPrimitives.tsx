@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { motion, type Transition } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 
 interface PageHeaderProps {
@@ -65,7 +65,7 @@ export const fadeUp = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
   transition: { duration: 0.35, ease: 'easeOut' },
-};
+} as const;
 
 export function PageShell({ children }: { children: React.ReactNode }) {
   return <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>;
@@ -74,7 +74,7 @@ export function PageShell({ children }: { children: React.ReactNode }) {
 export function PageHeader({ eyebrow, title, description, action, eyebrowStyle = 'default' }: PageHeaderProps) {
   return (
     <motion.section
-      {...(fadeUp as any)}
+      {...fadeUp}
       className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
     >
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -102,7 +102,7 @@ export function PageHeader({ eyebrow, title, description, action, eyebrowStyle =
 export function Card({ children, className = '' }: CardProps) {
   return (
     <motion.section
-      {...(fadeUp as any)}
+      {...fadeUp}
       className={`rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 ${className}`}
     >
       {children}

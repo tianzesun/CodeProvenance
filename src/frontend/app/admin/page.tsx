@@ -37,20 +37,20 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
+interface AxiosErrorResponse {
+  response?: {
+    data?: {
+      detail?: string;
+      message?: string;
+    };
+  };
+}
+
 function getErrorMessage(error: unknown): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof (error as any).response === 'object' &&
-    (error as any).response !== null &&
-    'data' in (error as any).response &&
-    typeof (error as any).response.data === 'object' &&
-    (error as any).response.data !== null &&
-    'detail' in (error as any).response.data &&
-    typeof (error as any).response.data.detail === 'string'
-  ) {
-    return (error as any).response.data.detail;
+  const axiosError = error as AxiosErrorResponse;
+  const detail = axiosError?.response?.data?.detail;
+  if (typeof detail === 'string') {
+    return detail;
   }
   return 'Unable to complete that action right now.';
 }

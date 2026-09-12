@@ -1,8 +1,8 @@
-// @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { Job, SimilarityResult } from '@/types/api';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
@@ -49,7 +49,7 @@ const REVIEW_STATUS_LABELS = {
   escalated: 'Escalated',
 };
 
-function formatTimestamp(value) {
+function formatTimestamp(value: string | null | undefined): string {
   if (!value) {
     return 'Awaiting upload';
   }
@@ -67,15 +67,15 @@ function formatTimestamp(value) {
   }).format(date);
 }
 
-function formatPercent(value) {
+function formatPercent(value: number): string {
   return `${Math.round((value || 0) * 100)}%`;
 }
 
-function getAssignmentTitle(job) {
+function getAssignmentTitle(job: Job): string {
   return job.assignment_name || job.course_name || 'Untitled assignment check';
 }
 
-function getReferenceLabel(job) {
+function getReferenceLabel(job: Job): string {
   if (!job.course_name || job.course_name === job.assignment_name) {
     return '';
   }
@@ -294,7 +294,14 @@ export default function Home() {
     () => jobs.filter((job) => job.status === 'completed'),
     [jobs]
   );
-  const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
+  const [selectedReportJob, setSelectedReportJob] = useState<{
+    id: string;
+    status: string;
+    summary?: Record<string, unknown>;
+    results?: unknown[];
+    threshold?: number;
+    review_status?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (completedJobs.length > 0 && !selectedReportJob) {

@@ -240,9 +240,10 @@ export default function FprValidationPage() {
       });
       alert('Run saved successfully.');
       await loadFprHistory(); // refresh list
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert('Failed to save run: ' + (err?.response?.data?.detail || err.message));
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      alert('Failed to save run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
     }
   };
 
@@ -252,8 +253,9 @@ export default function FprValidationPage() {
       setResult(res.data.result);
       setFiles([]);
       setError('');
-    } catch (err: any) {
-      alert('Failed to load run: ' + (err?.response?.data?.detail || err.message));
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      alert('Failed to load run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
     }
   };
 
@@ -263,8 +265,9 @@ export default function FprValidationPage() {
     try {
       await apiClient.delete(`/api/fpr-validation-runs/${id}`);
       await loadFprHistory();
-    } catch (err: any) {
-      alert('Failed to delete run: ' + (err?.response?.data?.detail || err.message));
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      alert('Failed to delete run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
     }
   };
 
@@ -652,8 +655,8 @@ export default function FprValidationPage() {
                     {fprView === 'fine-tuning' && (
                       <div className="px-6 py-2 text-xs text-emerald-600 border-t bg-emerald-50">
                         Focused on the fine-tuning zone (0.65–0.78). 
-                        Sorted by lowest FPR first — the top row is automatically marked <strong>“Recommended”</strong>. 
-                        Switch to "All Thresholds" for the complete view.
+                        Sorted by lowest FPR first — the top row is automatically marked <strong>&quot;Recommended&quot;</strong>. 
+                        Switch to &quot;All Thresholds&quot; for the complete view.
                       </div>
                     )}
                   </>

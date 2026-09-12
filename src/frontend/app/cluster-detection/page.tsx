@@ -34,8 +34,9 @@ export default function ClusterDetectionPage() {
     try {
       const response = await apiClient.get('/api/cluster-detection/clusters');
       setClusters(response.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load clusters');
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      setError(axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Failed to load clusters');
     } finally {
       setLoading(false);
     }

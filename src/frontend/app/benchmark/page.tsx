@@ -16,6 +16,27 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface ToolResult {
+  tool: string;
+  score: number;
+}
+
+interface PairResult {
+  label?: string;
+  file_a?: string;
+  file_b?: string;
+  code_a?: string;
+  code_b?: string;
+  source_a?: string;
+  source_b?: string;
+  content_a?: string;
+  content_b?: string;
+  tool_results?: ToolResult[];
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────
 const TOOLS = [
   {
@@ -1804,7 +1825,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                 <Eye size={16} /> Example Differing Pairs — Code Diffs
               </div>
               <div className="space-y-4 text-xs">
-                {results.pair_results.slice(0, 3).map((pair: any, idx: number) => {
+                {results.pair_results.slice(0, 3).map((pair: PairResult, idx: number) => {
                   const hasCode = pair.code_a || pair.source_a || pair.content_a;
                   const codeA = pair.code_a || pair.source_a || pair.content_a || pair.file_a;
                   const codeB = pair.code_b || pair.source_b || pair.content_b || pair.file_b;
@@ -1818,7 +1839,7 @@ function ReportStep({ results, onRestart, onRerun, benchmarkMode }) {
                         <div>
                           <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tool Scores</div>
                           <div className="flex flex-wrap gap-3">
-                            {(pair.tool_results || []).slice(0, 4).map((tr: any) => (
+                            {(pair.tool_results || []).slice(0, 4).map((tr: ToolResult) => (
                               <span key={tr.tool} className={`px-2 py-0.5 rounded ${(tr.tool === 'integritydesk' || tr.tool === 'codeprovenance') ? 'bg-violet-100 text-violet-700 font-bold' : 'bg-slate-200 text-slate-700'}`}>
                                 {tr.tool}: {(tr.score * 100).toFixed(0)}%
                               </span>

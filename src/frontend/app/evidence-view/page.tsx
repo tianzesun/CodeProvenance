@@ -19,6 +19,10 @@ interface EvidenceViewProps {
   onBack?: () => void;
 }
 
+interface EvidenceData {
+  id?: string;
+}
+
 function VerdictBadge({ v }: { v: string }) {
   const styles = {
     TRUE: 'bg-red-100 text-red-700 border-red-200',
@@ -42,7 +46,11 @@ export default function EvidenceViewerPage() {
   const [score, setScore] = useState(0.5);
   const [verdict, setVerdict] = useState('REVIEW');
   const [loading, setLoading] = useState(false);
-  const [evidenceData, setEvidenceData] = useState<any>(null);
+interface EvidenceData {
+  id?: string;
+}
+
+  const [evidenceData, setEvidenceData] = useState<EvidenceData | null>(null);
   const [error, setError] = useState('');
 
   const loadEvidenceView = useCallback(async (submissionA: string, submissionB: string) => {
@@ -57,8 +65,9 @@ export default function EvidenceViewerPage() {
         explanation: `Similarity score: ${(score * 100).toFixed(1)}%`,
       });
       setEvidenceData(response.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load evidence view');
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      setError(axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Failed to load evidence view');
     } finally {
       setLoading(false);
     }

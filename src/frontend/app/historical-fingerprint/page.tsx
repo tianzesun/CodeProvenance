@@ -38,8 +38,9 @@ export default function HistoricalFingerprintPage() {
     try {
       const response = await apiClient.get('/api/historical-fingerprint/alerts');
       setAlerts(response.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || 'Failed to load data');
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
+      setError(axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -144,7 +145,7 @@ export default function HistoricalFingerprintPage() {
               </div>
               <h3 className="text-lg font-medium text-slate-800 mb-2">No Style Changes Detected</h3>
               <p className="text-slate-500">
-                Students' coding styles appear consistent across submissions.
+                Students&apos; coding styles appear consistent across submissions.
               </p>
             </div>
           ) : (

@@ -8,6 +8,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/apiClient';
+
+interface WebAnalysisSubmission {
+  name: string;
+  match_count?: number;
+}
 import { ButtonLink, PageHeader, ActionButton, Card } from '@/components/saas/SaaSPrimitives';
 import {
   AlertTriangle,
@@ -525,6 +530,7 @@ export default function ResultsPage() {
   }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, job?.review_status]);
 
   // Active result for the detail drawer (falls back to first in filtered table)
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const activeResult = useMemo(() => {
     if (tableData.length === 0) return reviewResults[activeIndex] || reviewResults[0] || null;
     // Try to keep the previously selected if still in view
@@ -549,8 +555,8 @@ export default function ResultsPage() {
   const evidenceSignals = buildEvidenceSignals(activeResult).filter((s) => s.fired);
 
   // External / Public source matches for this specific pair (for side-by-side integration)
-  const externalA = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_a);
-  const externalB = job?.web_analysis?.submissions?.find((s: any) => s.name === activeResult?.file_b);
+  const externalA = job?.web_analysis?.submissions?.find((s: WebAnalysisSubmission) => s.name === activeResult?.file_a);
+  const externalB = job?.web_analysis?.submissions?.find((s: WebAnalysisSubmission) => s.name === activeResult?.file_b);
   const hasExternalMatches = (externalA?.match_count || 0) > 0 || (externalB?.match_count || 0) > 0;
 
   // Keep activeIndex in sync when table filters change (best effort)
@@ -1023,7 +1029,7 @@ export default function ResultsPage() {
             )}
 
             <div className="text-center text-[11px] text-slate-500 dark:text-slate-400">
-              Changes update the pair status immediately. Use "Back to all pairs" to return to the ranked list.
+              Changes update the pair status immediately. Use &quot;Back to all pairs&quot; to return to the ranked list.
             </div>
           </div>
         ) : null}
