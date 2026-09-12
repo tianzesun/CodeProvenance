@@ -365,6 +365,27 @@ def get_current_tenant(request: Request) -> str:
     return tenant_id
 
 
+def require_admin(request: Request) -> dict:
+    """FastAPI dependency requiring an authenticated admin user.
+
+    Resolves the dashboard user attached to the request by the auth middleware
+    and rejects non-admin callers. Keeps academic CRUD reachable for admins
+    while professors continue to use the instructor/org-scoped read endpoints.
+    """
+    user = getattr(request.state, "user", None)
+    if not isinstance(user, dict) or not user.get("id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator role required",
+        )
+    return user
+
+
 def setup_default_keys() -> None:
     """Create default API keys for development/testing.
 

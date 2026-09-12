@@ -193,9 +193,7 @@ class Submission(Base):
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
     )
     job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
-    student_id = Column(
-        UUID(as_uuid=False), ForeignKey("students.id"), nullable=True
-    )
+    student_id = Column(UUID(as_uuid=False), ForeignKey("students.id"), nullable=True)
     name = Column(String(255), nullable=False)
     file_count = Column(Integer, default=1)
     language_detected = Column(String(50), nullable=True)
@@ -439,7 +437,11 @@ class Organization(Base):
 
 
 class Course(Base):
-    """Course within an organization."""
+    """Course / course offering within an organization.
+
+    A course offering is identified by ``code`` + ``term`` + ``year`` so the
+    same course can repeat across academic terms and be compared historically.
+    """
 
     __tablename__ = "courses"
 
@@ -459,6 +461,9 @@ class Course(Base):
     # Academic term support
     term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
     year = Column(Integer, nullable=True)
+    # Course analytics metadata
+    department = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
     settings = Column(JSONB, default=dict)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
@@ -475,13 +480,20 @@ class Course(Base):
 
 
 class Assignment(Base):
-    """Assignment within a course."""
+    """Assignment within a course.
+
+    The ``assignment_type`` and flexible ``detection_config`` columns back the
+    assignment-vulnerability analytics ("which assignment formats are most
+    frequently copied?"). Other fields keep rich metadata without polluting the
+    relational core with bespoke columns.
+    """
 
     __tablename__ = "assignments"
 
     __table_args__ = (
         Index("idx_assignments_course", "course_id"),
         Index("idx_assignments_course_term", "course_id", "term"),
+        Index("idx_assignments_type", "assignment_type"),
     )
 
     id = Column(
@@ -492,6 +504,17 @@ class Assignment(Base):
     term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
     version = Column(Integer, default=1)  # Assignment version within course
     due_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Assignment analytics metadata
+    assignment_type = Column(
+        String(40), default="programming"
+    )  # programming / written / project / quiz / exam
+    description = Column(Text, nullable=True)
+    max_score = Column(Float, nullable=True)
+    team_mode = Column(String(20), default="individual")  # individual | group
+    open_book = Column(Boolean, default=True)
+    time_limited = Column(Boolean, default=False)
+    allowed_resources = Column(JSONB, default=list)  # list[str]
+    detection_config = Column(JSONB, default=dict)
     settings = Column(JSONB, default=dict)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
@@ -500,7 +523,9 @@ class Assignment(Base):
 
     course = relationship("Course", back_populates="assignments")
     jobs = relationship("Job", back_populates="assignment", lazy="dynamic")
-    versions = relationship("AssignmentVersion", back_populates="assignment", lazy="dynamic")
+    versions = relationship(
+        "AssignmentVersion", back_populates="assignment", lazy="dynamic"
+    )
 
 
 class Enrollment(Base):
@@ -523,7 +548,9 @@ class Enrollment(Base):
         nullable=False,
     )
     student_id = Column(
-        UUID(as_uuid=False), ForeignKey("students.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False,
     )
     enrolled_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     role = Column(String(20), default="student")
@@ -577,10 +604,14 @@ class AssignmentVersion(Base):
         UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
     )
     assignment_id = Column(
-        UUID(as_uuid=False), ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("assignments.id", ondelete="CASCADE"),
+        nullable=False,
     )
     course_id = Column(
-        UUID(as_uuid=False), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        nullable=False,
     )
     version = Column(Integer, nullable=False, default=1)
     name = Column(String(255), nullable=False)

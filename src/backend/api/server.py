@@ -91,6 +91,7 @@ from src.backend.models.database import (
     Assignment,
     Course,
     CourseInstructor,
+    Enrollment,
     FprValidationRun,
     Job,
     Report,
@@ -8792,6 +8793,48 @@ async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
     return {"runs": runs[:safe_limit]}
 
 
+def _count_by(db: Any, model: Any, column: Any, ids: list[Any]) -> dict[Any, int]:
+    """Return ``{foreign_key_value: count}`` grouped by ``column`` for ``ids``.
+
+    Args:
+        db: Database session.
+        model: ORM model to count.
+        column: Column to group by (usually a ``course_id``).
+        ids: Values to filter ``column`` on.
+
+    Returns:
+        Mapping of each id to its row count (ids with no rows are present as 0).
+    """
+    result = {i: 0 for i in ids}
+    if not ids:
+        return result
+    rows = db.query(column, func.count()).filter(column.in_(ids)).group_by(column).all()
+    for key, count in rows:
+        result[key] = int(count)
+    return result
+
+
+def _distinct_enrollment_counts(db: Any, course_ids: list[Any]) -> dict[Any, int]:
+    """Return ``{course_id: distinct_student_count}`` for the given courses.
+
+    Args:
+        db: Database session.
+        course_ids: Course ids to count enrollments for.
+
+    Returns:
+        Mapping of course id to number of distinct enrolled students.
+    """
+    if not course_ids:
+        return {}
+    rows = (
+        db.query(Enrollment.course_id, func.count(func.distinct(Enrollment.student_id)))
+        .filter(Enrollment.course_id.in_(course_ids))
+        .group_by(Enrollment.course_id)
+        .all()
+    )
+    return {str(key): int(count) for key, count in rows}
+
+
 @app.get("/api/courses")
 async def get_courses(request: Request) -> dict[str, Any]:
     """Return courses visible to the current user.
@@ -8831,13 +8874,29 @@ async def get_courses(request: Request) -> dict[str, Any]:
                 return {"courses": []}
 
             courses = q.order_by(Course.name).all()
+            course_ids = [c.id for c in courses]
+
+            # Enrich with assignment/student counts in a single query per course.
+            # For typical professor scale this is fine; a materialized analytics
+            # table can replace these count queries at larger scale (Phase 8).
+            assignment_counts = _count_by(
+                db, Assignment, Assignment.course_id, course_ids
+            )
+            student_counts = _distinct_enrollment_counts(db, course_ids)
+
             return {
                 "courses": [
                     {
                         "id": c.id,
                         "name": c.name,
                         "code": c.code,
+                        "term": c.term,
+                        "year": c.year,
+                        "department": c.department,
+                        "description": c.description,
                         "organization_id": c.organization_id,
+                        "assignment_count": assignment_counts.get(c.id, 0),
+                        "student_count": student_counts.get(c.id, 0),
                     }
                     for c in courses
                 ]
@@ -8887,13 +8946,36 @@ async def get_assignments(
                 q = q.filter(Assignment.course_id == course_id)
 
             assignments = q.order_by(Assignment.name).all()
+            assignment_ids = [a.id for a in assignments]
+            # Submissions link to assignments through their job; count accordingly.
+            submission_counts: dict[str, int] = {}
+            if assignment_ids:
+                rows = (
+                    db.query(Job.assignment_id, func.count(Submission.id))
+                    .join(Submission, Submission.job_id == Job.id)
+                    .filter(Job.assignment_id.in_(assignment_ids))
+                    .group_by(Job.assignment_id)
+                    .all()
+                )
+                submission_counts = {str(k): int(c) for k, c in rows}
             return {
                 "assignments": [
                     {
                         "id": a.id,
                         "name": a.name,
                         "course_id": a.course_id,
+                        "term": a.term,
+                        "version": a.version,
                         "due_at": a.due_at.isoformat() if a.due_at else None,
+                        "assignment_type": a.assignment_type or "programming",
+                        "description": a.description,
+                        "max_score": a.max_score,
+                        "team_mode": a.team_mode or "individual",
+                        "open_book": a.open_book,
+                        "time_limited": a.time_limited,
+                        "allowed_resources": a.allowed_resources or [],
+                        "settings": a.settings or {},
+                        "submission_count": submission_counts.get(a.id, 0),
                     }
                     for a in assignments
                 ]
@@ -8901,6 +8983,154 @@ async def get_assignments(
     except Exception:
         logger.warning("Failed to fetch assignments (instructor + org scoped)")
         return {"assignments": []}
+
+
+def _course_analytics_payload(
+    db: Any, assignment_ids: list[Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Compute per-assignment and course integrity analytics for assignments.
+
+    Args:
+        db: Database session.
+        assignment_ids: Course's assignment ids.
+
+    Returns:
+        ``(assignment_rows, all_pair_rows, summary)`` where each assignment row
+        carries the assignment summary, its stats and its similarity pairs.
+    """
+    from src.backend.application.services.course_analytics import (
+        assignment_integrity_stats,
+        course_integrity_summary,
+    )
+
+    job_lookup: dict[str, str] = {}
+    if assignment_ids:
+        jobs = db.query(Job).filter(Job.assignment_id.in_(assignment_ids)).all()
+        job_lookup = {j.id: j.assignment_id for j in jobs}
+
+    grouped: dict[str, list[dict[str, Any]]] = {aid: [] for aid in assignment_ids}
+    if job_lookup:
+        rows = (
+            db.query(SimilarityResult)
+            .filter(SimilarityResult.job_id.in_(list(job_lookup)))
+            .all()
+        )
+        for row in rows:
+            assignment_id = job_lookup.get(row.job_id)
+            if assignment_id is None:
+                continue
+            grouped[assignment_id].append(
+                {
+                    "similarity_score": row.similarity_score,
+                    "risk_level": row.risk_level,
+                }
+            )
+
+    assignment_rows: list[dict[str, Any]] = []
+    all_pair_rows: list[dict[str, Any]] = []
+    assignments = (
+        db.query(Assignment).filter(Assignment.course_id.in_(assignment_ids)).all()
+    )
+    assignments_by_id = {a.id: a for a in assignments}
+    for assignment_id in assignment_ids:
+        a = assignments_by_id.get(assignment_id)
+        if a is None:
+            continue
+        rows = grouped.get(assignment_id, [])
+        stats = assignment_integrity_stats(rows)
+        stats["all_pairs"] = rows
+        assignment_rows.append(
+            {
+                "assignment": {
+                    "id": a.id,
+                    "name": a.name,
+                    "term": a.term,
+                    "due_at": a.due_at.isoformat() if a.due_at else None,
+                    "assignment_type": a.assignment_type or "programming",
+                    "description": a.description,
+                },
+                "stats": stats,
+            }
+        )
+        all_pair_rows.extend(rows)
+
+    summary = course_integrity_summary(assignment_rows, all_pair_rows)
+    return assignment_rows, all_pair_rows, summary
+
+
+@app.get("/api/courses/{course_id}")
+async def get_course_detail(course_id: str, request: Request) -> dict[str, Any]:
+    """Return one course with assignments and derived integrity analytics."""
+    try:
+        current_user = _require_current_user(request, admin_only=False)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = current_user.get("id")
+    user_org_id = current_user.get("organization_id")
+
+    with SessionLocal() as db:
+        course = db.query(Course).filter(Course.id == course_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+        scope_ok = bool(user_org_id and course.organization_id == user_org_id)
+        if not scope_ok and user_id:
+            instructor = (
+                db.query(CourseInstructor)
+                .filter(
+                    CourseInstructor.course_id == course_id,
+                    CourseInstructor.user_id == user_id,
+                )
+                .first()
+            )
+            scope_ok = instructor is not None
+        if not scope_ok:
+            raise HTTPException(
+                status_code=403, detail="Not authorized for this course"
+            )
+
+        assignments = (
+            db.query(Assignment)
+            .filter(Assignment.course_id == course_id)
+            .order_by(Assignment.term, Assignment.name)
+            .all()
+        )
+        assignment_ids = [a.id for a in assignments]
+        student_count = (
+            db.query(func.count(func.distinct(Enrollment.student_id)))
+            .filter(Enrollment.course_id == course_id)
+            .scalar()
+            or 0
+        )
+
+        assignment_rows, _, summary = _course_analytics_payload(db, assignment_ids)
+
+        return {
+            "course": {
+                "id": course.id,
+                "name": course.name,
+                "code": course.code,
+                "term": course.term,
+                "year": course.year,
+                "department": course.department,
+                "description": course.description,
+                "organization_id": course.organization_id,
+                "student_count": int(student_count),
+                "assignment_count": len(assignments),
+            },
+            "assignments": [
+                {
+                    "id": row["assignment"]["id"],
+                    "name": row["assignment"]["name"],
+                    "assignment_type": row["assignment"]["assignment_type"],
+                    "due_at": row["assignment"]["due_at"],
+                    "stats": row["stats"],
+                }
+                for row in assignment_rows
+            ],
+            "summary": summary,
+        }
 
 
 @app.get("/api/error-analysis")
