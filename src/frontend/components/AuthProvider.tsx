@@ -66,14 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // identity starts unset and is only populated from /api/auth/me.
   const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
-  const [bootstrapped, setBootstrapped] = useState(() => {
-    // Optimistic UI hint only (controls login-page wording). Whether the
-    // workspace is initialized is always re-checked server-side on startup.
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('integritydesk_bootstrapped') === 'true';
-    }
-    return false;
-  });
+  const [bootstrapped, setBootstrapped] = useState<boolean>(false);
 
   const clearSession = useCallback(() => {
     setUser(null);
