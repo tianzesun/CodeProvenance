@@ -175,7 +175,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (!bootstrapped) {
+    if (!bootstrapped && !forceSignIn) {
       if (!trimmedFullName) {
         setFormError('Full name is required.');
         return;
@@ -196,7 +196,7 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      if (bootstrapped) {
+      if (bootstrapped || forceSignIn) {
         await login(trimmedEmail, password);
       } else {
         await bootstrapAdmin({
@@ -267,10 +267,10 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                  {showLogin ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
+                                    {(bootstrapped || forceSignIn) ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
-                  {showLogin
+                                    {(bootstrapped || forceSignIn)
                     ? 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'
                     : 'Create the first administrator account and configure the workspace for your institution.'}
                 </p>
@@ -322,9 +322,7 @@ export default function LoginPage() {
                   ? resetEmailSent
                     ? 'If the account exists, password reset instructions have been sent.'
                     : 'Enter your email address and we will send reset instructions.'
-                  : showLogin
-                    ? ''
-                    : 'Set up the first administrator account for this workspace.'}
+                                      : 'Set up the first administrator account for this workspace.'}
               </p>
             </div>
 
@@ -423,7 +421,7 @@ export default function LoginPage() {
               )
             ) : (
               <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-                {!bootstrapped && (
+                                {!bootstrapped && !forceSignIn && (
                   <>
                     <div className="space-y-2">
                       <label htmlFor="full-name" className="block text-sm font-medium text-slate-700">
@@ -544,7 +542,7 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  {!bootstrapped && !password && (
+                                    {!bootstrapped && !forceSignIn && !password && (
                     <p className="text-xs text-slate-500">
                       Use at least 8 characters with upper/lowercase letters, a number, and a symbol.
                     </p>
@@ -557,7 +555,7 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                {bootstrapped && (
+                                {(bootstrapped || forceSignIn) && (
                   <div className="flex items-center justify-between gap-4">
                     <label htmlFor="rememberMe" className="flex items-center gap-3 text-sm text-slate-600">
                       <input
