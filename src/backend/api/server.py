@@ -5406,12 +5406,21 @@ async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any
                     .filter(CourseInstructor.course_id == course.id)
                     .all()
                 )
+                assignments = (
+                    db.query(Assignment)
+                    .filter(Assignment.course_id == course.id)
+                    .order_by(Assignment.created_at.desc())
+                    .all()
+                )
 
                 result.append(
                     {
                         "id": course.id,
                         "name": course.name,
                         "code": course.code,
+                        "term": course.term,
+                        "year": course.year,
+                        "department": course.department,
                         "organization_id": course.organization_id,
                         "organization_name": (
                             course.organization.name if course.organization else None
@@ -5424,6 +5433,20 @@ async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any
                                 "role": u.role,
                             }
                             for u in instructors
+                        ],
+                        "assignment_count": len(assignments),
+                        "assignments": [
+                            {
+                                "id": a.id,
+                                "name": a.name,
+                                "term": a.term,
+                                "version": a.version,
+                                "assignment_type": a.assignment_type,
+                                "due_at": (
+                                    a.due_at.isoformat() if a.due_at else None
+                                ),
+                            }
+                            for a in assignments
                         ],
                     }
                 )

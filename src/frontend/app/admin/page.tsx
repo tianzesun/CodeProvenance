@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  FileText,
   GraduationCap,
   Loader2,
   Plus,
@@ -70,12 +71,26 @@ interface CourseInstructor {
   email: string;
 }
 
+interface CourseAssignment {
+  id: string;
+  name: string;
+  term?: string | null;
+  version?: number;
+  assignment_type?: string;
+  due_at?: string | null;
+}
+
 interface CourseWithInstructors {
   id: string;
   name: string;
   code?: string;
+  term?: string | null;
+  year?: number | null;
+  department?: string | null;
   organization_name?: string;
   instructors: CourseInstructor[];
+  assignment_count?: number;
+  assignments?: CourseAssignment[];
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -223,6 +238,7 @@ export default function AdminPage() {
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
+  const [expandedAssignmentsCourse, setExpandedAssignmentsCourse] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     full_name: '',
@@ -809,6 +825,19 @@ export default function AdminPage() {
                               {course.code}
                             </span>
                           )}
+                          {(course.term || course.year) && (
+                            <span className="rounded-md bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                              {course.term} {course.year}
+                            </span>
+                          )}
+                          <span
+                            className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-600 dark:bg-blue-500/15 dark:text-blue-300"
+                            title="Number of assignments in this course"
+                          >
+                            <FileText size={11} />
+                            {course.assignment_count ?? course.assignments?.length ?? 0}{' '}
+                            {course.assignment_count === 1 ? 'assignment' : 'assignments'}
+                          </span>
                         </div>
                         {course.organization_name && (
                           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
@@ -881,9 +910,64 @@ export default function AdminPage() {
                           </button>
                         </div>
                       )}
+
+                    {/* Assignments for this course */}
+                    <div className="mt-5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedAssignmentsCourse((prev) => prev === course.id ? null : course.id)
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+                      >
+                        <ChevronDown
+                          size={14}
+                          className={`transition-transform ${expandedAssignmentsCourse === course.id ? 'rotate-180' : ''}`}
+                        />
+                        {expandedAssignmentsCourse === course.id
+                          ? 'Hide assignments'
+                          : `View ${course.assignment_count ?? course.assignments?.length ?? 0} assignments`}
+                      </button>
+
+                      {expandedAssignmentsCourse === course.id && (
+                        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                          {!course.assignments || course.assignments.length === 0 ? (
+                            <div className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                              No assignments have been created for this course yet.
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {course.assignments.map((assignment) => (
+                                <div
+                                  key={assignment.id}
+                                  className="flex items-center gap-3 bg-white px-4 py-3 dark:bg-slate-850"
+                                >
+                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                    <FileText size={14} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                                      {assignment.name}
+                                    </div>
+                                    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                      {[assignment.assignment_type, assignment.term].filter(Boolean).join(' · ') || 'Assignment'}
+                                    </div>
+                                  </div>
+                                  {assignment.due_at && (
+                                    <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                                      Due {new Date(assignment.due_at).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                );
+                  </div>
+              );
               })}
             </div>
           )}
