@@ -239,6 +239,7 @@ export default function AdminPage() {
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
   const [expandedAssignmentsCourse, setExpandedAssignmentsCourse] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'users' | 'courses'>('users');
 
   const [form, setForm] = useState({
     full_name: '',
@@ -336,6 +337,12 @@ export default function AdminPage() {
   const totalUsers = users.length;
   const activeUsers = users.filter((u) => !u.suspended).length;
   const suspendedUsers = users.filter((u) => u.suspended).length;
+
+  const totalCourses = coursesWithInstructors.length;
+  const totalAssignments = coursesWithInstructors.reduce(
+    (sum, c) => sum + (c.assignment_count ?? c.assignments?.length ?? 0),
+    0
+  );
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -445,13 +452,14 @@ export default function AdminPage() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
                 <Users size={14} />
-                Account Directory
+                Administration
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
-                User administration
+                Users &amp; courses
               </h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
-                Review all accounts, check access status, and create new users from one place.
+                Manage accounts and roles, control course access, and see which
+                assignments belong to each course — all in one place.
               </p>
             </div>
 
@@ -502,7 +510,7 @@ export default function AdminPage() {
         )}
 
         {/* ── Stat cards ──────────────────────────────────────────────────────── */}
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-center justify-between">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
@@ -544,9 +552,70 @@ export default function AdminPage() {
               {suspendedUsers}
             </div>
           </div>
+
+          <div className="rounded-[24px] border border-blue-100 bg-white p-5 shadow-sm dark:border-blue-900/40 dark:bg-slate-950">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Courses
+              </div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-900/30">
+                <GraduationCap size={14} className="text-blue-600 dark:text-blue-400" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-semibold text-blue-700 tabular-nums dark:text-blue-300">
+              {totalCourses}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-violet-100 bg-white p-5 shadow-sm dark:border-violet-900/40 dark:bg-slate-950">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Assignments
+              </div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-50 dark:bg-violet-900/30">
+                <FileText size={14} className="text-violet-600 dark:text-violet-400" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-semibold text-violet-700 tabular-nums dark:text-violet-300">
+              {totalAssignments}
+            </div>
+          </div>
         </section>
 
+        {/* ── Section tabs ──────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={() => setActiveTab('users')}
+            aria-pressed={activeTab === 'users'}
+            className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'users'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+          >
+            <Users size={15} />
+            Users
+            <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {totalUsers}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('courses')}
+            aria-pressed={activeTab === 'courses'}
+            className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'courses'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+          >
+            <GraduationCap size={15} />
+            Courses &amp; assignments
+            <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {totalCourses}
+            </span>
+          </button>
+        </div>
+
         {/* ── Users table ─────────────────────────────────────────────────────── */}
+        {activeTab === 'users' && (
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           {/* Table header + filters */}
           <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
@@ -761,21 +830,31 @@ export default function AdminPage() {
             </>
           )}
         </section>
+        )}
 
         {/* ── Course & Instructor Assignments ─────────────────────────────────── */}
+        {activeTab === 'courses' && (
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5 dark:border-slate-800">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
                 <GraduationCap size={14} />
-                Instructor Access
+                Courses
               </div>
               <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
-                Course &amp; Instructor Assignments
+                Courses &amp; assignments
               </h2>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Control which professors can view and upload to each course.
+                Manage course access and see which assignments belong to each course.
               </p>
+            </div>
+            <div className="shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-right dark:bg-slate-900">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                Assignments
+              </div>
+              <div className="text-xl font-semibold text-slate-900 tabular-nums dark:text-white">
+                {totalAssignments}
+              </div>
             </div>
           </div>
 
@@ -940,7 +1019,7 @@ export default function AdminPage() {
                               {course.assignments.map((assignment) => (
                                 <div
                                   key={assignment.id}
-                                  className="flex items-center gap-3 bg-white px-4 py-3 dark:bg-slate-850"
+                                  className="flex items-center gap-3 bg-white px-4 py-3 dark:bg-slate-900"
                                 >
                                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                                     <FileText size={14} />
@@ -972,6 +1051,7 @@ export default function AdminPage() {
             </div>
           )}
         </section>
+        )}
 
       </div>
 
