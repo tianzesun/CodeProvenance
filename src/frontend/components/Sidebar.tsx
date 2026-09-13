@@ -5,24 +5,22 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
+  BookOpen,
   Bot,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   FileText,
   FlaskConical,
-  History,
   LayoutDashboard,
   LogOut,
   Menu,
   MoonStar,
   PlusCircle,
-  SearchCheck,
   Settings,
   Shield,
   ShieldCheck,
   SunMedium,
-  Upload,
   X,
 } from 'lucide-react';
 
@@ -43,7 +41,9 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-width', collapsed ? '80px' : '288px');
   }, [collapsed]);
 
-  const navGroups = [
+    const isProfessor = user?.role === 'professor';
+
+    const navGroups = [
     {
       title: 'ACADEMIC',
       items: [
@@ -59,92 +59,105 @@ export default function Sidebar() {
           icon: PlusCircle,
           activeOn: ['/upload'],
         },
-        {
-          href: '/ai-detector',
-          label: 'AI Detector',
-          icon: Bot,
-          activeOn: ['/ai-detector'],
-        },
-        {
-          href: '/assignments',
-          label: 'Assignments',
-          icon: Upload,
-          activeOn: ['/assignments'],
-        },
-        {
-          href: '/cases',
-          label: 'Cases',
-          icon: SearchCheck,
-          activeOn: ['/cases', '/results'],
-        },
-        {
-          href: '/history',
-          label: 'History',
-          icon: History,
-          activeOn: ['/history'],
-        },
-      ],
-    },
-    {
-      title: 'ENGINE & R&D',
-      items: [
-        ...(user?.role === 'admin'
+        ...(isProfessor
           ? [
             {
-              href: '/benchmark',
-              label: 'Benchmark',
-              icon: ClipboardList,
-              activeOn: ['/benchmark'],
-            },
-            {
-              href: '/tools/fpr-validation',
-              label: 'FPR Validation',
-              icon: ShieldCheck,
-              activeOn: ['/tools/fpr-validation'],
-            },
-            {
-              href: '/ai-detector/accuracy',
-              label: 'AI Accuracy',
-              icon: FlaskConical,
-              activeOn: ['/ai-detector/accuracy'],
+              href: '/ai-detector',
+              label: 'AI-Generated Code Review',
+              icon: Bot,
+              activeOn: ['/ai-detector'],
             },
           ]
-          : []),
-        {
-          href: '/analytics',
-          label: 'Analytics',
-          icon: BarChart3,
-          activeOn: ['/analytics'],
-        },
-      ],
-    },
-    {
-      title: 'MANAGEMENT',
-      items: [
-        {
-          href: '/reports',
-          label: 'Reports',
-          icon: FileText,
-          activeOn: ['/reports'],
-        },
-        {
-          href: '/settings',
-          label: 'Settings',
-          icon: Settings,
-          activeOn: ['/settings'],
-        },
-        ...(user?.role === 'admin'
-          ? [
+          : [
             {
-              href: '/admin',
-              label: 'Users',
-              icon: Shield,
-              activeOn: ['/admin'],
+              href: '/ai-detector',
+              label: 'AI Detector',
+              icon: Bot,
+              activeOn: ['/ai-detector'],
             },
-          ]
-          : []),
+          ]),
       ],
     },
+    ...(isProfessor
+      ? [
+        {
+          title: 'TEACHING',
+          items: [
+            {
+              href: '/courses',
+              label: 'Courses & Assignments',
+              icon: BookOpen,
+              activeOn: ['/courses'],
+            },
+          ],
+        },
+      ]
+      : []),
+    ...(!isProfessor
+      ? [
+        {
+          title: 'ENGINE & R&D',
+          items: [
+            ...(user?.role === 'admin'
+              ? [
+                {
+                  href: '/benchmark',
+                  label: 'Benchmark',
+                  icon: ClipboardList,
+                  activeOn: ['/benchmark'],
+                },
+                {
+                  href: '/tools/fpr-validation',
+                  label: 'FPR Validation',
+                  icon: ShieldCheck,
+                  activeOn: ['/tools/fpr-validation'],
+                },
+                {
+                  href: '/ai-detector/accuracy',
+                  label: 'AI Accuracy',
+                  icon: FlaskConical,
+                  activeOn: ['/ai-detector/accuracy'],
+                },
+              ]
+              : []),
+            {
+              href: '/analytics',
+              label: 'Analytics',
+              icon: BarChart3,
+              activeOn: ['/analytics'],
+            },
+          ],
+        },
+        {
+          title: 'MANAGEMENT',
+          items: [
+            {
+              href: '/reports',
+              label: 'Reports',
+              icon: FileText,
+              activeOn: ['/reports'],
+            },
+            {
+              href: '/settings',
+              label: 'Settings',
+              icon: Settings,
+              activeOn: ['/settings'],
+            },
+            ...(user?.role === 'admin'
+              ? [
+                {
+                  href: '/admin',
+                  label: 'Users',
+                  icon: Shield,
+                  activeOn: ['/admin'],
+                },
+              ]
+              : []),
+          ],
+        },
+      ]
+      : []
+    ),
   ];
 
   const handleLogout = async () => {

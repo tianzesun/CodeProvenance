@@ -24,6 +24,27 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   // Prevent redirect loops by tracking last redirect
   const lastRedirectRef = useRef<string | null>(null);
 
+  // Routes visible to the professor role. Professors focus on plagiarism
+  // checks (single + whole-class) and AI-generated code review only.
+  const PROFESSOR_ROUTES = [
+    '/',
+    '/upload',
+    '/ai-detector',
+    '/courses',
+    '/results',
+  ];
+
+  const isProfessorRouteAllowed = (path: string | null): boolean => {
+    if (!path) return false;
+    if (path === '/') return true;
+    // Exact match or a nested route under an allowed section.
+    return PROFESSOR_ROUTES.some((route) => route !== '/' && (path === route || path.startsWith(`${route}/`)));
+  };
+
+  const professorBlocked = Boolean(
+    user && user.role !== 'admin' && !isProfessorRouteAllowed(pathname),
+  );
+
   useEffect(() => {
     if (loading) {
       return;
@@ -51,6 +72,17 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
           lastRedirectRef.current = redirectKey;
           router.replace('/');
         }
+        return;
+      }
+
+      // Professors are limited to the academic workflow (plagiarism check +
+      // AI review + courses/assignments). Redirect them away from Engine/R&D
+      // and Manage pages if they navigate there directly.
+      if (user.role !== 'admin' && !isProfessorRouteAllowed(pathname)) {
+        if (lastRedirectRef.current !== redirectKey) {
+          lastRedirectRef.current = redirectKey;
+          router.replace('/');
+        }
       }
 
       // Reset redirect key when authentication is successful
@@ -61,7 +93,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   }, [bootstrapped, loading, pathname, requiredRole, requireAuth, router, user]);
 
   // Show loading only if auth is required
-  if (requireAuth && (loading || !bootstrapped || !user || (requiredRole === 'admin' && user.role !== 'admin'))) {
+  if (requireAuth && (loading || !bootstrapped || !user || professorBlocked || (requiredRole === 'admin' && user.role !== 'admin'))) {
     return (
       <div className="theme-shell min-h-screen bg-[var(--background)]">
         <SkeletonLoader variant="page" />
