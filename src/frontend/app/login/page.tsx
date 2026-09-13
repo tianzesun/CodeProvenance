@@ -114,6 +114,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [forceSignIn, setForceSignIn] = useState(false);
 
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -123,6 +124,8 @@ export default function LoginPage() {
   const [nextPath, setNextPath] = useState('/');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+
+  const showLogin = bootstrapped || forceSignIn;
 
   const passwordStrength = useMemo(
     () => calculatePasswordStrength(password),
@@ -264,10 +267,10 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                  {bootstrapped ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
+                  {showLogin ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
-                  {bootstrapped
+                  {showLogin
                     ? 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'
                     : 'Create the first administrator account and configure the workspace for your institution.'}
                 </p>
@@ -310,7 +313,7 @@ export default function LoginPage() {
                   ? resetEmailSent
                     ? 'Check your email'
                     : 'Reset password'
-                  : bootstrapped
+                  : showLogin
                     ? 'Professor Sign-In'
                     : 'Create Administrator Account'}
               </h2>
@@ -319,7 +322,7 @@ export default function LoginPage() {
                   ? resetEmailSent
                     ? 'If the account exists, password reset instructions have been sent.'
                     : 'Enter your email address and we will send reset instructions.'
-                  : bootstrapped
+                  : showLogin
                     ? ''
                     : 'Set up the first administrator account for this workspace.'}
               </p>
@@ -592,10 +595,20 @@ export default function LoginPage() {
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
                   {submitting
                     ? 'Processing...'
-                    : bootstrapped
+                                        : forceSignIn
                       ? 'Sign in'
                       : 'Create administrator account'}
                 </button>
+
+                {!forceSignIn && (
+                  <button
+                    type="button"
+                    onClick={() => setForceSignIn(true)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Already have an account? Sign in
+                  </button>
+                )}
                </form>
              )}
            </div>
