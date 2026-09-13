@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
 Seed script: adds UofT Computer Science courses + demo assignments to the DB.
-Run from project root: source venv/bin/activate && python scripts/seed_courses.py
+
+Run from project root::
+
+    source venv/bin/activate && python scripts/seed_courses.py
 
 This is an additive, idempotent demo seed. It skips courses/assignments that
-already exist (matched by code + year).
+already exist (matched by code).
 """
+import hashlib
 import os
 import sys
 from datetime import datetime
@@ -15,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv
+
 load_dotenv(PROJECT_ROOT / "src/backend/.env.local")
 
 DB_URL = os.environ.get("DATABASE_URL")
@@ -42,9 +47,21 @@ TERM = "Fall"
 YEAR = 2026
 
 ASSIGNMENTS = [
-    ("Assignment 1: Foundations", "programming", "Weekly practice with basic syntax and functions."),
-    ("Assignment 2: Data Structures", "programming", "Implement core data structures covered in class."),
-    ("Assignment 3: Algorithms", "programming", "Algorithmic problem set emphasizing efficiency."),
+    (
+        "Assignment 1: Foundations",
+        "programming",
+        "Weekly practice with basic syntax and functions.",
+    ),
+    (
+        "Assignment 2: Data Structures",
+        "programming",
+        "Implement core data structures covered in class.",
+    ),
+    (
+        "Assignment 3: Algorithms",
+        "programming",
+        "Algorithmic problem set emphasizing efficiency.",
+    ),
     ("Midterm Project", "project", "Individual project applying course concepts."),
     ("Final Project", "project", "Capstone project with peer review and demo."),
 ]
@@ -54,6 +71,7 @@ NAME = "Dr. T. Instructor"
 
 
 def get_org(db):
+    """Get or create the University of Toronto organization."""
     org = db.query(Organization).filter_by(name="University of Toronto").first()
     if org:
         return org
@@ -63,10 +81,10 @@ def get_org(db):
 
 
 def get_prof(db, org):
+    """Get or create the demo professor user."""
     user = db.query(User).filter_by(email=EMAIL).first()
     if user:
         return user
-    import hashlib
     user = User(
         email=EMAIL,
         full_name=NAME,
@@ -80,23 +98,25 @@ def get_prof(db, org):
 
 
 def seed():
+    """Seed the database with UofT CS courses and demo assignments."""
     with SessionLocal() as db:
         org = get_org(db)
         prof = get_prof(db, org)
         db.flush()
 
         added_courses = 0
-        for code, name, yr in COURSES:
-            course = db.query(Course).filter_by(code=code, year=yr).first()
+        for code, name, study_year in COURSES:
+            course = db.query(Course).filter_by(code=code, term=TERM, year=YEAR).first()
             if course:
                 continue
             course = Course(
                 code=code,
                 name=name,
-                year=yr,
+                year=YEAR,
                 term=TERM,
                 organization_id=org.id,
                 department="Computer Science",
+                description=f"Year {study_year} computer science course.",
             )
             db.add(course)
             added_courses += 1
@@ -105,16 +125,18 @@ def seed():
 
         added_assignments = 0
         for code, _n, _y in COURSES:
-            course = db.query(Course).filter_by(code=code, year=YEAR, term=TERM).first()
+            course = db.query(Course).filter_by(code=code, term=TERM, year=YEAR).first()
             if not course:
-                course = db.query(Course).filter_by(code=code, year=_y).first()
-                if not course:
-                    continue
+                continue
             for a_name, a_type, a_desc in ASSIGNMENTS:
-                existing = db.query(Assignment).filter(
-                    Assignment.course_id == course.id,
-                    Assignment.name == a_name,
-                ).first()
+                existing = (
+                    db.query(Assignment)
+                    .filter(
+                        Assignment.course_id == course.id,
+                        Assignment.name == a_name,
+                    )
+                    .first()
+                )
                 if existing:
                     continue
                 assignment = Assignment(
@@ -122,12 +144,19 @@ def seed():
                     description=a_desc,
                     assignment_type=a_type,
                     course_id=course.id,
-                    due_at=datetime(YEAR, 12 if a_type == "project" else 10, 5 + (len(a_name) % 3), 23, 59),
+                    due_at=datetime(
+                        YEAR,
+                        12 if a_type == "project" else 10,
+                        5 + (len(a_name) % 3),
+                        23,
+                        59,
+                    ),
                     max_score=100,
                     team_mode="individual",
                     open_book=True,
                     time_limited=False,
                     allowed_resources=["textbook", "lecture notes"],
+                    term=TERM,
                 )
                 db.add(assignment)
                 added_assignments += 1
