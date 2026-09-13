@@ -104,10 +104,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (currentUser) {
         localStorage.setItem('integritydesk_auth_user', JSON.stringify(currentUser));
       }
-    } catch {
-      // Backend could not confirm a valid session cookie, so treat the user
-      // as anonymous instead of trusting cached localStorage identity.
-      clearSession();
+    } catch (err) {
+      // Fallback: if /api/auth/status fails, try /api/auth/me to determine
+      // if the system is bootstrapped (endpoint exists and responds).
+      try {
+        await apiClient.get('/api/auth/me');
+        // If the call succeeds (even with 200 and null user), system is bootstrapped
+        setBootstrapped(true);
+        clearSession();
+      } catch {
+        // Both endpoints failed — treat as anonymous, keep bootstrapped false
+        clearSession();
+      }
     }
   }, [clearSession]);
 
