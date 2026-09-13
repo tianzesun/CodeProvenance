@@ -270,42 +270,41 @@ export default function HistoryPage() {
           </div>
         )}
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {STATUS_TABS.map((tab) => {
-            const isActive = activeStatus === tab.key;
-            const count = statusCounts[tab.key];
-            const accent = isActive
-              ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
-              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => handleStatusTab(tab.key)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${
-                  isActive ? '' : 'shadow-sm'
-                }`}
-              >
-                {tab.label}
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                    isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
         <Card>
           <CardHeader
             title="History"
             description="All similarity checks sorted by date."
             action={
-              <div className="flex items-center gap-3 text-sm text-slate-500">
-                <span>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {STATUS_TABS.map((tab) => {
+                    const isActive = activeStatus === tab.key;
+                    const count = statusCounts[tab.key];
+                    const accent = isActive
+                      ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => handleStatusTab(tab.key)}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${
+                          isActive ? '' : 'shadow-sm'
+                        }`}
+                      >
+                        {tab.label}
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                            isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="text-sm text-slate-500">
                   Showing{' '}
                   <strong className="font-semibold text-slate-900">
                     {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
