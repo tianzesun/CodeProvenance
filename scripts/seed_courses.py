@@ -9,7 +9,6 @@ Run from project root::
 This is an additive, idempotent demo seed. It skips courses/assignments that
 already exist (matched by code).
 """
-import hashlib
 import os
 import sys
 from datetime import datetime
@@ -28,6 +27,7 @@ if not DB_URL:
 os.environ.setdefault("DATABASE_URL", DB_URL)
 
 from src.backend.config.database import SessionLocal
+from src.backend.infrastructure.security import hash_password
 from src.backend.models.database import Assignment, Course, Organization, User
 
 COURSES = [
@@ -88,7 +88,7 @@ def get_prof(db, org):
     user = User(
         email=EMAIL,
         full_name=NAME,
-        password_hash=hashlib.sha256(b"demo-password").hexdigest(),
+                password_hash=hash_password("demo-password"),
         role="professor",
         organization_id=org.id,
         tenant_id=None,
