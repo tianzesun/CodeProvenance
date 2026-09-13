@@ -1,7 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { Card, CardHeader, PageHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
+import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
@@ -246,24 +246,6 @@ export default function HistoryPage() {
   return (
     <DashboardLayout>
       <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <PageHeader
-          eyebrow="History"
-          title="Browse past plagiarism check history."
-          action={
-            <label className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 lg:w-80">
-              <Search size={16} />
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search by assignment, course, or ID"
-                className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none"
-                aria-label="Search history"
-              />
-            </label>
-          }
-        />
-
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -272,10 +254,21 @@ export default function HistoryPage() {
 
         <Card>
           <CardHeader
-            title="History"
+            title="Plagiarism Check History"
             description="All similarity checks sorted by date."
             action={
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 lg:w-80">
+                  <Search size={16} />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search by assignment, course, or ID"
+                    className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                    aria-label="Search history"
+                  />
+                </label>
                 <div className="flex flex-wrap items-center gap-2">
                   {STATUS_TABS.map((tab) => {
                     const isActive = activeStatus === tab.key;
