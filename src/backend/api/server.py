@@ -178,6 +178,8 @@ app.include_router(auth.router, prefix="/api/auth")
 app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+from src.backend.api.routes import academic as academic_router  # noqa: E402
+app.include_router(academic_router.router, prefix="/api")
 # Public REST API (documented in docs/product/API_REFERENCE.md). Submissions
 # are processed by the same background pipeline as the upload flow.
 from src.backend.api.routes import analyze as analyze_router  # noqa: E402
@@ -12796,6 +12798,7 @@ def _serialize_user(user: User) -> dict[str, Any]:
         "role": user.role,
         "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
         "tenant_name": tenant.name if tenant else None,
+        "organization_id": str(user.organization_id) if user.organization_id is not None else None,
         "is_active": bool(user.is_active),
         "suspended": not bool(user.is_active),
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,

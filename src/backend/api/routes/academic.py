@@ -5,7 +5,7 @@ API routes for managing Organizations, Courses, Assignments, Students, and Enrol
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session, joinedload
 
@@ -47,6 +47,8 @@ class CourseCreate(BaseModel):
     code: Optional[str] = None
     term: Optional[str] = None
     year: Optional[int] = None
+    department: Optional[str] = None
+    description: Optional[str] = None
 
 
 class CourseResponse(BaseModel):
@@ -259,6 +261,39 @@ async def list_courses(
     ]
 
 
+@router.get("/courses")
+async def list_my_courses(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """List all courses for the current user's organization with assignment counts."""
+    user = getattr(request.state, "user", {}) or {}
+    org_id = user.get("organization_id")
+    if not org_id:
+        return []
+
+    courses = (
+        db.query(Course)
+        .filter(Course.organization_id == org_id)
+        .order_by(Course.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for c in courses:
+        count = db.query(Assignment).filter(Assignment.course_id == c.id).count()
+        result.append({
+            "id": str(c.id),
+            "name": c.name,
+            "code": c.code,
+            "term": c.term,
+            "year": c.year,
+            "department": c.department,
+            "assignmentCount": count,
+        })
+    return result
+
+
 @router.get("/courses/{course_id}", response_model=CourseResponse)
 async def get_course(
     course_id: str,
@@ -278,6 +313,84 @@ async def get_course(
         year=course.year,
         created_at=course.created_at.isoformat() if course.created_at else "",
     )
+
+
+@router.post("/courses", status_code=status.HTTP_201_CREATED)
+async def create_course_for_org(
+    request: Request,
+    course_data: CourseCreate,
+    db: Session = Depends(get_db),
+):
+    """Create a new course in the current user's organization."""
+    user = getattr(request.state, "user", {}) or {}
+    org_id = user.get("organization_id")
+    if not org_id:
+        raise HTTPException(status_code=400, detail="No organization associated with user")
+
+    course = Course(
+        organization_id=org_id,
+        name=course_data.name,
+        code=course_data.code,
+        term=course_data.term,
+        year=course_data.year,
+        department=course_data.department,
+        description=course_data.description,
+    )
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+    return {
+        "id": str(course.id),
+        "name": course.name,
+        "code": course.code,
+        "term": course.term,
+        "year": course.year,
+        "department": course.department,
+        "assignmentCount": 0,
+    }
+
+
+@router.put("/courses/{course_id}")
+async def update_course_by_id(
+    course_id: str,
+    course_data: CourseCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Update a course by ID."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    course.name = course_data.name
+    course.code = course_data.code
+    course.term = course_data.term
+    course.year = course_data.year
+    course.department = course_data.department
+    course.description = course_data.description
+    db.commit()
+    db.refresh(course)
+    return {
+        "id": str(course.id),
+        "name": course.name,
+        "code": course.code,
+        "term": course.term,
+        "year": course.year,
+        "department": course.department,
+    }
+
+
+@router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_course_by_id(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Delete a course by ID."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    db.delete(course)
+    db.commit()
 
 
 # ==================== Assignment Routes ====================
@@ -364,6 +477,20 @@ async def get_assignment(
         settings=assignment.settings,
         created_at=assignment.created_at.isoformat() if assignment.created_at else "",
     )
+
+
+@router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_assignment_by_id(
+    assignment_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Delete an assignment by ID."""
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    db.delete(assignment)
+    db.commit()
 
 
 # ==================== Student Routes ====================
