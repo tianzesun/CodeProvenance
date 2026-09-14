@@ -6303,7 +6303,7 @@ async def upload_files(
 ):
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
-    job_id = str(uuid.uuid4())[:8]
+    job_id = str(uuid.uuid4())
     _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -6370,7 +6370,7 @@ async def upload_zip(
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
 
-    job_id = str(uuid.uuid4())[:8]
+    job_id = str(uuid.uuid4())
     _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -6496,7 +6496,7 @@ async def detect_ai_generated_code(
     background so the HTTP call never blocks on model work.
     """
     current_user = getattr(request.state, "user", None)
-    job_id = str(uuid.uuid4())[:8]
+    job_id = str(uuid.uuid4())
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -9525,7 +9525,7 @@ async def run_benchmark(
             selected_tools.append(tool_id)
     tools = selected_tools or ["integritydesk"]
 
-    job_id = str(uuid.uuid4())[:8]
+    job_id = str(uuid.uuid4())
     job_dir = UPLOADS_DIR / f"bench_{job_id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -10309,7 +10309,7 @@ async def start_benchmark_job(
     preset_id: str = Form(default=""),
 ):
     """Start a benchmark in the background and return a job_id immediately."""
-    job_id = str(uuid.uuid4())[:8]
+    job_id = str(uuid.uuid4())
 
     # Read file bytes now, before the request context closes
     file_bytes: list[tuple] = []
