@@ -189,6 +189,9 @@ app.include_router(analyze_router.router, prefix="/api")
 from src.backend.api.routes import benchmark as benchmark_router  # noqa: E402
 
 app.include_router(benchmark_router.router)
+from src.backend.api.routes import reviews as reviews_router  # noqa: E402
+
+app.include_router(reviews_router.router)
 
 # Re-export benchmark route handlers so existing unit tests that import them
 # directly from `server` (e.g. `server.get_benchmark_datasets()`) keep working.

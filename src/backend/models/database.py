@@ -1019,3 +1019,117 @@ class TimelineEvent(Base):
     case = relationship("Case")
     job = relationship("Job")
     user = relationship("User")
+
+
+class PairReview(Base):
+    """Faculty review decision (disposition) for a flagged submission pair.
+
+    Rows are append-only: the latest row for a (job_id, submission_a,
+    submission_b) triplet represents the current state; all prior rows are
+    preserved for audit purposes.  Never UPDATE a row — INSERT a new one.
+
+    The ``ai_flag`` and ``corroborated`` fields capture the AI corroboration
+    state *at the moment of review* so analytics remain accurate even if the
+    policy thresholds are later changed.
+    """
+
+    __tablename__ = "pair_reviews"
+
+    __table_args__ = (
+        Index("idx_pair_reviews_job", "job_id"),
+        Index("idx_pair_reviews_job_band", "job_id", "band"),
+        Index("idx_pair_reviews_job_pair", "job_id", "submission_a", "submission_b"),
+        Index("idx_pair_reviews_reviewer", "reviewer_id"),
+        Index("idx_pair_reviews_reviewed_at", "reviewed_at"),
+        Index("idx_pair_reviews_disposition", "disposition"),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+
+    # Which job and which pair
+    job_id = Column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    submission_a = Column(String(255), nullable=False)
+    submission_b = Column(String(255), nullable=False)
+
+    # Who reviewed and when
+    reviewer_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    reviewed_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    # Computed band at review time: 'low' | 'review' | 'high'
+    band = Column(String(16), nullable=False)
+
+    # Faculty decision
+    # Allowed values: no_action | note_on_file | conversation |
+    #                 step_up_verification | formal_escalation
+    disposition = Column(String(32), nullable=False)
+
+    # Optional rationale (application layer enforces max 500 chars)
+    rationale = Column(Text, nullable=True)
+
+    # AI corroboration state captured at review time
+    ai_flag = Column(Boolean, nullable=False, default=False)
+    corroborated = Column(Boolean, nullable=False, default=False)
+
+    # Similarity score recorded at review time (for analytics / overturn queries)
+    similarity_score = Column(Numeric(5, 4), nullable=True)
+
+    # Appeal fields — nullable by design so no migration is needed when the
+    # appeal workflow is activated.
+    # Allowed appeal_status values: submitted | under_review | upheld | overturned
+    appeal_status = Column(String(16), nullable=True)
+    appeal_submitted_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    appeal_outcome_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    appeal_notes = Column(Text, nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    # Relationships
+    job = relationship("Job")
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+
+class BandThreshold(Base):
+    """Per-assignment-mode numeric thresholds for Low / Review / High bands.
+
+    ``review_min`` is the lower edge of the Review band (anything below is Low).
+    ``high_min``   is the lower edge of the High band.
+    ``ai_elevated_min`` is the AI probability above which a score is "elevated".
+
+    Rows are seeded by the migration and can be adjusted via direct DB update
+    or a future admin UI, without requiring a code deployment.
+    """
+
+    __tablename__ = "band_thresholds"
+
+    __table_args__ = (Index("idx_band_thresholds_mode", "assignment_mode"),)
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+
+    # Unique mode key — matches the assignment_mode field used across the codebase
+    assignment_mode = Column(String(64), nullable=False, unique=True)
+
+    # Band edges (0.0 – 1.0)
+    review_min = Column(Numeric(4, 3), nullable=False)
+    high_min = Column(Numeric(4, 3), nullable=False)
+
+    # AI corroboration thresholds
+    ai_elevated_min = Column(Numeric(4, 3), nullable=False, default=0.650)
+    web_match_min = Column(Numeric(4, 3), nullable=False, default=0.700)
+
+    # Engine-agreement corroboration: require this many engines to individually
+    # score >= engine_agree_min before treating AI+similarity as corroborated.
+    engine_agree_count = Column(Integer, nullable=False, default=2)
+    engine_agree_min = Column(Numeric(4, 3), nullable=False, default=0.500)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
