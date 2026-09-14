@@ -27,6 +27,7 @@ type JobItem = {
   createdAt: string;
   totalSubmissions: number;
   highSimilarityCount: number;
+  reviewStatus: string;
   persistenceWarning?: string;
 };
 
@@ -41,6 +42,7 @@ type RawJob = {
   created_at?: string;
   total_submissions?: number;
   high_similarity_count?: number;
+  review_status?: string;
   persistence_warning?: string;
 };
 
@@ -101,6 +103,7 @@ export default function HistoryPage() {
         createdAt: j.created_at || '',
         totalSubmissions: Number(j.total_submissions) || 0,
         highSimilarityCount: Number(j.high_similarity_count) || 0,
+        reviewStatus: j.review_status || 'unreviewed',
         persistenceWarning: j.persistence_warning || undefined,
       }));
 
@@ -233,9 +236,8 @@ export default function HistoryPage() {
       <button
         type="button"
         onClick={() => handleSort(column)}
-        className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-          sortKey === column ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'
-        }`}
+        className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide transition ${sortKey === column ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'
+          }`}
       >
         {label}
         {renderSortIcon(column)}
@@ -281,15 +283,13 @@ export default function HistoryPage() {
                         key={tab.key}
                         type="button"
                         onClick={() => handleStatusTab(tab.key)}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${
-                          isActive ? '' : 'shadow-sm'
-                        }`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${isActive ? '' : 'shadow-sm'
+                          }`}
                       >
                         {tab.label}
                         <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                            isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
-                          }`}
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
+                            }`}
                         >
                           {count}
                         </span>
@@ -335,6 +335,9 @@ export default function HistoryPage() {
                     {renderSortableTh('submissions', 'Submissions')}
                     {renderSortableTh('highRisk', 'High-Risk')}
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Review
+                    </th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Status
                     </th>
                     <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -365,6 +368,20 @@ export default function HistoryPage() {
                         ) : (
                           <span className="text-sm text-slate-400">0</span>
                         )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${job.reviewStatus === 'confirmed' ? 'bg-red-50 text-red-700 ring-1 ring-red-100' :
+                            job.reviewStatus === 'escalated' ? 'bg-purple-50 text-purple-700 ring-1 ring-purple-100' :
+                              job.reviewStatus === 'needs_review' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-100' :
+                                job.reviewStatus === 'dismissed' ? 'bg-slate-100 text-slate-500' :
+                                  'bg-slate-100 text-slate-400'
+                          }`}>
+                          {job.reviewStatus === 'confirmed' ? 'Confirmed' :
+                            job.reviewStatus === 'escalated' ? 'Escalated' :
+                              job.reviewStatus === 'needs_review' ? 'Needs review' :
+                                job.reviewStatus === 'dismissed' ? 'Dismissed' :
+                                  'Unreviewed'}
+                        </span>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2">
@@ -493,11 +510,10 @@ export default function HistoryPage() {
                       key={num}
                       type="button"
                       onClick={() => setPage(Number(num))}
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${
-                        safePage === num
-                          ? 'bg-slate-900 text-white'
-                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${safePage === num
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
                     >
                       {num}
                     </button>

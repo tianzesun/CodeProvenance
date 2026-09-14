@@ -386,6 +386,7 @@ export default function ResultsPage() {
   const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence | verdict
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
+  const [rationale, setRationale] = useState(''); // per-pair review rationale
 
   useEffect(() => {
     if (authLoading) {
@@ -436,7 +437,7 @@ export default function ResultsPage() {
   };
 
   // Update both the backend job-level status (existing) + per-pair review in DB via pair_reviews
-  const updateActivePairStatus = async (newStatus) => {
+  const updateActivePairStatus = async (newStatus, rationaleText?: string) => {
     const key = pairKey(activeResult);
     if (key) {
       setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
@@ -445,11 +446,12 @@ export default function ResultsPage() {
     const payload = {
       review_status: newStatus, // keep job-level for backward compat
       pair_reviews: {
-        [key]: { status: newStatus }
+        [key]: { status: newStatus, rationale: rationaleText || undefined }
       }
     };
 
     await updateReview(payload);
+    if (rationaleText) setRationale('');
   };
 
 
@@ -709,7 +711,7 @@ export default function ResultsPage() {
             }}
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900"
           >
-<Filter size={12} /> Reset filters
+            <Filter size={12} /> Reset filters
           </button>
         </div>
 
@@ -733,9 +735,10 @@ export default function ResultsPage() {
                   <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-900/50 dark:text-slate-400">
                     <tr>
                       <th className="w-12 px-4 py-3">#</th>
-                      <th className="w-[26%] px-4 py-3">Submission A</th>
-                      <th className="w-[26%] px-4 py-3">Submission B</th>
-                      <th className="w-32 px-4 py-3">Verdict</th>
+                      <th className="w-[23%] px-4 py-3">Submission A</th>
+                      <th className="w-[23%] px-4 py-3">Submission B</th>
+                      <th className="w-20 px-4 py-3">Score</th>
+                      <th className="w-28 px-4 py-3">Verdict</th>
                       <th className="w-28 px-4 py-3">Status</th>
                     </tr>
                   </thead>
@@ -759,6 +762,11 @@ export default function ResultsPage() {
                           <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{row._denseRank}</td>
                           <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_a}>{row.file_a}</td>
                           <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_b}>{row.file_b}</td>
+                          <td className="px-4 py-3">
+                            <span className={`font-mono text-sm font-semibold ${row._score >= 0.75 ? 'text-red-600 dark:text-red-400' : row._score >= 0.45 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                              {Math.round((row._score || 0) * 100)}%
+                            </span>
+                          </td>
                           <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
                           </td>
@@ -797,7 +805,7 @@ export default function ResultsPage() {
                   <ActionButton
                     variant="primary"
                     icon={ShieldCheck}
-                    onClick={() => updateActivePairStatus('needs_review')}
+                    onClick={() => updateActivePairStatus('needs_review', rationale)}
                     disabled={saving}
                   >
                     Mark for Review
@@ -805,11 +813,25 @@ export default function ResultsPage() {
                   <ActionButton
                     variant="secondary"
                     icon={X}
-                    onClick={() => updateActivePairStatus('dismissed')}
+                    onClick={() => updateActivePairStatus('dismissed', rationale)}
                     disabled={saving}
                   >
                     Dismiss
                   </ActionButton>
+                  <button
+                    onClick={() => updateActivePairStatus('confirmed', rationale)}
+                    disabled={saving}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-40 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    onClick={() => updateActivePairStatus('escalated', rationale)}
+                    disabled={saving}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2 text-sm font-semibold text-purple-700 transition hover:bg-purple-100 disabled:opacity-40 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-300"
+                  >
+                    Escalate
+                  </button>
                   <a
                     href={`/report/${id}/committee`}
                     target="_blank"
@@ -872,6 +894,20 @@ export default function ResultsPage() {
                   >
                     ← Back to all pairs
                   </button>
+                </div>
+                {/* Rationale input — shown below action row */}
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={rationale}
+                    onChange={(e) => setRationale(e.target.value)}
+                    placeholder="Optional rationale for this decision (recorded with the disposition)"
+                    maxLength={500}
+                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  />
+                  {rationale && (
+                    <span className="shrink-0 text-xs text-slate-400">{rationale.length}/500</span>
+                  )}
                 </div>
               </div>
             </Card>

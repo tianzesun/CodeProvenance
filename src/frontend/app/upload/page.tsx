@@ -175,6 +175,16 @@ export default function UploadPage() {
   const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
   const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
+  // Course / assignment picker
+  type Course = { id: string; name: string; code?: string };
+  type Assignment = { id: string; name: string; assignment_type?: string };
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [courseName, setCourseName] = useState('');
+  const [assignmentName, setAssignmentName] = useState('');
+
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   useEffect(() => {
@@ -316,6 +326,25 @@ export default function UploadPage() {
     }));
   }, [authLoading, selectedAssignmentModeId, uploadFormStorageKey]);
 
+  // Fetch courses on mount (for logged-in users)
+  useEffect(() => {
+    if (!user) return;
+    apiClient.get('/api/courses').then((res) => {
+      const list = Array.isArray(res.data?.courses) ? res.data.courses : (Array.isArray(res.data) ? res.data : []);
+      setCourses(list);
+    }).catch(() => setCourses([]));
+  }, [user]);
+
+  // Fetch assignments when course selection changes
+  useEffect(() => {
+    if (!selectedCourseId) { setAssignments([]); setSelectedAssignmentId(''); return; }
+    apiClient.get(`/api/courses/${selectedCourseId}/assignments`).then((res) => {
+      const list = Array.isArray(res.data?.assignments) ? res.data.assignments : (Array.isArray(res.data) ? res.data : []);
+      setAssignments(list);
+      setSelectedAssignmentId('');
+    }).catch(() => { setAssignments([]); setSelectedAssignmentId(''); });
+  }, [selectedCourseId]);
+
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
     const f = Array.from(e.dataTransfer.files);
@@ -337,8 +366,9 @@ export default function UploadPage() {
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     starterFiles.forEach((f) => fd.append('starter_files', f));
-    fd.append('course_name', 'Assignment Check');
-    fd.append('assignment_name', 'Assignment Check');
+    fd.append('course_name', courseName.trim() || (courses.find(c => c.id === selectedCourseId)?.name ?? ''));
+    fd.append('assignment_name', assignmentName.trim() || (assignments.find(a => a.id === selectedAssignmentId)?.name ?? ''));
+    if (selectedAssignmentId) fd.append('assignment_id', selectedAssignmentId);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_weights', JSON.stringify(engineWeights));
@@ -381,29 +411,28 @@ export default function UploadPage() {
                       Plagiarism Checker
                     </h1>
                   </div>
-                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                     Upload files and IntegrityDesk compares them using similarity engines + AI detection. 
-                     When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code.
-                   </p>
+                  <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+                    Upload files and IntegrityDesk compares them using similarity engines + AI detection.
+                    When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code.
+                  </p>
                 </div>
-                 <div className="flex flex-wrap items-center gap-3">
-                   {/* Small external scan status pill next to Analyze button */}
-                   {tenantExternalScanEnabled !== null && (
-                     <div className={`hidden md:flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
-                       tenantExternalScanEnabled 
-                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
-                         : 'border-amber-200 bg-amber-50 text-amber-700'
-                     }`}>
-                       <div className={`w-1.5 h-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                       External: {tenantExternalScanEnabled ? 'On' : 'Off'}
-                     </div>
-                   )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Small external scan status pill next to Analyze button */}
+                  {tenantExternalScanEnabled !== null && (
+                    <div className={`hidden md:flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${tenantExternalScanEnabled
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                      }`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                      External: {tenantExternalScanEnabled ? 'On' : 'Off'}
+                    </div>
+                  )}
 
-                   <button
-                     onClick={handleSubmit}
-                     disabled={!canRunCheck}
-                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
-                   >
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!canRunCheck}
+                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  >
                     {uploading
                       ? <>
                         <svg width="18" height="18" viewBox="0 0 20 20">
@@ -446,62 +475,134 @@ export default function UploadPage() {
             </section>
           )}
 
-           {inferredComparisonScope && (
-             <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-               <div className="flex items-start gap-3">
-                 <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                 <div>
-                   <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
-                   <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
-                 </div>
-               </div>
-             </section>
-           )}
+          {inferredComparisonScope && (
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+              <div className="flex items-start gap-3">
+                <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                <div>
+                  <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
+                  <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
+                </div>
+              </div>
+            </section>
+          )}
 
-           {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
-           {tenantExternalScanEnabled === false && !sourceScanEnabled && (
-             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
-               <div className="flex items-center gap-3 text-sm">
-                 <AlertCircle size={16} className="shrink-0 text-amber-600" />
-                 <div className="flex-1 text-amber-900">
-                   External source scanning (GitHub + web) is disabled at the tenant level.
-                   <a href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</a>
-                 </div>
-               </div>
-             </div>
-           )}
-
-            {/* External Source Scan status + per-submission control */}
-            <div className="mb-4">
-              <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-500">External Source Scan:</span>
-                    {tenantExternalScanEnabled === true ? (
-                      <span className="font-medium text-emerald-700">
-                        Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
-                      </span>
-                    ) : tenantExternalScanEnabled === false ? (
-                      <span className="font-medium text-amber-700">Disabled</span>
-                    ) : (
-                      <span className="text-slate-400">Loading…</span>
-                    )}
-                  </div>
-
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={sourceScanEnabled}
-                      onChange={(e) => setSourceScanEnabled(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>Scan for this submission</span>
-                  </label>
-
-                  <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
+          {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
+          {tenantExternalScanEnabled === false && !sourceScanEnabled && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
+              <div className="flex items-center gap-3 text-sm">
+                <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                <div className="flex-1 text-amber-900">
+                  External source scanning (GitHub + web) is disabled at the tenant level.
+                  <a href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</a>
                 </div>
               </div>
             </div>
+          )}
+
+          {/* External Source Scan status + per-submission control */}
+          <div className="mb-4">
+            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">External Source Scan:</span>
+                  {tenantExternalScanEnabled === true ? (
+                    <span className="font-medium text-emerald-700">
+                      Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
+                    </span>
+                  ) : tenantExternalScanEnabled === false ? (
+                    <span className="font-medium text-amber-700">Disabled</span>
+                  ) : (
+                    <span className="text-slate-400">Loading…</span>
+                  )}
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={sourceScanEnabled}
+                    onChange={(e) => setSourceScanEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Scan for this submission</span>
+                </label>
+
+                <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
+              </div>
+            </div>
+          </div>
+
+          {/* Course & Assignment Picker */}
+          <div className="rounded-2xl bg-white p-5" style={cardShadow}>
+            <div className="flex items-center gap-2 mb-4">
+              <BookOpen size={15} className="text-slate-500" />
+              <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
+              <span className="ml-1 text-xs text-slate-400">(optional — helps organise your history)</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* Course select */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500">Course</label>
+                <select
+                  value={selectedCourseId}
+                  onChange={(e) => { setSelectedCourseId(e.target.value); setCourseName(''); }}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                >
+                  <option value="">Select course…</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>{c.code ? `${c.code} – ` : ''}{c.name}</option>
+                  ))}
+                  <option value="__manual__">Enter manually…</option>
+                </select>
+              </div>
+
+              {/* Manual course name (shown when no course selected or manual chosen) */}
+              {(!selectedCourseId || selectedCourseId === '__manual__') && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500">Course name</label>
+                  <input
+                    type="text"
+                    value={courseName}
+                    onChange={(e) => setCourseName(e.target.value)}
+                    placeholder="e.g. Introduction to CS"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  />
+                </div>
+              )}
+
+              {/* Assignment select */}
+              {selectedCourseId && selectedCourseId !== '__manual__' && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500">Assignment</label>
+                  <select
+                    value={selectedAssignmentId}
+                    onChange={(e) => { setSelectedAssignmentId(e.target.value); setAssignmentName(''); }}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  >
+                    <option value="">Select assignment…</option>
+                    {assignments.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                    <option value="__manual__">Enter manually…</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Manual assignment name */}
+              {(!selectedAssignmentId || selectedAssignmentId === '__manual__' || selectedCourseId === '__manual__') && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500">Assignment name</label>
+                  <input
+                    type="text"
+                    value={assignmentName}
+                    onChange={(e) => setAssignmentName(e.target.value)}
+                    placeholder="e.g. Assignment 2 – Sorting"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">
