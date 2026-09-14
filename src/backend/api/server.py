@@ -186,7 +186,31 @@ app.include_router(academic_router.router, prefix="/api")
 from src.backend.api.routes import analyze as analyze_router  # noqa: E402
 
 app.include_router(analyze_router.router, prefix="/api")
+from src.backend.api.routes import benchmark as benchmark_router  # noqa: E402
 
+app.include_router(benchmark_router.router)
+# Backward-compatible aliases for functions moved to benchmark router module.
+# These allow existing tests and imports that reference server.get_benchmark_datasets,
+# server.run_benchmark, etc. to keep working without modification.
+from src.backend.api.routes.benchmark import (  # noqa: E402
+    apply_benchmark_optimization,
+    create_demo_dataset,
+    delete_fpr_validation_run,
+    download_benchmark_csv,
+    download_benchmark_pdf,
+    export_benchmark_pdf,
+    get_benchmark_audit,
+    get_benchmark_datasets,
+    get_benchmark_history,
+    get_benchmark_job_status,
+    get_benchmark_presets,
+    get_benchmark_tools,
+    get_tool_radar_data,
+    list_fpr_validation_runs,
+    run_benchmark,
+    save_fpr_validation_run,
+    start_benchmark_job,
+)
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
@@ -5311,114 +5335,6 @@ async def update_retention_settings(request: Request):
         )
 
 
-@app.post("/api/admin/create-demo-dataset")
-async def create_demo_dataset(request: Request):
-    """Create a synthetic demo dataset for testing."""
-    current_user = _require_current_user(request, admin_only=False)
-
-    try:
-        data = await request.json()
-        dataset_name = data.get("name", "").strip()
-        description = data.get("description", "").strip()
-        language = data.get("language", "python")
-        num_files = min(max(int(data.get("numFiles", 10)), 5), 100)
-        similarity_type = data.get("similarityType", "plagiarism")
-
-        if not dataset_name:
-            raise HTTPException(status_code=400, detail="Dataset name is required")
-
-        # Validate language
-        supported_languages = ["python", "java", "javascript", "cpp"]
-        if language not in supported_languages:
-            language = "python"
-
-        # Create dataset directory
-        dataset_dir = BENCHMARK_DATA_DIR / f"demo_{dataset_name}_{int(time.time())}"
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate synthetic files
-        files_created = 0
-        original_dir = dataset_dir / "original"
-        plagiarized_dir = dataset_dir / "plagiarized"
-        original_dir.mkdir()
-        plagiarized_dir.mkdir()
-
-        # Create original files
-        file_extension = _language_file_extension(language)
-        for i in range(num_files):
-            filename = f"{i:02d}"
-            filepath = original_dir / f"{filename}{file_extension}"
-
-            # Generate synthetic code based on language
-            code_content = generate_synthetic_code(i, language, similarity_type)
-            filepath.write_text(code_content)
-            files_created += 1
-
-        # Create modified versions (plagiarized)
-        for i in range(num_files):
-            original_file = original_dir / f"{i:02d}{file_extension}"
-            plagiarized_file = plagiarized_dir / f"{i:02d}{file_extension}"
-
-            if original_file.exists():
-                content = original_file.read_text()
-
-                # Apply modifications based on similarity type
-                if similarity_type == "type1_exact":
-                    # No transformations - exact copy
-                    modified_content = content
-                elif similarity_type == "type2_renamed":
-                    # Apply renaming transformations
-                    modified_content = apply_renaming_transforms(content, language)
-                elif similarity_type == "type3_modified":
-                    # Apply structural modifications
-                    modified_content = apply_structural_transforms(content, language)
-                elif similarity_type == "type4_semantic":
-                    # Different algorithm but same functionality - already handled in generation
-                    modified_content = content
-                elif similarity_type == "token_similarity":
-                    # Focus on token patterns - minimal changes
-                    modified_content = apply_token_transforms(content, language)
-                elif similarity_type == "structural_similarity":
-                    # Code organization changes
-                    modified_content = apply_organization_transforms(content, language)
-                else:  # semantic_similarity or default
-                    # Conceptual changes
-                    modified_content = apply_semantic_transforms(content, language)
-
-                plagiarized_file.write_text(modified_content)
-                files_created += 1
-
-        # Create metadata
-        metadata = {
-            "name": dataset_name,
-            "description": description,
-            "language": language,
-            "files_created": files_created,
-            "original_files": num_files,
-            "plagiarized_files": num_files,
-            "similarity_type": similarity_type,
-            "created_by": current_user["email"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "dataset_path": str(dataset_dir.relative_to(BENCHMARK_DATA_DIR.parent)),
-            "pairs": num_files,
-        }
-
-        metadata_file = dataset_dir / "metadata.json"
-        metadata_file.write_text(json.dumps(metadata, indent=2))
-
-        return JSONResponse(
-            status_code=201,
-            content={
-                "message": f"Demo dataset '{dataset_name}' created successfully",
-                "dataset": metadata,
-                "files_created": files_created,
-                "dataset_path": str(dataset_dir),
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to create demo dataset: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create demo dataset: {e!s}")
 
 
 def generate_synthetic_code(index: int, language: str, similarity_type: str) -> str:
@@ -7217,7 +7133,7 @@ async def _run_analysis(
         report_summary = {
             "total_files": len(submissions),
             "total_pairs": len(results),
-            "suspicious_pairs": report["summary"].get("suspicious_pairs", 0),
+            "suspicious_pairs": report.get("summary", {}).get("suspicious_pairs", 0),
             "average_similarity": (
                 sum(r.score for r in results) / len(results) if results else 0.0
             ),
@@ -7319,7 +7235,7 @@ async def _run_analysis(
                     }
                     for r in results
                 ],
-                "summary": report["summary"],
+                "summary": report.get("summary", {}),
                 "selected_tool_ids": selected_tool_ids,
                 "selected_tools": _jobs[job_id].get("selected_tools", []),
                 "external_tool_results": external_tool_results,
@@ -7754,233 +7670,10 @@ async def delete_job(job_id: str, request: Request):
     return JSONResponse(content={"status": "deleted"})
 
 
-@app.get("/api/benchmark-tools")
-async def get_benchmark_tools():
-    tools = [tool for tool in _list_benchmark_tools() if tool["id"] in REAL_BENCHMARK_TOOL_IDS]
-    # Add 'available' field for frontend compatibility
-    for tool in tools:
-        tool["available"] = tool.get("runnable", False)
-    return JSONResponse(content={"tools": tools})
 
 
-@app.post("/api/benchmark/real-fpr")
-async def compute_real_fpr_on_clean_corpus(
-    files: list[UploadFile] = File(...),
-):
-    """
-    Compute real False Positive Rate on a set of known-clean submissions.
-    Used for professor-release validation of the plagiarism checker.
-    """
-    if len(files) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="At least 2 submissions are required to compute FPR.",
-        )
-
-    submissions: dict[str, str] = {}
-    for upload in files:
-        try:
-            content = (await upload.read()).decode("utf-8", errors="ignore")
-            if len(content.strip()) > 30:
-                submissions[upload.filename] = content
-        except Exception:
-            logger.debug("Skipping unreadable submission: %s", upload.filename, exc_info=True)
-            continue
-
-    if len(submissions) < 2:
-        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
-
-    try:
-        # Use very low threshold to capture full distribution
-        service = BatchDetectionService(threshold=0.0)
-        pair_results = service.compare_all_pairs(submissions)
-
-        scores = [float(r.score) for r in pair_results]
-        num_pairs = len(scores)
-        num_submissions = len(submissions)
-    except Exception as e:
-        logger.exception("Real FPR computation failed")
-        raise HTTPException(
-            status_code=500, detail=f"Internal error during FPR computation: {e!s}"
-        ) from e
-
-    # Very fine-grained thresholds focused on the critical professor decision zone
-    # Extra density between 0.65 – 0.78 (most common range where professors tune)
-    thresholds_to_evaluate = [
-        0.40,
-        0.45,
-        0.50,
-        0.52,
-        0.55,
-        0.58,
-        0.60,
-        0.62,
-        0.64,
-        0.65,
-        0.66,
-        0.67,
-        0.68,
-        0.69,
-        0.70,
-        0.71,
-        0.72,
-        0.73,
-        0.74,
-        0.75,
-        0.76,
-        0.77,
-        0.78,
-        0.80,
-        0.82,
-        0.85,
-        0.88,
-        0.90,
-        0.95,
-    ]
-
-    fpr_table = []
-    for t in thresholds_to_evaluate:
-        above = sum(1 for s in scores if s >= t)
-        fpr = above / num_pairs if num_pairs > 0 else 0.0
-
-        if fpr <= 0.015:
-            label = "Excellent – very safe"
-        elif fpr <= 0.03:
-            label = "Good – comfortable for most courses"
-        elif fpr <= 0.05:
-            label = "Acceptable – use with evidence review"
-        elif fpr <= 0.08:
-            label = "Borderline – caution recommended"
-        else:
-            label = "High risk – too many false positives"
-
-        fpr_table.append(
-            {
-                "threshold": round(t, 2),
-                "fpr": round(fpr, 4),
-                "fpr_percent": round(fpr * 100, 2),
-                "label": label,
-                "flagged_pairs": above,
-            }
-        )
-
-    # === Sophisticated Multi-Factor Recommendation Logic ===
-    # Find the most conservative "very safe" threshold (FPR ≤ 1.5%)
-    very_safe = next((row for row in fpr_table if row["fpr"] <= 0.015), None)
-    # Find the best balanced threshold (FPR ≤ 3%)
-    balanced = next((row for row in fpr_table if row["fpr"] <= 0.03), None)
-    # Find the highest recall threshold that is still acceptable (FPR ≤ 5%)
-    high_recall = next((row for row in fpr_table if row["fpr"] <= 0.05), None)
-
-    # Context from the clean corpus
-    mean_clean = sum(scores) / len(scores) if scores else 0
-    max_clean = max(scores) if scores else 0
-
-    recommendations = []
-
-    if very_safe:
-        recommendations.append(
-            {
-                "threshold": very_safe["threshold"],
-                "fpr": very_safe["fpr_percent"],
-                "type": "very_safe",
-                "title": "Maximum Safety",
-                "advice": f"At {very_safe['threshold']*100:.0f}% the FPR on your clean data is only {very_safe['fpr_percent']:.1f}%. This is the most conservative setting and minimizes risk of false accusations.",
-            }
-        )
-
-    if balanced:
-        recommendations.append(
-            {
-                "threshold": balanced["threshold"],
-                "fpr": balanced["fpr_percent"],
-                "type": "balanced",
-                "title": "Recommended Default",
-                "advice": f"At {balanced['threshold']*100:.0f}% you get a good balance (FPR ≈ {balanced['fpr_percent']:.1f}%). Strong choice for most undergraduate courses.",
-            }
-        )
-
-    if high_recall:
-        recommendations.append(
-            {
-                "threshold": high_recall["threshold"],
-                "fpr": high_recall["fpr_percent"],
-                "type": "high_recall",
-                "title": "Higher Detection (with review)",
-                "advice": f"At {high_recall['threshold']*100:.0f}% you catch more cases (FPR ≈ {high_recall['fpr_percent']:.1f}%). Best used when every flagged pair is manually reviewed.",
-            }
-        )
-
-    # Overall assessment
-    if mean_clean > 0.25:
-        overall_risk = "Your clean corpus shows unusually high baseline similarity. Consider stronger starter-code / template filtering."
-    elif max_clean > 0.65:
-        overall_risk = "Some very similar clean pairs exist. Review the highest-scoring clean pairs to understand why."
-    else:
-        overall_risk = (
-            "Your clean data looks healthy. The system behaves as expected on non-plagiarized work."
-        )
-
-    # Actionable suggestions
-    suggested_actions = []
-    if not very_safe or very_safe["fpr"] > 0.02:
-        suggested_actions.append("Raise the default decision threshold by 5–8 percentage points.")
-    if mean_clean > 0.20:
-        suggested_actions.append("Enable or improve starter-code / boilerplate suppression.")
-    if max_clean > 0.70:
-        suggested_actions.append(
-            "Manually review the top 5–10 clean pairs with the highest scores."
-        )
-    if not suggested_actions:
-        suggested_actions.append(
-            "Current settings appear well calibrated for your student population."
-        )
-
-    # Legacy single recommendation string (for backward compatibility)
-    best = balanced or very_safe or fpr_table[-1]
-    recommendation = (
-        f"Recommended starting threshold: {best['threshold']*100:.0f}% "
-        f"(FPR on your clean data ≈ {best['fpr_percent']:.1f}%). "
-        f"{overall_risk}"
-    )
-
-    # Basic histogram (10 bins)
-    bins = [0] * 10
-    for s in scores:
-        idx = min(int(s * 10), 9)
-        bins[idx] += 1
-
-    histogram = [{"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)]
-
-    return JSONResponse(
-        content={
-            "num_submissions": num_submissions,
-            "num_pairs": num_pairs,
-            "fpr_table": fpr_table,
-            "score_histogram": histogram,
-            "recommendation": recommendation,  # legacy string
-            "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
-            "max_score": round(max(scores), 4) if scores else 0,
-            # New structured data for better frontend experience
-            "recommendations": recommendations,
-            "overall_assessment": overall_risk,
-            "suggested_actions": suggested_actions,
-            # Key decision values captured at the time of the run
-            "recommended_threshold": (
-                balanced["threshold"] if balanced else fpr_table[-1]["threshold"]
-            ),
-            "fpr_at_recommended_threshold": (balanced["fpr"] if balanced else fpr_table[-1]["fpr"])
-            / 100.0,
-        }
-    )
 
 
-class FprValidationRunCreate(BaseModel):
-    """Request body for saving an FPR validation run (internal tool endpoint)."""
-
-    name: str | None = None
-    result: dict[str, Any]
-    notes: str | None = None
 
 
 # ============================================================
@@ -7988,160 +7681,12 @@ class FprValidationRunCreate(BaseModel):
 # ============================================================
 
 
-@app.post("/api/fpr-validation-runs")
-async def save_fpr_validation_run(
-    request: Request,
-    payload: FprValidationRunCreate,
-):
-    """Save a completed FPR validation run to the database."""
-    try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
-        user_id = current_user.get("id")
-
-        if not tenant_id:
-            raise HTTPException(status_code=400, detail="No tenant associated with user")
-
-        name = payload.name or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
-        result_data = payload.result
-
-        run = FprValidationRun(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-            payload=result_data,
-            num_submissions=result_data.get("num_submissions"),
-            num_pairs=result_data.get("num_pairs"),
-            mean_score=result_data.get("mean_score"),
-            max_score=result_data.get("max_score"),
-            recommended_threshold=result_data.get("recommended_threshold"),
-            fpr_at_recommended_threshold=result_data.get("fpr_at_recommended_threshold"),
-            notes=payload.notes,
-            status="completed",
-        )
-
-        with SessionLocal() as db:
-            db.add(run)
-            db.commit()
-            db.refresh(run)
-
-        return {"id": run.id, "name": run.name, "created_at": run.created_at}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to save FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/fpr-validation-runs")
-async def list_fpr_validation_runs(
-    request: Request,
-    limit: int = 50,
-):
-    """List historical FPR validation runs for the current tenant."""
-    try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
-
-        with SessionLocal() as db:
-            runs = (
-                db.query(FprValidationRun)
-                .filter(FprValidationRun.tenant_id == tenant_id)
-                .order_by(FprValidationRun.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-
-            return {
-                "runs": [
-                    {
-                        "id": r.id,
-                        "name": r.name,
-                        "created_at": r.created_at,
-                        "num_submissions": r.num_submissions,
-                        "num_pairs": r.num_pairs,
-                        "recommended_threshold": r.recommended_threshold,
-                        "fpr_at_recommended_threshold": r.fpr_at_recommended_threshold,
-                        "is_certified": r.is_certified,
-                        "status": r.status,
-                    }
-                    for r in runs
-                ]
-            }
-
-    except Exception as e:
-        logger.exception("Failed to list FPR validation runs")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/fpr-validation-runs/{run_id}")
-async def get_fpr_validation_run(run_id: str, request: Request):
-    """Retrieve a single saved FPR validation run."""
-    try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
-
-        with SessionLocal() as db:
-            run = (
-                db.query(FprValidationRun)
-                .filter(
-                    FprValidationRun.id == run_id,
-                    FprValidationRun.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not run:
-                raise HTTPException(status_code=404, detail="FPR validation run not found")
-
-            return {
-                "id": run.id,
-                "name": run.name,
-                "created_at": run.created_at,
-                "notes": run.notes,
-                "is_certified": run.is_certified,
-                "certified_at": run.certified_at,
-                "result": run.payload,
-            }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to fetch FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/fpr-validation-runs/{run_id}")
-async def delete_fpr_validation_run(run_id: str, request: Request):
-    """Delete a saved FPR validation run."""
-    try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
-
-        with SessionLocal() as db:
-            run = (
-                db.query(FprValidationRun)
-                .filter(
-                    FprValidationRun.id == run_id,
-                    FprValidationRun.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not run:
-                raise HTTPException(status_code=404, detail="FPR validation run not found")
-
-            db.delete(run)
-            db.commit()
-
-        return {"success": True}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to delete FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================
@@ -8376,70 +7921,8 @@ def _persist_benchmark_response(response: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
-@app.get("/api/benchmark-presets")
-async def get_benchmark_presets() -> dict[str, Any]:
-    """Return repeatable benchmark workflows for product optimization."""
-    available_tools = {
-        tool["id"]: tool
-        for tool in _list_benchmark_tools()
-        if tool["id"] in REAL_BENCHMARK_TOOL_IDS
-    }
-    datasets = {item.name for item in _iter_benchmark_dataset_roots()}
-    datasets.update(
-        dataset_id
-        for dataset_id in BUILTIN_PAIR_DATASET_IDS
-        if _builtin_pair_dataset_path(dataset_id).exists()
-    )
-    presets = []
-    for preset in BENCHMARK_WORKFLOW_PRESETS:
-        runnable_tools = [
-            tool_id
-            for tool_id in preset["tools"]
-            if available_tools.get(tool_id, {}).get("runnable")
-        ]
-        blocked_tools = [
-            {
-                "id": tool_id,
-                "status": available_tools.get(tool_id, {}).get("status", "Not installed"),
-            }
-            for tool_id in preset["tools"]
-            if tool_id not in runnable_tools
-        ]
-        presets.append(
-            {
-                **preset,
-                "runnable_tools": runnable_tools,
-                "blocked_tools": blocked_tools,
-                "dataset_ready": preset["dataset"] in datasets,
-            }
-        )
-    return {"presets": presets}
 
 
-@app.get("/api/benchmark-history")
-async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
-    """Return recent benchmark run summaries (file + DB for native persistence)."""
-    safe_limit = max(1, min(100, int(limit)))
-    runs = _read_benchmark_history()[:safe_limit]
-
-    # DB-backed benchmark runs (so benchmark/page.tsx can list/reload from DB)
-    try:
-        with SessionLocal() as db:
-            db_benchmarks = (
-                db.query(Job)
-                .filter(Job.settings.op("->>")("type") == "benchmark")
-                .order_by(Job.created_at.desc())
-                .limit(safe_limit)
-                .all()
-            )
-            for j in db_benchmarks:
-                s = (j.settings or {}).get("summary") or {}
-                if s and not any(r.get("job_id") == j.id for r in runs):
-                    runs.append(s)
-    except Exception:
-        logger.warning("Failed to load benchmark runs from DB")
-
-    return {"runs": runs[:safe_limit]}
 
 
 def _count_by(db: Any, model: Any, column: Any, ids: list[Any]) -> dict[Any, int]:
@@ -8772,37 +8255,6 @@ async def get_course_detail(course_id: str, request: Request) -> dict[str, Any]:
         }
 
 
-@app.get("/api/error-analysis")
-async def get_error_analysis() -> dict[str, Any]:
-    """Compute real error analysis from stored benchmark runs and job results.
-
-    Priority:
-    1. Most recent benchmark run with ground-truth labels → full TP/FP/FN/TN + real cases
-    2. All job results → score-distribution analysis with real file names and engine data
-    """
-    # ── 1. Try benchmark runs with ground truth ──────────────────────────
-    benchmark_runs = sorted(
-        BENCHMARK_RUNS_DIR.glob("*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-    labeled_run: dict[str, Any] | None = None
-    for run_path in benchmark_runs[:10]:  # check last 10 runs
-        try:
-            run = json.loads(run_path.read_text(encoding="utf-8"))
-            if run.get("has_ground_truth") and run.get("pair_results"):
-                labeled_run = run
-                break
-        except Exception:
-            logger.debug("Failed to load labeled run", exc_info=True)
-            continue
-
-    if labeled_run:
-        return _build_error_analysis_from_benchmark(labeled_run)
-
-    # ── 2. Fall back to job results ──────────────────────────────────────
-    return _build_error_analysis_from_jobs()
 
 
 def _build_error_analysis_from_benchmark(run: dict[str, Any]) -> dict[str, Any]:
@@ -9352,137 +8804,6 @@ def _empty_error_analysis() -> dict[str, Any]:
     }
 
 
-@app.get("/api/benchmark-datasets")
-async def get_benchmark_datasets() -> dict[str, Any]:
-    """Get available benchmark datasets by scanning data/datasets/ directory."""
-    datasets: list[dict[str, Any]] = []
-    dataset_icons: dict[str, str] = {
-        "demo": "🧪",
-        "poj104": "📚",
-        "codesearchnet": "🐍",
-        "codexglue": "☕",
-        "google": "🏆",
-        "bigclone": "🔄",
-        "kaggle": "📊",
-        "synthetic": "⚙️",
-        "ieee": "🎓",
-        "oscar": "🎭",
-        "xiangtan": "🏫",
-    }
-    dataset_colors: dict[str, str] = {
-        "demo": "purple",
-        "poj104": "blue",
-        "codesearchnet": "green",
-        "codexglue": "amber",
-        "google": "emerald",
-        "bigclone": "cyan",
-        "kaggle": "indigo",
-        "synthetic": "gray",
-        "ieee": "rose",
-        "oscar": "fuchsia",
-        "xiangtan": "sky",
-    }
-
-    for item in _iter_benchmark_dataset_roots():
-        dataset_id = item.name
-        metadata = _load_dataset_metadata(item)
-        dataset_info: dict[str, Any] = {}
-
-        if metadata.get("exclude_from_benchmark"):
-            continue
-
-        readiness = _build_benchmark_dataset_readiness(dataset_id, item)
-        if not readiness.get("runnable"):
-            logger.debug(
-                "Hiding benchmark dataset %s: %s",
-                dataset_id,
-                readiness.get("reason", "not runnable"),
-            )
-            continue
-
-        # Determine if this is a demo dataset
-        is_demo = dataset_id.startswith("demo_")
-        dataset_dir = _resolve_benchmark_dataset_dir(dataset_id) or item
-
-        if not is_demo and dataset_dir.name in {"train", "test", "validation"}:
-            dataset_info = _read_json_file(dataset_dir / "dataset_info.json")
-
-        # Infer icon and color based on dataset name
-        icon = dataset_icons.get("demo" if is_demo else "synthetic", "📦")
-        color = dataset_colors.get("demo" if is_demo else "gray", "slate")
-
-        # Try to find icon/color for known dataset types
-        for key, dataset_icon in dataset_icons.items():
-            if key in dataset_id.lower():
-                icon = dataset_icon
-                color = dataset_colors.get(key, "slate")
-                break
-
-        # Build dataset record
-        dataset_record: dict[str, Any] = {
-            "id": dataset_id,
-            "name": metadata.get("name", dataset_id.replace("_", " ").title()),
-            "desc": metadata.get("description", f"Dataset: {dataset_id}"),
-            "icon": icon,
-            "color": color,
-            "language": _infer_dataset_language(
-                dataset_id,
-                metadata,
-                dataset_info,
-                dataset_dir=dataset_dir,
-            ),
-            "size": _infer_dataset_size_label(dataset_dir, metadata, dataset_info, is_demo),
-            "created_by": metadata.get("created_by", "System"),
-            "created_at": metadata.get("created", metadata.get("created_at", "")),
-            "is_demo": is_demo,
-            "has_ground_truth": bool(readiness.get("runnable")),
-            "benchmark_availability": readiness,
-        }
-        benchmark_quality = _build_benchmark_quality_certificate(item)
-        if benchmark_quality:
-            dataset_record["benchmark_quality"] = benchmark_quality
-
-        # Add demo-specific fields if applicable
-        if is_demo:
-            dataset_record["files_created"] = metadata.get("files_created", 0)
-            dataset_record["similarity_type"] = metadata.get("similarity_type", "unknown")
-
-        datasets.append(dataset_record)
-
-    present_dataset_ids = {dataset["id"] for dataset in datasets}
-    for dataset_id in sorted(BUILTIN_PAIR_DATASET_IDS - present_dataset_ids):
-        metadata = _load_builtin_pair_dataset_metadata(dataset_id)
-        if not metadata:
-            continue
-        dataset_root = _resolve_benchmark_dataset_root(dataset_id)
-        readiness = _build_benchmark_dataset_readiness(dataset_id, dataset_root)
-        benchmark_quality = _build_benchmark_quality_certificate(dataset_root)
-        dataset_record = {
-            "id": dataset_id,
-            "name": metadata.get("name", dataset_id.replace("_", " ").title()),
-            "desc": metadata.get("description", f"Dataset: {dataset_id}"),
-            "icon": dataset_icons.get("synthetic", "📦"),
-            "color": dataset_colors.get("synthetic", "slate"),
-            "language": metadata.get("language", _dataset_default_language(dataset_id)),
-            "size": metadata.get(
-                "size",
-                (
-                    f"{benchmark_quality.get('pair_count', 0):,} labeled pairs"
-                    if benchmark_quality
-                    else "Built-in benchmark"
-                ),
-            ),
-            "created_by": metadata.get("created_by", "System"),
-            "created_at": metadata.get("created", metadata.get("created_at", "")),
-            "is_demo": False,
-            "has_ground_truth": _dataset_has_pair_ground_truth(dataset_id, dataset_root),
-            "benchmark_availability": readiness,
-        }
-        if benchmark_quality:
-            dataset_record["benchmark_quality"] = benchmark_quality
-        datasets.append(dataset_record)
-
-    return JSONResponse(content={"datasets": datasets})
 
 
 def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bool:
@@ -9508,417 +8829,13 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
     return False
 
 
-@app.post("/api/benchmark")
-async def run_benchmark(
-    request: Request,
-    files: list[UploadFile] = File(default=[]),
-    tools: list[str] = Form(default=[]),
-    dataset: str = Form(default=""),
-    benchmark_type: str = Form(default="tool_comparison"),
-    preset_id: str = Form(default=""),
-):
-    # User authentication is handled by middleware, user info is in request.state
-    selected_tools: list[str] = []
-    for tool in tools:
-        tool_id = str(tool).strip().lower()
-        if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
-            selected_tools.append(tool_id)
-    tools = selected_tools or ["integritydesk"]
-
-    job_id = str(uuid.uuid4())
-    job_dir = UPLOADS_DIR / f"bench_{job_id}"
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.info(f"[BENCHMARK {job_id}] Starting benchmark job")
-    logger.info(f"[BENCHMARK {job_id}] Requested tools: {', '.join(tools)}")
-    logger.info(f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}")
-    normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
-    benchmark_type = normalized_protocol["benchmark_type"]
-    protocol = normalized_protocol["protocol"]
-    threshold_policy = normalized_protocol["threshold_policy"]
-    optimization_objective = normalized_protocol["optimization_objective"]
-    report_type = normalized_protocol["report_type"]
-
-    if benchmark_type in {"pan_optimization", "regression_test"}:
-        dataset_root = BENCHMARK_DATA_DIR / dataset if dataset else None
-        has_labeled_ground_truth = bool(
-            dataset
-            and dataset != "custom"
-            and dataset_root
-            and _dataset_has_pair_ground_truth(dataset, dataset_root)
-        )
-        if not has_labeled_ground_truth:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": (
-                        "PAN metrics require labeled ground truth. Select a labeled "
-                        "demo/synthetic original-vs-plagiarized dataset or a PAN-style "
-                        "dataset with labels."
-                    )
-                },
-            )
-
-    submissions = {}
-    explicit_pairs: list[dict[str, Any]] = []
-    pair_sampling_audit: dict[str, Any] = {}
-
-    logger.info(f"[BENCHMARK {job_id}] Loading submissions")
-    if dataset and dataset != "custom":
-        logger.info(f"[BENCHMARK {job_id}] Loading dataset: {dataset}")
-        submissions, explicit_pairs = _load_pair_labeled_benchmark_dataset(dataset, job_dir)
-        if explicit_pairs:
-            explicit_pairs, pair_sampling_audit = _select_reliable_explicit_pairs(
-                dataset, explicit_pairs
-            )
-            selected_files = {str(pair.get("file_a", "")) for pair in explicit_pairs} | {
-                str(pair.get("file_b", "")) for pair in explicit_pairs
-            }
-            submissions = {
-                filename: content
-                for filename, content in submissions.items()
-                if filename in selected_files
-            }
-        if not submissions:
-            submissions = _load_benchmark_dataset(dataset, job_dir)
-    else:
-        logger.info(f"[BENCHMARK {job_id}] Processing {len(files)} uploaded files")
-        submissions = await _store_benchmark_uploads(files, job_dir)
-
-    logger.info(f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions successfully")
-    if pair_sampling_audit:
-        logger.info(
-            "[BENCHMARK %s] Pair sampling: %s selected from %s (%s)",
-            job_id,
-            pair_sampling_audit.get("selected", {}).get("total_pairs", 0),
-            pair_sampling_audit.get("original", {}).get("total_pairs", 0),
-            pair_sampling_audit.get("sampling_policy"),
-        )
-
-    if len(submissions) < 2:
-        shutil.rmtree(job_dir, ignore_errors=True)
-        return JSONResponse(status_code=400, content={"error": "At least 2 code files required"})
-
-    if explicit_pairs:
-        all_pairs = [
-            (str(pair["file_a"]), str(pair["file_b"]))
-            for pair in explicit_pairs
-            if pair.get("file_a") in submissions and pair.get("file_b") in submissions
-        ]
-    else:
-        file_list = list(submissions.keys())
-        all_pairs = [
-            (file_list[i], file_list[j])
-            for i in range(len(file_list))
-            for j in range(i + 1, len(file_list))
-        ]
-    logger.info(f"[BENCHMARK {job_id}] Generated {len(all_pairs)} comparison pairs")
-
-    tool_results = {}
-    tool_timings: dict[str, float] = {}
-
-    if "integritydesk" in tools:
-        logger.info(f"[BENCHMARK {job_id}] Running IntegrityDesk engine")
-        tool_started = time.perf_counter()
-        try:
-            # Optimize for benchmarks: disable embedding on CPU, keep it on GPU
-            import os
-
-            original_embedding_runtime = os.environ.get("EMBEDDING_RUNTIME")
-            should_disable_embedding = False
-
-            # Check if GPU is available
-            try:
-                import torch
-
-                has_gpu = torch.cuda.is_available()
-                if not has_gpu and settings.EMBEDDING_RUNTIME in (
-                    "local_unixcoder",
-                    "local",
-                    "unixcoder",
-                ):
-                    # CPU-only and using local model - disable for speed
-                    should_disable_embedding = True
-                    os.environ["EMBEDDING_RUNTIME"] = "none"
-                    logger.info("Benchmark: Disabled embedding engine (CPU-only mode)")
-            except ImportError:
-                # torch not available, assume CPU
-                if settings.EMBEDDING_RUNTIME in (
-                    "local_unixcoder",
-                    "local",
-                    "unixcoder",
-                ):
-                    should_disable_embedding = True
-                    os.environ["EMBEDDING_RUNTIME"] = "none"
-                    logger.info("Benchmark: Disabled embedding engine (no GPU detected)")
-
-            service = BatchDetectionService(threshold=0.3)
-            logger.info(
-                f"[BENCHMARK {job_id}] Starting IntegrityDesk all-pairs comparison on {len(submissions)} files"
-            )
-            if explicit_pairs:
-                results = service.compare_pairs(submissions, explicit_pairs)
-            else:
-                results = service.compare_all_pairs(submissions)
-            logger.info(
-                f"[BENCHMARK {job_id}] IntegrityDesk completed successfully, got {len(results)} results"
-            )
-            tool_results["integritydesk"] = {
-                "pairs": [
-                    {
-                        "file_a": r.file_a,
-                        "file_b": r.file_b,
-                        "score": round(r.score, 3),
-                        "features": {k: round(v, 3) for k, v in r.features.items()},
-                        "contributions": {k: round(v, 3) for k, v in r.contributions.items()},
-                    }
-                    for r in results
-                ]
-            }
-
-            # Restore original setting
-            if should_disable_embedding:
-                if original_embedding_runtime:
-                    os.environ["EMBEDDING_RUNTIME"] = original_embedding_runtime
-                elif "EMBEDDING_RUNTIME" in os.environ:
-                    del os.environ["EMBEDDING_RUNTIME"]
-        except Exception as e:
-            logger.exception("IntegrityDesk benchmark failed")
-            tool_results["integritydesk"] = {"error": str(e)}
-        finally:
-            tool_timings["integritydesk"] = time.perf_counter() - tool_started
-
-    total_tools = len([t for t in tools if t != "integritydesk"])
-    current_tool_idx = 1
-    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
-
-    external_tool_runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
-    for tool in tools:
-        if tool == "integritydesk":
-            continue
-        logger.info(f"[BENCHMARK {job_id}] Running tool {current_tool_idx}/{total_tools}: {tool}")
-        current_tool_idx += 1
-        tool_started = time.perf_counter()
-        try:
-            score_data = external_tool_runner.run_tool(tool, submissions, all_pairs)
-            if score_data:
-                tool_results[tool] = score_data
-            else:
-                tool_results[tool] = {"error": f"{tool} not available"}
-        except Exception as e:
-            logger.exception(f"{tool} benchmark failed")
-            tool_results[tool] = {"error": str(e)}
-        finally:
-            tool_timings[tool] = time.perf_counter() - tool_started
-
-    explicit_pair_labels = {
-        frozenset((str(pair.get("file_a", "")), str(pair.get("file_b", "")))): int(
-            pair.get("label", 0)
-        )
-        for pair in explicit_pairs
-    }
-    pair_results = []
-    for fa, fb in all_pairs:
-        entry = {
-            "file_a": fa,
-            "file_b": fb,
-            "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
-            "tool_results": [],
-        }
-        label_key = frozenset((fa, fb))
-        if label_key in explicit_pair_labels:
-            entry["ground_truth_label"] = explicit_pair_labels[label_key]
-        for tool_name, tool_data in tool_results.items():
-            if "pairs" in tool_data:
-                for p in tool_data["pairs"]:
-                    if (p["file_a"] == fa and p["file_b"] == fb) or (
-                        p["file_a"] == fb and p["file_b"] == fa
-                    ):
-                        entry["tool_results"].append(
-                            {
-                                "tool": tool_name,
-                                "score": p["score"],
-                                "features": p.get("features", {}),
-                                "contributions": p.get("contributions", {}),
-                            }
-                        )
-        pair_results.append(entry)
-
-    # Build ground truth labels for built-in datasets
-    ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
-
-    # Compute evaluation metrics per tool
-    evaluation_results = {}
-
-    if ground_truth_labels:
-        for tool_name, tool_data in tool_results.items():
-            if "pairs" not in tool_data:
-                continue
-
-            scores = []
-            labels = []
-
-            for entry in pair_results:
-                fa, fb = entry["file_a"], entry["file_b"]
-                for tr in entry["tool_results"]:
-                    if tr["tool"] == tool_name:
-                        scores.append(tr["score"])
-                        # Find matching ground truth
-                        idx = next(
-                            (
-                                i
-                                for i, p in enumerate(pair_results)
-                                if p["file_a"] == fa and p["file_b"] == fb
-                            ),
-                            -1,
-                        )
-                        if idx >= 0 and idx < len(ground_truth_labels):
-                            labels.append(ground_truth_labels[idx])
-                        break
-
-            if scores and labels:
-                # Compute metrics
-                metrics = _compute_evaluation_metrics(
-                    scores,
-                    labels,
-                    tool_name,
-                    dataset or "custom",
-                    tool_timings.get(tool_name, 0.0),
-                    _compute_engine_contribution(tool_data.get("pairs", [])),
-                    threshold_strategy=(
-                        "fixed_threshold"
-                        if benchmark_type == "regression_test"
-                        else "calibration_holdout"
-                    ),
-                )
-                evaluation_results[tool_name] = metrics
-
-    # Simple summary for non-labeled datasets
-    id_avg = sum(
-        (p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])), 0
-    ) / max(1, len(tool_results.get("integritydesk", {}).get("pairs", [])))
-    comp_scores = [
-        p["score"]
-        for t, d in tool_results.items()
-        if t != "integritydesk" and "pairs" in d
-        for p in d["pairs"]
-    ]
-    comp_avg = sum(comp_scores) / len(comp_scores) if comp_scores else 0
-    benchmark_quality = (
-        _build_benchmark_quality_certificate(BENCHMARK_DATA_DIR / dataset)
-        if dataset and dataset != "custom"
-        else None
-    )
-
-    shutil.rmtree(job_dir, ignore_errors=True)
-
-    response = {
-        "job_id": job_id,
-        "preset_id": preset_id,
-        "preset_name": next(
-            (preset["name"] for preset in BENCHMARK_WORKFLOW_PRESETS if preset["id"] == preset_id),
-            "",
-        ),
-        "requested_tools": tools,
-        "tool_scores": {
-            k: {
-                "pairs": len(v.get("pairs", [])),
-                "error": v.get("error"),
-                "score_source": (
-                    "built_in_integritydesk"
-                    if k == "integritydesk"
-                    else ("real_cli" if "error" not in v else "unavailable")
-                ),
-                "runtime_seconds": round(tool_timings.get(k, 0.0), 4),
-                "avg_runtime_seconds": round(
-                    tool_timings.get(k, 0.0) / max(1, len(v.get("pairs", []))), 6
-                ),
-            }
-            for k, v in tool_results.items()
-        },
-        "pair_results": pair_results,
-        "summary": {
-            "pairs_tested": len(pair_results),
-            "tools_compared": len([t for t in tool_results if "error" not in tool_results[t]]),
-            "accuracy": {
-                "integritydesk": round(id_avg, 4),
-                "best_competitor": round(comp_avg, 4),
-            },
-            "accuracy_basis": "mean_similarity_score_not_classification_accuracy",
-            "score_summary": {
-                "integritydesk_mean_similarity": round(id_avg, 4),
-                "competitor_mean_similarity": round(comp_avg, 4),
-            },
-            "dataset_name": dataset or "custom",
-            "dataset_size": len(submissions),
-            "positive_pairs": int(sum(1 for label in ground_truth_labels if label >= 2)),
-            "negative_pairs": int(sum(1 for label in ground_truth_labels if label < 2)),
-            "optimization_trials": 17,
-            "cross_validation_folds": 1,
-            "optimization_method": "Threshold sweep over 17 cutoffs, maximizing F1; PlagDet reported as primary PAN score",
-        },
-        "benchmark_type": benchmark_type,
-        "protocol": protocol,
-        "threshold_policy": threshold_policy,
-        "optimization_objective": optimization_objective,
-        "report_type": report_type,
-        "benchmark_goal": (
-            "admin_pan_optimization"
-            if benchmark_type == "pan_optimization"
-            else (
-                "locked_regression_test"
-                if benchmark_type == "regression_test"
-                else "professor_tool_comparison"
-            )
-        ),
-        "has_ground_truth": bool(ground_truth_labels),
-    }
-    if pair_sampling_audit:
-        response["pair_sampling_audit"] = pair_sampling_audit
-    if benchmark_quality:
-        response["benchmark_quality"] = benchmark_quality
-
-    # Add evaluation metrics if available
-    if evaluation_results:
-        response["evaluation"] = evaluation_results
-        response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
-        response["benchmark_trust"] = (
-            evaluation_results.get("integritydesk") or next(iter(evaluation_results.values()), {})
-        ).get("benchmark_trust", {})
-        if benchmark_type == "regression_test":
-            response["quality_gates"] = _build_regression_quality_gates(
-                evaluation_results.get("integritydesk") or {}
-            )
-
-    response = _persist_benchmark_response(response)
-    return JSONResponse(content=response)
 
 
-@app.post("/api/benchmark/stream")
-async def stream_benchmark(
-    request: Request,
-    files: list[UploadFile] = File(default=[]),
-    tools: list[str] = Form(default=[]),
-    dataset: str = Form(default=""),
-    benchmark_type: str = Form(default="tool_comparison"),
-    preset_id: str = Form(default=""),
-):
-    """Delegate to the real benchmark endpoint (streaming was replaced with direct JSON)."""
-    return await run_benchmark(
-        request=request,
-        files=files,
-        tools=tools,
-        dataset=dataset,
-        benchmark_type=benchmark_type,
-        preset_id=preset_id,
-    )
 
 
 # ── Background benchmark job store ────────────────────────────────────────
 BENCHMARK_JOBS: dict[str, dict[str, Any]] = {}
 BENCHMARK_JOBS_LOCK = threading.Lock()
-
 
 def _benchmark_job_set(job_id: str, updates: dict[str, Any]) -> None:
     """Thread-safe update of a benchmark job record."""
@@ -10299,86 +9216,10 @@ def _run_benchmark_background(
         _benchmark_job_set(job_id, {"status": "error", "error": str(exc)})
 
 
-@app.post("/api/benchmark/start")
-async def start_benchmark_job(
-    request: Request,
-    files: list[UploadFile] = File(default=[]),
-    tools: list[str] = Form(default=[]),
-    dataset: str = Form(default=""),
-    benchmark_type: str = Form(default="tool_comparison"),
-    preset_id: str = Form(default=""),
-):
-    """Start a benchmark in the background and return a job_id immediately."""
-    job_id = str(uuid.uuid4())
-
-    # Read file bytes now, before the request context closes
-    file_bytes: list[tuple] = []
-    for f in files:
-        if f.filename:
-            content = await f.read()
-            file_bytes.append((f.filename, content))
-
-    tool_list = list(tools)  # copy from form data
-
-    _benchmark_job_set(job_id, {"status": "queued", "progress": []})
-
-    t = threading.Thread(
-        target=_run_benchmark_background,
-        args=(job_id, tool_list, dataset, benchmark_type, preset_id, file_bytes),
-        daemon=True,
-    )
-    t.start()
-
-    return JSONResponse(content={"job_id": job_id, "status": "queued"})
 
 
-@app.get("/api/benchmark/status/{job_id}")
-async def get_benchmark_job_status(job_id: str):
-    """Poll the status and progress of a background benchmark job."""
-    with BENCHMARK_JOBS_LOCK:
-        job = BENCHMARK_JOBS.get(job_id)
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Benchmark job not found")
-
-    return JSONResponse(
-        content={
-            "job_id": job_id,
-            "status": job.get("status", "unknown"),
-            "progress": job.get("progress", []),
-            "result": job.get("result") if job.get("status") == "done" else None,
-            "error": job.get("error") if job.get("status") == "error" else None,
-        }
-    )
 
 
-@app.post("/api/benchmark/apply-optimization")
-async def apply_benchmark_optimization(request: Request) -> dict[str, Any]:
-    """Apply proposed benchmark optimization changes to engine_weights.yaml."""
-    _require_current_user(request, admin_only=False)
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Invalid optimization payload")
-
-    changes = payload.get("config_changes")
-    if not isinstance(changes, list) or not changes:
-        raise HTTPException(status_code=400, detail="No optimization changes provided")
-
-    from src.backend.engines.scoring.fusion_engine import (
-        load_engine_config,
-        save_engine_config,
-    )
-
-    current_config = load_engine_config()
-    applied = _apply_engine_optimization_changes(current_config, changes)
-    save_engine_config(applied["config"])
-
-    return {
-        "success": True,
-        "message": "Proposed optimization applied to engine_weights.yaml",
-        "config_file": "src/backend/engines/engine_weights.yaml",
-        "applied_changes": applied["applied_changes"],
-    }
 
 
 def _get_ground_truth_labels(dataset: str, pair_results: list[dict[str, Any]]) -> list[int]:
@@ -13065,114 +11906,8 @@ async def download_ai_originality_pdf(job_id: str, request: Request):
     return response
 
 
-@app.get("/benchmark/{job_id}/download-csv")
-async def download_benchmark_csv(job_id: str):
-    job = _get_job(job_id)
-    if not job or "pair_results" not in job:
-        raise HTTPException(status_code=404, detail="Benchmark results not found")
-
-    import csv
-    from io import StringIO
-
-    si = StringIO()
-    writer = csv.writer(si)
-
-    # Headers
-    headers = ["Pair 1", "Pair 2", "Label"]
-    if job["pair_results"] and job["pair_results"][0].get("tool_results"):
-        for tool in [t["tool"] for t in job["pair_results"][0]["tool_results"]]:
-            headers.append(f"{tool} Score")
-    writer.writerow(headers)
-
-    # Rows
-    for pair in job["pair_results"]:
-        row = [pair["file_a"], pair["file_b"], pair["label"]]
-        for tool_result in pair["tool_results"]:
-            row.append(f"{tool_result['score']:.3f}")
-        writer.writerow(row)
-
-    response = Response(content=si.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = f"attachment; filename=benchmark_results_{job_id}.csv"
-    return response
 
 
-@app.get("/benchmark/{job_id}/download-pdf")
-async def download_benchmark_pdf(job_id: str):
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Benchmark job not found")
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Benchmark Results {job_id}</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 20px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background: #f5f5f5; font-weight: 600; }}
-            h1 {{ font-size: 18px; margin-bottom: 10px; }}
-            .meta {{ color: #666; font-size: 12px; margin-bottom: 20px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Benchmark Results</h1>
-        <div class="meta">
-            Job ID: {job_id}<br>
-            Generated: {datetime.now().isoformat()}
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Pair 1</th>
-                    <th>Pair 2</th>
-                    <th>Tool</th>
-                    <th>Score</th>
-                </tr>
-            </thead>
-            <tbody>
-    """
-
-    for pair in job.get("pair_results", []):
-        for tr in pair.get("tool_results", []):
-            html_content += f"""
-            <tr>
-                <td>{pair['file_a']}</td>
-                <td>{pair['file_b']}</td>
-                <td>{tr['tool']}</td>
-                <td>{tr['score']:.3f}</td>
-            </tr>
-            """
-
-    html_content += """
-            </tbody>
-        </table>
-    </body>
-    </html>
-    """
-
-    try:
-        import weasyprint
-
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-        response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
-        return response
-    except ImportError:
-        return Response(
-            content=html_content,
-            media_type="text/html",
-            headers={"Content-Disposition": f"attachment; filename=benchmark_{job_id}.html"},
-        )
-    except Exception as exc:
-        logger.warning("Benchmark PDF export fell back to minimal PDF for %s: %s", job_id, exc)
-        response = Response(
-            content=_minimal_pdf_bytes(f"Benchmark {job_id}"),
-            media_type="application/pdf",
-        )
-        response.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
-        return response
 
 
 def _pdf_escape(value: Any) -> str:
@@ -14751,349 +13486,8 @@ def _simple_text_pdf_bytes(title: str, lines: list[str]) -> bytes:
     return bytes(output)
 
 
-@app.post("/api/benchmark/export-pdf")
-async def export_benchmark_pdf(request: Request):
-    payload = await request.json()
-    dataset_name = (
-        payload.get("datasetName")
-        or (payload.get("summary") or {}).get("dataset_name")
-        or "Benchmark"
-    )
-
-    # Check if detailed scorecard is requested
-    if payload.get("format") == "detailed_scorecard":
-        scorecard = _build_detailed_evaluation_scorecard(payload)
-        pdf = _generate_detailed_scorecard_pdf(scorecard)
-    else:
-        # Use legacy format
-        report_lines = _build_benchmark_report_lines(payload)
-        pdf = _simple_text_pdf_bytes(f"{dataset_name} Benchmark Report", report_lines)
-
-    response = Response(content=pdf, media_type="application/pdf")
-    response.headers["Content-Disposition"] = (
-        "attachment; filename=benchmark_evaluation_scorecard.pdf"
-    )
-    return response
-
-    pair_results = payload.get("pair_results") or []
-    summary = payload.get("summary") or {}
-    dataset_name = payload.get("datasetName") or "Benchmark"
-    generated_at = payload.get("runAt") or datetime.now().isoformat()
-    benchmark_type = payload.get("benchmark_type") or payload.get("benchmarkMode")
-    evaluation = payload.get("evaluation") or {}
-
-    if benchmark_type == "pan_optimization" and evaluation:
-        import html
-
-        metric_source = evaluation.get("integritydesk")
-        if not metric_source:
-            metric_source = next(
-                (
-                    metrics
-                    for metrics in evaluation.values()
-                    if metrics and not metrics.get("error")
-                ),
-                {},
-            )
-
-        def metric_value(name: str, fallback: float = 0.0) -> float:
-            """Read a numeric metric from the selected PAN result."""
-            value = metric_source.get(name, fallback) if metric_source else fallback
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return fallback
-
-        metrics = [
-            (
-                "PlagDet",
-                metric_value("plagdet"),
-                "Primary PAN score; combines detection quality with granularity penalty.",
-                "Optimize threshold and fusion weights against PlagDet directly.",
-            ),
-            (
-                "Precision",
-                metric_value("precision"),
-                "Low precision means clean pairs are being flagged as plagiarism.",
-                "Raise decision threshold and require stronger multi-engine agreement.",
-            ),
-            (
-                "Recall",
-                metric_value("recall"),
-                "Low recall means known plagiarism pairs are being missed.",
-                "Widen candidate retrieval and strengthen renamed/structural clone handling.",
-            ),
-            (
-                "F1 Score",
-                metric_value("f1_score", metric_value("best_f1")),
-                "Balances precision and recall for the selected operating threshold.",
-                "Run threshold sweeps and keep the point that maximizes F1 and PlagDet.",
-            ),
-            (
-                "Granularity",
-                metric_value("granularity", 1.0),
-                "Values above 1 mean detections are split into too many fragments.",
-                "Merge adjacent or overlapping evidence for the same pair.",
-            ),
-            (
-                "AUC-PR",
-                metric_value("auc_pr", metric_value("pr_auc")),
-                "Measures whether true plagiarism ranks above negative pairs.",
-                "Tune fusion weights with PR-AUC as an objective and add harder negatives.",
-            ),
-            (
-                "False Positive Rate",
-                metric_value("false_positive_rate"),
-                "High FPR creates noisy admin feedback and weakens reviewer trust.",
-                "Add boilerplate/template suppression and stricter negative filters.",
-            ),
-            (
-                "Top-10 Retrieval",
-                metric_value("top_10_retrieval"),
-                "Measures how cleanly true positives appear in the first ranked candidates.",
-                "Tune retrieval with precision@10 and rerank using token/AST/winnowing evidence.",
-            ),
-            (
-                "Avg Runtime",
-                metric_value("avg_runtime_seconds"),
-                "Slow runtime makes iterative optimization and larger datasets expensive.",
-                "Cache parsing and run heavy engines only on shortlisted candidates.",
-            ),
-        ]
-
-        rows = ""
-        for name, value, why, action in metrics:
-            display = f"{value:.3f}s" if name == "Avg Runtime" else f"{value * 100:.1f}%"
-            if name == "Granularity":
-                display = f"{value:.3f}"
-            rows += f"""
-                <tr>
-                    <td>{html.escape(name)}</td>
-                    <td><strong>{html.escape(display)}</strong></td>
-                    <td>{html.escape(why)}</td>
-                    <td>{html.escape(action)}</td>
-                </tr>
-            """
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>{html.escape(dataset_name)} PAN Optimization Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }}
-                h1 {{ font-size: 24px; margin-bottom: 8px; }}
-                p {{ color: #475569; font-size: 13px; line-height: 1.6; }}
-                .meta {{ color: #64748b; font-size: 12px; margin-bottom: 20px; }}
-                .context {{ border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; padding: 14px 16px; margin-bottom: 20px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
-                th, td {{ border: 1px solid #e2e8f0; padding: 9px 10px; text-align: left; vertical-align: top; }}
-                th {{ background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }}
-                td {{ font-size: 12px; line-height: 1.5; }}
-            </style>
-        </head>
-        <body>
-            <h1>{html.escape(dataset_name)} PAN Optimization Report</h1>
-            <div class="meta">Generated: {html.escape(str(generated_at))}</div>
-            <div class="context">
-                <p><strong>Dataset:</strong> {html.escape(str(summary.get("dataset_name", dataset_name)))} · {int(summary.get("dataset_size", 0) or 0)} submissions · {int(summary.get("positive_pairs", 0) or 0)} plagiarized pairs</p>
-                <p><strong>Purpose:</strong> Track PAN-style scores so source-code changes can improve detection accuracy with measurable feedback.</p>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-                        <th>Score</th>
-                        <th>Why It Matters</th>
-                        <th>Next Action</th>
-                    </tr>
-                </thead>
-                <tbody>{rows}</tbody>
-            </table>
-        </body>
-        </html>
-        """
-
-        try:
-            import weasyprint
-
-            pdf = weasyprint.HTML(string=html_content).write_pdf()
-            response = Response(content=pdf, media_type="application/pdf")
-            response.headers["Content-Disposition"] = (
-                "attachment; filename=pan_optimization_report.pdf"
-            )
-            return response
-        except ImportError:
-            return Response(
-                content=html_content,
-                media_type="text/html",
-                headers={
-                    "Content-Disposition": "attachment; filename=pan_optimization_report.html"
-                },
-            )
-        except Exception as exc:
-            logger.warning("PAN PDF export fell back to minimal PDF: %s", exc)
-            response = Response(
-                content=_minimal_pdf_bytes(f"{dataset_name} PAN Optimization Report"),
-                media_type="application/pdf",
-            )
-            response.headers["Content-Disposition"] = (
-                "attachment; filename=pan_optimization_report.pdf"
-            )
-            return response
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>{dataset_name} Benchmark Report</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }}
-            h1 {{ font-size: 24px; margin-bottom: 8px; }}
-            h2 {{ font-size: 16px; margin: 28px 0 10px; }}
-            p {{ margin: 0; }}
-            .meta {{ color: #64748b; font-size: 12px; margin-bottom: 24px; }}
-            .summary {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }}
-            .card {{ border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; min-width: 160px; }}
-            .label {{ color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }}
-            .value {{ font-size: 24px; font-weight: 700; margin-top: 6px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
-            th, td {{ border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }}
-            th {{ background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }}
-            td {{ font-size: 12px; }}
-            .tool-chip {{ display: inline-block; border-radius: 999px; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; font-size: 11px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }}
-        </style>
-    </head>
-    <body>
-        <h1>{dataset_name} Benchmark Report</h1>
-        <div class="meta">Generated: {generated_at}</div>
-        <div class="summary">
-            <div class="card">
-                <div class="label">Tools Run</div>
-                <div class="value">{summary.get("tools_compared", 0)}</div>
-            </div>
-            <div class="card">
-                <div class="label">Pairs Tested</div>
-                <div class="value">{summary.get("pairs_tested", len(pair_results))}</div>
-            </div>
-            <div class="card">
-                <div class="label">IntegrityDesk Avg</div>
-                <div class="value">{round(float((summary.get("accuracy") or {}).get("integritydesk") or 0) * 100, 1)}%</div>
-            </div>
-            <div class="card">
-                <div class="label">Best Competitor Avg</div>
-                <div class="value">{round(float((summary.get("accuracy") or {}).get("best_competitor") or 0) * 100, 1)}%</div>
-            </div>
-        </div>
-
-        <h2>Pair Results</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Pair</th>
-                    <th>Files</th>
-                    <th>Tool Scores</th>
-                </tr>
-            </thead>
-            <tbody>
-    """
-
-    for pair in pair_results:
-        tool_scores = "".join(
-            f'<span class="tool-chip">{tr.get("tool", "tool")}: {round(float(tr.get("score", 0)) * 100, 1)}%</span>'
-            for tr in (pair.get("tool_results") or [])
-        )
-        html_content += f"""
-            <tr>
-                <td>{pair.get('label', 'Pair')}</td>
-                <td>{pair.get('file_a', '')}<br>{pair.get('file_b', '')}</td>
-                <td>{tool_scores or 'No scores available'}</td>
-            </tr>
-        """
-
-    html_content += """
-            </tbody>
-        </table>
-    </body>
-    </html>
-    """
-
-    try:
-        import weasyprint
-
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-        response = Response(content=pdf, media_type="application/pdf")
-        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
-        return response
-    except ImportError:
-        return Response(
-            content=html_content,
-            media_type="text/html",
-            headers={"Content-Disposition": "attachment; filename=benchmark_report.html"},
-        )
-    except Exception as exc:
-        logger.warning("Benchmark PDF export fell back to minimal PDF: %s", exc)
-        response = Response(
-            content=_minimal_pdf_bytes(f"{dataset_name} Benchmark Report"),
-            media_type="application/pdf",
-        )
-        response.headers["Content-Disposition"] = "attachment; filename=benchmark_report.pdf"
-        return response
 
 
-@app.get("/benchmark/{job_id}/radar")
-async def get_tool_radar_data(job_id: str):
-    job = _get_job(job_id)
-    if not job or "pair_results" not in job:
-        raise HTTPException(status_code=404, detail="Benchmark results not found")
-
-    pair_results = job["pair_results"]
-    tools = set()
-    for pair in pair_results:
-        for tr in pair["tool_results"]:
-            tools.add(tr["tool"])
-
-    axes = [
-        {"id": "classic_plagiarism", "name": "Copy+Rename", "axis": 0},
-        {"id": "near_miss", "name": "Refactored", "axis": 1},
-        {"id": "obfuscated", "name": "Obfuscated", "axis": 2},
-        {"id": "semantic", "name": "LLM Rewritten", "axis": 3},
-        {"id": "speed", "name": "Performance", "axis": 4},
-        {"id": "scalability", "name": "Scalability", "axis": 5},
-    ]
-
-    tool_scores = {}
-    for tool in tools:
-        scores = [0.0, 0.0, 0.0, 0.0, 0.65, 0.70]
-
-        # Calculate actual scores from benchmark data
-        all_scores = []
-        for pair in pair_results:
-            for tr in pair["tool_results"]:
-                if tr["tool"] == tool:
-                    all_scores.append(tr["score"])
-
-        if all_scores:
-            scores[0] = max(all_scores)
-            scores[1] = sorted(all_scores)[len(all_scores) // 2]
-            scores[2] = min(all_scores)
-            scores[3] = sum(s for s in all_scores if 0.3 < s < 0.7) / max(
-                1, sum(1 for s in all_scores if 0.3 < s < 0.7)
-            )
-
-        tool_scores[tool] = scores
-
-    return JSONResponse(
-        content={
-            "axes": axes,
-            "tool_scores": tool_scores,
-            "metadata": {
-                "job_id": job_id,
-                "pairs_analyzed": len(pair_results),
-                "generated_at": datetime.now().isoformat(),
-            },
-        }
-    )
 
 
 def _extract_student_info(filename):
@@ -15132,7 +13526,146 @@ def _render_code_table(code, max_lines=80):
     return f'<div class="code-scroll"><table class="code-table">{"".join(rows)}</table></div>'
 
 
+def _build_mode_features(mode_name: str, mode_version: str, preprocessing, evidence_surfaces) -> str:
+    """Build a plain-language description of what the assignment mode means."""
+    preprocessing_note = ""
+    if preprocessing and isinstance(preprocessing, (list, tuple)):
+        prep_items = []
+        for p in preprocessing[:3]:
+            try:
+                prep_items.append(str(p).replace("_", " ").title())
+            except Exception:
+                prep_items.append(str(p))
+        if prep_items:
+            preprocessing_note = f"<div class='mode-feature'><strong>Preprocessing:</strong> {', '.join(prep_items)}</div>"
+
+    evidence_note = ""
+    if evidence_surfaces and isinstance(evidence_surfaces, (list, tuple)):
+        evidence_items = []
+        for e in evidence_surfaces[:4]:
+            try:
+                evidence_items.append(str(e).replace("_", " ").title())
+            except Exception:
+                evidence_items.append(str(e))
+        if evidence_items:
+            evidence_note = f"<div class='mode-feature'><strong>Evidence Surfaces:</strong> Includes {', '.join(evidence_items)}</div>"
+
+    return f"""
+<div class='mode-features'>
+{preprocessing_note}
+{evidence_note}
+<div class='mode-feature'><strong>What this means:</strong> This mode adjusts sensitivity for beginner-level assignments where legitimate code convergence is common (e.g., standard algorithms, starter code patterns). Boilerplate tolerance is higher, and AST-based matching is weighted appropriately for simple programs.</div>
+</div>"""
+
+
+def _build_top_case_row(comparison, student_info: dict, index: int) -> str:
+    """Build a row for the top cases table with plain-language drivers."""
+    file_a = getattr(comparison, 'file_a', None)
+    file_a = file_a if file_a else 'unknown'
+    file_b = getattr(comparison, 'file_b', None)
+    file_b = file_b if file_b else 'unknown'
+    ia = student_info.get(file_a, {"name": file_a, "id": "N/A"})
+    ib = student_info.get(file_b, {"name": file_b, "id": "N/A"})
+
+    # Determine main drivers from features
+    features = getattr(comparison, 'features', None)
+    if features and isinstance(features, dict):
+        try:
+            def _safe_score(item):
+                try:
+                    return -float(item[1])
+                except (TypeError, ValueError):
+                    return 0.0
+            sorted_features = sorted(features.items(), key=_safe_score)
+            top_drivers = [(k, v) for k, v in sorted_features[:3] if isinstance(v, (int, float))]
+            driver_labels = {
+                "token_similarity": "Token match",
+                "ast_similarity": "AST/structure match",
+                "winnowing_similarity": "Fingerprint match",
+                "gst_similarity": "Algorithmic pattern match",
+                "semantic_similarity": "Semantic match",
+                "web_similarity": "Web/source match",
+                "ai_probability": "AI-text signal",
+                "cfg_similarity": "CFG/execution match",
+            }
+            driver_text = "; ".join(
+                f"{driver_labels.get(k, str(k).replace('_', ' ').title())} ({v:.0%})"
+                for k, v in top_drivers
+                if isinstance(v, (int, float)) and v >= 0.3
+            ) or "Multiple signals detected"
+        except (TypeError, ValueError, AttributeError):
+            driver_text = "See detailed evidence below"
+    else:
+        driver_text = "See detailed evidence below"
+
+    # Recommended action
+    score = getattr(comparison, 'score', 0.0)
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        score = 0.0
+
+    if score >= 0.9:
+        action = "<span class='action-critical'>Critical — immediate review</span>"
+    elif score >= 0.75:
+        action = "<span class='action-high'>High priority — schedule meeting</span>"
+    elif score >= 0.65:
+        action = "<span class='action-medium'>Manual review recommended</span>"
+    else:
+        action = "<span class='action-low'>Low priority — monitor</span>"
+
+    score_color = "#dc3545" if score >= 0.9 else "#fd7e14" if score >= 0.75 else "#ffc107"
+
+    return f"""<tr>
+<td><strong>{file_a}</strong><br>{ia['name']}<br>vs<br><strong>{file_b}</strong><br>{ib['name']}</td>
+<td style="color:{score_color};font-weight:700;text-align:center">{(score*100):.1f}%</td>
+<td style="font-size:12px">{driver_text}</td>
+<td>{action}</td>
+</tr>"""
+
+
 def _generate_committee_report(
+    job_id,
+    course_name,
+    assignment_name,
+    threshold,
+    report,
+    comparisons,
+    submissions,
+    output_path,
+    selected_tools=None,
+    assignment_mode=None,
+    calibration_report=None,
+    reproducibility_report=None,
+    ai_text_trust=None,
+):
+    try:
+        return _generate_committee_report_inner(
+            job_id, course_name, assignment_name, threshold,
+            report, comparisons, submissions, output_path,
+            selected_tools, assignment_mode, calibration_report,
+            reproducibility_report, ai_text_trust,
+        )
+    except Exception as e:
+        import traceback
+        error_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Error</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1e293b}}
+.error-box{{background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:20px;margin:20px 0}}
+.error-detail{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}}
+</style></head><body>
+<h1>Report Generation Error</h1>
+<div class="error-box">
+<p><strong>Error generating committee report for job {job_id}</strong></p>
+<p>The report could not be generated due to an internal error. Please try again or contact support.</p>
+</div>
+<div class="error-detail">{traceback.format_exc()}</div>
+</body></html>"""
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(error_html, encoding="utf-8")
+        raise
+
+
+def _generate_committee_report_inner(
     job_id,
     course_name,
     assignment_name,
@@ -15155,13 +13688,39 @@ def _generate_committee_report(
     ai_text_trust = ai_text_trust or {}
     mode_name = assignment_mode.get("name") or "Introductory Programming"
     mode_version = assignment_mode.get("version") or "1.0.0"
+    mode_context = assignment_mode.get("context") or ""
+    mode_preprocessing = assignment_mode.get("preprocessing") or []
+    mode_evidence_surfaces = assignment_mode.get("evidence_surfaces") or []
     mode_policy = assignment_mode.get("policy") or {}
-    suspicious = [c for c in comparisons if c.score >= threshold]
+    comparisons = comparisons or []
+    suspicious = []
+    review_zone = []
+    for c in comparisons:
+        try:
+            score = float(getattr(c, 'score', 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        if score >= threshold:
+            suspicious.append(c)
+        elif 0.4 <= score < threshold:
+            review_zone.append(c)
     students_involved = set()
     for c in suspicious:
-        students_involved.add(c.file_a)
-        students_involved.add(c.file_b)
-    student_info = {fn: _extract_student_info(fn) for fn in students_involved}
+        try:
+            fa = getattr(c, 'file_a', None)
+            fb = getattr(c, 'file_b', None)
+            if fa:
+                students_involved.add(str(fa))
+            if fb:
+                students_involved.add(str(fb))
+        except Exception:
+            pass
+    student_info = {}
+    for fn in students_involved:
+        try:
+            student_info[str(fn)] = _extract_student_info(str(fn))
+        except Exception:
+            student_info[str(fn)] = {"name": str(fn), "id": "N/A"}
 
     css = """
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -15235,11 +13794,73 @@ def _generate_committee_report(
     .policy-list li { margin-bottom: 6px; }
     .methodology { padding: 32px 40px; border-top: 2px solid #e2e8f0; background: #f8fafc; }
     .methodology p { font-size: 14px; color: #475569; line-height: 1.7; margin-bottom: 12px; }
+    .methodology-intro p { margin-bottom: 10px; }
+    .engine-list { margin: 8px 0 16px 20px; font-size: 13px; color: #475569; }
+    .engine-list li { margin-bottom: 4px; }
+    .score-fusion, .mode-explanation, .calibration-note, .class-baseline, .reproducibility, .ai-caution { margin: 16px 0; padding: 14px 18px; background: #ffffff; border-radius: 8px; border-left: 4px solid #1e40af; }
+    .calibration-note { border-left-color: #f59e0b; }
+    .class-baseline { border-left-color: #10b981; }
+    .ai-caution { border-left-color: #8b5cf6; }
+    .ai-warning { color: #7c3aed; font-weight: 500; background: #f5f3ff; padding: 8px 12px; border-radius: 6px; margin-top: 8px; }
     .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
     .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+
+    /* Executive Summary Styles */
+    .executive-summary { padding: 32px 40px; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0; }
+    .mode-context-box { margin-bottom: 24px; padding: 16px 20px; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .mode-context-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 6px; }
+    .mode-context-desc { font-size: 14px; color: #334155; line-height: 1.6; margin-bottom: 10px; }
+    .mode-features { font-size: 13px; color: #475569; }
+    .mode-feature { margin-bottom: 6px; padding-left: 12px; border-left: 3px solid #1e40af; }
+    .mode-feature strong { color: #1e293b; }
+
+    .key-metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+    .metric-card { background: #ffffff; padding: 18px 20px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .metric-card.highlight { border-color: #1e40af; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); }
+    .metric-card.warning { border-color: #f59e0b; background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); }
+    .metric-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 6px; }
+    .metric-value { font-size: 28px; font-weight: 800; color: #1e293b; line-height: 1.2; }
+    .metric-note { font-size: 11px; color: #64748b; margin-top: 4px; }
+
+    .score-interpretation-guide { margin-bottom: 28px; }
+    .guide-title { font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 12px; }
+    .guide-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .guide-band { padding: 14px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .guide-band.high { background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-color: #fca5a5; }
+    .guide-band.medium { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-color: #fcd34d; }
+    .guide-band.low { background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-color: #86efac; }
+    .guide-range { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+    .guide-band.high .guide-range { color: #dc2626; }
+    .guide-band.medium .guide-range { color: #d97706; }
+    .guide-band.low .guide-range { color: #16a34a; }
+    .guide-label { font-size: 12px; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
+    .guide-action { font-size: 11px; color: #64748b; line-height: 1.5; }
+
+    .top-cases-section { margin-top: 24px; }
+    .top-cases-title { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 14px; }
+    .top-cases-table { width: 100%; border-collapse: collapse; font-size: 13px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .top-cases-table th { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 12px 14px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #475569; border-bottom: 2px solid #cbd5e1; }
+    .top-cases-table td { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; background: #ffffff; vertical-align: top; }
+    .top-cases-table tr:hover td { background: #f8fafc; }
+    .action-critical { color: #dc2626; font-weight: 700; }
+    .action-high { color: #ea580c; font-weight: 700; }
+    .action-medium { color: #d97706; font-weight: 600; }
+    .action-low { color: #64748b; font-weight: 500; }
+    .ai-caution-box { margin-top: 16px; padding: 12px 16px; background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 8px; font-size: 12px; color: #5b21b6; line-height: 1.6; }
+    .ai-caution-box strong { color: #4c1d95; }
     .footer { padding: 28px 40px; border-top: 2px solid #e2e8f0; text-align: center; font-size: 12px; color: #64748b; background: #f1f5f9; }
     .signature-row { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 48px; padding-top: 24px; border-top: 2px solid #e2e8f0; }
     .sig-line { border-top: 1px solid #334155; padding-top: 8px; font-size: 14px; color: #475569; text-align: center; }
+
+    /* Evidence Surfaces Styles */
+    .evidence-surfaces { padding: 32px 40px; background: #f8fafc; border-top: 2px solid #e2e8f0; border-bottom: 2px solid #e2e8f0; }
+    .evidence-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .evidence-card { background: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .evidence-icon { font-size: 32px; margin-bottom: 10px; }
+    .evidence-title { font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+    .evidence-desc { font-size: 12px; color: #64748b; line-height: 1.6; }
+    .evidence-note { font-size: 13px; color: #475569; background: #ffffff; padding: 14px 18px; border-radius: 8px; border-left: 4px solid #1e40af; }
+
     @media print { body { background: #ffffff; } .report-container { box-shadow: none; border: none; } .no-print { display: none; } page-break-before: always; }
     @page { margin: 1in; size: letter; }
     """
@@ -15259,9 +13880,11 @@ def _generate_committee_report(
         circle_color = "#28a745"
         circle_label = "Low Similarity"
 
+    fp_rate = float(calibration_report.get("estimated_false_positive_rate", 0.0)) * 100
+
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Originality Report - {course_name or 'Course'}</title><style>{css}</style></head><body>
 <div class="report-container">
-<div class="conf-banner">Confidential -- Academic Integrity Report</div>
+<div class="conf-banner">Confidential — Academic Integrity Report</div>
 <div class="report-header">
 <div class="report-header-left">
 <div class="report-logo">ID</div>
@@ -15279,13 +13902,8 @@ def _generate_committee_report(
 <div class="report-meta">
 <div class="meta-item"><div class="meta-label">Course</div><div class="meta-value">{course_name or "Not Specified"}</div></div>
 <div class="meta-item"><div class="meta-label">Assignment</div><div class="meta-value">{assignment_name or "Not Specified"}</div></div>
-<div class="meta-item"><div class="meta-label">Submissions</div><div class="meta-value">{len(submissions)} files analyzed</div></div>
-<div class="meta-item"><div class="meta-label">Pairs Compared</div><div class="meta-value">{report['summary']['total_pairs']}</div></div>
-<div class="meta-item"><div class="meta-label">Threshold</div><div class="meta-value">{threshold:.0%}</div></div>
-<div class="meta-item"><div class="meta-label">Flagged Cases</div><div class="meta-value">{len(suspicious)}</div></div>
-<div class="meta-item"><div class="meta-label">Assignment Mode</div><div class="meta-value">{_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}</div></div>
-<div class="meta-item"><div class="meta-label">Tools Used</div><div class="meta-value">{len(selected_tools)} detector(s)</div></div>
-<div class="meta-item"><div class="meta-label">Report Type</div><div class="meta-value">Dean/committee evidence packet</div></div>
+<div class="meta-item"><div class="meta-label">Submissions</div><div class="meta-value">{len(submissions) if submissions is not None else 0} files analyzed</div></div>
+<div class="meta-item"><div class="meta-label">Pairs Compared</div><div class="meta-value">{report.get('summary', {}).get('total_pairs', len(comparisons) if comparisons is not None else 0)}</div></div>
 </div>
 
 <div class="similarity-overview">
@@ -15302,6 +13920,72 @@ def _generate_committee_report(
 </div>
 </div>
 
+<div class="executive-summary">
+<div class="section-title">Executive Summary</div>
+
+<div class="mode-context-box">
+<div class="mode-context-label">Assignment Mode Context</div>
+<div class="mode-context-desc">{_escape_html(str(mode_context))}</div>
+{_build_mode_features(mode_name, mode_version, mode_preprocessing, mode_evidence_surfaces)}
+</div>
+
+<div class="key-metrics-grid">
+<div class="metric-card">
+<div class="metric-label">Threshold Used</div>
+<div class="metric-value">{threshold:.0%}</div>
+</div>
+<div class="metric-card">
+<div class="metric-label">Estimated False Positive Rate</div>
+<div class="metric-value">~{fp_rate:.1f}%</div>
+<div class="metric-note">Calibrated on benchmark data; weights tuned on train/val only</div>
+</div>
+<div class="metric-card highlight">
+<div class="metric-label">Pairs Above Threshold</div>
+<div class="metric-value">{len(suspicious)}</div>
+<div class="metric-note">Requires formal review</div>
+</div>
+<div class="metric-card warning">
+<div class="metric-label">Pairs in Review Zone</div>
+<div class="metric-value">{len(review_zone)}</div>
+<div class="metric-note">40–{threshold:.0%} — inspect matched regions</div>
+</div>
+</div>
+
+<div class="score-interpretation-guide">
+<div class="guide-title">How to Interpret Similarity Scores</div>
+<div class="guide-grid">
+<div class="guide-band high">
+<div class="guide-range">≥65%</div>
+<div class="guide-label">Very Likely Substantial Overlap</div>
+<div class="guide-action">Prioritize for review. Strong structural match likely present.</div>
+</div>
+<div class="guide-band medium">
+<div class="guide-range">40–65%</div>
+<div class="guide-label">Inspect Matched Regions</div>
+<div class="guide-action">Focus on algorithmic core vs. boilerplate. May include legitimate shared patterns.</div>
+</div>
+<div class="guide-band low">
+<div class="guide-range">&lt;30%</div>
+<div class="guide-label">Usually Ignorable</div>
+<div class="guide-action">For medium/large assignments. May matter for very short tasks.</div>
+</div>
+</div>
+</div>
+
+<div class="top-cases-section">
+<div class="top-cases-title">Top Cases to Review</div>
+<table class="top-cases-table">
+<thead><tr><th>Student Pair</th><th>Score</th><th>Main Drivers</th><th>Recommended Action</th></tr></thead>
+<tbody>
+{''.join(_build_top_case_row(c, student_info, i) for i, c in enumerate(sorted(suspicious, key=lambda x: -(float(getattr(x, 'score', 0.0)) or 0))[:5], 1))}
+</tbody>
+</table>
+<div class="ai-caution-box">
+<strong>AI Detection Note:</strong> AI scores are probabilistic and are not accusations. Borderline results are queued for manual review only. AI detection alone cannot trigger a high or critical risk classification — it must be combined with other signals.
+</div>
+</div>
+</div>
+
 <div class="sources-section">
 <div class="section-title">Flagged Pairs</div>
 <table class="sources-table">
@@ -15309,17 +13993,25 @@ def _generate_committee_report(
 <tbody>"""
 
     for i, c in enumerate(suspicious, 1):
-        ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
-        ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
+        fa = getattr(c, 'file_a', 'unknown')
+        fb = getattr(c, 'file_b', None)
+        fb = fb if fb else 'unknown'
+        ia = student_info.get(str(fa), {"name": str(fa), "id": "N/A"})
+        ib = student_info.get(str(fb), {"name": str(fb), "id": "N/A"})
+        score = float(getattr(c, 'score', 0.0) or 0.0)
         badge_class = (
-            "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+            "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
         )
-        risk_label = "Critical" if c.score >= 0.9 else "High" if c.score >= 0.75 else "Medium"
-        flagged_engines = sum(1 for v in c.features.values() if v >= threshold)
+        risk_label = "Critical" if score >= 0.9 else "High" if score >= 0.75 else "Medium"
+        features = getattr(c, 'features', None)
+        if features and isinstance(features, dict):
+            flagged_engines = sum(1 for v in features.values() if isinstance(v, (int, float)) and v >= threshold)
+        else:
+            flagged_engines = 0
         html += f"""<tr>
-<td><strong>{c.file_a}</strong> vs <strong>{c.file_b}</strong></td>
+<td><strong>{fa}</strong> vs <strong>{fb}</strong></td>
 <td>{ia['name']} vs {ib['name']}</td>
-<td><span class="similarity-badge {badge_class}">{(c.score*100):.1f}%</span></td>
+<td><span class="similarity-badge {badge_class}">{(score*100):.1f}%</span></td>
 <td>{risk_label}</td>
 <td>{flagged_engines}/5</td>
 </tr>"""
@@ -15330,31 +14022,41 @@ def _generate_committee_report(
 <div class="section-title">Detailed Findings &amp; Evidence</div>"""
 
     for i, c in enumerate(suspicious, 1):
-        ia = student_info.get(c.file_a, {"name": c.file_a, "id": "N/A"})
-        ib = student_info.get(c.file_b, {"name": c.file_b, "id": "N/A"})
+        fa = getattr(c, 'file_a', 'unknown')
+        fb = getattr(c, 'file_b', None)
+        fb = fb if fb else 'unknown'
+        ia = student_info.get(str(fa), {"name": str(fa), "id": "N/A"})
+        ib = student_info.get(str(fb), {"name": str(fb), "id": "N/A"})
+        score = float(getattr(c, 'score', 0.0) or 0.0)
         badge_class = (
-            "sim-high" if c.score >= 0.9 else "sim-medium" if c.score >= 0.75 else "sim-low"
+            "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
         )
-
         engine_items = ""
-        for name, value in sorted(c.features.items(), key=lambda x: -x[1])[:5]:
-            ecolor = "#dc3545" if value >= 0.75 else "#fd7e14" if value >= 0.5 else "#28a745"
-            engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(value*100):.0f}%</div></div>'
+        features = getattr(c, 'features', None)
+        if features and isinstance(features, dict):
+            try:
+                for name, value in sorted(features.items(), key=lambda x: -(float(x[1]) if isinstance(x[1], (int, float)) else 0))[:5]:
+                    v = float(value) if isinstance(value, (int, float)) else 0.0
+                    ecolor = "#dc3545" if v >= 0.75 else "#fd7e14" if v >= 0.5 else "#28a745"
+                    engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(v*100):.0f}%</div></div>'
+            except (TypeError, ValueError, AttributeError):
+                engine_items = '<div class="engine-item"><div class="engine-name">N/A</div><div class="engine-score">-</div></div>'
 
-        ca = c.code_a or "N/A"
-        cb = c.code_b or "N/A"
+        ca = getattr(c, 'code_a', None) or "N/A"
+        cb = getattr(c, 'code_b', None) or "N/A"
         code_a_table = _render_code_table(ca)
         code_b_table = _render_code_table(cb)
+        risk_level = getattr(c, 'risk', 'N/A') or 'N/A'
 
         html += f"""<div class="finding-card">
 <div class="finding-header">
 <div class="finding-title">Finding #{i}: {ia['name']} vs {ib['name']}</div>
-<span class="similarity-badge {badge_class}">{(c.score*100):.1f}% Similarity</span>
+<span class="similarity-badge {badge_class}">{(score*100):.1f}% Similarity</span>
 </div>
 <div class="finding-body">
 <div class="finding-summary">
-<strong>Files:</strong> {c.file_a} vs {c.file_b}<br>
-<strong>Overall Score:</strong> {(c.score*100):.1f}% | <strong>Risk:</strong> {c.risk}
+<strong>Files:</strong> {fa} vs {fb}<br>
+<strong>Overall Score:</strong> {(score*100):.1f}% | <strong>Risk:</strong> {risk_level}
 </div>
 <div class="engine-grid">{engine_items}</div>
 <div class="match-legend">
@@ -15363,8 +14065,8 @@ def _generate_committee_report(
 <div class="match-legend-item"><div class="match-legend-dot" style="background:#d1d5db"></div> No match</div>
 </div>
 <div class="code-evidence">
-<div class="code-panel"><div class="code-panel-header">{c.file_a}</div>{code_a_table}</div>
-<div class="code-panel"><div class="code-panel-header">{c.file_b}</div>{code_b_table}</div>
+<div class="code-panel"><div class="code-panel-header">{fa}</div>{code_a_table}</div>
+<div class="code-panel"><div class="code-panel-header">{fb}</div>{code_b_table}</div>
 </div>
 </div>
 </div>"""
@@ -15372,17 +14074,79 @@ def _generate_committee_report(
     html += f"""</div>
 
 <div class="methodology">
-<div class="section-title">Methodology</div>
-<p>IntegrityDesk employs a multi-engine detection approach using six core forensic engines: <strong>Token</strong>, <strong>AST</strong>, <strong>Winnowing</strong>, <strong>GST</strong>, <strong>Semantic</strong>, and <strong>Web</strong>, with optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers for deeper review.</p>
-<p style="margin-top:8px;">Results are fused using weighted Bayesian arbitration to produce final similarity scores. This ensemble approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
-<p style="margin-top:8px;"><strong>Assignment mode:</strong> {_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}. This mode controls preprocessing expectations, calibration, and which evidence surfaces are emphasized.</p>
-<p style="margin-top:8px;"><strong>Tools used:</strong> {"".join(f'<span class="tool-chip">{_escape_html(str(tool))}</span>' for tool in selected_tools)}</p>
-<p style="margin-top:8px;"><strong>Calibration:</strong> At the selected {threshold:.0%} threshold, estimated false-positive rate is approximately {float(calibration_report.get("estimated_false_positive_rate", 0.0))*100:.1f}% based on benchmark calibration guidance. {_escape_html(str(calibration_report.get("overfit_guard", "")))}</p>
-<p style="margin-top:8px;"><strong>Reproducibility:</strong> Submission set hash {_escape_html(str(reproducibility_report.get("submission_set_hash", ""))[:16])}. {_escape_html(str(reproducibility_report.get("cache_note", "")))}</p>
-<p style="margin-top:8px;"><strong>AI-text caution:</strong> {_escape_html(str(ai_text_trust.get("false_positive_policy", "")))} Humanizer recall is tracked separately for {_escape_html(", ".join(ai_text_trust.get("humanizer_tools", [])))}.</p>
+<div class="section-title">How Scores Are Computed (Plain Language)</div>
+
+<div class="methodology-intro">
+<p>This report uses a <strong>multi-engine detection approach</strong> that looks for different kinds of similarity:</p>
+<ul class="engine-list">
+<li><strong>Token:</strong> Surface-level text matching (identifiers, keywords, operators)</li>
+<li><strong>AST:</strong> Structural similarity in the code's abstract syntax tree</li>
+<li><strong>Winnowing:</strong> Fingerprint-based similarity using document hashing</li>
+<li><strong>GST:</strong> Algorithmic pattern matching (control flow sequences)</li>
+<li><strong>Semantic:</strong> Meaning-level similarity (what the code does, not just how it looks)</li>
+<li><strong>Web:</strong> Matches against public code repositories and online sources</li>
+</ul>
+<p>Optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers provide additional signals for deeper review when needed.</p>
+</div>
+
+<div class="score-fusion">
+<p><strong>Score combination:</strong> Results from all engines are combined using a <strong>weighted ensemble scoring model</strong> (Bayesian-style fusion). Each engine contributes based on its reliability for the assignment type. This approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
+</div>
+
+<div class="mode-explanation">
+<p><strong>Assignment mode ({_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}):</strong> {mode_context}</p>
+<p>This mode controls preprocessing expectations (e.g., starter code elimination, identifier normalization), calibration parameters, and which evidence surfaces are emphasized in the results.</p>
+</div>
+
+<div class="calibration-note">
+<p><strong>Calibration:</strong> At the selected {threshold:.0%} threshold, the estimated false-positive rate is approximately {float(calibration_report.get("estimated_false_positive_rate", 0.0))*100:.1f}% based on benchmark calibration guidance. {_escape_html(str(calibration_report.get("overfit_guard", "")))}</p>
+<p><strong>Important:</strong> Engine weights and thresholds are tuned on historical training/validation data only — never on this assignment's test submissions. This prevents overfitting to specific assignments.</p>
+</div>
+
+<div class="class-baseline">
+<p><strong>Class baseline normalization:</strong> Before computing pair scores, a class baseline is calculated from all submissions. Pair scores are then normalized relative to this baseline, so you see "high for this class" rather than just raw percentages. This helps distinguish unusual similarity from normal variation in the class.</p>
+</div>
+
+<div class="reproducibility">
+<p><strong>Reproducibility:</strong> Submission set hash {_escape_html(str(reproducibility_report.get("submission_set_hash", ""))[:16])}. {_escape_html(str(reproducibility_report.get("cache_note", "")))}</p>
+<p>Tools used: {"".join(f'<span class="tool-chip">{_escape_html(str(tool))}</span>' for tool in selected_tools)}</p>
+</div>
+
+<div class="ai-caution">
+<p><strong>AI-text detection caution:</strong> AI scores are probabilistic and should not be used as the sole basis for adverse actions. {_escape_html(str(ai_text_trust.get("false_positive_policy", "")))} Humanizer recall is tracked separately for {_escape_html(", ".join(ai_text_trust.get("humanizer_tools", [])))}.</p>
+<p class="ai-warning">AI detection alone cannot trigger a high or critical risk classification — it must be combined with other signals (structural, token, web matches, etc.). Borderline AI results are queued for manual review only.</p>
+</div>
+
 <ul class="policy-list">
 {"".join(f'<li>{_escape_html(str(item))}</li>' for item in (mode_policy.get("calibration") or [])[:4])}
 </ul>
+</div>
+
+<div class="evidence-surfaces">
+<div class="section-title">Evidence Surfaces (What You'll See When You Click)</div>
+<div class="evidence-grid">
+<div class="evidence-card">
+<div class="evidence-icon">📄</div>
+<div class="evidence-title">Side-by-Side Diff</div>
+<div class="evidence-desc">When you click on a case, you'll see the two submitted files displayed side-by-side with matching regions highlighted. Matched lines appear in yellow; highly similar regions appear in red.</div>
+</div>
+<div class="evidence-card">
+<div class="evidence-icon">🌳</div>
+<div class="evidence-title">AST Match Visualization</div>
+<div class="evidence-desc">For structural matches, an AST subtree view shows which code structures are shared. This helps distinguish legitimate shared patterns from copied logic.</div>
+</div>
+<div class="evidence-card">
+<div class="evidence-icon">🔗</div>
+<div class="evidence-title">Web-Source Matches</div>
+<div class="evidence-desc">If web matching is enabled, any matches to public code sources (GitHub gists, Stack Overflow, tutorials) are shown with links. Clicking takes you directly to the source.</div>
+</div>
+<div class="evidence-card">
+<div class="evidence-icon">🤖</div>
+<div class="evidence-title">AI Probability Gauge</div>
+<div class="evidence-desc">An AI-text probability indicator appears when AI detection is enabled. Remember: this is a probabilistic signal, not an accusation. Borderline results are flagged for manual review only.</div>
+</div>
+</div>
+<p class="evidence-note">The evidence surfaces available depend on the assignment mode and which engines were active for this analysis. For <strong>{_escape_html(str(mode_name))} v{_escape_html(str(mode_version))}</strong>, the following evidence views are provided: {', '.join(e.replace('_', ' ').title() for e in mode_evidence_surfaces) if mode_evidence_surfaces else 'See detailed findings below'}.</p>
 </div>
 
 <div class="signature-row">
@@ -15445,29 +14209,6 @@ async def get_upload_settings(request: Request):
     )
 
 
-@app.get("/api/benchmark-audit/{dataset_id}")
-async def get_benchmark_audit(dataset_id: str) -> dict[str, Any]:
-    """Return a benchmark audit for labeled datasets with explicit pair metadata."""
-    dataset_root = BENCHMARK_DATA_DIR / dataset_id
-    if not dataset_root.exists() and dataset_id not in BUILTIN_PAIR_DATASET_IDS:
-        raise HTTPException(status_code=404, detail="Benchmark dataset not found")
-
-    raw_pairs = _read_generated_pair_items(dataset_root)
-    if not raw_pairs:
-        raise HTTPException(
-            status_code=400,
-            detail="Benchmark audit requires explicit pair-labeled dataset metadata",
-        )
-
-    return {
-        "dataset_id": dataset_id,
-        "audit": _audit_benchmark_pairs(raw_pairs),
-        "quality_certificate": _build_benchmark_quality_certificate(dataset_root),
-        "split_guard": {
-            "tuning": _benchmark_split_guard("validation", "tuning"),
-            "locked_test": _benchmark_split_guard("test", "tuning"),
-        },
-    }
 
 
 @app.get("/api/assignment-modes")
