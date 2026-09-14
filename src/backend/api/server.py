@@ -6232,6 +6232,7 @@ def apply_semantic_transforms(code: str, language: str) -> str:
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -6246,7 +6247,7 @@ async def upload_files(
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled, "status": "processing"}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6278,7 +6279,8 @@ async def upload_files(
             status_code=400, content={"error": "At least 2 code files are required"}
         )
 
-    return await _run_analysis(
+    background_tasks.add_task(
+        _run_analysis_background,
         job_id,
         job_dir,
         course_name,
@@ -6291,11 +6293,13 @@ async def upload_files(
         tool_ids,
         starter_sources,
     )
+    return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
 
 @app.post("/api/upload-zip")
 async def upload_zip(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -6313,7 +6317,7 @@ async def upload_zip(
         return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
 
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled}
+    _jobs[job_id] = {"source_scan_enabled_override": source_scan_enabled, "status": "processing"}
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6341,7 +6345,8 @@ async def upload_zip(
                 target.write_bytes(content)
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
 
-    return await _run_analysis(
+    background_tasks.add_task(
+        _run_analysis_background,
         job_id,
         job_dir,
         course_name,
@@ -6354,6 +6359,7 @@ async def upload_zip(
         tool_ids,
         starter_sources,
     )
+    return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
 
 def _ensure_job_row_for_ai_detector(
