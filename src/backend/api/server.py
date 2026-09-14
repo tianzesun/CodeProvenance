@@ -189,6 +189,33 @@ app.include_router(analyze_router.router, prefix="/api")
 from src.backend.api.routes import benchmark as benchmark_router  # noqa: E402
 
 app.include_router(benchmark_router.router)
+
+# Re-export benchmark route handlers so existing unit tests that import them
+# directly from `server` (e.g. `server.get_benchmark_datasets()`) keep working.
+from src.backend.api.routes.benchmark import (  # noqa: E402
+    get_benchmark_datasets,
+    get_benchmark_tools,
+    get_benchmark_presets,
+    get_benchmark_history,
+    get_error_analysis,
+    get_benchmark_audit,
+    run_benchmark,
+    stream_benchmark,
+    start_benchmark_job,
+    get_benchmark_job_status,
+    apply_benchmark_optimization,
+    compute_real_fpr_on_clean_corpus,
+    save_fpr_validation_run,
+    list_fpr_validation_runs,
+    get_fpr_validation_run,
+    delete_fpr_validation_run,
+    download_benchmark_csv,
+    download_benchmark_pdf,
+    export_benchmark_pdf,
+    get_tool_radar_data,
+    create_demo_dataset,
+)
+
 # Backward-compatible aliases for functions moved to benchmark router module.
 # These allow existing tests and imports that reference server.get_benchmark_datasets,
 # server.run_benchmark, etc. to keep working without modification.
@@ -211,6 +238,7 @@ from src.backend.api.routes.benchmark import (  # noqa: E402
     save_fpr_validation_run,
     start_benchmark_job,
 )
+
 REPORTS_DIR = project_root / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 BENCHMARK_RUNS_DIR = REPORTS_DIR / "benchmark_runs"
@@ -5335,8 +5363,6 @@ async def update_retention_settings(request: Request):
         )
 
 
-
-
 def generate_synthetic_code(index: int, language: str, similarity_type: str) -> str:
     """Generate synthetic code for testing different similarity types."""
 
@@ -7670,23 +7696,9 @@ async def delete_job(job_id: str, request: Request):
     return JSONResponse(content={"status": "deleted"})
 
 
-
-
-
-
-
-
 # ============================================================
 # FPR Validation Runs History (Database-backed)
 # ============================================================
-
-
-
-
-
-
-
-
 
 
 # ============================================================
@@ -7919,10 +7931,6 @@ def _persist_benchmark_response(response: dict[str, Any]) -> dict[str, Any]:
             db.commit()
 
     return response
-
-
-
-
 
 
 def _count_by(db: Any, model: Any, column: Any, ids: list[Any]) -> dict[Any, int]:
@@ -8253,8 +8261,6 @@ async def get_course_detail(course_id: str, request: Request) -> dict[str, Any]:
             ],
             "summary": summary,
         }
-
-
 
 
 def _build_error_analysis_from_benchmark(run: dict[str, Any]) -> dict[str, Any]:
@@ -8804,8 +8810,6 @@ def _empty_error_analysis() -> dict[str, Any]:
     }
 
 
-
-
 def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bool:
     """Return true when a dataset can support pair-level benchmark metrics."""
     if dataset_id in BUILTIN_PAIR_DATASET_IDS:
@@ -8829,13 +8833,10 @@ def _dataset_has_pair_ground_truth(dataset_id: str, dataset_root: PathLib) -> bo
     return False
 
 
-
-
-
-
 # ── Background benchmark job store ────────────────────────────────────────
 BENCHMARK_JOBS: dict[str, dict[str, Any]] = {}
 BENCHMARK_JOBS_LOCK = threading.Lock()
+
 
 def _benchmark_job_set(job_id: str, updates: dict[str, Any]) -> None:
     """Thread-safe update of a benchmark job record."""
@@ -9214,12 +9215,6 @@ def _run_benchmark_background(
     except Exception as exc:
         logger.exception("Background benchmark job %s failed", job_id)
         _benchmark_job_set(job_id, {"status": "error", "error": str(exc)})
-
-
-
-
-
-
 
 
 def _get_ground_truth_labels(dataset: str, pair_results: list[dict[str, Any]]) -> list[int]:
@@ -11906,10 +11901,6 @@ async def download_ai_originality_pdf(job_id: str, request: Request):
     return response
 
 
-
-
-
-
 def _pdf_escape(value: Any) -> str:
     """Escape text for a simple PDF content stream."""
     return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
@@ -13486,10 +13477,6 @@ def _simple_text_pdf_bytes(title: str, lines: list[str]) -> bytes:
     return bytes(output)
 
 
-
-
-
-
 def _extract_student_info(filename):
     stem = PathLib(filename).stem
     parts = re.split(r"[_\-\s]+", stem)
@@ -13526,7 +13513,9 @@ def _render_code_table(code, max_lines=80):
     return f'<div class="code-scroll"><table class="code-table">{"".join(rows)}</table></div>'
 
 
-def _build_mode_features(mode_name: str, mode_version: str, preprocessing, evidence_surfaces) -> str:
+def _build_mode_features(
+    mode_name: str, mode_version: str, preprocessing, evidence_surfaces
+) -> str:
     """Build a plain-language description of what the assignment mode means."""
     preprocessing_note = ""
     if preprocessing and isinstance(preprocessing, (list, tuple)):
@@ -13560,22 +13549,24 @@ def _build_mode_features(mode_name: str, mode_version: str, preprocessing, evide
 
 def _build_top_case_row(comparison, student_info: dict, index: int) -> str:
     """Build a row for the top cases table with plain-language drivers."""
-    file_a = getattr(comparison, 'file_a', None)
-    file_a = file_a if file_a else 'unknown'
-    file_b = getattr(comparison, 'file_b', None)
-    file_b = file_b if file_b else 'unknown'
+    file_a = getattr(comparison, "file_a", None)
+    file_a = file_a if file_a else "unknown"
+    file_b = getattr(comparison, "file_b", None)
+    file_b = file_b if file_b else "unknown"
     ia = student_info.get(file_a, {"name": file_a, "id": "N/A"})
     ib = student_info.get(file_b, {"name": file_b, "id": "N/A"})
 
     # Determine main drivers from features
-    features = getattr(comparison, 'features', None)
+    features = getattr(comparison, "features", None)
     if features and isinstance(features, dict):
         try:
+
             def _safe_score(item):
                 try:
                     return -float(item[1])
                 except (TypeError, ValueError):
                     return 0.0
+
             sorted_features = sorted(features.items(), key=_safe_score)
             top_drivers = [(k, v) for k, v in sorted_features[:3] if isinstance(v, (int, float))]
             driver_labels = {
@@ -13588,18 +13579,21 @@ def _build_top_case_row(comparison, student_info: dict, index: int) -> str:
                 "ai_probability": "AI-text signal",
                 "cfg_similarity": "CFG/execution match",
             }
-            driver_text = "; ".join(
-                f"{driver_labels.get(k, str(k).replace('_', ' ').title())} ({v:.0%})"
-                for k, v in top_drivers
-                if isinstance(v, (int, float)) and v >= 0.3
-            ) or "Multiple signals detected"
+            driver_text = (
+                "; ".join(
+                    f"{driver_labels.get(k, str(k).replace('_', ' ').title())} ({v:.0%})"
+                    for k, v in top_drivers
+                    if isinstance(v, (int, float)) and v >= 0.3
+                )
+                or "Multiple signals detected"
+            )
         except (TypeError, ValueError, AttributeError):
             driver_text = "See detailed evidence below"
     else:
         driver_text = "See detailed evidence below"
 
     # Recommended action
-    score = getattr(comparison, 'score', 0.0)
+    score = getattr(comparison, "score", 0.0)
     try:
         score = float(score)
     except (TypeError, ValueError):
@@ -13641,13 +13635,23 @@ def _generate_committee_report(
 ):
     try:
         return _generate_committee_report_inner(
-            job_id, course_name, assignment_name, threshold,
-            report, comparisons, submissions, output_path,
-            selected_tools, assignment_mode, calibration_report,
-            reproducibility_report, ai_text_trust,
+            job_id,
+            course_name,
+            assignment_name,
+            threshold,
+            report,
+            comparisons,
+            submissions,
+            output_path,
+            selected_tools,
+            assignment_mode,
+            calibration_report,
+            reproducibility_report,
+            ai_text_trust,
         )
     except Exception as e:
         import traceback
+
         error_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Error</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1e293b}}
 .error-box{{background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:20px;margin:20px 0}}
@@ -13697,7 +13701,7 @@ def _generate_committee_report_inner(
     review_zone = []
     for c in comparisons:
         try:
-            score = float(getattr(c, 'score', 0.0))
+            score = float(getattr(c, "score", 0.0))
         except (TypeError, ValueError):
             score = 0.0
         if score >= threshold:
@@ -13707,8 +13711,8 @@ def _generate_committee_report_inner(
     students_involved = set()
     for c in suspicious:
         try:
-            fa = getattr(c, 'file_a', None)
-            fb = getattr(c, 'file_b', None)
+            fa = getattr(c, "file_a", None)
+            fb = getattr(c, "file_b", None)
             if fa:
                 students_involved.add(str(fa))
             if fb:
@@ -13993,19 +13997,19 @@ def _generate_committee_report_inner(
 <tbody>"""
 
     for i, c in enumerate(suspicious, 1):
-        fa = getattr(c, 'file_a', 'unknown')
-        fb = getattr(c, 'file_b', None)
-        fb = fb if fb else 'unknown'
+        fa = getattr(c, "file_a", "unknown")
+        fb = getattr(c, "file_b", None)
+        fb = fb if fb else "unknown"
         ia = student_info.get(str(fa), {"name": str(fa), "id": "N/A"})
         ib = student_info.get(str(fb), {"name": str(fb), "id": "N/A"})
-        score = float(getattr(c, 'score', 0.0) or 0.0)
-        badge_class = (
-            "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
-        )
+        score = float(getattr(c, "score", 0.0) or 0.0)
+        badge_class = "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
         risk_label = "Critical" if score >= 0.9 else "High" if score >= 0.75 else "Medium"
-        features = getattr(c, 'features', None)
+        features = getattr(c, "features", None)
         if features and isinstance(features, dict):
-            flagged_engines = sum(1 for v in features.values() if isinstance(v, (int, float)) and v >= threshold)
+            flagged_engines = sum(
+                1 for v in features.values() if isinstance(v, (int, float)) and v >= threshold
+            )
         else:
             flagged_engines = 0
         html += f"""<tr>
@@ -14022,31 +14026,32 @@ def _generate_committee_report_inner(
 <div class="section-title">Detailed Findings &amp; Evidence</div>"""
 
     for i, c in enumerate(suspicious, 1):
-        fa = getattr(c, 'file_a', 'unknown')
-        fb = getattr(c, 'file_b', None)
-        fb = fb if fb else 'unknown'
+        fa = getattr(c, "file_a", "unknown")
+        fb = getattr(c, "file_b", None)
+        fb = fb if fb else "unknown"
         ia = student_info.get(str(fa), {"name": str(fa), "id": "N/A"})
         ib = student_info.get(str(fb), {"name": str(fb), "id": "N/A"})
-        score = float(getattr(c, 'score', 0.0) or 0.0)
-        badge_class = (
-            "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
-        )
+        score = float(getattr(c, "score", 0.0) or 0.0)
+        badge_class = "sim-high" if score >= 0.9 else "sim-medium" if score >= 0.75 else "sim-low"
         engine_items = ""
-        features = getattr(c, 'features', None)
+        features = getattr(c, "features", None)
         if features and isinstance(features, dict):
             try:
-                for name, value in sorted(features.items(), key=lambda x: -(float(x[1]) if isinstance(x[1], (int, float)) else 0))[:5]:
+                for name, value in sorted(
+                    features.items(),
+                    key=lambda x: -(float(x[1]) if isinstance(x[1], (int, float)) else 0),
+                )[:5]:
                     v = float(value) if isinstance(value, (int, float)) else 0.0
                     ecolor = "#dc3545" if v >= 0.75 else "#fd7e14" if v >= 0.5 else "#28a745"
                     engine_items += f'<div class="engine-item"><div class="engine-name">{name}</div><div class="engine-score" style="color:{ecolor}">{(v*100):.0f}%</div></div>'
             except (TypeError, ValueError, AttributeError):
                 engine_items = '<div class="engine-item"><div class="engine-name">N/A</div><div class="engine-score">-</div></div>'
 
-        ca = getattr(c, 'code_a', None) or "N/A"
-        cb = getattr(c, 'code_b', None) or "N/A"
+        ca = getattr(c, "code_a", None) or "N/A"
+        cb = getattr(c, "code_b", None) or "N/A"
         code_a_table = _render_code_table(ca)
         code_b_table = _render_code_table(cb)
-        risk_level = getattr(c, 'risk', 'N/A') or 'N/A'
+        risk_level = getattr(c, "risk", "N/A") or "N/A"
 
         html += f"""<div class="finding-card">
 <div class="finding-header">
@@ -14207,8 +14212,6 @@ async def get_upload_settings(request: Request):
             "assignment_modes": assignment_modes_payload(),
         }
     )
-
-
 
 
 @app.get("/api/assignment-modes")

@@ -166,7 +166,7 @@ async def compute_real_fpr_on_clean_corpus(
 ):
     """Compute real False Positive Rate on a set of known-clean submissions."""
     from src.backend.api.server import logger
-    from src.backend.engines.detection.batch_detection import BatchDetectionService
+    from src.backend.application.services.batch_detection_service import BatchDetectionService
 
     if len(files) < 2:
         raise HTTPException(
@@ -196,9 +196,35 @@ async def compute_real_fpr_on_clean_corpus(
         ) from e
 
     thresholds_to_evaluate = [
-        0.40, 0.45, 0.50, 0.52, 0.55, 0.58, 0.60, 0.62, 0.64, 0.65,
-        0.66, 0.67, 0.68, 0.69, 0.70, 0.71, 0.72, 0.73, 0.74, 0.75,
-        0.76, 0.77, 0.78, 0.80, 0.82, 0.85, 0.88, 0.90, 0.95,
+        0.40,
+        0.45,
+        0.50,
+        0.52,
+        0.55,
+        0.58,
+        0.60,
+        0.62,
+        0.64,
+        0.65,
+        0.66,
+        0.67,
+        0.68,
+        0.69,
+        0.70,
+        0.71,
+        0.72,
+        0.73,
+        0.74,
+        0.75,
+        0.76,
+        0.77,
+        0.78,
+        0.80,
+        0.82,
+        0.85,
+        0.88,
+        0.90,
+        0.95,
     ]
     fpr_table = []
     for t in thresholds_to_evaluate:
@@ -292,7 +318,9 @@ async def compute_real_fpr_on_clean_corpus(
     if mean_clean > 0.20:
         suggested_actions.append("Enable or improve starter-code / boilerplate suppression.")
     if max_clean > 0.70:
-        suggested_actions.append("Manually review the top 5–10 clean pairs with the highest scores.")
+        suggested_actions.append(
+            "Manually review the top 5–10 clean pairs with the highest scores."
+        )
     if not suggested_actions:
         suggested_actions.append(
             "Current settings appear well calibrated for your student population."
@@ -325,9 +353,7 @@ async def compute_real_fpr_on_clean_corpus(
             "recommended_threshold": (
                 balanced["threshold"] if balanced else fpr_table[-1]["threshold"]
             ),
-            "fpr_at_recommended_threshold": (
-                balanced["fpr"] if balanced else fpr_table[-1]["fpr"]
-            )
+            "fpr_at_recommended_threshold": (balanced["fpr"] if balanced else fpr_table[-1]["fpr"])
             / 100.0,
         }
     )
@@ -352,10 +378,7 @@ async def save_fpr_validation_run(request: Request, payload: FprValidationRunCre
         user_id = current_user.get("id")
         if not tenant_id:
             raise HTTPException(status_code=400, detail="No tenant associated with user")
-        name = (
-            payload.name
-            or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
-        )
+        name = payload.name or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
         result_data = payload.result
         run = FprValidationRun(
             tenant_id=tenant_id,
@@ -632,14 +655,30 @@ async def get_benchmark_datasets() -> dict[str, Any]:
     from src.backend.api.server import _dataset_has_pair_ground_truth  # type: ignore[attr-defined]
 
     dataset_icons: dict[str, str] = {
-        "demo": "🧪", "poj104": "📚", "codesearchnet": "🐍", "codexglue": "☕",
-        "google": "🏆", "bigclone": "🔄", "kaggle": "📊", "synthetic": "⚙️",
-        "ieee": "🎓", "oscar": "🎭", "xiangtan": "🏫",
+        "demo": "🧪",
+        "poj104": "📚",
+        "codesearchnet": "🐍",
+        "codexglue": "☕",
+        "google": "🏆",
+        "bigclone": "🔄",
+        "kaggle": "📊",
+        "synthetic": "⚙️",
+        "ieee": "🎓",
+        "oscar": "🎭",
+        "xiangtan": "🏫",
     }
     dataset_colors: dict[str, str] = {
-        "demo": "purple", "poj104": "blue", "codesearchnet": "green", "codexglue": "amber",
-        "google": "emerald", "bigclone": "cyan", "kaggle": "indigo", "synthetic": "gray",
-        "ieee": "rose", "oscar": "fuchsia", "xiangtan": "sky",
+        "demo": "purple",
+        "poj104": "blue",
+        "codesearchnet": "green",
+        "codexglue": "amber",
+        "google": "emerald",
+        "bigclone": "cyan",
+        "kaggle": "indigo",
+        "synthetic": "gray",
+        "ieee": "rose",
+        "oscar": "fuchsia",
+        "xiangtan": "sky",
     }
     datasets: list[dict[str, Any]] = []
     for item in _iter_benchmark_dataset_roots():
@@ -669,8 +708,9 @@ async def get_benchmark_datasets() -> dict[str, Any]:
             "desc": metadata.get("description", f"Dataset: {dataset_id}"),
             "icon": icon,
             "color": color,
-            "language": _infer_dataset_language(dataset_id, metadata, dataset_info,
-                                                 dataset_dir=dataset_dir),
+            "language": _infer_dataset_language(
+                dataset_id, metadata, dataset_info, dataset_dir=dataset_dir
+            ),
             "size": _infer_dataset_size_label(dataset_dir, metadata, dataset_info, is_demo),
             "created_by": metadata.get("created_by", "System"),
             "created_at": metadata.get("created", metadata.get("created_at", "")),
@@ -762,7 +802,7 @@ async def run_benchmark(
         logger,
         settings,
     )
-    from src.backend.engines.detection.batch_detection import BatchDetectionService
+    from src.backend.application.services.batch_detection_service import BatchDetectionService
 
     selected_tools: list[str] = []
     for tool in tools:
@@ -861,7 +901,9 @@ async def run_benchmark(
 
                 has_gpu = torch.cuda.is_available()
                 if not has_gpu and settings.EMBEDDING_RUNTIME in (
-                    "local_unixcoder", "local", "unixcoder"
+                    "local_unixcoder",
+                    "local",
+                    "unixcoder",
                 ):
                     should_disable_embedding = True
                     os.environ["EMBEDDING_RUNTIME"] = "none"
@@ -958,8 +1000,11 @@ async def run_benchmark(
                     if tr["tool"] == tool_name:
                         scores.append(tr["score"])
                         idx = next(
-                            (i for i, p in enumerate(pair_results)
-                             if p["file_a"] == fa and p["file_b"] == fb),
+                            (
+                                i
+                                for i, p in enumerate(pair_results)
+                                if p["file_a"] == fa and p["file_b"] == fb
+                            ),
                             -1,
                         )
                         if 0 <= idx < len(ground_truth_labels):
@@ -967,7 +1012,10 @@ async def run_benchmark(
                         break
             if scores and labels:
                 metrics = _compute_evaluation_metrics(
-                    scores, labels, tool_name, dataset or "custom",
+                    scores,
+                    labels,
+                    tool_name,
+                    dataset or "custom",
                     tool_timings.get(tool_name, 0.0),
                     _compute_engine_contribution(tool_data.get("pairs", [])),
                     threshold_strategy=(
@@ -978,9 +1026,9 @@ async def run_benchmark(
                 )
                 evaluation_results[tool_name] = metrics
 
-    id_avg = sum(
-        p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])
-    ) / max(1, len(tool_results.get("integritydesk", {}).get("pairs", [])))
+    id_avg = sum(p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])) / max(
+        1, len(tool_results.get("integritydesk", {}).get("pairs", []))
+    )
     comp_scores_all = [
         p["score"]
         for t, d in tool_results.items()
@@ -1066,8 +1114,7 @@ async def run_benchmark(
         response["evaluation"] = evaluation_results
         response["ground_truth_basis"] = _get_ground_truth_basis(dataset)
         response["benchmark_trust"] = (
-            evaluation_results.get("integritydesk")
-            or next(iter(evaluation_results.values()), {})
+            evaluation_results.get("integritydesk") or next(iter(evaluation_results.values()), {})
         ).get("benchmark_trust", {})
         if benchmark_type == "regression_test":
             response["quality_gates"] = _build_regression_quality_gates(
@@ -1219,9 +1266,7 @@ async def download_benchmark_csv(job_id: str):
             row.append(f"{tool_result['score']:.3f}")
         writer.writerow(row)
     response = Response(content=si.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = (
-        f"attachment; filename=benchmark_results_{job_id}.csv"
-    )
+    response.headers["Content-Disposition"] = f"attachment; filename=benchmark_results_{job_id}.csv"
     return response
 
 
@@ -1336,33 +1381,60 @@ async def export_benchmark_pdf(request: Request):
                 return fallback
 
         metrics = [
-            ("PlagDet", metric_value("plagdet"),
-             "Primary PAN score; combines detection quality with granularity penalty.",
-             "Optimize threshold and fusion weights against PlagDet directly."),
-            ("Precision", metric_value("precision"),
-             "Low precision means clean pairs are being flagged as plagiarism.",
-             "Raise decision threshold and require stronger multi-engine agreement."),
-            ("Recall", metric_value("recall"),
-             "Low recall means known plagiarism pairs are being missed.",
-             "Widen candidate retrieval and strengthen renamed/structural clone handling."),
-            ("F1 Score", metric_value("f1_score", metric_value("best_f1")),
-             "Balances precision and recall for the selected operating threshold.",
-             "Run threshold sweeps and keep the point that maximizes F1 and PlagDet."),
-            ("Granularity", metric_value("granularity", 1.0),
-             "Values above 1 mean detections are split into too many fragments.",
-             "Merge adjacent or overlapping evidence for the same pair."),
-            ("AUC-PR", metric_value("auc_pr", metric_value("pr_auc")),
-             "Measures whether true plagiarism ranks above negative pairs.",
-             "Tune fusion weights with PR-AUC as an objective and add harder negatives."),
-            ("False Positive Rate", metric_value("false_positive_rate"),
-             "High FPR creates noisy admin feedback and weakens reviewer trust.",
-             "Add boilerplate/template suppression and stricter negative filters."),
-            ("Top-10 Retrieval", metric_value("top_10_retrieval"),
-             "Measures how cleanly true positives appear in the first ranked candidates.",
-             "Tune retrieval with precision@10 and rerank using token/AST/winnowing evidence."),
-            ("Avg Runtime", metric_value("avg_runtime_seconds"),
-             "Slow runtime makes iterative optimization and larger datasets expensive.",
-             "Cache parsing and run heavy engines only on shortlisted candidates."),
+            (
+                "PlagDet",
+                metric_value("plagdet"),
+                "Primary PAN score; combines detection quality with granularity penalty.",
+                "Optimize threshold and fusion weights against PlagDet directly.",
+            ),
+            (
+                "Precision",
+                metric_value("precision"),
+                "Low precision means clean pairs are being flagged as plagiarism.",
+                "Raise decision threshold and require stronger multi-engine agreement.",
+            ),
+            (
+                "Recall",
+                metric_value("recall"),
+                "Low recall means known plagiarism pairs are being missed.",
+                "Widen candidate retrieval and strengthen renamed/structural clone handling.",
+            ),
+            (
+                "F1 Score",
+                metric_value("f1_score", metric_value("best_f1")),
+                "Balances precision and recall for the selected operating threshold.",
+                "Run threshold sweeps and keep the point that maximizes F1 and PlagDet.",
+            ),
+            (
+                "Granularity",
+                metric_value("granularity", 1.0),
+                "Values above 1 mean detections are split into too many fragments.",
+                "Merge adjacent or overlapping evidence for the same pair.",
+            ),
+            (
+                "AUC-PR",
+                metric_value("auc_pr", metric_value("pr_auc")),
+                "Measures whether true plagiarism ranks above negative pairs.",
+                "Tune fusion weights with PR-AUC as an objective and add harder negatives.",
+            ),
+            (
+                "False Positive Rate",
+                metric_value("false_positive_rate"),
+                "High FPR creates noisy admin feedback and weakens reviewer trust.",
+                "Add boilerplate/template suppression and stricter negative filters.",
+            ),
+            (
+                "Top-10 Retrieval",
+                metric_value("top_10_retrieval"),
+                "Measures how cleanly true positives appear in the first ranked candidates.",
+                "Tune retrieval with precision@10 and rerank using token/AST/winnowing evidence.",
+            ),
+            (
+                "Avg Runtime",
+                metric_value("avg_runtime_seconds"),
+                "Slow runtime makes iterative optimization and larger datasets expensive.",
+                "Cache parsing and run heavy engines only on shortlisted candidates.",
+            ),
         ]
         rows = ""
         for name, value, why, action in metrics:
@@ -1403,15 +1475,15 @@ async def export_benchmark_pdf(request: Request):
 
             pdf = weasyprint.HTML(string=html_content).write_pdf()
             resp = Response(content=pdf, media_type="application/pdf")
-            resp.headers["Content-Disposition"] = (
-                "attachment; filename=pan_optimization_report.pdf"
-            )
+            resp.headers["Content-Disposition"] = "attachment; filename=pan_optimization_report.pdf"
             return resp
         except ImportError:
             return Response(
                 content=html_content,
                 media_type="text/html",
-                headers={"Content-Disposition": "attachment; filename=pan_optimization_report.html"},
+                headers={
+                    "Content-Disposition": "attachment; filename=pan_optimization_report.html"
+                },
             )
         except Exception as exc:
             logger.warning("PAN PDF export fell back to minimal PDF: %s", exc)
@@ -1419,9 +1491,7 @@ async def export_benchmark_pdf(request: Request):
                 content=_minimal_pdf_bytes(f"{dataset_name} PAN Optimization Report"),
                 media_type="application/pdf",
             )
-            resp.headers["Content-Disposition"] = (
-                "attachment; filename=pan_optimization_report.pdf"
-            )
+            resp.headers["Content-Disposition"] = "attachment; filename=pan_optimization_report.pdf"
             return resp
 
     # Legacy format
