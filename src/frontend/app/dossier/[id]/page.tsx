@@ -137,26 +137,26 @@ export default function EvidenceDossierPage() {
       setDossier((prev) =>
         prev
           ? {
-              ...prev,
-              students: prev.students.map((s) =>
-                s.student === student.student
-                  ? {
-                      ...s,
-                      viva_outcome: {
-                        outcome: draft.outcome,
-                        notes: draft.notes || null,
-                        conducted_at: conductedAt,
-                      },
-                    }
-                  : s,
-              ),
-            }
+            ...prev,
+            students: prev.students.map((s) =>
+              s.student === student.student
+                ? {
+                  ...s,
+                  viva_outcome: {
+                    outcome: draft.outcome,
+                    notes: draft.notes || null,
+                    conducted_at: conductedAt,
+                  },
+                }
+                : s,
+            ),
+          }
           : prev,
       );
     } catch (err) {
       setError(
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          'Failed to save viva outcome.',
+        'Failed to save viva outcome.',
       );
     } finally {
       setSavingStudent('');
@@ -218,7 +218,7 @@ export default function EvidenceDossierPage() {
           </div>
           <div className="flex items-center gap-2">
             <a
-              href={`/dossier/${dossier.job_id}/download-pdf`}
+              href={`/report/${dossier.job_id}/download-pdf`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -246,11 +246,10 @@ export default function EvidenceDossierPage() {
           ).map(([label, covered]) => (
             <span
               key={label}
-              className={`rounded-full border px-2.5 py-1 ${
-                covered
+              className={`rounded-full border px-2.5 py-1 ${covered
                   ? 'border-sky-200 bg-sky-50 text-sky-700'
                   : 'border-slate-200 bg-slate-50 text-slate-400'
-              }`}
+                }`}
             >
               {covered ? '✓' : '—'} {label}
             </span>
@@ -312,9 +311,8 @@ export default function EvidenceDossierPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span
-                                  className={`h-1.5 w-1.5 rounded-full ${
-                                    severityDot[item.severity] || 'bg-slate-400'
-                                  }`}
+                                  className={`h-1.5 w-1.5 rounded-full ${severityDot[item.severity] || 'bg-slate-400'
+                                    }`}
                                 />
                                 <span className="font-medium text-slate-800 dark:text-slate-200">
                                   {item.title}
@@ -348,10 +346,9 @@ export default function EvidenceDossierPage() {
 
                   {student.viva_outcome && (
                     <div
-                      className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
-                        outcomeStyles[student.viva_outcome.outcome] ||
+                      className={`mt-4 rounded-xl border px-3 py-2 text-sm ${outcomeStyles[student.viva_outcome.outcome] ||
                         outcomeStyles.inconclusive
-                      }`}
+                        }`}
                     >
                       <span className="inline-flex items-center gap-1.5 font-medium">
                         <ClipboardCheck size={14} />

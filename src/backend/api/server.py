@@ -6257,10 +6257,16 @@ async def upload_files(
     saved_files = []
     for f in files:
         if f.filename and _is_code_file(f.filename):
+            content = await f.read()
+            if len(content) > 10 * 1024 * 1024:  # 10 MB per file
+                shutil.rmtree(job_dir, ignore_errors=True)
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": f"File '{f.filename}' exceeds the 10 MB per-file limit."},
+                )
             safe_name = PathLib(f.filename).name
             target = _unique_child_path(job_dir, PathLib(safe_name))
             target.parent.mkdir(parents=True, exist_ok=True)
-            content = await f.read()
             target.write_bytes(content)
             saved_files.append(str(target.relative_to(job_dir)))
 
@@ -6326,6 +6332,12 @@ async def upload_zip(
 
     zip_path = job_dir / file.filename
     content = await file.read()
+    if len(content) > 200 * 1024 * 1024:  # 200 MB ZIP limit
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "ZIP file exceeds the 200 MB size limit."},
+        )
     zip_path.write_bytes(content)
 
     extracted = _extract_zip(zip_path, job_dir)

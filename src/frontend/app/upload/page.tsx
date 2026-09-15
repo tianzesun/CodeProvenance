@@ -658,13 +658,6 @@ export default function UploadPage() {
                       >
                         <FileUp size={13} />Browse files
                       </button>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium text-slate-400"
-                        style={{ borderColor: '#e2e8f0', background: '#f8fafc' }}
-                      >
-                        <FolderArchive size={13} />Import from LMS
-                      </button>
                     </div>
                     <p className="mt-5 text-xs text-slate-300 font-medium">
                       .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift · .zip

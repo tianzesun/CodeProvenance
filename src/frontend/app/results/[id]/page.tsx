@@ -4,7 +4,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/apiClient';
@@ -577,6 +577,44 @@ export default function ResultsPage() {
 
   const closeDrawer = () => setDrawerOpen(false);
 
+  // Navigate to adjacent pair within the current filtered tableData
+  const navigatePair = useCallback((direction: 1 | -1) => {
+    if (tableData.length === 0) return;
+    const currentKey = pairKey(activeResult);
+    const currentTableIdx = tableData.findIndex((r) => r._key === currentKey);
+    const nextTableIdx = currentTableIdx + direction;
+    if (nextTableIdx < 0 || nextTableIdx >= tableData.length) return;
+    const nextRow = tableData[nextTableIdx];
+    const idx = reviewResults.findIndex((r) => pairKey(r) === nextRow._key);
+    if (idx >= 0) setActiveIndex(idx);
+  }, [activeResult, tableData, reviewResults]);
+
+  const currentTableIndex = useMemo(() => {
+    const key = pairKey(activeResult);
+    return tableData.findIndex((r) => r._key === key);
+  }, [activeResult, tableData]);
+
+  // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowRight' || e.key === 'j' || e.key === 'J') {
+        e.preventDefault();
+        navigatePair(1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        navigatePair(-1);
+      } else if (e.key === 'Escape') {
+        closeDrawer();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [drawerOpen, navigatePair]);
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -722,6 +760,9 @@ export default function ResultsPage() {
               <h2 className="text-sm font-semibold text-slate-950 dark:text-white">Suspicious Pairs — Ranked</h2>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {tableData.length} pairs shown
+                {tableData.length > 0 && (
+                  <span className="ml-2 text-slate-400 dark:text-slate-600">· click to open · J/K to navigate</span>
+                )}
               </div>
             </div>
 
@@ -892,8 +933,30 @@ export default function ResultsPage() {
                     onClick={closeDrawer}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
                   >
-                    ← Back to all pairs
+                    ← All pairs
                   </button>
+                  {/* Prev / Next navigation */}
+                  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                    <button
+                      onClick={() => navigatePair(-1)}
+                      disabled={currentTableIndex <= 0}
+                      title="Previous pair (K / ←)"
+                      className="rounded-l-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      ‹ Prev
+                    </button>
+                    <span className="select-none border-x border-slate-200 px-2 py-2 text-xs text-slate-400 dark:border-slate-700">
+                      {currentTableIndex >= 0 ? currentTableIndex + 1 : '–'} / {tableData.length}
+                    </span>
+                    <button
+                      onClick={() => navigatePair(1)}
+                      disabled={currentTableIndex >= tableData.length - 1}
+                      title="Next pair (J / →)"
+                      className="rounded-r-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      Next ›
+                    </button>
+                  </div>
                 </div>
                 {/* Rationale input — shown below action row */}
                 <div className="mt-3 flex items-center gap-2">
