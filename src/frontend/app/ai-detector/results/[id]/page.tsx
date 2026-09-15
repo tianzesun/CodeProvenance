@@ -209,6 +209,15 @@ function SubmissionCard({ entry }) {
   const hasSnippet = snippet.length > 0;
   const metrics = entry.code_metrics || {};
   const patterns = entry.evidence_patterns || {};
+  const method = entry.method || 'heuristic';
+  const binocularsAvailable =
+    method === 'binoculars' || entry.layers?.binoculars?.available === true;
+  const methodLabel =
+    method === 'binoculars'
+      ? 'Binoculars + heuristics'
+      : method === 'ml'
+        ? 'Classifier + heuristics'
+        : 'Heuristic-only';
 
   return (
     <div className={`rounded-2xl border ${tone.border} overflow-hidden`}>
@@ -224,6 +233,20 @@ function SubmissionCard({ entry }) {
             {entry.language && (
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">
                 {entry.language}
+              </span>
+            )}
+            <span
+              className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
+              title={entry.model || methodLabel}
+            >
+              {methodLabel}
+            </span>
+            {!binocularsAvailable && (
+              <span
+                className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                title="The Binoculars zero-shot layer is not installed, so this verdict comes from statistical signals (and the trained classifier when available) rather than the full ensemble."
+              >
+                Heuristic-only — Binoculars not installed
               </span>
             )}
           </div>

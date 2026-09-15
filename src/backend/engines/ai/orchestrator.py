@@ -259,18 +259,21 @@ class AIDetectionOrchestrator:
         else:
             fused_probability = self._heuristic_fuse(signals)
 
-        # Combine confidence, then apply the false-positive safeguards before
-        # the display floor so penalties (and the low-confidence damping they
-        # enable) can actually take effect.
-        legacy_conf = legacy_result.get("confidence", 0.5)
-        bino_conf = (
-            bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.5
-        )
-        raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+        # Combine confidence over the layers that actually ran, then apply the
+        # false-positive safeguards. A layer that did not run must not
+        # contribute a phantom confidence value, and no artificial floor is
+        # applied: an honest "very low" confidence is more useful to a
+        # reviewer than a clamp that masks it.
+        legacy_conf = float(legacy_result.get("confidence", 0.5))
+        if bino_result.get("available"):
+            bino_conf = float(bino_result.get("confidence", 0.5))
+            raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+        else:
+            raw_confidence = legacy_conf
         fused_probability, safeguarded_confidence, safeguard_notes = (
             apply_fp_safeguards(fused_probability, raw_confidence, signals)
         )
-        combined_confidence = max(0.4, safeguarded_confidence)
+        combined_confidence = safeguarded_confidence
 
         # Apply the learned calibrator (trained via /api/ai-detect/retrain) to
         # the fused score so shared calibration feedback affects the live path.
