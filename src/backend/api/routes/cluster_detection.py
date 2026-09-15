@@ -92,7 +92,7 @@ async def detect_clusters(
 
     except Exception as e:
         logger.error(f"Cluster detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Cluster detection failed.")
 
 
 @router.get("/stats")
@@ -166,4 +166,4 @@ async def analyze_clusters(
 
     except Exception as e:
         logger.error(f"Cluster analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Cluster analysis failed.")

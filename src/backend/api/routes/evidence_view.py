@@ -55,7 +55,7 @@ async def generate_evidence_view_endpoint(
 
     except Exception as e:
         logger.error(f"Evidence view generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Evidence view generation failed.")
 
 
 @router.post("/diff")
@@ -92,7 +92,7 @@ async def get_diff(
 
     except Exception as e:
         logger.error(f"Diff generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Diff generation failed.")
 
 
 @router.get("/verdict-options")

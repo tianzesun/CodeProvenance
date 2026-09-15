@@ -66,7 +66,7 @@ async def update_engine_weights(weights: dict[str, float]):
         logger.exception("Failed to update engine weights")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to update weights: {e!s}",
+            detail="Failed to update engine weights. Check the supplied values.",
         )
 
 

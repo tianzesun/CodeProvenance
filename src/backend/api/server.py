@@ -6577,7 +6577,9 @@ async def retrain_ai_detector():
         )
     except Exception as e:
         logger.error(f"Retraining failed: {e}")
-        return JSONResponse(status_code=500, content={"error": f"Retraining failed: {e!s}"})
+        return JSONResponse(
+            status_code=500, content={"error": "Retraining failed. See server logs for details."}
+        )
 
 
 AIGCODESET_REPORT_DIR = project_root.parent / "data" / "datasets" / "aigcodeset"
@@ -7359,7 +7361,10 @@ async def _run_analysis(
                 _update_job_status_in_db(job_id, "failed", str(e))
             except SQLAlchemyError:
                 logger.warning("Could not update job status in DB after analysis failure")
-        return JSONResponse(status_code=500, content={"error": f"Analysis failed: {e!s}"})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Analysis failed. The server has logged the details."},
+        )
 
 
 def _run_analysis_background(
@@ -14530,7 +14535,8 @@ async def update_engine_config(config_update: dict[str, Any]):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Engine settings update rejected: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid engine settings.")
 
 
 @app.post("/api/settings/calibrate")
@@ -14554,7 +14560,10 @@ async def trigger_calibration():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Calibration failed: {e!s}")
+        logger.exception("Engine calibration failed")
+        raise HTTPException(
+            status_code=500, detail="Calibration failed. See server logs for details."
+        )
 
 
 @app.get("/api/settings/validation")

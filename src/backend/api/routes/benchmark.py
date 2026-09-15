@@ -136,7 +136,9 @@ async def create_demo_dataset(request: Request):
         raise
     except Exception as e:
         logger.error(f"Failed to create demo dataset: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create demo dataset: {e!s}")
+        raise HTTPException(
+            status_code=500, detail="Failed to create demo dataset. See server logs for details."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ async def compute_real_fpr_on_clean_corpus(
     except Exception as e:
         logger.exception("Real FPR computation failed")
         raise HTTPException(
-            status_code=500, detail=f"Internal error during FPR computation: {e!s}"
+            status_code=500, detail="FPR computation failed. See server logs for details."
         ) from e
 
     thresholds_to_evaluate = [
@@ -403,7 +405,7 @@ async def save_fpr_validation_run(request: Request, payload: FprValidationRunCre
         raise
     except Exception as e:
         logger.exception("Failed to save FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to save FPR validation run.")
 
 
 @router.get("/api/fpr-validation-runs")
@@ -443,7 +445,7 @@ async def list_fpr_validation_runs(request: Request, limit: int = 50):
         raise
     except Exception as e:
         logger.exception("Failed to list FPR validation runs")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list FPR validation runs.")
 
 
 @router.get("/api/fpr-validation-runs/{run_id}")
@@ -479,7 +481,7 @@ async def get_fpr_validation_run(run_id: str, request: Request):
         raise
     except Exception as e:
         logger.exception("Failed to fetch FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch FPR validation run.")
 
 
 @router.delete("/api/fpr-validation-runs/{run_id}")
@@ -509,7 +511,7 @@ async def delete_fpr_validation_run(run_id: str, request: Request):
         raise
     except Exception as e:
         logger.exception("Failed to delete FPR validation run")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete FPR validation run.")
 
 
 # ---------------------------------------------------------------------------

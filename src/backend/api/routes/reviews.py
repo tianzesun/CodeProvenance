@@ -130,6 +130,20 @@ def _require_user(request: Request) -> dict[str, Any]:
     return user
 
 
+def _require_job_access(job_id: str, user: dict[str, Any]) -> None:
+    """Raise HTTP 404 if the job doesn't exist or is not accessible by *user*.
+
+    Reuses the same access-control logic as the main job endpoints so the
+    reviews endpoints enforce the same tenant isolation.  Returns 404 (not
+    403) to avoid confirming whether a job exists for an unauthorised caller.
+    """
+    from src.backend.api.server import _get_job, _job_is_accessible
+
+    job = _get_job(job_id)
+    if not job or not _job_is_accessible(job, user):
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+
 def _get_threshold_config(
     db: Session, assignment_mode: str | None
 ) -> tuple[BandThresholdConfig, str]:
@@ -244,6 +258,7 @@ async def create_review(
     """
     user = _require_user(request)
     reviewer_id: str = user["id"]
+    _require_job_access(job_id, user)
 
     from src.backend.api.server import SessionLocal
 
@@ -316,7 +331,8 @@ async def list_reviews(
     not included — use the job results endpoint to get all pairs, then cross-
     reference by (submission_a, submission_b) to find pending ones.
     """
-    _require_user(request)
+    user = _require_user(request)
+    _require_job_access(job_id, user)
 
     from src.backend.api.server import SessionLocal
 
@@ -347,7 +363,8 @@ async def get_review_summary(
     Includes per-band and per-disposition counts, overturn count, escalation
     count, and AI flag breakdown — all computed over the latest review per pair.
     """
-    _require_user(request)
+    user = _require_user(request)
+    _require_job_access(job_id, user)
 
     from src.backend.api.server import SessionLocal
 
@@ -368,7 +385,8 @@ async def get_pair_review_history(
     Useful for the disposition panel to show prior decisions and rationale
     before the reviewer makes a new one.
     """
-    _require_user(request)
+    user = _require_user(request)
+    _require_job_access(job_id, user)
 
     from src.backend.api.server import SessionLocal
 
@@ -403,7 +421,8 @@ async def get_job_thresholds(
     The frontend uses this to display the correct band boundaries and to
     pre-compute which dispositions are available before the reviewer submits.
     """
-    _require_user(request)
+    user = _require_user(request)
+    _require_job_access(job_id, user)
 
     from src.backend.api.server import SessionLocal
 
