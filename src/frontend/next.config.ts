@@ -6,7 +6,13 @@ const backendOrigin =
   process.env.BACKEND_URL;
 
 if (!backendOrigin) {
-  throw new Error('Set BACKEND_URL, API_URL, or NEXT_PUBLIC_API_URL before starting the dashboard.');
+  throw new Error(
+    'Missing backend URL. Start the whole stack with ./scripts/start.sh (it exports ' +
+      'API_URL/NEXT_PUBLIC_API_URL), or run the dashboard standalone with ' +
+      '`API_URL=http://127.0.0.1:8000 npm run dev`. Do not add an .env.local at the ' +
+      'repo root: the backend only reads src/backend/.env.local, and Next.js only ' +
+      'reads env files inside src/frontend/.'
+  );
 }
 
 const nextConfig: NextConfig = {

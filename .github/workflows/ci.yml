@@ -13,6 +13,9 @@ env:
   EMBEDDING_SERVER_URL: "http://localhost:8001"
   BACKEND_URL: "http://localhost:8000"
   NEXT_PUBLIC_API_URL: "http://localhost:8000"
+  # AppSettings also requires AUTH_JWT_SECRET, and CI has no .env.local to read it
+  # from, so without this the settings import (and every test that touches it) dies.
+  AUTH_JWT_SECRET: "ci-only-placeholder-never-used-at-runtime"
 
 jobs:
   migrations:

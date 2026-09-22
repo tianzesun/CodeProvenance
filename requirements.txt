@@ -16,7 +16,7 @@ celery==5.3.6
 
 # Environment & Configuration
 python-dotenv==1.0.0
-pydantic==2.5.3
+pydantic[email]==2.5.3
 pydantic-settings==2.1.0
 pyyaml==6.0.3
 

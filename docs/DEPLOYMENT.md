@@ -16,7 +16,7 @@ Environment configuration has been centralized. Please follow the dedicated guid
 
 This guide covers:
 - Local development setup using `src/backend/.env.example`
-- Production configuration using `src/backend/.env.production.example`
+- Production configuration generated on the server by `deploy/setup.sh` (see `deploy/README.md`)
 - Security best practices and secret management
 - Common pitfalls (including previous issues with stray `.env.local` files)
 
