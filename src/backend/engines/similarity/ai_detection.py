@@ -48,7 +48,13 @@ _LLM_COMMENT_PATTERNS: list[re.Pattern] = [
         r"#\s*(Initialize|Create|Define|Compute|Calculate|Return|Check|Handle)\b",
         re.IGNORECASE,
     ),
-    re.compile(r"#\s*[A-Z][a-zA-Z'-]*(?: [a-zA-Z'-]+){2,}\s*$", re.MULTILINE),
+    # NOTE: this list previously contained a pattern matching ANY 3+ word
+    # English sentence-style comment. On the human false-positive baseline
+    # (174 novice student files) that single pattern fired in 37/37
+    # flagged-innocent files: it measures "well-commented code", which is
+    # taught as good style, not LLM output. Only phrase-level LLM comment
+    # fingerprints are kept; sentence-shaped comments alone must not
+    # contribute to the pattern signal.
     re.compile(r"#\s*-{3,}"),
     # Only match templated LLM docstrings (Google/Sphinx/NumPy style). This avoids
     # flagging plain one-line human docstrings that merely contain a common verb.
@@ -292,7 +298,19 @@ class AIDetectionEngine:
 
         # Combined raw entropy — typical human code: 3.5–5.5 bits
         # Repetitive / LLM code: 0–3.0 bits
-        combined = 0.4 * raw_unigram + 0.6 * raw_bigram
+        #
+        # Finite-sample correction: raw entropy estimated from a short token
+        # stream is biased downward (fewer tokens cannot spread across as many
+        # bins), so 10–25-line student files looked "low-entropy / AI-like"
+        # purely for being short. Miller–Madow adds ~ (K-1)/(2N) bits, where K
+        # is the number of distinct bins and N the sample size.
+        corrected_unigram = raw_unigram + (len(unigram_counter) - 1) / (
+            2.0 * max(1, total)
+        )
+        corrected_bigram = raw_bigram + (len(bigram_counter) - 1) / (
+            2.0 * max(1, btotal)
+        )
+        combined = 0.4 * corrected_unigram + 0.6 * corrected_bigram
 
         # Map: 0 bits → 1.0 (very AI-like), 5.0 bits → 0.0 (very human-like)
         return max(0.0, min(1.0, 1.0 - combined / 5.0))
@@ -357,18 +375,43 @@ class AIDetectionEngine:
         Normalised by code length so longer files don't score higher.
         High-precision comment/structural fingerprints are weighted more than
         generic naming matches (which are common in human code).
+
+        No single fingerprint family may saturate the signal: a file that
+        matches only one family — however many times — tops out at 0.45.
+        On the human false-positive baseline the dominant FP mode was exactly
+        that (one benign family firing many times), so raw density could push
+        innocent student files to 1.0 on a single comment style.
         """
         total_lines = max(1, len(code.splitlines()))
-        strong_matches = sum(
-            len(pattern.findall(code))
-            for pattern in (_LLM_COMMENT_PATTERNS + _LLM_STRUCTURAL_PATTERNS)
+        comment_hits = sum(
+            len(pattern.findall(code)) for pattern in _LLM_COMMENT_PATTERNS
         )
-        weak_matches = min(
-            8,
-            sum(len(pattern.findall(code)) for pattern in _LLM_NAMING_PATTERNS),
+        structural_hits = sum(
+            len(pattern.findall(code)) for pattern in _LLM_STRUCTURAL_PATTERNS
         )
-        density = (2.0 * strong_matches + 0.5 * weak_matches) / total_lines
-        return max(0.0, min(1.0, density * 2.5))
+        naming_hits = min(
+            8, sum(len(pattern.findall(code)) for pattern in _LLM_NAMING_PATTERNS)
+        )
+        families = [
+            (2.0, comment_hits),
+            (2.0, structural_hits),
+            (0.5, naming_hits),
+        ]
+        families_fired = sum(1 for _, hits in families if hits > 0)
+
+        def _family_contribution(weight: float, hits: int) -> float:
+            """One family's contribution, capped so it alone cannot saturate."""
+            if hits <= 0:
+                return 0.0
+            density = (weight * hits) / total_lines
+            return min(0.45, density * 2.5)
+
+        score = sum(_family_contribution(weight, hits) for weight, hits in families)
+        if families_fired >= 2:
+            # Independent families firing together are genuine fingerprint
+            # evidence: let the score move beyond any single family's cap.
+            score += 0.10 * families_fired
+        return max(0.0, min(1.0, score))
 
     def _signal_structural_entropy(self, code: str, language: str) -> float:
         """AST structural entropy signal (Python only).
