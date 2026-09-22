@@ -29,7 +29,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path as PathLib
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import numpy as np
@@ -4074,6 +4074,179 @@ def _db_job_status(app_status: str) -> str:
     }.get(app_status, app_status)
 
 
+# Ordered analysis stages surfaced to the upload page so professors can see
+# exactly what the pipeline is doing while a job runs.
+ANALYSIS_STAGE_LABELS: dict[str, str] = {
+    "queued": "Queued for analysis",
+    "reading_submissions": "Reading submissions",
+    "building_pairs": "Building comparison plan",
+    "external_tools": "Running external tools",
+    "comparing_submissions": "Comparing submissions",
+    "ai_detection": "Detecting AI-generated code",
+    "external_scan": "Scanning external sources",
+    "generating_reports": "Generating reports",
+    "completed": "Analysis complete",
+    "failed": "Analysis failed",
+}
+
+# Overall progress-bar percentage at which each stage starts.
+ANALYSIS_STAGE_PERCENT: dict[str, float] = {
+    "queued": 0.02,
+    "reading_submissions": 0.06,
+    "building_pairs": 0.12,
+    "external_tools": 0.18,
+    "comparing_submissions": 0.20,
+    "ai_detection": 0.78,
+    "external_scan": 0.86,
+    "generating_reports": 0.94,
+    "completed": 1.0,
+}
+
+# Pair comparison owns the widest slice of the bar: it is the only stage whose
+# duration grows with the number of submissions.
+COMPARISON_PERCENT_FLOOR = 0.20
+COMPARISON_PERCENT_CEILING = 0.72
+
+
+def _new_job_progress() -> dict[str, Any]:
+    """Return the initial progress payload for a freshly accepted upload."""
+    return {
+        "stage": "queued",
+        "label": ANALYSIS_STAGE_LABELS["queued"],
+        "detail": "Upload received — waiting for the analysis worker",
+        "percent": ANALYSIS_STAGE_PERCENT["queued"],
+        "completed_units": None,
+        "total_units": None,
+        "unit": "",
+        "current_pair": None,
+        "plan": [],
+        "updated_at": datetime.now().isoformat(),
+    }
+
+
+def _analysis_progress_plan(
+    include_external_tools: bool, include_external_scan: bool
+) -> list[dict[str, str]]:
+    """Return the ordered stages a job will run, for the upload checklist.
+
+    Args:
+        include_external_tools: True when non-IntegrityDesk tools were selected.
+        include_external_scan: True when external source scanning is enabled.
+
+    Returns:
+        List of ``{"stage": ..., "label": ...}`` dicts in execution order.
+    """
+    stage_keys = ["reading_submissions", "building_pairs"]
+    if include_external_tools:
+        stage_keys.append("external_tools")
+    stage_keys.append("comparing_submissions")
+    stage_keys.append("ai_detection")
+    if include_external_scan:
+        stage_keys.append("external_scan")
+    stage_keys.append("generating_reports")
+    return [{"stage": key, "label": ANALYSIS_STAGE_LABELS[key]} for key in stage_keys]
+
+
+def _set_job_progress(
+    job_id: str,
+    stage: str,
+    *,
+    percent: float | None = None,
+    detail: str = "",
+    completed_units: int | None = None,
+    total_units: int | None = None,
+    unit: str = "",
+    current_pair: dict[str, str] | None = None,
+    plan: list[dict[str, str]] | None = None,
+) -> None:
+    """Publish live analysis progress for *job_id*.
+
+    The upload page polls ``GET /api/jobs/{job_id}`` and renders whatever is
+    stored under the job's ``progress`` key. In-memory state is always updated
+    so the next poll sees the change immediately; job.json is only rewritten
+    when the stage changes, because pair-level ticks would otherwise write to
+    disk on every comparison.
+
+    Args:
+        job_id: Job identifier whose progress should be updated.
+        stage: Stage key from ``ANALYSIS_STAGE_LABELS``.
+        percent: Overall completion in the 0.0-1.0 range. Defaults to the
+            stage's entry percentage, or the previously reported value.
+        detail: Human-readable description of the current work item.
+        completed_units: Units finished inside the current stage.
+        total_units: Total units expected in the current stage.
+        unit: Unit name for the counters (for example ``"pairs"``).
+        current_pair: Submission names currently being compared, if any.
+        plan: Stage plan override; defaults to the plan already on the job.
+    """
+    job = _jobs.get(job_id)
+    if not job:
+        return
+
+    previous = job.get("progress") if isinstance(job.get("progress"), dict) else {}
+    if percent is None:
+        percent = _coerce_float(
+            previous.get("percent"), ANALYSIS_STAGE_PERCENT.get(stage, 0.0)
+        )
+    if plan is None:
+        existing_plan = previous.get("plan")
+        plan = existing_plan if isinstance(existing_plan, list) else []
+
+    job["progress"] = {
+        "stage": stage,
+        "label": ANALYSIS_STAGE_LABELS.get(stage, stage.replace("_", " ").title()),
+        "detail": detail,
+        "percent": round(max(0.0, min(1.0, _coerce_float(percent))), 4),
+        "completed_units": completed_units,
+        "total_units": total_units,
+        "unit": unit,
+        "current_pair": current_pair,
+        "plan": plan,
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    if previous.get("stage") != stage:
+        try:
+            _persist_job(job_id)
+        except Exception:
+            logger.warning("Could not persist progress for job %s", job_id)
+
+
+def _tool_display_name(tool_id: str) -> str:
+    """Return the human-readable label for a benchmark tool identifier."""
+    return BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
+        "name", tool_id.replace("-", " ").title()
+    )
+
+
+def _pair_progress_callback(job_id: str) -> Callable[[int, int, str, str], None]:
+    """Build a callback that maps per-pair comparison ticks onto job progress.
+
+    Args:
+        job_id: Job the comparison belongs to.
+
+    Returns:
+        Callable accepting ``(completed, total, file_a, file_b)``.
+    """
+
+    def report(completed: int, total: int, file_a: str, file_b: str) -> None:
+        """Record one finished pair on the job's progress payload."""
+        ratio = max(0.0, min(1.0, (completed / total) if total else 1.0))
+        _set_job_progress(
+            job_id,
+            "comparing_submissions",
+            percent=COMPARISON_PERCENT_FLOOR
+            + (COMPARISON_PERCENT_CEILING - COMPARISON_PERCENT_FLOOR) * ratio,
+            detail=f"{file_a} vs {file_b}",
+            completed_units=completed,
+            total_units=total,
+            unit="pairs",
+            current_pair={"file_a": file_a, "file_b": file_b},
+        )
+
+    return report
+
+
 def _resolve_default_tenant_id(db) -> str | None:
     """Return the first existing tenant ID, or None if no tenants exist."""
     fallback = db.query(Tenant).first()
@@ -6528,6 +6701,7 @@ async def upload_files(
     _jobs[job_id] = {
         "source_scan_enabled_override": source_scan_enabled,
         "status": "processing",
+        "progress": _new_job_progress(),
     }
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -6611,6 +6785,7 @@ async def upload_zip(
     _jobs[job_id] = {
         "source_scan_enabled_override": source_scan_enabled,
         "status": "processing",
+        "progress": _new_job_progress(),
     }
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -7126,12 +7301,25 @@ def _run_analysis_engines(
     threshold,
     fusion_weights,
     starter_sources,
+    progress_callback: Callable[[int, int, str, str], None] | None = None,
 ):
     """Run the selected comparison engines and build the report.
 
     Runs in a worker thread via ``run_in_threadpool`` because the engine work
     is CPU-bound and synchronous; keeping it inline in the async handler blocks
     the event loop for the whole analysis.
+
+    Args:
+        selected_tool_ids: Tools the user enabled for this job.
+        submissions: Mapping of submission name to source code.
+        all_pairs: Every comparison pair for the job.
+        external_tool_results: Per-tool scores gathered before the engines run.
+        threshold: Similarity threshold used for risk classification.
+        fusion_weights: Engine weights for the fusion scorer.
+        starter_sources: Optional instructor starter code to strip first.
+        progress_callback: Optional ``callback(completed, total, file_a, file_b)``
+            forwarded to the batch service so the upload page can show which
+            pair is being compared right now.
     """
     if "integritydesk" in selected_tool_ids:
         service = BatchDetectionService(
@@ -7139,7 +7327,9 @@ def _run_analysis_engines(
             weights=fusion_weights or None,
             starter_sources=starter_sources,
         )
-        results = service.compare_all_pairs(submissions)
+        results = service.compare_all_pairs(
+            submissions, progress_callback=progress_callback
+        )
         _merge_external_features_into_results(results, external_tool_results)
         report = service.generate_report(results)
     else:
@@ -7214,6 +7404,12 @@ async def _run_analysis(
             )
 
     selected_tool_ids = _parse_selected_tool_ids(tool_ids_raw)
+    # IntegrityDesk is the built-in engine (reported by the
+    # ``comparing_submissions`` stage), so only third-party tools get their own
+    # progress stage.
+    external_tool_ids = [
+        tool_id for tool_id in selected_tool_ids if tool_id != "integritydesk"
+    ]
     try:
         requested_engine_keys = json.loads(engine_keys_raw) if engine_keys_raw else []
         if not isinstance(requested_engine_keys, list):
@@ -7276,10 +7472,7 @@ async def _run_analysis(
         "owner_user_email": current_user.get("email") if current_user else None,
         "selected_tool_ids": selected_tool_ids,
         "selected_tools": [
-            BENCHMARK_TOOL_METADATA.get(tool_id, {}).get(
-                "name", tool_id.replace("-", " ").title()
-            )
-            for tool_id in selected_tool_ids
+            _tool_display_name(tool_id) for tool_id in selected_tool_ids
         ],
         "external_tool_results": {},
         "active_engines": (
@@ -7296,6 +7489,47 @@ async def _run_analysis(
     _persist_job(job_id)
 
     try:
+        # External-source scan settings are resolved before any analysis runs
+        # because they decide which stages this job executes (the progress plan
+        # advertised to the upload page).
+        settings_payload = _build_settings_payload(
+            current_user.get("tenant_id") if current_user else None
+        )
+
+        # Per-assignment override for external source scanning (uses existing Assignment.settings JSONB)
+        assignment_id = _jobs[job_id].get("assignment_id")
+        if assignment_id:
+            try:
+                with SessionLocal() as db:
+                    ass = (
+                        db.query(Assignment)
+                        .filter(Assignment.id == assignment_id)
+                        .first()
+                    )
+                    if ass and ass.settings:
+                        for key in ("source_scan_enabled", "source_scan_sites"):
+                            if key in ass.settings:
+                                settings_payload[key] = ass.settings[key]
+            except Exception:
+                logger.warning(
+                    "Failed to load per-assignment external scan settings override"
+                )
+
+        # Per-submission override from upload form (highest priority)
+        if job_id in _jobs and "source_scan_enabled_override" in _jobs[job_id]:
+            settings_payload["source_scan_enabled"] = _jobs[job_id][
+                "source_scan_enabled_override"
+            ]
+
+        _set_job_progress(
+            job_id,
+            "reading_submissions",
+            detail="Loading uploaded submissions from disk",
+            plan=_analysis_progress_plan(
+                bool(external_tool_ids),
+                bool(settings_payload.get("source_scan_enabled")),
+            ),
+        )
         submissions = _read_files_from_dir(job_dir)
         if len(submissions) < 2:
             del _jobs[job_id]
@@ -7419,10 +7653,38 @@ async def _run_analysis(
             )
 
         all_pairs = _build_all_submission_pairs(submissions)
+        _set_job_progress(
+            job_id,
+            "building_pairs",
+            detail=f"{len(submissions)} submissions → {len(all_pairs)} pairs to compare",
+            completed_units=0,
+            total_units=len(all_pairs),
+            unit="pairs",
+        )
+        if external_tool_ids:
+            _set_job_progress(
+                job_id,
+                "external_tools",
+                detail="Running "
+                + ", ".join(
+                    _tool_display_name(tool_id) for tool_id in external_tool_ids
+                ),
+                completed_units=0,
+                total_units=len(external_tool_ids),
+                unit="tools",
+            )
         external_tool_results = _run_selected_external_tools(
             selected_tool_ids, submissions, all_pairs
         )
 
+        _set_job_progress(
+            job_id,
+            "comparing_submissions",
+            detail=f"Comparing {len(submissions)} submissions",
+            completed_units=0,
+            total_units=len(all_pairs),
+            unit="pairs",
+        )
         # The engine work is CPU-bound and synchronous; offload it so the event
         # loop stays responsive to other requests while a job analyzes.
         results, report = await run_in_threadpool(
@@ -7434,42 +7696,35 @@ async def _run_analysis(
             threshold,
             fusion_weights,
             starter_sources,
+            _pair_progress_callback(job_id),
         )
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
+        _set_job_progress(
+            job_id,
+            "ai_detection",
+            detail=f"Scoring {len(submissions)} submissions for AI authorship signals",
+            completed_units=0,
+            total_units=len(submissions),
+            unit="submissions",
+        )
         # AI detection is CPU-bound (and may load a local code LM); offload it
         # like the engine work so the event loop stays responsive.
         ai_detection = await run_in_threadpool(_build_ai_detection_summary, submissions)
-        settings_payload = _build_settings_payload(
-            current_user.get("tenant_id") if current_user else None
-        )
 
-        # Per-assignment override for external source scanning (uses existing Assignment.settings JSONB)
-        assignment_id = _jobs[job_id].get("assignment_id")
-        if assignment_id:
-            try:
-                with SessionLocal() as db:
-                    ass = (
-                        db.query(Assignment)
-                        .filter(Assignment.id == assignment_id)
-                        .first()
-                    )
-                    if ass and ass.settings:
-                        for key in ("source_scan_enabled", "source_scan_sites"):
-                            if key in ass.settings:
-                                settings_payload[key] = ass.settings[key]
-            except Exception:
-                logger.warning(
-                    "Failed to load per-assignment external scan settings override"
-                )
-
-        # Per-submission override from upload form (highest priority)
-        if job_id in _jobs and "source_scan_enabled_override" in _jobs[job_id]:
-            settings_payload["source_scan_enabled"] = _jobs[job_id][
-                "source_scan_enabled_override"
-            ]
-
+        if settings_payload.get("source_scan_enabled"):
+            _set_job_progress(
+                job_id,
+                "external_scan",
+                detail=(
+                    f"Checking {len(submissions)} submissions against GitHub, "
+                    "Stack Overflow and configured sources"
+                ),
+                completed_units=0,
+                total_units=len(submissions),
+                unit="submissions",
+            )
         web_analysis = _build_web_analysis_summary(submissions, settings_payload)
         pair_ai_details = _build_pair_ai_details(results, ai_detection)
         calibration_report = _build_calibration_report(threshold, mode.mode_id)
@@ -7477,6 +7732,11 @@ async def _run_analysis(
             submissions, selected_tool_ids, mode
         )
         ai_text_trust = _build_ai_text_trust_report(ai_detection)
+        _set_job_progress(
+            job_id,
+            "generating_reports",
+            detail="Writing HTML, JSON and committee reports",
+        )
 
         comparison_details = []
         for r in results:
@@ -7623,7 +7883,20 @@ async def _run_analysis(
                 "submissions": {k: v[:3000] for k, v in submissions.items()},
             }
         )
-        _persist_job(job_id)
+        # `_set_job_progress` rewrites job.json because the stage changed, so it
+        # replaces the explicit `_persist_job` call that used to live here.
+        _set_job_progress(
+            job_id,
+            "completed",
+            percent=1.0,
+            detail=(
+                f"Compared {len(all_pairs)} pairs across {len(submissions)} submissions"
+            ),
+            completed_units=len(all_pairs),
+            total_units=len(all_pairs),
+            unit="pairs",
+            current_pair=None,
+        )
         _update_job_status_in_db(job_id, "completed")
 
         # Persist SimilarityResult rows to DB (non-fatal; file-based storage is primary)
@@ -7698,6 +7971,7 @@ async def _run_analysis(
         if job_id in _jobs:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(e)
+            _set_job_progress(job_id, "failed", detail=str(e)[:200])
             _persist_job(job_id)
             try:
                 _update_job_status_in_db(job_id, "failed", str(e))

@@ -20,6 +20,7 @@ import {
   Zap,
   Shield,
   Clock3,
+  FileCode,
   SearchCheck,
   BookOpen,
 } from 'lucide-react';
@@ -137,12 +138,42 @@ const btnShadow = { boxShadow: '0 1px 2px rgba(37,99,235,0.2), 0 4px 14px rgba(3
 const dotGrid = { backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' };
 const blueBg = { background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' };
 const blueCardBg = { background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', border: '1px solid #bfdbfe' };
-const progressTasks = [
-  'Removing starter code',
-  'Building similarity candidates',
-  'Comparing prior semesters',
-  'Ranking cases worth review',
+type UploadProgressStage = { stage: string; label: string };
+
+type UploadJobProgress = {
+  stage: string;
+  label: string;
+  detail: string;
+  percent: number;
+  completed_units: number | null;
+  total_units: number | null;
+  unit: string;
+  current_pair: { file_a: string; file_b: string } | null;
+  plan: UploadProgressStage[];
+  updated_at: string;
+};
+
+// Mirrors the backend stage plan. Only used until the first server progress
+// payload arrives, since the upload request itself has no server-side progress.
+const FALLBACK_PROGRESS_STAGES: UploadProgressStage[] = [
+  { stage: 'queued', label: 'Queued for analysis' },
+  { stage: 'reading_submissions', label: 'Reading submissions' },
+  { stage: 'building_pairs', label: 'Building comparison plan' },
+  { stage: 'comparing_submissions', label: 'Comparing submissions' },
+  { stage: 'ai_detection', label: 'Detecting AI-generated code' },
+  { stage: 'generating_reports', label: 'Generating reports' },
 ];
+
+function describeProgress(progress: UploadJobProgress) {
+  const pair = progress.current_pair;
+  if (progress.stage === 'comparing_submissions' && pair) {
+    const counter = progress.total_units
+      ? `${progress.completed_units ?? 0}/${progress.total_units} · `
+      : '';
+    return `${counter}${pair.file_a} ↔ ${pair.file_b}`;
+  }
+  return progress.detail ? `${progress.label} — ${progress.detail}` : progress.label;
+}
 
 export default function UploadPage() {
   const router = useRouter();
@@ -168,6 +199,8 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState(0);
+  const [jobProgress, setJobProgress] = useState<UploadJobProgress | null>(null);
+  const [activity, setActivity] = useState<string[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
   const [animateFiles, setAnimateFiles] = useState(false);
   const [dragCount, setDragCount] = useState(0);
@@ -187,15 +220,18 @@ export default function UploadPage() {
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // Fallback crawl for the window between "Analyze" and the first server-side
+  // progress payload: real stage/percent values take over as soon as the job
+  // status poll reports them.
   useEffect(() => {
     if (!uploading) {
       setProgress(0);
       return;
     }
-    setProgress(0.12);
+    setProgress(0.03);
     const timer = window.setInterval(() => {
-      setProgress((current) => Math.min(0.92, current + 0.035));
-    }, 600);
+      setProgress((current) => Math.min(0.1, current + 0.015));
+    }, 400);
     return () => window.clearInterval(timer);
   }, [uploading]);
 
@@ -225,6 +261,14 @@ export default function UploadPage() {
     pollRef.current = setInterval(async () => {
       try {
         const s = await apiClient.get(`/api/jobs/${jobId}`);
+        const reported = s.data?.progress as UploadJobProgress | undefined;
+        if (reported) {
+          setJobProgress(reported);
+          const entry = describeProgress(reported);
+          setActivity((previous) =>
+            previous[0] === entry ? previous : [entry, ...previous].slice(0, 6),
+          );
+        }
         if (s.data.status === 'completed') { clearInterval(pollRef.current!); router.push(`/results/${jobId}`); }
         else if (s.data.status === 'failed') { clearInterval(pollRef.current!); setUploading(false); setError(s.data.error || 'Analysis failed'); }
       } catch (e) { clearInterval(pollRef.current!); setUploading(false); setError(getApiErrorMessage(e, 'Could not load status.')); }
@@ -257,6 +301,28 @@ export default function UploadPage() {
   }, [files.length, zipFile]);
   const selectedAssignmentMode = useMemo(() => assignmentModes.find((m) => m.id === selectedAssignmentModeId), [assignmentModes, selectedAssignmentModeId]);
   const hasMixedZipSelection = useMemo(() => files.length > 1 && files.some((f) => f.name.toLowerCase().endsWith('.zip')), [files]);
+  const submissionScope = zipFile ? '1 archive' : `${files.length} submissions`;
+  // Live progress reported by the backend while the job runs; `progress` is the
+  // local fallback animation used before the first poll response.
+  const displayProgress = jobProgress ? jobProgress.percent : progress;
+  const progressPlan = jobProgress?.plan?.length ? jobProgress.plan : FALLBACK_PROGRESS_STAGES;
+  const reportedStageIndex = jobProgress
+    ? progressPlan.findIndex((stage) => stage.stage === jobProgress.stage)
+    : -1;
+  // `completed`/`failed` are not part of the plan: treat them as "every
+  // reported stage finished" so the checklist never flips back to all-pending.
+  // Before the first poll response, `queued` is the stage in flight.
+  const activeStageIndex = jobProgress
+    ? (reportedStageIndex === -1 ? progressPlan.length : reportedStageIndex)
+    : 0;
+  const currentWork = jobProgress
+    ? (jobProgress.current_pair
+      ? `${jobProgress.current_pair.file_a} ↔ ${jobProgress.current_pair.file_b}`
+      : jobProgress.detail)
+    : 'Uploading files to the analysis queue…';
+  const progressFooter = jobProgress?.total_units
+    ? `${submissionScope} · ${jobProgress.completed_units ?? 0} of ${jobProgress.total_units} ${jobProgress.unit || 'units'} complete`
+    : submissionScope;
   const canRunCheck = useMemo(() => {
     if (uploading || hasMixedZipSelection) return false;
     // IntegrityDesk is always used, so we just need files
@@ -362,7 +428,9 @@ export default function UploadPage() {
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
-    setProgress(0.18);
+    setProgress(0.03);
+    setJobProgress(null);
+    setActivity([]);
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     starterFiles.forEach((f) => fd.append('starter_files', f));
@@ -451,27 +519,64 @@ export default function UploadPage() {
           {uploading && (
             <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-950">
-                    <Loader2 size={16} className="animate-spin" />
-                    Analyzing {zipFile ? 'submissions from archive' : `${files.length} submissions`}...
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-blue-950">
+                    <Loader2 size={16} className="animate-spin shrink-0" />
+                    <span className="truncate">
+                      {jobProgress?.label ?? `Analyzing ${zipFile ? 'submissions from archive' : `${files.length} submissions`}...`}
+                    </span>
+                    {jobProgress?.stage === 'comparing_submissions' && jobProgress.total_units ? (
+                      <span className="rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                        pair {jobProgress.completed_units ?? 0} of {jobProgress.total_units}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-blue-800">
+                    <FileCode size={12} className="shrink-0 text-blue-500" />
+                    <span className="truncate">{currentWork}</span>
                   </div>
                   <div className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner">
-                    <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+                    <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${Math.round(displayProgress * 100)}%` }} />
                   </div>
-                  <div className="mt-2 flex justify-end">
-                    <span className="text-xs font-medium text-blue-700">{Math.round(progress * 100)}%</span>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="truncate text-[11px] text-blue-700/80">{progressFooter}</span>
+                    <span className="text-xs font-medium text-blue-700">{Math.round(displayProgress * 100)}%</span>
                   </div>
                 </div>
                 <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">
-                  {progressTasks.map((task, index) => (
-                    <div key={task} className="flex items-center gap-2">
-                      <Check size={14} className={progress > (index + 1) * 0.18 ? 'text-blue-700' : 'text-blue-300'} />
-                      {task}
+                  {progressPlan.map((task, index) => (
+                    <div key={task.stage} className="flex items-center gap-2">
+                      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                        {index < activeStageIndex ? (
+                          <Check size={14} className="text-blue-700" />
+                        ) : index === activeStageIndex ? (
+                          <Loader2 size={13} className="animate-spin text-blue-700" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full bg-blue-300" />
+                        )}
+                      </span>
+                      <span className={index === activeStageIndex ? 'font-semibold text-blue-950' : index < activeStageIndex ? 'text-blue-700' : 'text-blue-500/70'}>
+                        {task.label}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
+
+              {activity.length > 0 && (
+                <div className="mt-4 rounded-xl border border-blue-100 bg-white/70 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                    <Clock3 size={12} /> Live activity
+                  </div>
+                  <ul className="mt-2 space-y-1">
+                    {activity.map((line, index) => (
+                      <li key={`${index}-${line}`} className="truncate font-mono text-[11px] text-blue-900/80">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           )}
 
