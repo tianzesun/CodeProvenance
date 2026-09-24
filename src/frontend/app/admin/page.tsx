@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  BookOpen,
+  Calendar,
   CheckCircle2,
   ChevronDown,
   FileText,
@@ -36,6 +38,13 @@ function formatDate(value: string | null) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 interface AxiosErrorResponse {
@@ -238,8 +247,9 @@ export default function AdminPage() {
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
-  const [expandedAssignmentsCourse, setExpandedAssignmentsCourse] = useState<string | null>(null);
+  const [expandedCourseIds, setExpandedCourseIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'users' | 'courses'>('users');
+  const [courseQuery, setCourseQuery] = useState('');
 
   const [form, setForm] = useState({
     full_name: '',
@@ -344,6 +354,23 @@ export default function AdminPage() {
     0
   );
 
+  const filteredCourses = useMemo(() => {
+    const query = courseQuery.trim().toLowerCase();
+    if (!query) return coursesWithInstructors;
+    return coursesWithInstructors.filter((course) => {
+      const haystack = [
+        course.name,
+        course.code ?? '',
+        course.department ?? '',
+        course.organization_name ?? '',
+        ...(course.instructors?.map((i) => i.full_name) ?? []),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [coursesWithInstructors, courseQuery]);
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   const openCreatePanel = () => {
@@ -432,6 +459,18 @@ export default function AdminPage() {
     } catch (error) {
       setPageError(getErrorMessage(error));
     }
+  };
+
+  const toggleCourseAssignments = (courseId: string) => {
+    setExpandedCourseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(courseId)) {
+        next.delete(courseId);
+      } else {
+        next.add(courseId);
+      }
+      return next;
+    });
   };
 
   // ── Early returns ─────────────────────────────────────────────────────────────
@@ -835,7 +874,7 @@ export default function AdminPage() {
         {/* ── Course & Instructor Assignments ─────────────────────────────────── */}
         {activeTab === 'courses' && (
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
                 <GraduationCap size={14} />
@@ -848,31 +887,45 @@ export default function AdminPage() {
                 Manage course access and see which assignments belong to each course.
               </p>
             </div>
-            <div className="shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-right dark:bg-slate-900">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                Assignments
+
+            <div className="flex flex-col gap-2 sm:items-end">
+              <div className="relative w-full sm:w-[280px]">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="search"
+                  value={courseQuery}
+                  onChange={(e) => setCourseQuery(e.target.value)}
+                  placeholder="Search courses, codes, professors…"
+                  aria-label="Search courses"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                />
               </div>
-              <div className="text-xl font-semibold text-slate-900 tabular-nums dark:text-white">
-                {totalAssignments}
-              </div>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {filteredCourses.length === totalCourses
+                  ? `${totalCourses} course${totalCourses !== 1 ? 's' : ''} · ${totalAssignments} assignment${totalAssignments !== 1 ? 's' : ''}`
+                  : `${filteredCourses.length} of ${totalCourses} courses`}
+              </p>
             </div>
           </div>
 
           {loadingCourses ? (
-            <div className="divide-y divide-slate-200 dark:divide-slate-800">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="px-6 py-5">
-                  <div className="h-5 w-48 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-2 h-4 w-32 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-4 flex gap-2">
-                    {Array.from({ length: 2 }).map((_, j) => (
-                      <div key={j} className="h-7 w-24 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
-                    ))}
+            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 w-20 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-4 w-16 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
                   </div>
+                  <div className="mt-3 h-5 w-40 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                  <div className="mt-3 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
                 </div>
               ))}
             </div>
-          ) : coursesWithInstructors.length === 0 ? (
+          ) : totalCourses === 0 ? (
             <div className="px-6 py-16 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-900">
                 <Building2 size={22} className="text-slate-500 dark:text-slate-400" />
@@ -882,98 +935,142 @@ export default function AdminPage() {
                 Create courses first before assigning instructors.
               </p>
             </div>
+          ) : filteredCourses.length === 0 ? (
+            <div className="px-6 py-16 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-900">
+                <Search size={22} className="text-slate-500 dark:text-slate-400" />
+              </div>
+              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+                No courses match your search
+              </h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Try a different course name, code, department, organization, or professor.
+              </p>
+            </div>
           ) : (
-            <div className="divide-y divide-slate-200 dark:divide-slate-800">
-              {coursesWithInstructors.map((course) => {
+            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+              {filteredCourses.map((course) => {
                 const professors = users.filter((u) => u.role === 'professor' || u.role === 'admin');
                 const currentInstructorIds = course.instructors.map((i) => i.id);
                 const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
                 const isAssigning = assigningCourse === course.id;
+                const assignmentCount = course.assignment_count ?? course.assignments?.length ?? 0;
+                const isAssignmentsOpen = expandedCourseIds.has(course.id);
 
                 return (
-                  <div key={course.id} className="px-6 py-5">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      {/* Course info */}
+                  <article
+                    key={course.id}
+                    className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    {/* Course header */}
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-900 dark:text-white">
-                            {course.name}
-                          </span>
+                        <div className="flex flex-wrap items-center gap-2">
                           {course.code && (
-                            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                            <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                               {course.code}
                             </span>
                           )}
                           {(course.term || course.year) && (
-                            <span className="rounded-md bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
                               {course.term} {course.year}
                             </span>
                           )}
-                          <span
-                            className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-600 dark:bg-blue-500/15 dark:text-blue-300"
-                            title="Number of assignments in this course"
-                          >
-                            <FileText size={11} />
-                            {course.assignment_count ?? course.assignments?.length ?? 0}{' '}
-                            {course.assignment_count === 1 ? 'assignment' : 'assignments'}
-                          </span>
                         </div>
-                        {course.organization_name && (
-                          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                            <Building2 size={11} />
-                            {course.organization_name}
-                          </div>
-                        )}
+                        <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
+                          {course.name}
+                        </h3>
+                      </div>
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
+                        <GraduationCap size={17} className="text-blue-600 dark:text-blue-400" />
+                      </div>
+                    </div>
 
-                        {/* Current instructors */}
-                        <div className="mt-3">
-                          {course.instructors.length === 0 ? (
-                            <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-600 dark:bg-amber-900/20 dark:text-amber-400">
-                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                              No instructors assigned
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {course.instructors.map((inst) => (
-                                <div
-                                  key={inst.id}
-                                  className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 py-1 pl-3 pr-2 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
-                                >
-                                  <span>{inst.full_name}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => removeInstructor(course.id, inst.id, inst.full_name)}
-                                    className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                                    title={`Remove ${inst.full_name}`}
-                                  >
-                                    <X size={11} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                    {/* Meta */}
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                      {course.department && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <BookOpen size={12} className="shrink-0" />
+                          {course.department}
+                        </span>
+                      )}
+                      {course.organization_name && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Building2 size={12} className="shrink-0" />
+                          {course.organization_name}
+                        </span>
+                      )}
+                      {!course.department && !course.organization_name && (
+                        <span>No department or organization on record</span>
+                      )}
+                    </div>
+
+                    {/* Professors */}
+                    <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                          Professors
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {course.instructors.length}
+                        </span>
                       </div>
 
-                      {/* Assign form */}
-                      {availableProfessors.length > 0 && (
-                        <div className="flex shrink-0 items-center gap-2">
-                          <div className="relative">
+                      <div className="mt-2.5">
+                        {course.instructors.length === 0 ? (
+                          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/70 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                            No instructors assigned yet
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {course.instructors.map((inst) => (
+                              <div
+                                key={inst.id}
+                                title={inst.email}
+                                className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+                              >
+                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                                  {initialsOf(inst.full_name)}
+                                </span>
+                                <span className="max-w-[9rem] truncate">{inst.full_name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeInstructor(course.id, inst.id, inst.full_name)}
+                                  className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                                  title={`Remove ${inst.full_name}`}
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Assign a professor */}
+                      {availableProfessors.length > 0 ? (
+                        <div className="mt-3 flex items-center gap-2">
+                          <div className="relative min-w-0 flex-1">
                             <select
                               value={selectedProfessorForCourse[course.id] || ''}
                               onChange={(e) =>
                                 setSelectedProfessorForCourse((prev) => ({ ...prev, [course.id]: e.target.value }))
                               }
-                              className="h-10 appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                              aria-label={`Choose a professor for ${course.name}`}
+                              className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                             >
-                              <option value="">Add professor…</option>
+                              <option value="">Choose professor…</option>
                               {availableProfessors.map((p) => (
                                 <option key={p.id} value={p.id}>
                                   {p.full_name}
                                 </option>
                               ))}
                             </select>
-                            <ChevronDown size={13} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <ChevronDown
+                              size={13}
+                              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                            />
                           </div>
                           <button
                             type="button"
@@ -982,71 +1079,93 @@ export default function AdminPage() {
                               const uid = selectedProfessorForCourse[course.id];
                               if (uid) assignInstructor(course.id, uid);
                             }}
-                            className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {isAssigning ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                            {isAssigning ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
                             Assign
                           </button>
                         </div>
+                      ) : (
+                        <p className="mt-3 text-xs leading-5 text-slate-400 dark:text-slate-500">
+                          No other professor accounts available to assign.
+                        </p>
                       )}
+                    </div>
 
-                    {/* Assignments for this course */}
-                    <div className="mt-5">
+                    {/* Assignments */}
+                    <div className="mt-auto pt-4">
                       <button
                         type="button"
-                        onClick={() =>
-                          setExpandedAssignmentsCourse((prev) => prev === course.id ? null : course.id)
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+                        onClick={() => toggleCourseAssignments(course.id)}
+                        aria-expanded={isAssignmentsOpen}
+                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
                       >
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+                          <FileText size={13} className="text-violet-500 dark:text-violet-400" />
+                          Assignments
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {assignmentCount}
+                          </span>
+                        </span>
                         <ChevronDown
-                          size={14}
-                          className={`transition-transform ${expandedAssignmentsCourse === course.id ? 'rotate-180' : ''}`}
+                          size={15}
+                          className={`text-slate-400 transition-transform ${isAssignmentsOpen ? 'rotate-180' : ''}`}
                         />
-                        {expandedAssignmentsCourse === course.id
-                          ? 'Hide assignments'
-                          : `View ${course.assignment_count ?? course.assignments?.length ?? 0} assignments`}
                       </button>
 
-                      {expandedAssignmentsCourse === course.id && (
-                        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-                          {!course.assignments || course.assignments.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-                              No assignments have been created for this course yet.
-                            </div>
-                          ) : (
-                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {isAssignmentsOpen && (
+                        <div className="mt-3">
+                          {course.assignments && course.assignments.length > 0 ? (
+                            <ul className="space-y-2">
                               {course.assignments.map((assignment) => (
-                                <div
+                                <li
                                   key={assignment.id}
-                                  className="flex items-center gap-3 bg-white px-4 py-3 dark:bg-slate-900"
+                                  className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/70"
                                 >
-                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                                    <FileText size={14} />
+                                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
+                                    <FileText size={12} />
                                   </div>
                                   <div className="min-w-0 flex-1">
                                     <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                                       {assignment.name}
                                     </div>
-                                    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                                      {[assignment.assignment_type, assignment.term].filter(Boolean).join(' · ') || 'Assignment'}
+                                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      {assignment.assignment_type && (
+                                        <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
+                                          {assignment.assignment_type.replace(/_/g, ' ')}
+                                        </span>
+                                      )}
+                                      {assignment.term && (
+                                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                          {assignment.term}
+                                        </span>
+                                      )}
+                                      {typeof assignment.version === 'number' && (
+                                        <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                                          v{assignment.version}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                   {assignment.due_at && (
-                                    <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                                    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                                      <Calendar size={12} />
                                       Due {new Date(assignment.due_at).toLocaleDateString()}
                                     </span>
                                   )}
-                                </div>
+                                </li>
                               ))}
+                            </ul>
+                          ) : (
+                            <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-xs leading-5 text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
+                              No assignments have been created for this course yet.
                             </div>
                           )}
                         </div>
                       )}
                     </div>
-                  </div>
-                  </div>
-              );
+                  </article>
+                );
               })}
             </div>
           )}
