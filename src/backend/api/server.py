@@ -11943,6 +11943,11 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "openai_model": settings.OPENAI_MODEL,
     "anthropic_api_key": settings.ANTHROPIC_API_KEY or "",
     "anthropic_model": settings.ANTHROPIC_MODEL,
+    "llm_provider": settings.LLM_PROVIDER,
+    "llm_fallback_provider": settings.LLM_FALLBACK_PROVIDER,
+    "llm_api_keys": dict(settings.LLM_API_KEYS or {}),
+    "llm_model_overrides": dict(settings.LLM_MODEL_OVERRIDES or {}),
+    "llm_base_urls": dict(settings.LLM_BASE_URLS or {}),
     "moss_user_id": settings.MOSS_USER_ID or "",
     "embedding_runtime": settings.EMBEDDING_RUNTIME,
     "embedding_model": settings.EMBEDDING_MODEL,
@@ -12082,6 +12087,11 @@ SETTINGS_ATTR_MAP = {
     "openai_model": "OPENAI_MODEL",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "anthropic_model": "ANTHROPIC_MODEL",
+    "llm_provider": "LLM_PROVIDER",
+    "llm_fallback_provider": "LLM_FALLBACK_PROVIDER",
+    "llm_api_keys": "LLM_API_KEYS",
+    "llm_model_overrides": "LLM_MODEL_OVERRIDES",
+    "llm_base_urls": "LLM_BASE_URLS",
     "moss_user_id": "MOSS_USER_ID",
     "embedding_runtime": "EMBEDDING_RUNTIME",
     "embedding_model": "EMBEDDING_MODEL",
@@ -12162,6 +12172,31 @@ def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     payload["anthropic_api_key_configured"] = bool(anthropic_key)
     payload["moss_user_id"] = ""
     payload["moss_user_id_configured"] = bool(moss_user_id)
+
+    # Per-provider keys are secrets too: blank the values, report which
+    # providers have a key stored, and attach the provider catalog so the
+    # settings page can render every supported vendor.
+    raw_llm_keys = payload.get("llm_api_keys")
+    llm_keys = dict(raw_llm_keys) if isinstance(raw_llm_keys, dict) else {}
+    payload["llm_api_keys"] = {str(prov): "" for prov in llm_keys}
+    payload["llm_api_keys_configured"] = {
+        str(prov): bool(val) for prov, val in llm_keys.items()
+    }
+    overrides = payload.get("llm_model_overrides")
+    payload["llm_model_overrides"] = (
+        dict(overrides) if isinstance(overrides, dict) else {}
+    )
+    base_urls = payload.get("llm_base_urls")
+    payload["llm_base_urls"] = dict(base_urls) if isinstance(base_urls, dict) else {}
+
+    from src.backend.integrations.provider_catalog import provider_catalog_payload
+
+    payload["llm_providers"] = provider_catalog_payload()
+    from src.backend.integrations.llm_provider import latest_recommended_model
+
+    active_provider = str(payload.get("llm_provider") or "openai")
+    payload["llm_active_provider"] = active_provider
+    payload["llm_latest_model"] = latest_recommended_model(active_provider)
     from src.backend.engines.scoring.professor_profiles import (
         apply_professor_profile,
         professor_profile_catalog,
@@ -12177,15 +12212,43 @@ def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
 
 
 def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
+    """Push persisted tenant settings onto the live runtime configuration.
+
+    Non-secret values are assigned onto the pydantic settings object so every
+    consumer reading ``settings.<ATTR>`` sees the tenant's saved choice without
+    a restart. Secret-like values (API keys, MOSS id) are additionally mirrored
+    into the process environment because some provider clients read
+    ``os.environ`` directly. Called after settings are saved and on every
+    authenticated dashboard request.
+    """
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
         if attr is None or key not in merged:
             continue
+        value = merged[key]
+
+        # Secret-like settings: mirror into env (and the settings object) only
+        # when a non-empty value was provided; empty means "leave unchanged".
+        if key in SECRET_SETTING_KEYS:
+            if value:
+                os.environ[attr] = str(value)
+                try:
+                    setattr(settings, attr, str(value))
+                except Exception:
+                    logger.warning(
+                        "Failed to apply secret setting %s", key, exc_info=True
+                    )
+            continue
+
         if not hasattr(settings, attr):
             continue
-            if key in SECRET_SETTING_KEYS and merged[key]:
-                os.environ[attr] = str(merged[key])
+        try:
+            setattr(settings, attr, value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Failed to apply setting %s -> %s=%r", key, attr, value, exc_info=True
+            )
 
 
 def _normalize_source_scan_sites(value: Any) -> list[str]:
@@ -15195,6 +15258,47 @@ async def update_settings(request: Request):
                 value = _normalize_engine_weights(value)
             if key == "source_scan_sites":
                 value = _normalize_source_scan_sites(value)
+            if key in ("llm_provider", "llm_fallback_provider"):
+                from src.backend.integrations.provider_catalog import (
+                    get_provider_spec,
+                )
+
+                raw_provider = str(value or "").strip().lower()
+                if not raw_provider:
+                    value = ""
+                else:
+                    try:
+                        value = get_provider_spec(raw_provider).key
+                    except ValueError:
+                        continue
+            if key == "llm_api_keys":
+                if not isinstance(value, dict):
+                    continue
+                # An empty entry means "keep the stored key" (the frontend
+                # blanks masked secrets before saving), mirroring the legacy
+                # single-vendor key handling above.
+                merged_keys = dict(stored_settings.get("llm_api_keys") or {})
+                for provider_name, key_value in value.items():
+                    provider_key = str(provider_name).strip().lower()
+                    if provider_key and key_value:
+                        merged_keys[provider_key] = str(key_value)
+                value = merged_keys
+            if key == "llm_model_overrides":
+                if not isinstance(value, dict):
+                    continue
+                value = {
+                    str(name).strip().lower(): str(model or "").strip()
+                    for name, model in value.items()
+                    if str(name).strip()
+                }
+            if key == "llm_base_urls":
+                if not isinstance(value, dict):
+                    continue
+                value = {
+                    str(name).strip().lower(): str(url or "").strip().rstrip("/")
+                    for name, url in value.items()
+                    if str(name).strip()
+                }
             if key == "professor_profile":
                 from src.backend.engines.scoring.professor_profiles import (
                     apply_professor_profile,
@@ -15202,7 +15306,11 @@ async def update_settings(request: Request):
 
                 value = dict(apply_professor_profile(value).profile.__dict__)
             stored_settings[key] = value
-            applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
+            if key == "llm_api_keys":
+                # Never echo stored keys back to the client.
+                applied[key] = {str(name): True for name in value}
+            else:
+                applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
             if key == "professor_profile":
                 continue
             if key in SECRET_SETTING_KEYS and value:
@@ -15221,6 +15329,18 @@ async def update_settings(request: Request):
             stored_settings["engine_weights"] = professor_profile_to_engine_weights(
                 applied_profile
             )
+
+        # Keep the generic per-provider key map in sync with the legacy
+        # single-vendor fields so both entry points stay equivalent.
+        for legacy_key, provider_name in (
+            ("openai_api_key", "openai"),
+            ("anthropic_api_key", "anthropic"),
+        ):
+            legacy_value = data.get(legacy_key)
+            if legacy_value:
+                synced_keys = dict(stored_settings.get("llm_api_keys") or {})
+                synced_keys[provider_name] = str(legacy_value)
+                stored_settings["llm_api_keys"] = synced_keys
 
         tenant.settings = stored_settings
         db.add(tenant)
@@ -15290,11 +15410,13 @@ async def test_ai_provider_connection(request: Request) -> dict[str, Any]:
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid test payload")
-    provider = str(payload.get("provider") or "openai").strip().lower()
-    if provider not in ("openai", "anthropic"):
-        raise HTTPException(
-            status_code=400, detail="Provider must be openai or anthropic"
-        )
+    from src.backend.integrations.provider_catalog import get_provider_spec
+
+    provider = str(payload.get("provider") or "").strip()
+    try:
+        provider = get_provider_spec(provider).key
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     api_key_override = payload.get("api_key")
     api_key_override = str(api_key_override).strip() if api_key_override else None
 
@@ -15312,6 +15434,55 @@ async def test_ai_provider_connection(request: Request) -> dict[str, Any]:
             f"Connection failed: {result.get('message', 'unknown error')}"
         )
     return result
+
+
+@app.get("/api/settings/ai-providers")
+async def get_ai_providers(request: Request) -> dict[str, Any]:
+    """Return the catalog of supported AI providers (no secrets included)."""
+    _require_current_user(request, admin_only=True)
+    from src.backend.integrations.provider_catalog import provider_catalog_payload
+
+    return {
+        "providers": provider_catalog_payload(),
+        "default_provider": settings.LLM_PROVIDER,
+        "fallback_provider": settings.LLM_FALLBACK_PROVIDER,
+    }
+
+
+@app.get("/api/settings/ai-providers/models")
+async def get_ai_provider_models(
+    request: Request,
+    provider: str = "",
+    refresh: int = 0,
+) -> dict[str, Any]:
+    """Return the most useful current models a provider offers.
+
+    Models are discovered live from the vendor's model-listing endpoint (with
+    a short in-memory cache) so the settings page always offers the latest
+    models instead of a hardcoded list. Falls back to the provider's
+    recommended IDs when discovery is impossible (for example no API key yet).
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.integrations.llm_provider import configured_api_key
+    from src.backend.integrations.provider_catalog import (
+        get_provider_spec,
+        list_provider_models,
+        normalize_provider,
+    )
+
+    key = normalize_provider(provider) or str(settings.LLM_PROVIDER or "openai")
+    try:
+        spec = get_provider_spec(key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    base_url_override = (settings.LLM_BASE_URLS or {}).get(spec.key) or None
+    return await list_provider_models(
+        spec.key,
+        api_key=configured_api_key(spec.key),
+        base_url=base_url_override,
+        refresh=bool(refresh),
+    )
 
 
 @app.post("/api/analyze/evidence-summary")

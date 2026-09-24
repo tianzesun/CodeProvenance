@@ -1,10 +1,19 @@
 """LLM providers for evidence summarization and rewrite analysis.
 
-Implements OpenAI and Anthropic chat completions over httpx (no SDK
-dependency) so the API keys configured on the settings page actually
-connect to a model. All callers must degrade gracefully when no key is
-configured or the API is unreachable: the async helpers in this module
-return a heuristic summary instead of raising.
+Implements chat completions over httpx (no SDK dependency) so the API keys
+configured on the settings page actually connect to a model. All callers must
+degrade gracefully when no key is configured or the API is unreachable: the
+async helpers in this module return a heuristic summary instead of raising.
+
+Vendor support is data-driven: :mod:`src.backend.integrations.provider_catalog`
+lists every supported vendor, and because OpenAI, Google (compatibility layer),
+xAI, Mistral, DeepSeek, Groq, OpenRouter and Ollama all speak the same
+OpenAI-compatible ``/chat/completions`` protocol, one request path serves them
+all. Anthropic keeps its native Messages API.
+
+Models are never hardcoded to an old generation: when no explicit model is
+configured the newest model the provider currently offers is resolved from the
+catalog (see :func:`resolve_provider_config`).
 
 Both providers are intentionally kept in one small module so the settings
 page can authenticate a connection and jobs can enrich flagged pairs with a
@@ -22,15 +31,66 @@ from typing import Any
 import httpx
 
 from src.backend.config.settings import settings
+from src.backend.integrations.provider_catalog import (
+    ProviderSpec,
+    get_provider_spec,
+    latest_recommended_model,
+    normalize_provider,
+    supported_providers,
+)
 
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic")
+#: Every provider accepted by :class:`LLMProvider`, in catalog order.
+SUPPORTED_PROVIDERS: tuple[str, ...] = supported_providers()
+
+#: Legacy per-provider settings attributes kept in sync with the generic
+#: `LLM_API_KEYS` / `LLM_MODEL_OVERRIDES` maps so existing deployments and
+#: environment variables keep working unchanged.
+_LEGACY_KEY_ATTRS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+_LEGACY_MODEL_ATTRS: dict[str, str] = {
+    "openai": "OPENAI_MODEL",
+    "anthropic": "ANTHROPIC_MODEL",
+}
+_LEGACY_BASE_URL_ATTRS: dict[str, str] = {
+    "openai": "OPENAI_BASE_URL",
+    "ollama": "OLLAMA_BASE_URL",
+}
 
 _MAX_CODE_CHARS = 2000
+
+#: Substrings vendors use when they reject a request *parameter* (rather than
+#: the model or the whole payload). Matching one lets the client retry with the
+#: offending field dropped or renamed.
+_PARAMETER_REJECTION_MARKERS: tuple[str, ...] = (
+    "max_tokens",
+    "max_completion_tokens",
+    "temperature",
+    "unsupported parameter",
+    "unsupported value",
+    "unknown parameter",
+    "unrecognized request argument",
+    "does not support",
+)
+
+
+def _is_parameter_rejection(detail: str) -> bool:
+    """Return ``True`` when an error body blames a request parameter.
+
+    Args:
+        detail: Response body text from a rejected request.
+
+    Returns:
+        ``True`` when the error names a parameter this client can adapt.
+    """
+    lowered = (detail or "").lower()
+    return any(marker in lowered for marker in _PARAMETER_REJECTION_MARKERS)
 
 
 class LLMError(RuntimeError):
@@ -45,13 +105,18 @@ class LLMProviderConfig:
     api_key: str
     model: str
     base_url: str
+    #: ``openai`` for OpenAI-compatible chat APIs, ``anthropic`` for the
+    #: native Messages API.
+    api_style: str = "openai"
 
 
 class LLMProvider:
-    """Minimal chat-completion client for OpenAI and Anthropic.
+    """Minimal chat-completion client for every supported vendor.
 
-    The transport is injectable so unit tests can exercise request/response
-    handling with ``httpx.MockTransport`` instead of hitting a real API.
+    The request path is selected from the vendor's ``api_style`` so all
+    OpenAI-compatible vendors share one implementation. The transport is
+    injectable so unit tests can exercise request/response handling with
+    ``httpx.MockTransport`` instead of hitting a real API.
     """
 
     def __init__(
@@ -62,26 +127,39 @@ class LLMProvider:
         base_url: str,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 60.0,
+        api_style: str | None = None,
     ) -> None:
-        normalized = str(provider or "").strip().lower()
-        if normalized not in SUPPORTED_PROVIDERS:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
-        if not api_key:
-            raise LLMError(f"{normalized} API key is not configured")
+        normalized = normalize_provider(provider)
+        spec = self._resolve_spec(normalized, provider)
+        if spec.requires_key and not api_key:
+            raise LLMError(f"{spec.label} API key is not configured")
         if not model:
-            raise LLMError(f"No model configured for {normalized}")
-        self.provider = normalized
+            raise LLMError(f"No model configured for {spec.label}")
+        self.provider = spec.key
         self.api_key = api_key
         self.model = model
-        self.base_url = (base_url or "").rstrip("/")
-        if not self.base_url:
-            self.base_url = (
-                settings.OPENAI_BASE_URL
-                if self.provider == "openai"
-                else ANTHROPIC_DEFAULT_BASE_URL
-            )
+        self.api_style = api_style or spec.api_style
+        self.base_url = (base_url or spec.base_url).rstrip("/")
         self.timeout = timeout
         self._transport = transport
+
+    @staticmethod
+    def _resolve_spec(normalized: str, original: str) -> ProviderSpec:
+        """Look up the provider spec, translating catalog errors.
+
+        Args:
+            normalized: Canonical provider key (possibly empty).
+            original: The value the caller supplied, used in the error text.
+
+        Returns:
+            The matching provider spec.
+
+        Raises:
+            ValueError: when the provider is not supported.
+        """
+        if not normalized:
+            raise ValueError(f"Unsupported LLM provider: {original}")
+        return get_provider_spec(normalized)
 
     async def complete(
         self,
@@ -92,11 +170,11 @@ class LLMProvider:
     ) -> str:
         """Return the model's text completion for a single prompt."""
         try:
-            if self.provider == "openai":
-                return await self._openai_chat(prompt, system, max_tokens, temperature)
-            return await self._anthropic_messages(
-                prompt, system, max_tokens, temperature
-            )
+            if self.api_style == "anthropic":
+                return await self._anthropic_messages(
+                    prompt, system, max_tokens, temperature
+                )
+            return await self._openai_chat(prompt, system, max_tokens, temperature)
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:300] if exc.response is not None else ""
             raise LLMError(
@@ -135,30 +213,67 @@ class LLMProvider:
         max_tokens: int,
         temperature: float,
     ) -> str:
+        """POST an OpenAI-compatible chat completion.
+
+        Vendors differ in the token-limit field (``max_tokens`` for most,
+        ``max_completion_tokens`` for OpenAI's current models) and reasoning
+        models reject a custom ``temperature``. A 400 that names one of those
+        fields is retried with the field dropped or renamed, so a freshly
+        released model works without a code change.
+        """
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+
+        token_field = (
+            "max_completion_tokens" if self.provider == "openai" else "max_tokens"
+        )
+        alternate_field = (
+            "max_tokens"
+            if token_field == "max_completion_tokens"
+            else "max_completion_tokens"
+        )
+        attempts: list[dict[str, Any]] = [
+            {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature,
+                token_field: max_tokens,
+            },
+            {"model": self.model, "messages": messages, token_field: max_tokens},
+            {"model": self.model, "messages": messages, alternate_field: max_tokens},
+        ]
+
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        async with self._client(headers) as client:
-            response = await client.post(url, json=payload)
+        last_error: LLMError | None = None
+        for index, payload in enumerate(attempts):
+            async with self._client(headers) as client:
+                response = await client.post(url, json=payload)
+            if response.status_code == 400 and index < len(attempts) - 1:
+                detail = response.text[:300]
+                if _is_parameter_rejection(detail):
+                    last_error = LLMError(
+                        f"{self.provider} rejected request parameters: {detail}"
+                    )
+                    continue
             response.raise_for_status()
             data = response.json()
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            raise LLMError(f"Unexpected OpenAI response: {str(data)[:200]}")
-        return str(content or "").strip()
+            try:
+                content = data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                raise LLMError(
+                    f"Unexpected {self.provider} response: {str(data)[:200]}"
+                )
+            return str(content or "").strip()
+
+        if last_error is not None:
+            raise last_error
+        raise LLMError(f"{self.provider} API request failed")
 
     async def _anthropic_messages(
         self,
@@ -272,47 +387,133 @@ def _heuristic_summary(features: Mapping[str, float]) -> str:
 # ─── High-level helpers ──────────────────────────────────────────────
 
 
-def resolve_provider_config(
-    provider: str = "openai",
-    api_key_override: str | None = None,
-) -> LLMProviderConfig:
-    """Resolve a provider config from settings (optionally overriding the key).
+def configured_api_key(provider: str) -> str:
+    """Return the stored API key for a provider.
 
     Args:
-        provider: ``openai`` or ``anthropic``.
+        provider: Canonical provider key or alias.
+
+    Returns:
+        The per-provider key from ``LLM_API_KEYS``, falling back to the legacy
+        per-vendor setting so existing deployments keep working.
+    """
+    try:
+        provider = get_provider_spec(provider).key
+    except ValueError:
+        return ""
+    keys = settings.LLM_API_KEYS or {}
+    value = str(keys.get(provider) or "").strip()
+    if value:
+        return value
+    legacy_attr = _LEGACY_KEY_ATTRS.get(provider)
+    if legacy_attr:
+        return str(getattr(settings, legacy_attr, "") or "").strip()
+    return ""
+
+
+def _configured_model(provider: str) -> str:
+    """Resolve the model to use for a provider.
+
+    A stored override always wins. When nothing is pinned the newest model the
+    vendor currently offers is used, which is what keeps this integration from
+    drifting onto an obsolete generation.
+
+    Args:
+        provider: Canonical provider key.
+
+    Returns:
+        A model ID, or ``""`` when the vendor has no known models.
+    """
+    overrides = settings.LLM_MODEL_OVERRIDES or {}
+    pinned = str(overrides.get(provider) or "").strip()
+    if pinned:
+        return pinned
+    legacy_attr = _LEGACY_MODEL_ATTRS.get(provider)
+    if legacy_attr:
+        legacy_value = str(getattr(settings, legacy_attr, "") or "").strip()
+        if legacy_value:
+            return legacy_value
+    return latest_recommended_model(provider)
+
+
+def _configured_base_url(provider: str, spec: ProviderSpec) -> str:
+    """Resolve the base URL for a provider.
+
+    Args:
+        provider: Canonical provider key.
+        spec: The provider's catalog entry (its default base URL).
+
+    Returns:
+        The stored override, the legacy per-vendor setting, or the vendor
+        default, in that order of precedence.
+    """
+    base_urls = settings.LLM_BASE_URLS or {}
+    override = str(base_urls.get(provider) or "").strip()
+    if override:
+        return override.rstrip("/")
+    legacy_attr = _LEGACY_BASE_URL_ATTRS.get(provider)
+    if legacy_attr:
+        legacy_value = str(getattr(settings, legacy_attr, "") or "").strip()
+        if legacy_value:
+            return legacy_value.rstrip("/")
+    return spec.base_url.rstrip("/")
+
+
+def resolve_provider_config(
+    provider: str = "",
+    api_key_override: str | None = None,
+) -> LLMProviderConfig:
+    """Resolve a provider config from settings.
+
+    Both the provider and the model are resolved dynamically: an empty
+    ``provider`` means "use the configured default", and an unpinned model
+    means "use the newest model this vendor currently offers". That is what
+    prevents the integration from being stuck on an outdated model.
+
+    Args:
+        provider: Provider key or alias; falls back to ``LLM_PROVIDER`` and
+            then to OpenAI.
         api_key_override: Optional key supplied by the user on the settings
             page before saving; falls back to the configured key.
 
     Returns:
-        LLMProviderConfig with resolved key, model, and base URL.
+        LLMProviderConfig with resolved provider, key, model, base URL and the
+        API style used to select the request path.
 
     Raises:
         ValueError: for unsupported providers.
     """
-    normalized = str(provider or "").strip().lower()
-    if normalized == "openai":
-        return LLMProviderConfig(
-            provider="openai",
-            api_key=api_key_override or settings.OPENAI_API_KEY or "",
-            model=settings.OPENAI_MODEL,
-            base_url=settings.OPENAI_BASE_URL,
-        )
-    if normalized == "anthropic":
-        return LLMProviderConfig(
-            provider="anthropic",
-            api_key=api_key_override or settings.ANTHROPIC_API_KEY or "",
-            model=settings.ANTHROPIC_MODEL,
-            base_url=ANTHROPIC_DEFAULT_BASE_URL,
-        )
-    raise ValueError(f"Unsupported LLM provider: {provider}")
+    candidate = (
+        normalize_provider(provider)
+        or normalize_provider(settings.LLM_PROVIDER)
+        or "openai"
+    )
+    spec = get_provider_spec(candidate)
+    return LLMProviderConfig(
+        provider=spec.key,
+        api_key=(api_key_override or "").strip() or configured_api_key(spec.key),
+        model=_configured_model(spec.key),
+        base_url=_configured_base_url(spec.key, spec),
+        api_style=spec.api_style,
+    )
 
 
 async def test_provider_connection(
-    provider: str = "openai",
+    provider: str = "",
     api_key_override: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
-    """Test a configured provider and return a professor-facing result."""
+    """Test a configured provider and return a professor-facing result.
+
+    Args:
+        provider: Provider key or alias; empty means "use the configured one".
+        api_key_override: Optional key typed on the settings page.
+        transport: Optional mock transport for tests.
+
+    Returns:
+        A dict with ``ok``, a human-readable ``message``, the resolved
+        ``provider``, ``model`` and ``latency_ms``.
+    """
     try:
         config = resolve_provider_config(provider, api_key_override)
     except ValueError as exc:
@@ -323,6 +524,7 @@ async def test_provider_connection(
             api_key=config.api_key,
             model=config.model,
             base_url=config.base_url,
+            api_style=config.api_style,
             transport=transport,
         )
     except LLMError as exc:
@@ -334,6 +536,7 @@ async def test_provider_connection(
         }
     result = await llm.test_connection()
     result["provider"] = config.provider
+    result["base_url"] = config.base_url
     return result
 
 
@@ -341,7 +544,7 @@ async def summarize_pair_evidence(
     code_a: str,
     code_b: str,
     features: Mapping[str, float],
-    provider: str = "openai",
+    provider: str = "",
     api_key_override: str | None = None,
     file_a: str = "file_a",
     file_b: str = "file_b",
@@ -354,7 +557,7 @@ async def summarize_pair_evidence(
         code_a: First submission source code.
         code_b: Second submission source code.
         features: Engine scores to interpret.
-        provider: ``openai`` or ``anthropic``.
+        provider: Provider key or alias; empty means "use the configured one".
         api_key_override: Optional key to use instead of the stored one.
         file_a, file_b: Display names for the submissions.
         task: ``evidence`` or ``rewrite``.
@@ -371,6 +574,7 @@ async def summarize_pair_evidence(
             api_key=config.api_key,
             model=config.model,
             base_url=config.base_url,
+            api_style=config.api_style,
             transport=transport,
         )
     except (LLMError, ValueError) as exc:
