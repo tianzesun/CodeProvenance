@@ -7083,7 +7083,17 @@ async def get_ai_detection_accuracy():
     rather than on UI polish. Numbers come from
     ``data/datasets/aigcodeset/benchmark_report*.json``; empty when the dataset
     has not been built/benchmarked.
+
+    The ``taxonomy`` block maps the response onto the canonical benchmark
+    structure in ``docs/CODEPROVENANCE_BENCHMARK.md`` (§1 Detection Performance,
+    §2 False Positive Validation including Real-World FPR Validation, §3
+    Robustness, §4 Generalization) and reports per-item coverage status, so the
+    UI can show measured fields and honest gaps side by side.
     """
+    from src.backend.benchmark.taxonomy import (
+        build_taxonomy_status,
+        taxonomy_summary,
+    )
     from src.backend.engines.ai.ensemble import AIEnsembleConfig
     from src.backend.engines.ai.fp_baseline import load_human_fp_baseline
 
@@ -7093,13 +7103,16 @@ async def get_ai_detection_accuracy():
         "statistical": _read_ai_benchmark_report("benchmark_report.statistical.json"),
         "codelm": _read_ai_benchmark_report("benchmark_report.codelm.json"),
     }
+    human_fp_baseline = load_human_fp_baseline()
+    components = build_taxonomy_status(reports, human_fp_baseline)
     return JSONResponse(
         content={
             "dataset": "AIGCodeSet (Demirok & Kutlu, IEEE SIU 2025, arXiv:2412.16594)",
             "methodology": (
                 "Grouped holdout by problem_id: the same programming problem "
                 "never appears in both train and test, preventing style-memorisation "
-                "leakage. AI = positive class."
+                "leakage. AI = positive class. TPR/FPR, ROC-AUC and PR-AUC are "
+                "reported at 0.50 plus the server thresholds 0.40/0.70."
             ),
             "runtime": {
                 "ml_classifier_enabled": config.classification_enabled,
@@ -7109,7 +7122,12 @@ async def get_ai_detection_accuracy():
                 ),
                 "default_engine": "heuristic (ML disabled unless classification.enabled)",
             },
-            "human_fp_baseline": load_human_fp_baseline(),
+            "human_fp_baseline": human_fp_baseline,
+            "taxonomy": {
+                "reference": "docs/CODEPROVENANCE_BENCHMARK.md",
+                "components": [component.to_dict() for component in components],
+                "summary": taxonomy_summary(components),
+            },
             "reports": reports,
             "available": any(reports.values()),
         }

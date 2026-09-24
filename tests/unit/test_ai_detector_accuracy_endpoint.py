@@ -1,10 +1,10 @@
 """Unit tests for the AI detector accuracy-benchmark endpoint.
 
 Verifies that ``/api/ai-detect/accuracy`` surfaces the real AIGCodeSet
-benchmark numbers (grouped-holdout metrics, heuristic-vs-ML comparison,
-per-generator sensitivity, perplexity-source comparison) with methodology and
-runtime disclosures, and returns a data-unavailable payload when no report
-exists.
+benchmark numbers (grouped-holdout metrics including FPR/PR-AUC,
+heuristic-vs-ML comparison, per-generator sensitivity, perplexity-source
+comparison) with methodology, runtime and taxonomy-coverage disclosures, and
+returns a data-unavailable payload when no report exists.
 """
 
 import asyncio
@@ -26,7 +26,9 @@ MAIN_REPORT = {
             "precision": 0.7627,
             "recall": 0.2381,
             "f1": 0.3629,
+            "fpr": 0.1921,
             "auc": 0.6641,
+            "pr_auc": 0.3124,
         }
     },
     "heuristic_comparison": {
@@ -151,3 +153,78 @@ class TestAIDetectionAccuracyEndpoint:
         assert "ml_classifier_enabled" in body["runtime"]
         assert "perplexity_model" in body["runtime"]
         assert "methodology" in body
+
+    @patch(
+        "src.backend.api.server._read_ai_benchmark_report",
+        side_effect=lambda name: {
+            "benchmark_report.json": MAIN_REPORT,
+            "benchmark_report.statistical.json": STATISTICAL_REPORT,
+            "benchmark_report.codelm.json": CODELM_REPORT,
+        }[name],
+    )
+    def test_taxonomy_maps_four_components(self, read_report) -> None:
+        """The response must carry the canonical four-part taxonomy tree."""
+        body = _run_endpoint()
+        taxonomy = body["taxonomy"]
+        assert taxonomy["reference"] == "docs/CODEPROVENANCE_BENCHMARK.md"
+        assert [c["number"] for c in taxonomy["components"]] == [1, 2, 3, 4]
+        assert [c["key"] for c in taxonomy["components"]] == [
+            "detection_performance",
+            "false_positive_validation",
+            "robustness",
+            "generalization",
+        ]
+
+    @patch(
+        "src.backend.api.server._read_ai_benchmark_report",
+        side_effect=lambda name: {
+            "benchmark_report.json": MAIN_REPORT,
+            "benchmark_report.statistical.json": STATISTICAL_REPORT,
+            "benchmark_report.codelm.json": CODELM_REPORT,
+        }[name],
+    )
+    def test_taxonomy_marks_reported_metrics_live(self, read_report) -> None:
+        """Metrics present in the report must be surfaced as measured."""
+        body = _run_endpoint()
+        detection = body["taxonomy"]["components"][0]
+        statuses = {item["key"]: item["status"] for item in detection["items"]}
+        assert statuses["fpr_in_lab"] == "live"
+        assert statuses["pr_auc"] == "live"
+        assert statuses["tpr_recall"] == "live"
+        assert all(item["status_label"] for item in detection["items"])
+
+    @patch(
+        "src.backend.api.server._read_ai_benchmark_report",
+        side_effect=lambda name: None,
+    )
+    def test_taxonomy_reports_gaps_without_artifacts(self, read_report) -> None:
+        """With no report and no baseline the measurable items are all missing."""
+        with patch(
+            "src.backend.engines.ai.fp_baseline.load_human_fp_baseline",
+            return_value={},
+        ):
+            body = _run_endpoint()
+        summary = body["taxonomy"]["summary"]
+        assert summary["live"] == 0
+        assert summary["missing"] == 15
+        assert summary["partial"] == 2
+
+    @patch(
+        "src.backend.api.server._read_ai_benchmark_report",
+        side_effect=lambda name: {
+            "benchmark_report.json": MAIN_REPORT,
+            "benchmark_report.statistical.json": STATISTICAL_REPORT,
+            "benchmark_report.codelm.json": CODELM_REPORT,
+        }[name],
+    )
+    def test_taxonomy_surfaces_real_world_fpr_baseline(self, read_report) -> None:
+        """§2b must be live when the tracked human baseline has corpora."""
+        with patch(
+            "src.backend.engines.ai.fp_baseline.load_human_fp_baseline",
+            return_value={"corpora": {"kaggle_student_code": {"count": 174}}},
+        ):
+            body = _run_endpoint()
+        fp_component = body["taxonomy"]["components"][1]
+        items = {item["key"]: item for item in fp_component["items"]}
+        assert items["real_world_fpr_validation"]["status"] == "live"
+        assert "n=174" in items["real_world_fpr_validation"]["evidence"]

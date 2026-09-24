@@ -3,7 +3,7 @@
 Provides extended evaluation metrics:
 - ROC-AUC: Receiver Operating Characteristic - Area Under Curve
 - Calibration error: Expected and Maximum calibration error
-- Basic metrics: precision, recall, F1, accuracy
+- Basic metrics: precision, recall, F1, accuracy, false/true positive rate
 """
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ from .calibration import (
 from .basic import (
     precision,
     recall,
+    false_positive_rate,
+    true_positive_rate,
     f1_score,
     accuracy,
     compute_confusion_matrix,
@@ -45,6 +47,8 @@ __all__ = [
     # Basic metrics
     "precision",
     "recall",
+    "false_positive_rate",
+    "true_positive_rate",
     "f1_score",
     "accuracy",
     "compute_confusion_matrix",

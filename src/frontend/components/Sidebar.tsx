@@ -108,7 +108,7 @@ export default function Sidebar() {
                 },
                 {
                   href: '/tools/fpr-validation',
-                  label: 'FPR Validation',
+                  label: 'Real-World FPR Validation',
                   icon: ShieldCheck,
                   activeOn: ['/tools/fpr-validation'],
                 },
