@@ -14,6 +14,7 @@ import {
   BarChart3,
   Bot,
   CheckCircle2,
+  ClipboardCheck,
   GripVertical,
   LayoutGrid,
   EyeOff,
@@ -36,6 +37,7 @@ const HOME_CARD_STORAGE_KEY = 'integritydesk-home-layout-v1';
 const HOME_LAYOUT_TIP_STORAGE_KEY = 'integritydesk-home-layout-tip-v1';
 const HOME_CARD_DEFAULT_ORDER = [
   'recent-checks',
+  'review-workload',
   'report-center',
   'plagiarism-checker',
   'ai-detector',
@@ -317,6 +319,23 @@ export default function Home() {
   }, [completedJobs]);
   const runningCount = jobs.filter((job) => ['processing', 'analyzing'].includes(job.status)).length;
   const latestFlaggedResults = latestCompleted ? getFlaggedResults(latestCompleted) : [];
+
+  // Review workload: how many completed jobs still need attention
+  const workload = useMemo(() => {
+    const completed = jobs.filter((j) => j.status === 'completed');
+    const pending = completed.filter(
+      (j) => !j.review_status || j.review_status === 'unreviewed'
+    );
+    const inProgress = completed.filter((j) => j.review_status === 'needs_review');
+    const confirmed = completed.filter((j) => j.review_status === 'confirmed');
+    const escalated = completed.filter((j) => j.review_status === 'escalated');
+    // Pair-level count: total flagged pairs across unreviewed/needs-review jobs
+    const flaggedPairs = [...pending, ...inProgress].reduce((sum, j) => {
+      const s = j.summary as { suspicious_pairs?: number } | undefined;
+      return sum + (s?.suspicious_pairs ?? 0);
+    }, 0);
+    return { total: completed.length, pending: pending.length, inProgress: inProgress.length, confirmed: confirmed.length, escalated: escalated.length, flaggedPairs };
+  }, [jobs]);
   const latestPreviewResults = latestFlaggedResults.slice(0, 3);
   const latestThreshold = getThreshold(latestCompleted);
   const latestSummary = latestCompleted?.summary || {};
@@ -536,6 +555,100 @@ export default function Home() {
               ))}
             </div>
           )}
+        </div>
+      ),
+    },
+    'review-workload': {
+      id: 'review-workload',
+      label: 'Review workload',
+      className: 'xl:col-span-4 lg:col-span-6',
+      content: (
+        <div className="theme-card rounded-[30px] overflow-hidden">
+          <div className="theme-section-line px-6 py-5">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                  Review workload
+                </div>
+                <h2 className="font-display mt-2 text-2xl font-semibold text-[var(--text-primary)]">
+                  {loading ? '…' : workload.pending + workload.inProgress > 0
+                    ? `${workload.pending + workload.inProgress} assignment${workload.pending + workload.inProgress === 1 ? '' : 's'} need attention`
+                    : 'All caught up'}
+                </h2>
+              </div>
+              <Link href="/assignments" className="theme-link inline-flex items-center gap-1 text-sm font-medium">
+                Open triage
+                <ChevronRight size={16} />
+              </Link>
+            </div>
+          </div>
+
+          <div className="px-6 pb-6 space-y-3">
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-12 rounded-2xl skeleton" />
+                ))}
+              </div>
+            ) : workload.total === 0 ? (
+              <div className="theme-card-muted rounded-[20px] px-5 py-8 text-center">
+                <ClipboardCheck size={22} className="mx-auto text-[var(--text-muted)]" />
+                <p className="mt-3 text-sm text-[var(--text-secondary)]">No completed checks yet.</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
+                    <div className="text-2xl font-bold text-amber-600">{workload.pending}</div>
+                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Unreviewed</div>
+                  </div>
+                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
+                    <div className="text-2xl font-bold text-blue-600">{workload.inProgress}</div>
+                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">In progress</div>
+                  </div>
+                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
+                    <div className="text-2xl font-bold text-red-600">{workload.escalated}</div>
+                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Escalated</div>
+                  </div>
+                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
+                    <div className="text-2xl font-bold text-emerald-600">{workload.confirmed}</div>
+                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Confirmed</div>
+                  </div>
+                </div>
+
+                {/* Flagged pairs summary */}
+                {workload.flaggedPairs > 0 && (
+                  <div className="theme-card-muted rounded-[20px] px-4 py-3 flex items-center justify-between">
+                    <span className="text-sm text-[var(--text-secondary)]">
+                      Flagged pairs awaiting review
+                    </span>
+                    <span className="font-mono text-sm font-semibold text-amber-600">
+                      {workload.flaggedPairs}
+                    </span>
+                  </div>
+                )}
+
+                {/* Progress bar: reviewed / total */}
+                <div className="pt-1">
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-muted)]">
+                    <span>Overall progress</span>
+                    <span>{workload.confirmed + workload.escalated + (workload.total - workload.pending - workload.inProgress - workload.confirmed - workload.escalated)} / {workload.total} reviewed</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                    <div
+                      className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                      style={{
+                        width: workload.total > 0
+                          ? `${Math.round((1 - (workload.pending + workload.inProgress) / workload.total) * 100)}%`
+                          : '0%'
+                      }}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       ),
     },
@@ -797,8 +910,8 @@ export default function Home() {
                     <div className="space-y-4">
                       <div
                         className={`rounded-[22px] border px-4 py-4 ${latestFlaggedResults.length > 0
-                            ? 'border-amber-500/20 bg-amber-500/[0.08]'
-                            : 'border-emerald-500/20 bg-emerald-500/[0.08]'
+                          ? 'border-amber-500/20 bg-amber-500/[0.08]'
+                          : 'border-emerald-500/20 bg-emerald-500/[0.08]'
                           }`}
                       >
                         <div className="grid gap-4 2xl:grid-cols-[1.2fr_0.8fr] 2xl:items-start">
@@ -1129,8 +1242,8 @@ const EditableDashboardCard = ({
             onClick={onActivate}
             aria-label={`Select ${label} card`}
             className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold ${isActive
-                ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
-                : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]'
+              ? 'border-blue-600/20 bg-blue-600/10 text-blue-600'
+              : 'border-[color:var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]'
               }`}
           >
             Select

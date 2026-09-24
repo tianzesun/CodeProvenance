@@ -16,8 +16,10 @@ from src.backend.config.settings import settings
 from src.backend.models.database import (
     Assignment,
     AuditLog,
+    BandThreshold,
     Course,
     Job,
+    PairReview,
     SimilarityResult,
     Submission,
     Tenant,
@@ -32,9 +34,7 @@ class TenantService:
     """
 
     @staticmethod
-    def create_tenant(
-        db: Session, name: str, api_key_hash: str, tier: str = "free"
-    ) -> Tenant:
+    def create_tenant(db: Session, name: str, api_key_hash: str, tier: str = "free") -> Tenant:
         """
         Create a new tenant.
 
@@ -134,8 +134,7 @@ class JobService:
             idempotency_key=idempotency_key,
             detection_modes=detection_modes or list(settings.DEFAULT_DETECTION_MODES),
             language_filters=language_filters,
-            exclude_patterns=exclude_patterns
-            or ["__pycache__", "*.class", "node_modules"],
+            exclude_patterns=exclude_patterns or ["__pycache__", "*.class", "node_modules"],
             template_files=template_files or [],
             retention_days=retention_days,
         )
@@ -157,11 +156,7 @@ class JobService:
         Returns:
             Job instance or None
         """
-        return (
-            db.query(Job)
-            .filter(and_(Job.id == job_id, Job.tenant_id == tenant_id))
-            .first()
-        )
+        return db.query(Job).filter(and_(Job.id == job_id, Job.tenant_id == tenant_id)).first()
 
     @staticmethod
     def get_jobs_by_tenant(
@@ -500,9 +495,7 @@ class WebhookEventService:
             event.last_error = error_message
             # Calculate next retry with exponential backoff
             backoff_seconds = 60 * (2**event.attempt_count)
-            event.next_attempt_at = datetime.utcnow() + timedelta(
-                seconds=backoff_seconds
-            )
+            event.next_attempt_at = datetime.utcnow() + timedelta(seconds=backoff_seconds)
 
         db.commit()
         db.refresh(event)
@@ -515,9 +508,7 @@ class UsageMetricService:
     """
 
     @staticmethod
-    def get_or_create_usage_metric(
-        db: Session, tenant_id: str, period: str
-    ) -> UsageMetric:
+    def get_or_create_usage_metric(db: Session, tenant_id: str, period: str) -> UsageMetric:
         """
         Get or create usage metric for a tenant and period.
 
@@ -531,9 +522,7 @@ class UsageMetricService:
         """
         metric = (
             db.query(UsageMetric)
-            .filter(
-                and_(UsageMetric.tenant_id == tenant_id, UsageMetric.period == period)
-            )
+            .filter(and_(UsageMetric.tenant_id == tenant_id, UsageMetric.period == period))
             .first()
         )
 
@@ -712,3 +701,458 @@ class AcademicService:
         db.commit()
         db.refresh(assignment)
         return assignment
+
+
+class BandThresholdService:
+    """Service for loading per-assignment-mode band threshold configuration.
+
+    Provides a DB-backed override for the static ``BAND_THRESHOLDS`` dict in
+    ``review_policy``.  When no row exists for the requested mode, the service
+    returns ``None`` and callers fall back to the static defaults.
+    """
+
+    @staticmethod
+    def get_by_mode(db: Session, assignment_mode: str) -> BandThreshold | None:
+        """Return the BandThreshold row for *assignment_mode*, or ``None``.
+
+        Args:
+            db: Database session.
+            assignment_mode: Canonical mode string (e.g. ``'algorithms'``).
+                Lookup is case-insensitive.
+
+        Returns:
+            Matching ``BandThreshold`` ORM instance, or ``None`` if not found.
+        """
+        return (
+            db.query(BandThreshold)
+            .filter(BandThreshold.assignment_mode == assignment_mode.lower().strip())
+            .first()
+        )
+
+    @staticmethod
+    def get_all(db: Session) -> list[BandThreshold]:
+        """Return all configured band threshold rows ordered by mode name.
+
+        Args:
+            db: Database session.
+
+        Returns:
+            List of ``BandThreshold`` instances sorted alphabetically by mode.
+        """
+        return db.query(BandThreshold).order_by(BandThreshold.assignment_mode).all()
+
+    @staticmethod
+    def upsert(
+        db: Session,
+        assignment_mode: str,
+        review_min: float,
+        high_min: float,
+        ai_elevated_min: float = 0.65,
+        web_match_min: float = 0.70,
+        engine_agree_count: int = 2,
+        engine_agree_min: float = 0.50,
+    ) -> BandThreshold:
+        """Create or update a threshold row for *assignment_mode*.
+
+        Args:
+            db: Database session.
+            assignment_mode: Mode key (stored lower-cased).
+            review_min: Lower edge of the Review band (0.0–1.0).
+            high_min: Lower edge of the High band (0.0–1.0).  Must be >
+                ``review_min``; enforced by DB constraint.
+            ai_elevated_min: AI probability threshold for "elevated" flag.
+            web_match_min: Minimum web-match score for corroboration.
+            engine_agree_count: Engine-agreement corroboration count.
+            engine_agree_min: Per-engine score floor for agreement.
+
+        Returns:
+            The created or updated ``BandThreshold`` instance.
+        """
+        mode_key = assignment_mode.lower().strip()
+        row = db.query(BandThreshold).filter(BandThreshold.assignment_mode == mode_key).first()
+        if row is None:
+            row = BandThreshold(assignment_mode=mode_key)
+            db.add(row)
+        row.review_min = review_min
+        row.high_min = high_min
+        row.ai_elevated_min = ai_elevated_min
+        row.web_match_min = web_match_min
+        row.engine_agree_count = engine_agree_count
+        row.engine_agree_min = engine_agree_min
+        db.commit()
+        db.refresh(row)
+        return row
+
+
+class PairReviewService:
+    """Service for persisting and querying faculty review decisions.
+
+    Rows in ``pair_reviews`` are **append-only**: every call to
+    :meth:`create_review` inserts a new row.  The latest row for a
+    (job_id, submission_a, submission_b) triplet is the current decision;
+    all prior rows form the audit trail.  Never call ``UPDATE`` on this table.
+    """
+
+    # ------------------------------------------------------------------
+    # Writes
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_review(
+        db: Session,
+        job_id: str,
+        submission_a: str,
+        submission_b: str,
+        reviewer_id: str,
+        band: str,
+        disposition: str,
+        rationale: str | None = None,
+        ai_flag: bool = False,
+        corroborated: bool = False,
+        similarity_score: float | None = None,
+    ) -> PairReview:
+        """Insert a new review row (append-only).
+
+        Args:
+            db: Database session.
+            job_id: Job identifier (``jobs.id``, VARCHAR 36).
+            submission_a: Name / identifier of the first submission.
+            submission_b: Name / identifier of the second submission.
+            reviewer_id: UUID of the reviewing user.
+            band: Computed band at review time: ``'low'``, ``'review'``, or
+                ``'high'``.
+            disposition: Faculty decision; must be one of the values in
+                ``VALID_DISPOSITIONS``.
+            rationale: Optional free-text rationale (max 500 chars enforced
+                by the API layer).
+            ai_flag: ``True`` when the AI score was elevated at review time.
+            corroborated: ``True`` when the AI flag was corroborated by
+                structural or web evidence.
+            similarity_score: Fused similarity score recorded for analytics.
+
+        Returns:
+            The newly inserted ``PairReview`` instance.
+        """
+        review = PairReview(
+            job_id=job_id,
+            submission_a=submission_a,
+            submission_b=submission_b,
+            reviewer_id=reviewer_id,
+            band=band,
+            disposition=disposition,
+            rationale=rationale,
+            ai_flag=ai_flag,
+            corroborated=corroborated,
+            similarity_score=similarity_score,
+        )
+        db.add(review)
+        db.commit()
+        db.refresh(review)
+        return review
+
+    # ------------------------------------------------------------------
+    # Reads — per job
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_latest_for_job(
+        db: Session,
+        job_id: str,
+        band: str | None = None,
+        disposition: str | None = None,
+        pending_only: bool = False,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[PairReview]:
+        """Return the **latest** review row for each pair in *job_id*.
+
+        Uses a subquery to select the most recent ``reviewed_at`` timestamp
+        per (job_id, submission_a, submission_b) triplet, then returns the
+        full rows.  Optionally filters by band, disposition, or pending status.
+
+        A pair is "pending" when it has *no* review row yet; this method only
+        returns pairs that have at least one review.  Use
+        :meth:`get_pending_pairs` to list pairs without any review.
+
+        Args:
+            db: Database session.
+            job_id: Job identifier.
+            band: Optional band filter (``'low'``, ``'review'``, ``'high'``).
+            disposition: Optional disposition filter.
+            pending_only: If ``True``, return only rows whose disposition is
+                ``None``-equivalent (not applicable here since every row has a
+                disposition; kept for API symmetry — pass ``False``).
+            limit: Maximum rows to return.
+            offset: Pagination offset.
+
+        Returns:
+            List of ``PairReview`` instances (latest per pair), ordered by
+            ``reviewed_at`` descending.
+        """
+        from sqlalchemy import func
+
+        # Subquery: latest reviewed_at per (job_id, submission_a, submission_b)
+        latest_sq = (
+            db.query(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+                func.max(PairReview.reviewed_at).label("max_reviewed_at"),
+            )
+            .filter(PairReview.job_id == job_id)
+            .group_by(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+            )
+            .subquery()
+        )
+
+        query = db.query(PairReview).join(
+            latest_sq,
+            and_(
+                PairReview.job_id == latest_sq.c.job_id,
+                PairReview.submission_a == latest_sq.c.submission_a,
+                PairReview.submission_b == latest_sq.c.submission_b,
+                PairReview.reviewed_at == latest_sq.c.max_reviewed_at,
+            ),
+        )
+
+        if band:
+            query = query.filter(PairReview.band == band)
+        if disposition:
+            query = query.filter(PairReview.disposition == disposition)
+
+        return query.order_by(PairReview.reviewed_at.desc()).limit(limit).offset(offset).all()
+
+    @staticmethod
+    def get_history_for_pair(
+        db: Session,
+        job_id: str,
+        submission_a: str,
+        submission_b: str,
+    ) -> list[PairReview]:
+        """Return the full review history for one pair, newest first.
+
+        Args:
+            db: Database session.
+            job_id: Job identifier.
+            submission_a: First submission name.
+            submission_b: Second submission name.
+
+        Returns:
+            All ``PairReview`` rows for this pair, ordered newest-first.
+        """
+        return (
+            db.query(PairReview)
+            .filter(
+                PairReview.job_id == job_id,
+                PairReview.submission_a == submission_a,
+                PairReview.submission_b == submission_b,
+            )
+            .order_by(PairReview.reviewed_at.desc())
+            .all()
+        )
+
+    @staticmethod
+    def get_latest_for_pair(
+        db: Session,
+        job_id: str,
+        submission_a: str,
+        submission_b: str,
+    ) -> PairReview | None:
+        """Return the single most recent review for a pair, or ``None``.
+
+        Args:
+            db: Database session.
+            job_id: Job identifier.
+            submission_a: First submission name.
+            submission_b: Second submission name.
+
+        Returns:
+            Most recent ``PairReview`` row, or ``None`` if not yet reviewed.
+        """
+        return (
+            db.query(PairReview)
+            .filter(
+                PairReview.job_id == job_id,
+                PairReview.submission_a == submission_a,
+                PairReview.submission_b == submission_b,
+            )
+            .order_by(PairReview.reviewed_at.desc())
+            .first()
+        )
+
+    # ------------------------------------------------------------------
+    # Aggregates — review summary for a job
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_review_summary(db: Session, job_id: str) -> dict[str, Any]:
+        """Return aggregate review counts for *job_id*.
+
+        Counts are computed over **latest** reviews only (one per pair).
+
+        Returns a dict with the following keys:
+
+        - ``reviewed_total`` — pairs with at least one review
+        - ``by_band`` — ``{band: count}`` for latest reviews
+        - ``by_disposition`` — ``{disposition: count}`` for latest reviews
+        - ``overturned`` — reviews where disposition is ``'no_action'`` in the
+          Review or High band (proxy for false positives caught in triage)
+        - ``escalated`` — reviews where disposition is
+          ``'step_up_verification'`` or ``'formal_escalation'``
+        - ``ai_only_flags`` — latest reviews where ``ai_flag=True`` and
+          ``corroborated=False``
+        - ``corroborated_flags`` — latest reviews where ``ai_flag=True`` and
+          ``corroborated=True``
+
+        Args:
+            db: Database session.
+            job_id: Job identifier.
+
+        Returns:
+            Summary dict as described above.
+        """
+        from sqlalchemy import func
+
+        latest_sq = (
+            db.query(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+                func.max(PairReview.reviewed_at).label("max_reviewed_at"),
+            )
+            .filter(PairReview.job_id == job_id)
+            .group_by(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+            )
+            .subquery()
+        )
+
+        latest_rows: list[PairReview] = (
+            db.query(PairReview)
+            .join(
+                latest_sq,
+                and_(
+                    PairReview.job_id == latest_sq.c.job_id,
+                    PairReview.submission_a == latest_sq.c.submission_a,
+                    PairReview.submission_b == latest_sq.c.submission_b,
+                    PairReview.reviewed_at == latest_sq.c.max_reviewed_at,
+                ),
+            )
+            .all()
+        )
+
+        by_band: dict[str, int] = {}
+        by_disposition: dict[str, int] = {}
+        overturned = 0
+        escalated = 0
+        ai_only_flags = 0
+        corroborated_flags = 0
+
+        for row in latest_rows:
+            by_band[row.band] = by_band.get(row.band, 0) + 1
+            by_disposition[row.disposition] = by_disposition.get(row.disposition, 0) + 1
+            if row.disposition == "no_action" and row.band in ("review", "high"):
+                overturned += 1
+            if row.disposition in ("step_up_verification", "formal_escalation"):
+                escalated += 1
+            if row.ai_flag and not row.corroborated:
+                ai_only_flags += 1
+            if row.ai_flag and row.corroborated:
+                corroborated_flags += 1
+
+        return {
+            "job_id": job_id,
+            "reviewed_total": len(latest_rows),
+            "by_band": by_band,
+            "by_disposition": by_disposition,
+            "overturned": overturned,
+            "escalated": escalated,
+            "ai_only_flags": ai_only_flags,
+            "corroborated_flags": corroborated_flags,
+        }
+
+    # ------------------------------------------------------------------
+    # Overturn-rate analytics (cross-job)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_overturn_rate_by_band(
+        db: Session,
+        job_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compute overturn rate per band across one or more jobs.
+
+        An overturn is a latest review in the Review or High band whose
+        disposition is ``'no_action'``.
+
+        Args:
+            db: Database session.
+            job_ids: Optional list of job IDs to restrict the query.  If
+                ``None``, all jobs with reviews are included.
+
+        Returns:
+            List of dicts, one per band:
+            ``[{band, total_reviewed, overturned, overturn_rate_pct}]``
+        """
+        from sqlalchemy import func
+
+        base_q = db.query(PairReview)
+        if job_ids:
+            base_q = base_q.filter(PairReview.job_id.in_(job_ids))
+
+        latest_sq = (
+            base_q.with_entities(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+                func.max(PairReview.reviewed_at).label("max_reviewed_at"),
+            )
+            .group_by(
+                PairReview.job_id,
+                PairReview.submission_a,
+                PairReview.submission_b,
+            )
+            .subquery()
+        )
+
+        latest_rows: list[PairReview] = (
+            db.query(PairReview)
+            .join(
+                latest_sq,
+                and_(
+                    PairReview.job_id == latest_sq.c.job_id,
+                    PairReview.submission_a == latest_sq.c.submission_a,
+                    PairReview.submission_b == latest_sq.c.submission_b,
+                    PairReview.reviewed_at == latest_sq.c.max_reviewed_at,
+                ),
+            )
+            .filter(PairReview.band.in_(["review", "high"]))
+            .all()
+        )
+
+        counts: dict[str, dict[str, int]] = {}
+        for row in latest_rows:
+            entry = counts.setdefault(row.band, {"total": 0, "overturned": 0})
+            entry["total"] += 1
+            if row.disposition == "no_action":
+                entry["overturned"] += 1
+
+        result = []
+        for band in ("review", "high"):
+            entry = counts.get(band, {"total": 0, "overturned": 0})
+            total = entry["total"]
+            overturned = entry["overturned"]
+            result.append(
+                {
+                    "band": band,
+                    "total_reviewed": total,
+                    "overturned": overturned,
+                    "overturn_rate_pct": (round(overturned / total * 100, 1) if total else None),
+                }
+            )
+        return result

@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   FlaskConical,
   Info,
+  Layers,
   Shield,
   Sigma,
 } from 'lucide-react';
@@ -78,7 +79,9 @@ function ThresholdTable({ report, soc }) {
             <th className="px-4 py-3 font-semibold">Precision</th>
             <th className="px-4 py-3 font-semibold">Recall</th>
             <th className="px-4 py-3 font-semibold">F1</th>
-            {soc === 'auc' && <th className="px-4 py-3 font-semibold">AUC</th>}
+            <th className="px-4 py-3 font-semibold">FPR</th>
+            {soc === 'auc' && <th className="px-4 py-3 font-semibold">ROC-AUC</th>}
+            {soc === 'auc' && <th className="px-4 py-3 font-semibold">PR-AUC</th>}
           </tr>
         </thead>
         <tbody>
@@ -86,10 +89,18 @@ function ThresholdTable({ report, soc }) {
             <tr key={row.label} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
               {renderMetrics(row.metrics)}
+              <MetricCell value={row.metrics?.fpr} higherIsBetter={false} />
               {soc === 'auc' && (
                 <td>
                   <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {auc(row.metrics.auc)}
+                  </span>
+                </td>
+              )}
+              {soc === 'auc' && (
+                <td>
+                  <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {auc(row.metrics.pr_auc)}
                   </span>
                 </td>
               )}
@@ -118,7 +129,9 @@ function ComparisonTable({ report }) {
             <th className="px-4 py-3 font-semibold">Precision</th>
             <th className="px-4 py-3 font-semibold">Recall</th>
             <th className="px-4 py-3 font-semibold">F1</th>
-            <th className="px-4 py-3 font-semibold">AUC</th>
+            <th className="px-4 py-3 font-semibold">FPR</th>
+            <th className="px-4 py-3 font-semibold">ROC-AUC</th>
+            <th className="px-4 py-3 font-semibold">PR-AUC</th>
           </tr>
         </thead>
         <tbody>
@@ -126,9 +139,15 @@ function ComparisonTable({ report }) {
             <tr key={row.label} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
               {renderMetrics(row.metrics)}
+              <MetricCell value={row.metrics?.fpr} higherIsBetter={false} />
               <td>
                 <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                  {auc(row.metrics.auc)}
+                  {auc(row.metrics?.auc)}
+                </span>
+              </td>
+              <td>
+                <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  {auc(row.metrics?.pr_auc)}
                 </span>
               </td>
             </tr>
@@ -153,7 +172,8 @@ function GeneratorTable({ report }) {
             <th className="px-4 py-3 font-semibold">AI samples</th>
             <th className="px-4 py-3 font-semibold">Precision</th>
             <th className="px-4 py-3 font-semibold">Recall</th>
-            <th className="px-4 py-3 font-semibold">AUC</th>
+            <th className="px-4 py-3 font-semibold">FPR</th>
+            <th className="px-4 py-3 font-semibold">ROC-AUC</th>
           </tr>
         </thead>
         <tbody>
@@ -171,6 +191,7 @@ function GeneratorTable({ report }) {
                   {fmt(g.metrics?.recall)}
                 </span>
               </td>
+              <MetricCell value={g.metrics?.fpr} higherIsBetter={false} />
               <td>
                 <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   {auc(g.metrics?.auc)}
@@ -205,7 +226,9 @@ function PerplexityCompare({ statistical, codelm }) {
           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
             <th className="px-4 py-3 font-semibold">Perplexity source</th>
             <th className="px-4 py-3 font-semibold">F1</th>
-            <th className="px-4 py-3 font-semibold">AUC</th>
+            <th className="px-4 py-3 font-semibold">FPR</th>
+            <th className="px-4 py-3 font-semibold">ROC-AUC</th>
+            <th className="px-4 py-3 font-semibold">PR-AUC</th>
           </tr>
         </thead>
         <tbody>
@@ -220,9 +243,15 @@ function PerplexityCompare({ statistical, codelm }) {
                     {fmt(m.f1)}
                   </span>
                 </td>
+                <MetricCell value={m.fpr} higherIsBetter={false} />
                 <td>
                   <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {auc(m.auc)}
+                  </span>
+                </td>
+                <td>
+                  <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {auc(m.pr_auc)}
                   </span>
                 </td>
               </tr>
@@ -245,31 +274,42 @@ function StatBadge({ label, value, on }) {
 }
 
 function HumanFpBaseline({ baseline }) {
+  const rows = Object.entries(baseline?.corpora || {});
+  if (!rows.length) return null;
   const student = baseline?.corpora?.kaggle_student_code;
-  if (!student) return null;
-  const rows = Object.entries(baseline.corpora || {});
   return (
     <section className="theme-card-strong rounded-[30px] overflow-hidden">
       <div className="theme-section-line px-6 py-5 lg:px-7">
         <div className="inline-flex items-center gap-2 rounded-full border border-amber-600/10 bg-amber-500/[0.08] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-700">
           <AlertTriangle size={13} />
-          Measured on real student code
+          §2 False positive validation
         </div>
         <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-          Human-code false positives
+          Real-World FPR Validation
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-          The production detector was run over known-human code. On {student.count}{' '}
-          real novice student Python submissions,{' '}
-          <strong className="text-amber-700">
-            {Math.round((student['fp_at_0.70'] ?? 0) * 100)}% score in the high band (≥ 0.70)
-          </strong>{' '}
-          and{' '}
-          <strong className="text-amber-700">
-            {Math.round((student['fp_at_0.40'] ?? 0) * 100)}% in the medium band (≥ 0.40)
-          </strong>{' '}
-          — while experienced/community human code scores 0%. Treat every AI score as a
-          screening signal for a human conversation, never as a verdict.
+          {student ? (
+            <>
+              The production detector was run over known-human code. On {student.count}{' '}
+              real novice student Python submissions,{' '}
+              <strong className="text-amber-700">
+                {Math.round((student['fp_at_0.70'] ?? 0) * 100)}% score in the high band (≥ 0.70)
+              </strong>{' '}
+              and{' '}
+              <strong className="text-amber-700">
+                {Math.round((student['fp_at_0.40'] ?? 0) * 100)}% in the medium band (≥ 0.40)
+              </strong>{' '}
+              — while experienced/community human code scores 0%. Treat every AI score as a
+              screening signal for a human conversation, never as a verdict.
+            </>
+          ) : (
+            <>
+              The production detector was run over {rows.length} held-out corpora of known-human
+              code. These are flag rates at the screening (0.40), default (0.50) and high-confidence
+              (0.70) thresholds. Treat every AI score as a screening signal for a human
+              conversation, never as a verdict.
+            </>
+          )}
         </p>
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
@@ -308,6 +348,92 @@ function HumanFpBaseline({ baseline }) {
             <li key={c}>{c}</li>
           ))}
         </ul>
+      </div>
+    </section>
+  );
+}
+
+const TAXONOMY_PILL_TONES = {
+  live: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  partial: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  gap: 'bg-orange-50 text-orange-700 ring-orange-600/20',
+  missing: 'bg-slate-100 text-slate-500 ring-slate-300/60',
+};
+
+function TaxonomyStatusPill({ status, label }) {
+  const cls = TAXONOMY_PILL_TONES[status] || TAXONOMY_PILL_TONES.missing;
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${cls}`}>
+      {label || status}
+    </span>
+  );
+}
+
+function TaxonomyCoverage({ taxonomy }) {
+  const components = taxonomy?.components || [];
+  if (!components.length) return null;
+  const summary = taxonomy?.summary || {};
+  const order = ['live', 'partial', 'gap', 'missing'];
+  return (
+    <section className="theme-card-strong rounded-[30px] overflow-hidden">
+      <div className="theme-section-line px-6 py-5 lg:px-7">
+        <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
+          <Layers size={13} />
+          Benchmark coverage map
+        </div>
+        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
+          What is measured — and what is still missing
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+          Every figure on this page belongs to the four-part structure a review panel asks about:
+          detection performance, false-positive validation, robustness and generalization (see{' '}
+          <span className="font-mono text-xs">docs/CODEPROVENANCE_BENCHMARK.md</span>). The table
+          below states the status we can defend today, derived only from artifacts that exist in
+          this repository — measured items are reproducible, the gaps are named rather than hidden.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-4 text-xs text-[var(--text-secondary)]">
+          {order.map((key) => (
+            <span key={key} className="inline-flex items-center gap-2">
+              <TaxonomyStatusPill status={key} label={key} />
+              {summary[key] ?? 0} item{summary[key] === 1 ? '' : 's'}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-6 px-6 py-6 lg:px-7">
+        {components.map((component) => (
+          <div key={component.key} className="overflow-x-auto">
+            <div className="mb-2 flex flex-wrap items-baseline gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-blue)]">
+                §{component.number}
+              </span>
+              <h3 className="font-display text-lg font-semibold tracking-tight text-[var(--text-primary)]">
+                {component.title}
+              </h3>
+              <span className="text-xs text-[var(--text-secondary)]">{component.summary}</span>
+            </div>
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">
+                <tr>
+                  <th className="pb-2 pr-4 font-medium">Item</th>
+                  <th className="pb-2 pr-4 font-medium">Status</th>
+                  <th className="pb-2 font-medium">Evidence</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {(component.items || []).map((item) => (
+                  <tr key={item.key}>
+                    <td className="py-2 pr-4 text-[var(--text-primary)]">{item.label}</td>
+                    <td className="py-2 pr-4">
+                      <TaxonomyStatusPill status={item.status} label={item.status_label} />
+                    </td>
+                    <td className="py-2 text-xs text-[var(--text-secondary)]">{item.evidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -377,6 +503,8 @@ export default function AIDetectionAccuracyPage() {
             </div>
           </section>
 
+          <TaxonomyCoverage taxonomy={data?.taxonomy} />
+
           {data?.human_fp_baseline && <HumanFpBaseline baseline={data.human_fp_baseline} />}
 
           {error && (
@@ -416,7 +544,7 @@ export default function AIDetectionAccuracyPage() {
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
               <div>
-                <div className="text-sm font-semibold text-slate-900">Grouped holdout (no leakage)</div>
+                <div className="text-sm font-semibold text-slate-900">§1 Detection performance — grouped holdout (no leakage)</div>
                 <div className="mt-1 text-xs text-slate-500">
                   {main?.n_samples ?? '—'} samples ({main?.n_ai ?? '—'} AI). 20% of problems held out; the same problem never spans train and test.
                 </div>
@@ -430,7 +558,7 @@ export default function AIDetectionAccuracyPage() {
 
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             <div className="border-b border-slate-100 px-5 py-4">
-              <div className="text-sm font-semibold text-slate-900">Heuristic vs ML classifier</div>
+              <div className="text-sm font-semibold text-slate-900">§1 Detection performance — heuristic vs ML classifier</div>
               <div className="mt-1 text-xs text-slate-500">Same unseen test fold, two scoring methods. ML is disabled by default for false-positive safety.</div>
             </div>
             <div className="space-y-4 p-5">
@@ -440,8 +568,8 @@ export default function AIDetectionAccuracyPage() {
 
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             <div className="border-b border-slate-100 px-5 py-4">
-              <div className="text-sm font-semibold text-slate-900">Per-generator sensitivity</div>
-              <div className="mt-1 text-xs text-slate-500">Recall against each generator on problems the model never trained on.</div>
+              <div className="text-sm font-semibold text-slate-900">§1 Detection performance — per-generator sensitivity</div>
+              <div className="mt-1 text-xs text-slate-500">Recall (and FPR on the shared human pool) against each generator on problems the model never trained on.</div>
             </div>
             <div className="space-y-4 p-5">
               <GeneratorTable report={main} />
@@ -450,8 +578,8 @@ export default function AIDetectionAccuracyPage() {
 
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             <div className="border-b border-slate-100 px-5 py-4">
-              <div className="text-sm font-semibold text-slate-900">Perplexity signal comparison</div>
-              <div className="mt-1 text-xs text-slate-500">The causal code-LM improves AUC over the statistical bigram — but is not enabled by default.</div>
+              <div className="text-sm font-semibold text-slate-900">§1 Detection performance — perplexity signal comparison</div>
+              <div className="mt-1 text-xs text-slate-500">The causal code-LM improves ROC-AUC and PR-AUC over the statistical bigram — but is not enabled by default.</div>
             </div>
             <div className="space-y-4 p-5">
               <PerplexityCompare statistical={reports.statistical} codelm={reports.codelm} />
@@ -467,7 +595,9 @@ export default function AIDetectionAccuracyPage() {
                   The heuristic path (the live default) reaches AUC ~0.52–0.55 — modest. The trained
                   ML classifier (0.66) and causal code-LM (0.63) are measured improvements but remain
                   <span className="font-semibold text-slate-700"> disabled by default</span> because on short,
-                  terse student code they raise false positives. This is deliberately honest: we show real
+                  terse student code they raise false positives. Every table above reports FPR next to
+                  recall, and PR-AUC alongside ROC-AUC, so the cost of a missed human is never hidden
+                  behind a single headline number. This is deliberately honest: we show real
                   numbers, treat scores as indicators (not proof), and flag that AIGCodeSet alone cannot
                   validate the product&apos;s real input distribution. See
                   <span className="font-mono text-xs text-slate-500"> docs/AI_DETECTOR_VS_TURNITIN.md</span> for the full gap analysis.

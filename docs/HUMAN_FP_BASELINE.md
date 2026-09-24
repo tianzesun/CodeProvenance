@@ -91,3 +91,47 @@ bands or annotations on an unlabelled corpus would repeat the calibration
 guesswork this baseline exists to end. The band-relative caveats already
 shipped in-product carry the honest message; the labelled institutional
 holdout decides any band change.
+
+## Recalibration (2026-09-21): FP@0.70 21.3% → 2.3%
+
+A per-file signal dump of this corpus (same 174 files) isolated the
+mechanism behind the false positives, and four targeted fixes were shipped:
+
+1. **Single-pattern root cause.** All 37 high-band false positives shared one
+   fingerprint: the comment regex matching ANY 3+ word English sentence
+   (`#\s*[A-Z]...`). It measures "well-commented code" — taught as good
+   style — and saturated `pattern_library` to 1.0 on 15–21-line tutorial
+   files. The pattern was removed; only phrase-level LLM fingerprints remain.
+2. **Single-family saturation cap.** `_signal_pattern_library` now caps each
+   fingerprint family's contribution at 0.45; only independent families
+   firing together can push the signal higher.
+3. **Finite-sample entropy correction.** Raw-entropy "perplexity" is biased
+   low on short files (Miller–Madow `+(K-1)/(2N)` added), which previously
+   pushed short human code toward "low-entropy = AI-like".
+4. **Uncertainty beats confidence.** Low-confidence calls (adjusted < 0.2)
+   with probability ≥ 0.70 are now capped at 0.66 instead of damped to
+   ~0.75+ — flagged-innocent files carried mean confidence 0.06 yet still
+   displayed red. Heuristic fingerprint boosts additionally require an
+   independent corroborating signal.
+
+Measured result (same corpus, same pipeline):
+
+| Threshold | Before | After |
+| --- | ---: | ---: |
+| FP@0.40 | 44.3% | **9.8%** |
+| FP@0.50 | 39.1% | **3.4%** |
+| FP@0.70 | 21.3% | **2.3%** |
+
+Score distribution moved from mean 0.425 / max 0.812 to mean 0.277 / max
+0.762; no file's score increased. Control corpora are unaffected (only
+comment-style fingerprints were removed). Recall cost, measured on a 60-file
+AIGCodeSet sample through the full production pipeline: fused recall@0.40
+dropped 8/60 → 4/60. Diagnosis of that cost: the raw classifier itself is
+**worse than chance on this distribution (AUC 0.382, AI vs Kaggle novice
+human)** — it was trained on polished AIGCodeSet human code, so novice
+student code scores *more* AI-like than AI. Relaxing the classifier length
+gate is therefore measurably not a path to recall. The honest conclusion:
+heuristic-only detection of AIGCodeSet-style AI was always near-chance
+(mean fused score 0.277 post-fix, 0.277 raw-ML pre-fix), and recovering
+recall requires retraining the classifier on mixed novice-human corpora —
+the labelled institutional holdout remains the decisive measurement.

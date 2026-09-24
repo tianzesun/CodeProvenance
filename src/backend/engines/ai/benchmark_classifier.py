@@ -27,8 +27,10 @@ Three evaluations are run:
    raw classifier probability into the same formula — a documented
    approximation for this evaluation.)
 
-Metrics: accuracy, precision, recall, F1, AUC (AI = positive class), plus the
-existing server thresholds (medium risk 0.40 / high risk 0.70).
+Metrics: accuracy, precision, recall/TPR, FPR, F1, ROC-AUC and PR-AUC
+(AI = positive class), plus the existing server thresholds (medium risk 0.40 /
+high risk 0.70). TPR/FPR/AUC/PR-AUC are the §1 fields of
+``docs/CODEPROVENANCE_BENCHMARK.md``.
 
 Usage::
 
@@ -126,9 +128,17 @@ def build_feature_rows(codes: list[str]) -> list[dict[str, float]]:
 def _metrics(
     y_true: list[int], y_prob: list[float], threshold: float
 ) -> dict[str, Any]:
-    """Precision/recall/F1/accuracy/AUC at a given probability threshold."""
+    """Precision/recall/F1/accuracy/FPR/AUC/PR-AUC at a probability threshold.
+
+    Mirrors the benchmark taxonomy (``docs/CODEPROVENANCE_BENCHMARK.md`` §1):
+    ``recall`` is the TPR, ``fpr`` is the share of human samples flagged at this
+    threshold, and ``pr_auc`` (average precision) is reported alongside ROC-AUC
+    because the AI/human split is imbalanced.
+    """
     from sklearn.metrics import (
         accuracy_score,
+        average_precision_score,
+        confusion_matrix,
         f1_score,
         precision_score,
         recall_score,
@@ -142,10 +152,21 @@ def _metrics(
         "recall": round(recall_score(y_true, y_pred, zero_division=0), 4),
         "f1": round(f1_score(y_true, y_pred, zero_division=0), 4),
     }
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    report["tpr"] = report["recall"]
+    report["fpr"] = round(fp / (fp + tn), 4) if (fp + tn) else 0.0
+    report["tp"] = int(tp)
+    report["fp"] = int(fp)
+    report["tn"] = int(tn)
+    report["fn"] = int(fn)
     try:
         report["auc"] = round(roc_auc_score(y_true, y_prob), 4)
     except ValueError:
         report["auc"] = None
+    try:
+        report["pr_auc"] = round(average_precision_score(y_true, y_prob), 4)
+    except ValueError:
+        report["pr_auc"] = None
     return report
 
 
@@ -319,9 +340,13 @@ def main() -> None:
     def _fmt(m: dict[str, Any]) -> str:
         auc = m.get("auc")
         auc_s = "n/a" if auc is None else f"{auc:.3f}"
+        pr_auc = m.get("pr_auc")
+        pr_s = "n/a" if pr_auc is None else f"{pr_auc:.3f}"
+        fpr = m.get("fpr")
+        fpr_s = "n/a" if fpr is None else f"{fpr:.3f}"
         return (
             f"acc={m['accuracy']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} "
-            f"F1={m['f1']:.3f} AUC={auc_s}"
+            f"F1={m['f1']:.3f} FPR={fpr_s} AUC={auc_s} PR-AUC={pr_s}"
         )
 
     print("\n=== Grouped holdout (no leakage) ===")

@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+
+logger = logging.getLogger(__name__)
 
 from src.backend.application.services.lti_service import LTIService
 
@@ -48,7 +51,8 @@ async def lti_launch(request: Request):
         return RedirectResponse(url=f"/dashboard?lti_user={user_id}&course={course_id}")
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"LTI Launch Failed: {e!s}")
+        logger.warning("LTI launch failed: %s", e)
+        raise HTTPException(status_code=400, detail="LTI launch failed. Check LTI configuration.")
 
 
 @router.post("/deep-link-select")
@@ -72,9 +76,7 @@ async def lti_pdp_callback(request: Request, submission_id: str):
     """
     # In a real scenario, fetch results from DB
     mock_results = {"score": 0.85, "ai_probability": 0.92}
-    pdp_response = lti_service.handle_plagiarism_callback(
-        request, submission_id, mock_results
-    )
+    pdp_response = lti_service.handle_plagiarism_callback(request, submission_id, mock_results)
     return pdp_response
 
 

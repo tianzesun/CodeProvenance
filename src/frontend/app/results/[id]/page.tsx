@@ -4,7 +4,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/apiClient';
@@ -13,10 +13,12 @@ interface WebAnalysisSubmission {
   name: string;
   match_count?: number;
 }
-import { ButtonLink, PageHeader, ActionButton, Card } from '@/components/saas/SaaSPrimitives';
+import { ButtonLink, ActionButton, Card } from '@/components/saas/SaaSPrimitives';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  FileDown,
   FileText,
   Filter,
   Search,
@@ -24,7 +26,19 @@ import {
   X,
   TreePine,
   GitBranch,
+  BookOpen,
+  Calendar,
 } from 'lucide-react';
+
+// Dispositions available in the Pair Detail Inspector status dropdown.
+// Values match the backend pair review statuses.
+const STATUS_OPTIONS = [
+  { value: 'unreviewed', label: 'Unreviewed' },
+  { value: 'needs_review', label: 'Needs review' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'dismissed', label: 'Dismissed' },
+  { value: 'escalated', label: 'Escalated' },
+];
 
 function formatPercent(value) {
   const num = Number(value) || 0;
@@ -32,7 +46,22 @@ function formatPercent(value) {
 }
 
 function getAssignmentTitle(job) {
-  return job?.assignment_name || job?.course_name || 'Assignment Results';
+  return (
+    (typeof job?.assignment_name === 'string' && job.assignment_name.trim()) ||
+    (typeof job?.course_name === 'string' && job.course_name.trim()) ||
+    'Analysis Results'
+  );
+}
+
+function formatRunDate(iso) {
+  if (!iso) {
+    return 'unknown date';
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return 'unknown date';
+  }
+  return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 function getThreshold(job) {
@@ -386,6 +415,8 @@ export default function ResultsPage() {
   const [sortMode, setSortMode] = useState('unreviewed'); // unreviewed | similarity | evidence | verdict
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
+  const [reportsOpen, setReportsOpen] = useState(false); // Reports dropdown in inspector header
+  const [detailTab, setDetailTab] = useState('signals'); // signals | blocks | code
 
   useEffect(() => {
     if (authLoading) {
@@ -436,8 +467,8 @@ export default function ResultsPage() {
   };
 
   // Update both the backend job-level status (existing) + per-pair review in DB via pair_reviews
-  const updateActivePairStatus = async (newStatus) => {
-    const key = pairKey(activeResult);
+  const updatePairStatus = async (row, newStatus) => {
+    const key = pairKey(row);
     if (key) {
       setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
     }
@@ -569,11 +600,64 @@ export default function ResultsPage() {
 
   const openDrawerFor = (row) => {
     const idx = reviewResults.findIndex((r) => pairKey(r) === row._key);
+    setReportsOpen(false);
+    setDetailTab('signals');
     if (idx >= 0) setActiveIndex(idx);
     setDrawerOpen(true);
   };
 
   const closeDrawer = () => setDrawerOpen(false);
+
+  // Navigate to adjacent pair within the current filtered tableData
+  const navigatePair = useCallback((direction: 1 | -1) => {
+    if (tableData.length === 0) return;
+    setReportsOpen(false);
+    const currentKey = pairKey(activeResult);
+    const currentTableIdx = tableData.findIndex((r) => r._key === currentKey);
+    const nextTableIdx = currentTableIdx + direction;
+    if (nextTableIdx < 0 || nextTableIdx >= tableData.length) return;
+    const nextRow = tableData[nextTableIdx];
+    const idx = reviewResults.findIndex((r) => pairKey(r) === nextRow._key);
+    if (idx >= 0) setActiveIndex(idx);
+  }, [activeResult, tableData, reviewResults]);
+
+  const currentTableIndex = useMemo(() => {
+    const key = pairKey(activeResult);
+    return tableData.findIndex((r) => r._key === key);
+  }, [activeResult, tableData]);
+
+  // Current disposition of the pair shown in the inspector
+  const activeStatus = pairStatuses[pairKey(activeResult)] || activeResult?.review_status || 'unreviewed';
+
+  // Review progress for the workspace header
+  const reviewedCount = results.filter(
+    (r) => (pairStatuses[pairKey(r)] || r.review_status || 'unreviewed') !== 'unreviewed',
+  ).length;
+  const reviewPct = results.length ? Math.round((reviewedCount / results.length) * 100) : 0;
+  const highRiskCount = results.filter(
+    (r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed',
+  ).length;
+
+  // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowRight' || e.key === 'j' || e.key === 'J') {
+        e.preventDefault();
+        navigatePair(1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        navigatePair(-1);
+      } else if (e.key === 'Escape') {
+        closeDrawer();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [drawerOpen, navigatePair]);
 
   if (loading) {
     return (
@@ -606,36 +690,66 @@ export default function ResultsPage() {
       <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
 
         {/* ── Header ──────────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <PageHeader
-            eyebrow="Review workspace"
-            title={getAssignmentTitle(job)}
-            description={job?.course_name ? `${job.course_name} · ${job?.created_at ? new Date(job.created_at).toLocaleString() : ''}` : ''}
-            eyebrowStyle="badge"
-          />
-          <ButtonLink
-            href={`/dossier/${id}`}
-            variant="secondary"
-          >
-            Evidence Dossier & Viva Questions
-          </ButtonLink>
-        </div>
+        <Card className="overflow-hidden">
+          {/* Row 1: identity (left) + page-level action (right) */}
+          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
+                Review Workspace
+              </div>
+              <h1 className="mt-2.5 truncate text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                {getAssignmentTitle(job)}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
+                <span className="inline-flex items-center gap-1.5" title="Course">
+                  <BookOpen size={14} /> {job?.course_name || 'No course linked'}
+                </span>
+                <span className="inline-flex items-center gap-1.5" title="Analysis run time">
+                  <Calendar size={14} /> Analyzed {formatRunDate(job?.created_at)}
+                </span>
+              </div>
+            </div>
 
-        {/* ── Summary chips ────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {job?.file_count || Object.keys(submissions).length || 0} submissions
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {results.length} pair{results.length === 1 ? '' : 's'}
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-            {results.filter((r) => (Number(r.score) || 0) >= 0.75 && (pairStatuses[pairKey(r)] || 'unreviewed') !== 'dismissed').length} high-risk
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-            {tableData.length} shown
-          </span>
-        </div>
+            {/* Page-level navigation CTA — top-right, aligned with identity */}
+            <div className="shrink-0 sm:pt-1">
+              <ButtonLink href={`/dossier/${id}`} variant="secondary">
+                Evidence Dossier &amp; Viva Questions
+              </ButtonLink>
+            </div>
+          </div>
+
+          {/* Row 2: metrics strip */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-slate-200 bg-slate-50/60 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-900/40">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+                {job?.file_count || Object.keys(submissions).length || 0} submissions
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+                {results.length} pair{results.length === 1 ? '' : 's'}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                {highRiskCount} high-risk
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                {tableData.length} shown
+              </span>
+            </div>
+
+            {/* Review progress */}
+            <div className="ml-auto w-full max-w-xs">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+                <span>Review progress</span>
+                <span className="font-mono">{reviewedCount}/{results.length} · {reviewPct}%</span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${reviewPct === 100 ? 'bg-emerald-500' : 'bg-blue-600'}`}
+                  style={{ width: `${reviewPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
 
         {/* ── Filters bar ──────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-3">
@@ -709,7 +823,7 @@ export default function ResultsPage() {
             }}
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900"
           >
-<Filter size={12} /> Reset filters
+            <Filter size={12} /> Reset filters
           </button>
         </div>
 
@@ -720,6 +834,9 @@ export default function ResultsPage() {
               <h2 className="text-sm font-semibold text-slate-950 dark:text-white">Suspicious Pairs — Ranked</h2>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {tableData.length} pairs shown
+                {tableData.length > 0 && (
+                  <span className="ml-2 text-slate-400 dark:text-slate-600">· click to open · J/K to navigate</span>
+                )}
               </div>
             </div>
 
@@ -733,9 +850,10 @@ export default function ResultsPage() {
                   <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-900/50 dark:text-slate-400">
                     <tr>
                       <th className="w-12 px-4 py-3">#</th>
-                      <th className="w-[26%] px-4 py-3">Submission A</th>
-                      <th className="w-[26%] px-4 py-3">Submission B</th>
-                      <th className="w-32 px-4 py-3">Verdict</th>
+                      <th className="w-[23%] px-4 py-3">Submission A</th>
+                      <th className="w-[23%] px-4 py-3">Submission B</th>
+                      <th className="w-20 px-4 py-3">Score</th>
+                      <th className="w-28 px-4 py-3">Verdict</th>
                       <th className="w-28 px-4 py-3">Status</th>
                     </tr>
                   </thead>
@@ -760,12 +878,27 @@ export default function ResultsPage() {
                           <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_a}>{row.file_a}</td>
                           <td className="truncate px-4 py-3 font-medium text-slate-950 dark:text-white" title={row.file_b}>{row.file_b}</td>
                           <td className="px-4 py-3">
+                            <span className={`font-mono text-sm font-semibold ${row._score >= 0.75 ? 'text-red-600 dark:text-red-400' : row._score >= 0.45 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                              {Math.round((row._score || 0) * 100)}%
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>
-                              {status.replace('_', ' ')}
-                            </span>
+                            <select
+                              value={status}
+                              disabled={saving}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => updatePairStatus(row, e.target.value)}
+                              className={`cursor-pointer rounded-full border-0 px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:opacity-50 ${statusTone}`}
+                            >
+                              {STATUS_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value} className="bg-white text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
                           </td>
                         </tr>
                       );
@@ -781,104 +914,165 @@ export default function ResultsPage() {
         {drawerOpen && activeResult ? (
           <div className="space-y-4">
             <Card className="overflow-hidden">
-              <div className="flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Pair Detail Inspector</div>
-                  <div className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">
-                    {activeResult.file_a} vs {activeResult.file_b}
+              {/* Row 1: identity + navigation */}
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+                <div className="min-w-0">
+                  <button
+                    onClick={closeDrawer}
+                    className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    ← All pairs
+                  </button>
+
+                  {/* Filename pair: two large titles + elegant "VS" divider */}
+                  <div className="mt-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <h2 className="truncate text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                      {activeResult.file_a}
+                    </h2>
+                    <span className="inline-flex shrink-0 items-center rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                      vs
+                    </span>
+                    <h2 className="truncate text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                      {activeResult.file_b}
+                    </h2>
                   </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <VerdictBadge verdict={activeResult.verdict} />
-                    <span className="text-sm text-slate-500 dark:text-slate-400">{confidenceDisplay}% confidence</span>
+
+                  {/* Verdict + confidence as labeled mini-metrics */}
+                  <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">
+                        Verdict
+                      </span>
+                      <VerdictBadge verdict={activeResult.verdict} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">
+                        Confidence
+                      </span>
+                      <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {confidenceDisplay}%
+                      </span>
+                      <div className="h-1 w-16 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div
+                          className={`h-full rounded-full ${
+                            confidenceDisplay >= 75
+                              ? 'bg-red-500'
+                              : confidenceDisplay >= 45
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.max(confidenceDisplay, 4)}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <ActionButton
-                    variant="primary"
-                    icon={ShieldCheck}
-                    onClick={() => updateActivePairStatus('needs_review')}
-                    disabled={saving}
-                  >
-                    Mark for Review
-                  </ActionButton>
-                  <ActionButton
-                    variant="secondary"
-                    icon={X}
-                    onClick={() => updateActivePairStatus('dismissed')}
-                    disabled={saving}
-                  >
-                    Dismiss
-                  </ActionButton>
-                  <a
-                    href={`/report/${id}/committee`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
-                  >
-                    Committee Report
-                  </a>
-                  <a
-                    href={`/report/${id}/download`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
-                  >
-                    HTML Report
-                  </a>
-                  <a
-                    href={`/report/${id}/download-json`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
-                  >
-                    JSON Data
-                  </a>
-                  <a
-                    href={`/report/${id}/download-pdf`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
-                  >
-                    PDF Report
-                  </a>
-                  <a
-                    href={`/api/reports/integrity-assessment/${id}?format=html`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
-                  >
-                    <FileText size={14} /> Integrity Report
-                  </a>
-                  <a
-                    href={`/api/reports/integrity-assessment/${id}?format=pdf`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
-                  >
-                    <FileText size={14} /> Integrity PDF
-                  </a>
-                  <a
-                    href={`/report/${id}/download-csv`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
-                  >
-                    CSV Data
-                  </a>
-                  <button
-                    onClick={closeDrawer}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
-                  >
-                    ← Back to all pairs
-                  </button>
+                <div className="flex items-center gap-2">
+                  {/* Reports dropdown — consolidates all report / export links */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setReportsOpen((v) => !v)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/50"
+                    >
+                      <FileDown size={14} /> Reports
+                      <ChevronDown size={14} className={`transition ${reportsOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {reportsOpen && (
+                      <>
+                        <div className="fixed inset-0 z-20" onClick={() => setReportsOpen(false)} />
+                        <div className="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                          {[
+                            { label: 'HTML Report', href: `/report/${id}/download` },
+                            { label: 'PDF Report', href: `/report/${id}/download-pdf` },
+                            { label: 'Committee Report', href: `/report/${id}/committee` },
+                            { label: 'JSON Data', href: `/report/${id}/download-json` },
+                            { label: 'CSV Data', href: `/report/${id}/download-csv` },
+                            { label: 'Integrity Report', href: `/api/reports/integrity-assessment/${id}?format=html`, accent: true },
+                            { label: 'Integrity PDF', href: `/api/reports/integrity-assessment/${id}?format=pdf`, accent: true },
+                          ].map((item) => (
+                            <a
+                              key={item.label}
+                              href={item.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => setReportsOpen(false)}
+                              className={`block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 ${
+                                item.accent
+                                  ? 'text-blue-700 dark:text-blue-300'
+                                  : 'text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {item.label}
+                            </a>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Prev / Next navigation */}
+                  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                    <button
+                      onClick={() => navigatePair(-1)}
+                      disabled={currentTableIndex <= 0}
+                      title="Previous pair (K / ←)"
+                      className="rounded-l-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      ‹ Prev
+                    </button>
+                    <span className="select-none border-x border-slate-200 px-2 py-2 text-xs text-slate-400 dark:border-slate-700">
+                      {currentTableIndex >= 0 ? currentTableIndex + 1 : '–'} / {tableData.length}
+                    </span>
+                    <button
+                      onClick={() => navigatePair(1)}
+                      disabled={currentTableIndex >= tableData.length - 1}
+                      title="Next pair (J / →)"
+                      className="rounded-r-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      Next ›
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {/* Row 2: section tabs */}
+              <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-3 dark:border-slate-800">
+                {[
+                  { id: 'signals', label: 'Evidence Signals', count: evidenceSignals.length },
+                  { id: 'blocks', label: 'Evidence Blocks', count: activeResult?.matching_blocks?.length || 0 },
+                  { id: 'code', label: 'Side-by-side', count: null },
+                ].map((tab) => {
+                  const isActive = detailTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setDetailTab(tab.id)}
+                      className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition ${
+                        isActive
+                          ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                          : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {tab.label}
+                      {tab.count !== null && (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          isActive
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                        }`}>
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </Card>
 
-            {/* Evidence Summary - why this pair was flagged */}
-            <Card className="overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
+            {detailTab === 'signals' && (
+              <div>
+                <Card className="overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                 <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
                 <div>
                   <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
@@ -933,10 +1127,30 @@ export default function ResultsPage() {
                   </div>
                 )}
               </div>
-            </Card>
+              </Card>
+
+              {/* Evidence chips — simplified signal summary */}
+              {evidenceTypes.length > 0 && (
+                <Card className="overflow-hidden">
+                  <div className="px-5 py-4">
+                    <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Evidence Signals
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {evidenceTypes.map((item) => (
+                        <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+              )}
+              </div>
+            )}
 
             {/* Evidence Blocks - matching code blocks between submissions */}
-            {activeResult?.matching_blocks && activeResult.matching_blocks.length > 0 && (
+            {detailTab === 'blocks' && (
               <Card className="overflow-hidden">
                 <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                   <GitBranch size={16} className="text-purple-600 dark:text-purple-400" />
@@ -948,36 +1162,25 @@ export default function ResultsPage() {
                   </div>
                 </div>
                 <div className="space-y-3 px-5 py-4">
-                  {activeResult.matching_blocks.slice(0, 5).map((block, idx) => (
+                  {(activeResult?.matching_blocks || []).slice(0, 5).map((block, idx) => (
                     <BlockDetail key={idx} block={block} codeA={leftCode} codeB={rightCode} />
                   ))}
-                  {activeResult.matching_blocks.length > 5 && (
+                  {(activeResult?.matching_blocks?.length || 0) > 5 && (
                     <div className="text-xs text-slate-500 dark:text-slate-400">
                       +{activeResult.matching_blocks.length - 5} more blocks
+                    </div>
+                  )}
+                  {(activeResult?.matching_blocks?.length || 0) === 0 && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+                      No matching code blocks were isolated for this pair. The side-by-side view still shows full-source highlights.
                     </div>
                   )}
                 </div>
               </Card>
             )}
 
-            {/* Evidence chips (simplified view) */}
-            {evidenceTypes.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="px-5 py-4">
-                  <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Evidence Signals
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {evidenceTypes.map((item) => (
-                      <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </Card>
-            )}
-
+            {detailTab === 'code' && (
+              <>
             {/* Similarity Legend */}
             <Card className="overflow-hidden">
               <div className="px-5 py-3">
@@ -1027,9 +1230,11 @@ export default function ResultsPage() {
                 <div className="text-sm text-slate-600 dark:text-slate-400">{job.review_notes}</div>
               </Card>
             )}
+              </>
+            )}
 
             <div className="text-center text-[11px] text-slate-500 dark:text-slate-400">
-              Changes update the pair status immediately. Use &quot;Back to all pairs&quot; to return to the ranked list.
+              Changes update the pair status immediately. Use the tabs above to inspect signals, blocks, and source.
             </div>
           </div>
         ) : null}

@@ -124,12 +124,45 @@ class TestOrchestratorSeparation:
         result = self.detector.analyze(AI_CANONICAL)
         assert result["ai_probability"] >= 0.6
 
-    def test_ai_with_comments_detected(self) -> None:
-        # Regression: the descriptive English comment fingerprint regex was too
-        # fragile to match hyphenated words or single-letter sentence starts.
+    def test_comment_style_alone_does_not_reach_high_band(self) -> None:
+        # Recalibrated 2026-09-21 against the human false-positive baseline
+        # (docs/HUMAN_FP_BASELINE.md): the previous expectation — descriptive
+        # English comments must push a file into the high band via the
+        # pattern_library signal — fired on 37/37 innocent novice student
+        # files, because well-commented code is taught as good style. A
+        # sentence-shaped comment alone is not fingerprint evidence; this
+        # sample must therefore stay below the high-risk threshold, exactly
+        # like a well-commented human submission.
         result = self.detector.analyze(AI_WITH_COMMENTS)
+        assert result["ai_probability"] < 0.7
+        assert result["signals"].get("pattern_library", 0.0) <= 0.45
+
+    def test_multiple_fingerprint_families_still_saturate(self) -> None:
+        # Independent fingerprint families firing together remain genuine
+        # evidence: the single-family saturation cap must not weaken the
+        # signal when comment, structural and docstring fingerprints all hit.
+        multi_family = (
+            "def process_data(input_data: List[str]) -> Dict[str, int]:\n"
+            '    """Count word frequencies.\n'
+            "\n"
+            "    Args:\n"
+            "        input_data: A list of raw text rows.\n"
+            "\n"
+            "    Returns:\n"
+            "        A dictionary mapping each word to its frequency.\n"
+            '    """\n'
+            "    result_list: Dict[str, int] = {}\n"
+            "    if input_data is None:\n"
+            "        raise ValueError('input_data must not be None')\n"
+            "    for row in input_data:\n"
+            "        # Step 1: tokenize the row into words\n"
+            "        for word in row.lower().split():\n"
+            "            result_list[word] = result_list.get(word, 0) + 1\n"
+            "    return result_list\n"
+        )
+        result = self.detector.analyze(multi_family)
+        assert result["signals"].get("pattern_library", 0.0) > 0.45
         assert result["ai_probability"] >= 0.6
-        assert result["signals"].get("pattern_library", 0.0) > 0.3
 
 
 class TestAIDetectionLayerHonesty:

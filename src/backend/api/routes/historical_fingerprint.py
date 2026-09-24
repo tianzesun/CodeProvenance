@@ -16,9 +16,7 @@ from src.backend.evaluation.historical_fingerprint import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/api/historical-fingerprint", tags=["historical-fingerprint"]
-)
+router = APIRouter(prefix="/api/historical-fingerprint", tags=["historical-fingerprint"])
 
 
 class FingerprintRequest(BaseModel):
@@ -68,7 +66,7 @@ async def analyze_fingerprint(
 
     except Exception as e:
         logger.error(f"Fingerprint analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Fingerprint analysis failed.")
 
 
 @router.post("/quick-analyze")
@@ -98,7 +96,7 @@ async def quick_analyze(
 
     except Exception as e:
         logger.error(f"Quick fingerprint analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Fingerprint analysis failed.")
 
 
 @router.get("/consistency/{student_id}")
@@ -129,7 +127,7 @@ async def get_consistency(
 
     except Exception as e:
         logger.error(f"Consistency check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Consistency check failed.")
 
 
 @router.get("/extract-features")
@@ -165,4 +163,4 @@ async def extract_features(
 
     except Exception as e:
         logger.error(f"Feature extraction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Feature extraction failed.")

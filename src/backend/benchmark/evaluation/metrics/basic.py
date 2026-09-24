@@ -38,6 +38,42 @@ def recall(tp: int, fn: int) -> float:
     return tp / (tp + fn)
 
 
+def false_positive_rate(fp: int, tn: int) -> float:
+    """Compute the false positive rate: FP / (FP + TN).
+
+    This is the share of known-human samples flagged as AI. It is the metric
+    the product reports on human-only corpora (see
+    ``docs/CODEPROVENANCE_BENCHMARK.md`` §1/§2b) and is undefined only when no
+    human samples exist, in which case it returns 0.0.
+
+    Args:
+        fp: False positives (human samples flagged as AI).
+        tn: True negatives (human samples not flagged).
+
+    Returns:
+        False positive rate (0.0 to 1.0).
+    """
+    if fp + tn == 0:
+        return 0.0
+    return fp / (fp + tn)
+
+
+def true_positive_rate(tp: int, fn: int) -> float:
+    """Compute the true positive rate (recall): TP / (TP + FN).
+
+    Alias of :func:`recall` named after the ROC convention so TPR and FPR read
+    symmetrically in benchmark tables.
+
+    Args:
+        tp: True positives (AI samples flagged as AI).
+        fn: False negatives (AI samples not flagged).
+
+    Returns:
+        True positive rate (0.0 to 1.0).
+    """
+    return recall(tp, fn)
+
+
 def f1_score(precision_val: float, recall_val: float) -> float:
     """Compute F1 score: 2 * precision * recall / (precision + recall).
     
@@ -96,26 +132,34 @@ def compute_metrics_from_confusion(
     confusion: Dict[str, int],
 ) -> Dict[str, float]:
     """Compute all metrics from confusion matrix.
-    
+
+    Reports both ROC-convention rates so the benchmark taxonomy's §1 metrics
+    (TPR/Recall and FPR) are first-class fields rather than derived by callers:
+    ``tpr`` (== ``recall``) and ``fpr``.
+
     Args:
         confusion: Dictionary with tp, fp, tn, fn.
-        
+
     Returns:
-        Dictionary with precision, recall, f1, accuracy.
+        Dictionary with precision, recall, tpr, fpr, f1, accuracy and the
+        underlying tp/fp/tn/fn counts.
     """
     tp = confusion["tp"]
     fp = confusion["fp"]
     tn = confusion["tn"]
     fn = confusion["fn"]
-    
+
     prec = precision(tp, fp)
     rec = recall(tp, fn)
+    fpr = false_positive_rate(fp, tn)
     f1 = f1_score(prec, rec)
     acc = accuracy(tp, tn, fp, fn)
-    
+
     return {
         "precision": prec,
         "recall": rec,
+        "tpr": true_positive_rate(tp, fn),
+        "fpr": fpr,
         "f1": f1,
         "accuracy": acc,
         "tp": tp,

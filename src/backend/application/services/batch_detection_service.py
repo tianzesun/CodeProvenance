@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -265,12 +265,25 @@ class BatchDetectionService:
                     )
         return submissions
 
-    def compare_all_pairs(self, submissions: dict[str, str]) -> list[ComparisonResult]:
-        """Compare all pairs of submissions and return ranked results."""
+    def compare_all_pairs(
+        self,
+        submissions: dict[str, str],
+        progress_callback: Callable[[int, int, str, str], None] | None = None,
+    ) -> list[ComparisonResult]:
+        """Compare all pairs of submissions and return ranked results.
+
+        Args:
+            submissions: Mapping of submission name to source code.
+            progress_callback: Optional ``callback(completed, total, file_a,
+                file_b)`` invoked after every pair finishes so callers can
+                report real progress during long class-wide comparisons.
+        """
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
         results = []
         files = list(submissions.keys())
+        total_pairs = len(files) * (len(files) - 1) // 2
+        completed_pairs = 0
         highlighter = CodeHighlighter(min_match_length=4)
 
         for i, fa in enumerate(files):
@@ -327,6 +340,17 @@ class BatchDetectionService:
                     code_b=cb,
                 )
                 results.append(pair_result)
+                completed_pairs += 1
+                if progress_callback is not None:
+                    try:
+                        progress_callback(completed_pairs, total_pairs, fa, fb)
+                    except Exception:
+                        logger.warning(
+                            "Progress callback failed for pair %s / %s",
+                            fa,
+                            fb,
+                            exc_info=True,
+                        )
 
         # Sort by score descending
         results.sort(key=lambda x: x.score, reverse=True)

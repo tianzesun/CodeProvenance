@@ -3,12 +3,15 @@
 from pathlib import Path
 from typing import Any
 
+import logging
 from fastapi import APIRouter, HTTPException
 
 from src.backend.engines.scoring.fusion_engine import (
     load_engine_config,
     save_engine_config,
 )
+
+logger = logging.getLogger(__name__)
 from src.backend.engines.scoring.profile_manager import (
     apply_course_profile,
     export_course_profile_yaml,
@@ -73,7 +76,8 @@ async def update_engine_config(config_update: dict[str, Any]):
         return {"success": True, "message": "Engine configuration updated successfully"}
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Engine config update rejected: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid engine configuration.")
 
 
 @router.post("/calibrate")
@@ -91,7 +95,10 @@ async def trigger_calibration():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Calibration failed: {e!s}")
+        logger.exception("Engine calibration failed")
+        raise HTTPException(
+            status_code=500, detail="Calibration failed. See server logs for details."
+        )
 
 
 @router.get("/validation")

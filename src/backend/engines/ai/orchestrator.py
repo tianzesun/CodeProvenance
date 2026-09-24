@@ -114,7 +114,15 @@ def apply_fp_safeguards(
     if 0.4 <= ai_probability <= 0.6:
         adjusted = max(adjusted, 0.3)
     if adjusted < 0.2:
-        ai_probability = ai_probability * 0.8 + 0.1
+        if ai_probability >= 0.70:
+            # Low-confidence calls must not land in the high band. The human
+            # FP baseline showed flagged-innocent student files carried mean
+            # confidence 0.06, yet the old 0.8x+0.1 damper left them at ~0.75
+            # — still red. Cap them just below the high threshold instead:
+            # "uncertain" must beat "confident and wrong".
+            ai_probability = min(ai_probability, 0.66)
+        else:
+            ai_probability = ai_probability * 0.8 + 0.1
         notes.append("Low confidence — score damped toward neutral")
     return round(ai_probability, 3), round(adjusted, 3), notes
 
@@ -259,18 +267,21 @@ class AIDetectionOrchestrator:
         else:
             fused_probability = self._heuristic_fuse(signals)
 
-        # Combine confidence, then apply the false-positive safeguards before
-        # the display floor so penalties (and the low-confidence damping they
-        # enable) can actually take effect.
-        legacy_conf = legacy_result.get("confidence", 0.5)
-        bino_conf = (
-            bino_result.get("confidence", 0.5) if bino_result.get("available") else 0.5
-        )
-        raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+        # Combine confidence over the layers that actually ran, then apply the
+        # false-positive safeguards. A layer that did not run must not
+        # contribute a phantom confidence value, and no artificial floor is
+        # applied: an honest "very low" confidence is more useful to a
+        # reviewer than a clamp that masks it.
+        legacy_conf = float(legacy_result.get("confidence", 0.5))
+        if bino_result.get("available"):
+            bino_conf = float(bino_result.get("confidence", 0.5))
+            raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+        else:
+            raw_confidence = legacy_conf
         fused_probability, safeguarded_confidence, safeguard_notes = (
             apply_fp_safeguards(fused_probability, raw_confidence, signals)
         )
-        combined_confidence = max(0.4, safeguarded_confidence)
+        combined_confidence = safeguarded_confidence
 
         # Apply the learned calibrator (trained via /api/ai-detect/retrain) to
         # the fused score so shared calibration feedback affects the live path.
@@ -402,7 +413,15 @@ class AIDetectionOrchestrator:
         burstiness = signals.get("burstiness", 0.0)
 
         raw = 0.45 * pattern + 0.20 * docstring + 0.20 * stylometry + 0.15 * burstiness
-        # High-precision fingerprint evidence gets an additional boost.
-        boost = 0.18 * pattern if pattern >= 0.30 else 0.0
+        # High-precision fingerprint evidence gets an additional boost, but
+        # only when an independent signal corroborates it. On the human FP
+        # baseline, one benign comment family alone saturated the pattern
+        # signal on 37/37 flagged-innocent files, and this boost amplified
+        # that single-family saturation into high-band flags.
+        perplexity_signal = signals.get("perplexity", 0.0)
+        corroborated = (
+            docstring >= 0.25 or stylometry >= 0.60 or perplexity_signal >= 0.80
+        )
+        boost = 0.18 * pattern if (pattern >= 0.30 and corroborated) else 0.0
         k = 6.0
         return 1.0 / (1.0 + math.exp(-k * ((raw + boost) - 0.5)))

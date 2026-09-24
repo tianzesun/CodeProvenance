@@ -87,11 +87,21 @@ class TestLLMProviderValidation:
     def test_unsupported_provider_raises(self) -> None:
         with pytest.raises(ValueError):
             LLMProvider(
-                provider="gemini",
+                provider="not-a-real-vendor",
                 api_key="x",
                 model="m",
                 base_url="https://example.com",
             )
+
+    def test_catalog_aliases_resolve_to_supported_provider(self) -> None:
+        """Aliases like ``claude`` or ``google`` map to catalog keys."""
+        provider = LLMProvider(
+            provider="claude",
+            api_key="x",
+            model="claude-sonnet-5",
+            base_url="https://example.com/v1",
+        )
+        assert provider.provider == "anthropic"
 
     def test_missing_api_key_raises_llm_error(self) -> None:
         with pytest.raises(LLMError):
@@ -104,7 +114,16 @@ class TestLLMProviderValidation:
 
     def test_resolve_provider_config_rejects_unknown_provider(self) -> None:
         with pytest.raises(ValueError):
-            resolve_provider_config("gemini")
+            resolve_provider_config("not-a-real-vendor")
+
+    def test_resolve_provider_config_accepts_new_vendor(self) -> None:
+        """Previously-unsupported vendors resolve without a code change."""
+        config = resolve_provider_config("gemini", api_key_override="g-key")
+        assert config.provider == "google"
+        assert config.api_key == "g-key"
+        # Chat uses Gemini's OpenAI-compatible endpoint; only model listing
+        # uses Google's native API.
+        assert config.api_style == "openai"
 
     def test_resolve_provider_config_uses_override_key(
         self, monkeypatch: pytest.MonkeyPatch

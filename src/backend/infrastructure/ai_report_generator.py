@@ -103,6 +103,179 @@ def _risk_color(score: float) -> str:
     return "#16a34a"
 
 
+# Turnitin-style score bands. Ordered high-to-low; first match wins.
+# display="*%" mirrors Turnitin's convention of withholding exact percentages
+# below 20% because of the elevated false-positive risk in that range.
+_SCORE_BANDS: list[dict[str, Any]] = [
+    {
+        "min": 0.80,
+        "label": "Likely AI-generated",
+        "color": "#dc2626",
+        "bg": "#fef2f2",
+        "range": "80\u2013100%",
+        "description": (
+            "Most of this code is likely AI-generated or heavily modified by "
+            "AI tools. Thorough human review is required \u2014 but a high score "
+            "alone does not confirm misconduct."
+        ),
+    },
+    {
+        "min": 0.50,
+        "label": "Substantial AI involvement",
+        "color": "#ea580c",
+        "bg": "#fff7ed",
+        "range": "50\u201379%",
+        "description": (
+            "A significant portion of this code appears AI-generated or "
+            "AI-assisted. Detailed review of the flagged evidence is "
+            "recommended before any conclusions are drawn."
+        ),
+    },
+    {
+        "min": 0.20,
+        "label": "Mixed \u2014 possibly AI-assisted",
+        "color": "#d97706",
+        "bg": "#fffbeb",
+        "range": "20\u201349%",
+        "description": (
+            "A mix of human and AI-assisted code. This range often reflects "
+            "boilerplate, standard idioms, or minor AI use such as "
+            "brainstorming or auto-completion."
+        ),
+    },
+    {
+        "min": 0.0,
+        "label": "Faint AI patterns",
+        "color": "#64748b",
+        "bg": "#f8fafc",
+        "range": "1\u201319%",
+        "description": (
+            "Faint AI-like patterns were detected, but scores in this range "
+            "carry a high risk of false positives, so the exact percentage is "
+            "withheld (\u201c*%\u201d). Treat as noise unless other evidence agrees."
+        ),
+    },
+    {
+        "min": -1.0,
+        "label": "No AI patterns detected",
+        "color": "#16a34a",
+        "bg": "#f0fdf4",
+        "range": "0%",
+        "description": (
+            "No detectable AI patterns were found. A 0% score means the "
+            "detector found nothing \u2014 it is not a guarantee of originality."
+        ),
+    },
+]
+
+# A stable order so interpretation rows render high-to-low.
+_BAND_LABELS_IN_ORDER = [
+    "Likely AI-generated",
+    "Substantial AI involvement",
+    "Mixed \u2014 possibly AI-assisted",
+    "Faint AI patterns",
+    "No AI patterns detected",
+]
+
+
+def _score_band(score: float) -> dict[str, Any]:
+    """Return the Turnitin-style interpretation band for a 0-1 AI score.
+
+    Args:
+        score: Fused AI probability in [0, 1] (clamped).
+
+    Returns:
+        Dict with keys: label, color, bg, range, description, display.
+        ``display`` is the headline percentage string; scores in 1-19% render
+        as "*%" following Turnitin's asterisk convention.
+    """
+    s = max(0.0, min(1.0, _coerce(score)))
+    if s <= 0.0:
+        return dict(_SCORE_BANDS[-1], display="0%")
+    for band in _SCORE_BANDS:
+        if s >= band["min"]:
+            return {
+                "label": band["label"],
+                "color": band["color"],
+                "bg": band["bg"],
+                "range": band["range"],
+                "description": band["description"],
+                "display": "*%" if 0.0 < s < 0.20 else _pct(s),
+            }
+    return dict(_SCORE_BANDS[-1], display="0%")
+
+
+def _band_interpretation_table(active_label: str) -> str:
+    """Build the 'How to Read This Score' band table for the report.
+
+    Args:
+        active_label: Label of the band matching the headline score; that row
+            is highlighted with a 'THIS REPORT' pill.
+
+    Returns:
+        HTML string for the interpretation section.
+    """
+    by_label = {b["label"]: b for b in _SCORE_BANDS}
+    rows = ""
+    for label in _BAND_LABELS_IN_ORDER:
+        band = by_label[label]
+        active = label == active_label
+        row_bg = band["bg"] if active else "#ffffff"
+        rows += (
+            "<tr style='background:" + row_bg + "'>"
+            "<td style='padding:10px 12px;font-size:12px;font-weight:"
+            + ("800" if active else "700")
+            + ";color:"
+            + band["color"]
+            + ";white-space:nowrap'>"
+            + _esc(band["range"])
+            + "</td>"
+            "<td style='padding:10px 12px;font-size:12px;font-weight:"
+            + ("800" if active else "600")
+            + ";color:#0f172a;white-space:nowrap'>"
+            + _esc(label)
+            + (
+                " <span style='background:" + band["color"] + ";color:#fff;"
+                "border-radius:999px;padding:1px 8px;font-size:9px;"
+                "font-weight:800;letter-spacing:.06em;margin-left:4px'>"
+                "THIS REPORT</span>"
+                if active
+                else ""
+            )
+            + "</td>"
+            "<td style='padding:10px 12px;font-size:12px;color:#475569;"
+            "line-height:1.55'>" + _esc(band["description"]) + "</td>"
+            "</tr>"
+        )
+    return (
+        "<div class='sec'>"
+        "<div class='sec-head'><h2>How to Read This Score</h2>"
+        "<span style='font-size:11px;color:#64748b'>"
+        "Interpretation bands follow the Turnitin convention</span></div>"
+        "<div class='sec-body'>"
+        "<table style='width:100%;border-collapse:collapse'>"
+        "<thead><tr>"
+        "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.08em;color:#64748b;"
+        "background:#f8fafc;border-bottom:1px solid #e2e8f0;width:80px'>Score</th>"
+        "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.08em;color:#64748b;"
+        "background:#f8fafc;border-bottom:1px solid #e2e8f0;width:200px'>Meaning</th>"
+        "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.08em;color:#64748b;"
+        "background:#f8fafc;border-bottom:1px solid #e2e8f0'>What it indicates</th>"
+        "</tr></thead>"
+        "<tbody>" + rows + "</tbody>"
+        "</table>"
+        "<div style='margin-top:12px;font-size:11px;color:#64748b;line-height:1.6'>"
+        "&#42; Scores between 1% and 19% are shown as \u201c*%\u201d because faint "
+        "AI-like patterns in this range are usually false alarms \u2014 the same "
+        "convention Turnitin uses for its AI writing score."
+        "</div>"
+        "</div></div>"
+    )
+
+
 def _signal_rows(signal_summary: dict[str, Any]) -> str:
     """Build HTML rows for the signal summary table."""
     rows = ""
@@ -136,6 +309,7 @@ def _submission_card(entry: dict[str, Any]) -> str:
     annotated = entry.get("annotated_snippet") or []
 
     border = _risk_color(prob)
+    card_band = _score_band(prob)
     if prob >= 0.70:
         bg = "#fef2f2"
         badge_bg = "#fee2e2"
@@ -256,8 +430,10 @@ def _submission_card(entry: dict[str, Any]) -> str:
         "<div style='font-size:22px;font-weight:900;color:"
         + border
         + "'>"
-        + _pct(prob)
+        + card_band["display"]
         + "</div>"
+        "<div style='font-size:10px;font-weight:700;color:#64748b;"
+        "margin-top:1px'>" + _esc(card_band["label"]) + "</div>"
         "</div>"
         "<div>"
         "<div style='font-size:10px;font-weight:700;text-transform:uppercase;"
@@ -298,16 +474,10 @@ def build_ai_originality_report_html(job: dict[str, Any]) -> str:
     highest = _coerce(ai.get("highest_score"))
     average = _coerce(ai.get("average_score"))
 
-    risk_color = _risk_color(highest)
-    if highest >= 0.70:
-        risk_bg = "#fef2f2"
-        risk_label = "High Risk"
-    elif highest >= 0.40:
-        risk_bg = "#fffbeb"
-        risk_label = "Needs Review"
-    else:
-        risk_bg = "#f0fdf4"
-        risk_label = "Low Risk"
+    band = _score_band(highest)
+    avg_band = _score_band(average)
+    risk_color = band["color"]
+    risk_bg = band["bg"]
 
     # Dynamic CSS rules that need variable values
     dynamic_css = (
@@ -392,17 +562,26 @@ def build_ai_originality_report_html(job: dict[str, Any]) -> str:
         "</div></div>"
         "</header>"
         "<div class='score-banner'>"
-        "<div class='score-circle'><span>" + _pct(highest) + "</span></div>"
+        "<div class='score-circle'><span>" + band["display"] + "</span></div>"
         "<div>"
-        "<div style='font-size:17px;font-weight:800;color:"
-        + risk_color
-        + "'>"
-        + risk_label
-        + " \u2014 Highest AI Probability</div>"
-        "<div style='font-size:12px;color:#475569;margin-top:3px;max-width:480px'>"
-        "Fused score from 8 independent detection signals. "
-        "This is a triage signal \u2014 review the evidence cards before taking action."
-        "</div>"
+        "<div style='font-size:17px;font-weight:800;color:" + risk_color + "'>"
+        "AI-Generated Code Score: "
+        + band["display"]
+        + " &nbsp;\u2014&nbsp; "
+        + _esc(band["label"])
+        + "</div>"
+        "<div style='font-size:12px;color:#475569;margin-top:4px;max-width:520px'>"
+        + _esc(band["description"])
+        + "</div>"
+        "<div style='font-size:11px;color:#64748b;margin-top:5px'>"
+        "Fused from 8 independent detection signals. Like Turnitin's AI writing "
+        "score, this is an interpretation aid \u2014 not proof of misconduct."
+        + (
+            " Scores under 20% are shown as \u201c*%\u201d (false-positive protection)."
+            if band["display"] == "*%"
+            else ""
+        )
+        + "</div>"
         "</div>"
         "<div class='chips'>"
         "<div class='chip'><span class='chip-val'>"
@@ -411,16 +590,19 @@ def build_ai_originality_report_html(job: dict[str, Any]) -> str:
         "<div class='chip'><span class='chip-val'>"
         + str(flagged)
         + "</span><span class='chip-lbl'>Flagged</span></div>"
-        "<div class='chip'><span class='chip-val'>"
-        + _pct(highest)
+        "<div class='chip'><span class='chip-val' style='color:"
+        + risk_color
+        + "'>"
+        + band["display"]
         + "</span><span class='chip-lbl'>Highest</span></div>"
-        "<div class='chip'><span class='chip-val'>"
-        + _pct(average)
+        "<div class='chip'><span class='chip-val' style='color:"
+        + avg_band["color"]
+        + "'>"
+        + avg_band["display"]
         + "</span><span class='chip-lbl'>Average</span></div>"
         "</div>"
         "</div>"
-        "<main>"
-        "<div class='sec'>"
+        "<main>" + _band_interpretation_table(band["label"]) + "<div class='sec'>"
         "<div class='sec-head'><h2>Detection Methodology</h2>"
         "<span style='font-size:11px;color:#64748b'>8-signal ensemble</span></div>"
         "<div class='sec-body' style='display:flex;flex-wrap:wrap'>"

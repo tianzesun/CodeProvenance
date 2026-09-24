@@ -145,10 +145,68 @@ export default function SettingsPage() {
   // Live provider connection test so the Connected badge reflects a verified
   // API call rather than merely the presence of a stored key.
   const [providerTest, setProviderTest] = useState<Record<string, { testing: boolean; message: string; ok: boolean }>>({});
-  const testProvider = async (provider: 'openai' | 'anthropic') => {
+
+  // Vendor catalog + live model listings. The catalog comes with /api/settings
+  // (settings.llm_providers); model lists are fetched per provider so the UI
+  // always offers the vendor's newest models instead of a hardcoded list.
+  const providers: any[] = Array.isArray((settings as any)?.llm_providers) ? (settings as any).llm_providers : [];
+  const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [modelOptions, setModelOptions] = useState<Record<string, any[]>>({});
+  const [modelSource, setModelSource] = useState<Record<string, string>>({});
+  const [modelMessage, setModelMessage] = useState<Record<string, string>>({});
+  const [modelsLoading, setModelsLoading] = useState<Record<string, boolean>>({});
+
+  const activeProvider = selectedProvider || String((settings as any)?.llm_provider || providers[0]?.key || 'openai');
+  const activeSpec = providers.find((p) => p.key === activeProvider) || providers[0] || null;
+  const configuredMap: Record<string, boolean> = (settings as any)?.llm_api_keys_configured || {};
+  const overridesMap: Record<string, string> = (settings as any)?.llm_model_overrides || {};
+  const baseUrlsMap: Record<string, string> = (settings as any)?.llm_base_urls || {};
+
+  const loadModels = async (provider: string, refresh = false) => {
+    if (!provider) return;
+    setModelsLoading((cur) => ({ ...cur, [provider]: true }));
+    try {
+      const res = await apiClient.get('/api/settings/ai-providers/models', {
+        params: { provider, refresh: refresh ? 1 : 0 },
+      });
+      const body = res.data || {};
+      setModelOptions((cur) => ({ ...cur, [provider]: body.models || [] }));
+      setModelSource((cur) => ({ ...cur, [provider]: body.source || 'recommended' }));
+      setModelMessage((cur) => ({ ...cur, [provider]: body.message || '' }));
+    } catch (err) {
+      const apiError = (err as { response?: { data?: { detail?: string } } })?.response?.data;
+      setModelMessage((cur) => ({ ...cur, [provider]: apiError?.detail || 'Could not load models' }));
+      setModelOptions((cur) => ({ ...cur, [provider]: [] }));
+    } finally {
+      setModelsLoading((cur) => ({ ...cur, [provider]: false }));
+    }
+  };
+
+  const setProviderKey = (provider: string, value: string) => {
+    const keys = { ...((settings as any)?.llm_api_keys || {}), [provider]: value };
+    updateSetting('llm_api_keys', keys);
+    // Keep the legacy single-vendor fields in sync so old consumers still work.
+    if (provider === 'openai') updateSetting('openai_api_key', value);
+    if (provider === 'anthropic') updateSetting('anthropic_api_key', value);
+  };
+
+  const setProviderModel = (provider: string, value: string) => {
+    updateSetting('llm_model_overrides', { ...overridesMap, [provider]: value });
+    if (provider === 'openai') updateSetting('openai_model', value);
+    if (provider === 'anthropic') updateSetting('anthropic_model', value);
+  };
+
+  const setProviderBaseUrl = (provider: string, value: string) => {
+    updateSetting('llm_base_urls', { ...baseUrlsMap, [provider]: value });
+    if (provider === 'openai') updateSetting('openai_base_url', value);
+  };
+
+  const testProvider = async (provider: string) => {
     setProviderTest((current) => ({ ...current, [provider]: { testing: true, message: 'Testing connection\u2026', ok: false } }));
     try {
-      const key = provider === 'openai' ? settings?.openai_api_key : settings?.anthropic_api_key;
+      const keyMap: Record<string, string> = (settings as any)?.llm_api_keys || {};
+      const legacy = provider === 'openai' ? settings?.openai_api_key : settings?.anthropic_api_key;
+      const key = keyMap[provider] || legacy;
       const res = await apiClient.post('/api/settings/ai-provider/test', {
         provider,
         api_key: key || undefined,
@@ -166,6 +224,13 @@ export default function SettingsPage() {
       }));
     }
   };
+
+  // Fetch the vendor's current models whenever the selected provider changes.
+  useEffect(() => {
+    if (!activeProvider || providers.length === 0) return;
+    if (!modelOptions[activeProvider]) void loadModels(activeProvider);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProvider, providers.length]);
 
   const validateConfig = async () => {
     setValidationLoading(true);
@@ -211,6 +276,11 @@ export default function SettingsPage() {
         openai_model: settings.openai_model,
         anthropic_api_key: settings.anthropic_api_key,
         anthropic_model: settings.anthropic_model,
+        llm_provider: settings.llm_provider,
+        llm_fallback_provider: settings.llm_fallback_provider,
+        llm_api_keys: settings.llm_api_keys,
+        llm_model_overrides: settings.llm_model_overrides,
+        llm_base_urls: settings.llm_base_urls,
         moss_user_id: settings.moss_user_id,
         embedding_runtime: settings.embedding_runtime,
         embedding_model: settings.embedding_model,
@@ -258,7 +328,7 @@ export default function SettingsPage() {
         {/* Header */}
         <PageHeader
           eyebrow="Settings"
-          title="Professor-friendly detection settings"
+          title="Detection Settings"
           description="Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically."
           action={
             <button
@@ -371,69 +441,162 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  {/* OpenAI Card */}
-                  <div className="rounded-xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between">
+                {/* Provider picker: choose which vendor to configure */}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {providers.map((spec: any) => {
+                    const connected = Boolean(configuredMap[spec.key]);
+                    const isActive = activeProvider === spec.key;
+                    return (
+                      <button
+                        key={spec.key}
+                        type="button"
+                        onClick={() => setSelectedProvider(spec.key)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isActive
+                          ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                          }`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : isActive ? 'bg-white/50' : 'bg-slate-300'}`} />
+                        {spec.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {activeSpec && (
+                  <div className="mt-4 rounded-xl border border-slate-200 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <div className={`h-2.5 w-2.5 rounded-full ${settings.openai_api_key_configured ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className="text-sm font-semibold text-slate-900">OpenAI</span>
+                        <div className={`h-2.5 w-2.5 rounded-full ${configuredMap[activeSpec.key] ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        <span className="text-sm font-semibold text-slate-900">{activeSpec.label}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${configuredMap[activeSpec.key] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {configuredMap[activeSpec.key] ? 'Connected' : 'Not configured'}
+                        </span>
                       </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${settings.openai_api_key_configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {settings.openai_api_key_configured ? 'Connected' : 'Not configured'}
-                      </span>
+                      <div className="flex items-center gap-3 text-xs font-medium text-blue-600">
+                        {activeSpec.key_url && (
+                          <a href={activeSpec.key_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                            Get API key <ExternalLink size={12} />
+                          </a>
+                        )}
+                        {activeSpec.docs_url && (
+                          <a href={activeSpec.docs_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                            Docs <ExternalLink size={12} />
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-3 space-y-3">
-                      <TextInput label="API Key" type="password" value={settings.openai_api_key} placeholder={settings.openai_api_key_configured ? 'Leave blank to keep current key' : 'Enter OpenAI API key'} onChange={(value) => updateSetting('openai_api_key', value)} />
-                      <div className="grid grid-cols-2 gap-3">
-                        <TextInput label="Base URL" value={settings.openai_base_url} onChange={(value) => updateSetting('openai_base_url', value)} />
-                        <TextInput label="Model" value={settings.openai_model} onChange={(value) => updateSetting('openai_model', value)} />
+                      {activeSpec.requires_key ? (
+                        <TextInput
+                          label="API Key"
+                          type="password"
+                          value={(settings as any)?.llm_api_keys?.[activeProvider] ?? ''}
+                          placeholder={configuredMap[activeProvider] ? 'Leave blank to keep current key' : `Enter ${activeSpec.label} API key`}
+                          onChange={(value) => setProviderKey(activeProvider, value)}
+                        />
+                      ) : (
+                        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                          {activeSpec.label} does not require an API key (for example a locally hosted endpoint).
+                        </div>
+                      )}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <TextInput
+                          label="Base URL (optional)"
+                          value={baseUrlsMap[activeProvider] ?? ''}
+                          placeholder={activeSpec.base_url}
+                          onChange={(value) => setProviderBaseUrl(activeProvider, value)}
+                        />
+                        <div>
+                          <label className="mb-1.5 block text-xs font-semibold text-slate-600">Model</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={overridesMap[activeProvider] ?? ''}
+                              onChange={(event) => setProviderModel(activeProvider, event.target.value)}
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            >
+                              <option value="">Auto — always the newest recommended model</option>
+                              {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model: any) => model.id === overridesMap[activeProvider]) && (
+                                <option value={overridesMap[activeProvider]}>{overridesMap[activeProvider]} (saved)</option>
+                              )}
+                              {(modelOptions[activeProvider] || []).map((model: any) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.label}{model.tier && model.tier !== 'standard' ? ` — ${model.tier}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={modelsLoading[activeProvider]}
+                              onClick={() => loadModels(activeProvider, true)}
+                              title="Refresh the model list from the vendor"
+                              className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              <RefreshCw size={14} className={modelsLoading[activeProvider] ? 'animate-spin' : ''} />
+                            </button>
+                          </div>
+                        </div>
                       </div>
+                      <p className="text-xs text-slate-500">
+                        {modelsLoading[activeProvider]
+                          ? 'Loading models\u2026'
+                          : `${(modelOptions[activeProvider] || []).length} models available`}
+                        {modelSource[activeProvider] === 'live'
+                          ? ' \u00b7 fetched live from the vendor'
+                          : modelSource[activeProvider]
+                            ? ' \u00b7 vendor\u2019s current recommendations (live list unavailable)'
+                            : ''}
+                      </p>
+                      {modelMessage[activeProvider] && (
+                        <div className="text-xs text-slate-500">{modelMessage[activeProvider]}</div>
+                      )}
                       <button
                         type="button"
-                        disabled={providerTest['openai']?.testing}
-                        onClick={() => testProvider('openai')}
+                        disabled={providerTest[activeProvider]?.testing}
+                        onClick={() => testProvider(activeProvider)}
                         className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       >
-                        {providerTest['openai']?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                        {providerTest['openai']?.testing ? 'Testing\u2026' : 'Test Connection'}
+                        {providerTest[activeProvider]?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        {providerTest[activeProvider]?.testing ? 'Testing\u2026' : 'Test Connection'}
                       </button>
-                      {providerTest['openai']?.message && (
-                        <div className={`text-xs ${providerTest['openai'].ok ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {providerTest['openai'].message}
+                      {providerTest[activeProvider]?.message && (
+                        <div className={`text-xs ${providerTest[activeProvider].ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {providerTest[activeProvider].message}
                         </div>
                       )}
                     </div>
+                    {activeSpec.note && (
+                      <p className="mt-3 text-xs leading-5 text-slate-500">{activeSpec.note}</p>
+                    )}
                   </div>
-                  {/* Anthropic Card */}
-                  <div className="rounded-xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2.5 w-2.5 rounded-full ${settings.anthropic_api_key_configured ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className="text-sm font-semibold text-slate-900">Anthropic</span>
-                      </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${settings.anthropic_api_key_configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {settings.anthropic_api_key_configured ? 'Connected' : 'Not configured'}
-                      </span>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      <TextInput label="API Key" type="password" value={settings.anthropic_api_key} placeholder={settings.anthropic_api_key_configured ? 'Leave blank to keep current key' : 'Enter Anthropic API key'} onChange={(value) => updateSetting('anthropic_api_key', value)} />
-                      <TextInput label="Model" value={settings.anthropic_model} onChange={(value) => updateSetting('anthropic_model', value)} />
-                      <button
-                        type="button"
-                        disabled={providerTest['anthropic']?.testing}
-                        onClick={() => testProvider('anthropic')}
-                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        {providerTest['anthropic']?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                        {providerTest['anthropic']?.testing ? 'Testing\u2026' : 'Test Connection'}
-                      </button>
-                      {providerTest['anthropic']?.message && (
-                        <div className={`text-xs ${providerTest['anthropic'].ok ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {providerTest['anthropic'].message}
-                        </div>
-                      )}
-                    </div>
+                )}
+                {/* Default + fallback provider routing */}
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600">Default provider</label>
+                    <select
+                      value={String((settings as any)?.llm_provider || 'openai')}
+                      onChange={(event) => updateSetting('llm_provider', event.target.value)}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      {providers.length === 0 && <option value="openai">OpenAI</option>}
+                      {providers.map((spec: any) => (
+                        <option key={spec.key} value={spec.key}>{spec.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600">Fallback provider</label>
+                    <select
+                      value={String((settings as any)?.llm_fallback_provider || '')}
+                      onChange={(event) => updateSetting('llm_fallback_provider', event.target.value)}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="">None</option>
+                      {providers.map((spec: any) => (
+                        <option key={spec.key} value={spec.key}>{spec.label}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <div className="mt-3 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-700">

@@ -56,12 +56,28 @@ class AppSettings(BaseSettings):
     DEFAULT_THRESHOLD: float = 0.82
 
     # LLM / AI
+    #: Active provider key from `integrations.provider_catalog` (openai,
+    #: anthropic, google, xai, mistral, deepseek, groq, openrouter, ollama).
+    LLM_PROVIDER: str = "openai"
+    #: Optional secondary provider used when the primary one is unavailable.
+    LLM_FALLBACK_PROVIDER: str = ""
+    #: Per-provider API keys, keyed by canonical provider name.
+    LLM_API_KEYS: dict[str, str] = Field(default_factory=dict)
+    #: Per-provider model overrides. An empty string means "use the newest
+    #: model the provider currently offers", resolved at call time so the
+    #: application never pins an obsolete model by accident.
+    LLM_MODEL_OVERRIDES: dict[str, str] = Field(default_factory=dict)
+    #: Per-provider base URL overrides (self-hosted gateways, proxies, ...).
+    LLM_BASE_URLS: dict[str, str] = Field(default_factory=dict)
+
     OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    OPENAI_MODEL: str = "gpt-3.5-turbo"
+    OPENAI_MODEL: str = ""
 
     ANTHROPIC_API_KEY: str | None = None
-    ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
+    ANTHROPIC_MODEL: str = ""
+
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
 
     # Auth
     AUTH_JWT_SECRET: str

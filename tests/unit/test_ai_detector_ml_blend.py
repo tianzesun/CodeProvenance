@@ -89,11 +89,22 @@ class TestApplyFPSafeguards:
         assert confidence == 0.55
         assert any("variance" in note for note in notes)
 
-    def test_low_confidence_damps_probability_toward_neutral(self) -> None:
+    def test_low_confidence_high_score_is_capped_below_high_band(self) -> None:
+        # Recalibrated 2026-09-21: a 0.9 score with near-zero confidence used
+        # to be damped to 0.82 — still a red high-band flag. Uncertain calls
+        # must now cap just below the high-risk threshold instead.
         signals = {name: 0.2 for name in range(8)}
         signals[3] = 0.8
         probability, _, notes = apply_fp_safeguards(0.9, 0.1, signals)
-        assert probability == round(0.9 * 0.8 + 0.1, 3)
+        assert probability == 0.66
+        assert any("damped" in note for note in notes)
+
+    def test_low_confidence_moderate_score_damps_toward_neutral(self) -> None:
+        # Scores below the high band keep the original gentle damper.
+        signals = {name: 0.2 for name in range(8)}
+        signals[3] = 0.8
+        probability, _, notes = apply_fp_safeguards(0.3, 0.1, signals)
+        assert probability == round(0.3 * 0.8 + 0.1, 3)
         assert any("damped" in note for note in notes)
 
     def test_few_signals_skip_safeguards(self) -> None:
