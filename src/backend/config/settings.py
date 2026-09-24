@@ -101,6 +101,18 @@ class AppSettings(BaseSettings):
     GPTZERO_API_KEY: str | None = None
     GRAMMARLY_API_KEY: str | None = None
 
+    # Email delivery (password reset, review notifications, and test sends).
+    #: ``console`` logs the message to stdout, ``smtp`` uses the ``EMAIL_*``
+    #: fields below, and ``sendgrid`` uses ``SENDGRID_API_KEY``.
+    EMAIL_BACKEND: str = "console"
+    EMAIL_HOST: str = "localhost"
+    EMAIL_PORT: int = 587
+    EMAIL_USER: str = ""
+    EMAIL_PASSWORD: str | None = None
+    EMAIL_FROM: str = "noreply@integritydesk.com"
+    EMAIL_USE_TLS: bool = True
+    SENDGRID_API_KEY: str | None = None
+
     # Detection Pipeline (three-layer decision tree)
     DETECTION_DOMAIN_PRESETS: dict[str, str] = Field(
         default_factory=lambda: {

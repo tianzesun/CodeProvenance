@@ -1,21 +1,55 @@
 """
-Email service for sending password reset emails.
+Email service for sending transactional messages.
 
 Supports multiple backends:
 - "console": Logs emails to stdout (default for development)
 - "smtp": Sends via SMTP server (production)
 - "sendgrid": Sends via SendGrid API (production, requires SENDGRID_API_KEY)
 
-Configure via EMAIL_BACKEND, EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASSWORD,
-EMAIL_FROM, and SENDGRID_API_KEY environment variables.
+Configuration is read from the live application settings first (so values an
+administrator saves on the settings page take effect without a restart) and
+falls back to the EMAIL_BACKEND, EMAIL_HOST, EMAIL_PORT, EMAIL_USER,
+EMAIL_PASSWORD, EMAIL_FROM, EMAIL_USE_TLS and SENDGRID_API_KEY environment
+variables.
 """
 
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _live_settings() -> Any:
+    """Return the shared application settings object, or ``None``.
+
+    Imported lazily to avoid a circular import at module load time and so the
+    service observes settings saved at runtime.
+    """
+    try:
+        from src.backend.config.settings import settings as app_settings
+
+        return app_settings
+    except Exception:  # pragma: no cover - defensive import guard
+        return None
+
+
+def _configured_value(attr: str, env_name: str, default: Any) -> Any:
+    """Resolve an email setting, preferring the live settings object.
+
+    Falls back to the environment variable so deployments that configure email
+    purely through ``.env.local`` keep working unchanged.
+    """
+    import os
+
+    live = _live_settings()
+    if live is not None:
+        value = getattr(live, attr, None)
+        if value not in (None, ""):
+            return value
+    return os.getenv(env_name, default)
 
 
 class EmailService:
@@ -24,23 +58,76 @@ class EmailService:
     @staticmethod
     def _get_backend() -> str:
         """Get the configured email backend."""
-        import os
-
-        return os.getenv("EMAIL_BACKEND", "console").lower()
+        return str(
+            _configured_value("EMAIL_BACKEND", "EMAIL_BACKEND", "console")
+        ).lower()
 
     @staticmethod
     def _get_smtp_config() -> dict:
-        """Get SMTP configuration from environment."""
-        import os
-
+        """Get SMTP configuration from the live settings or environment."""
         return {
-            "host": os.getenv("EMAIL_HOST", "localhost"),
-            "port": int(os.getenv("EMAIL_PORT", "587")),
-            "user": os.getenv("EMAIL_USER", ""),
-            "password": os.getenv("EMAIL_PASSWORD", ""),
-            "from_email": os.getenv("EMAIL_FROM", "noreply@integritydesk.com"),
-            "use_tls": os.getenv("EMAIL_USE_TLS", "true").lower() == "true",
+            "host": str(_configured_value("EMAIL_HOST", "EMAIL_HOST", "localhost")),
+            "port": int(_configured_value("EMAIL_PORT", "EMAIL_PORT", "587")),
+            "user": str(_configured_value("EMAIL_USER", "EMAIL_USER", "")),
+            "password": str(
+                _configured_value("EMAIL_PASSWORD", "EMAIL_PASSWORD", "") or ""
+            ),
+            "from_email": str(
+                _configured_value(
+                    "EMAIL_FROM", "EMAIL_FROM", "noreply@integritydesk.com"
+                )
+            ),
+            "use_tls": str(
+                _configured_value("EMAIL_USE_TLS", "EMAIL_USE_TLS", "true")
+            ).lower()
+            == "true",
         }
+
+    @staticmethod
+    async def _deliver(
+        to_email: str, subject: str, html_body: str, text_body: str
+    ) -> bool:
+        """Dispatch a message to the configured backend.
+
+        Returns ``True`` when the backend accepted the message and ``False``
+        when delivery failed, so callers can report an honest status instead
+        of raising into a request handler.
+        """
+        backend = EmailService._get_backend()
+        try:
+            if backend == "smtp":
+                return EmailService._send_via_smtp(
+                    to_email, subject, html_body, text_body
+                )
+            if backend == "sendgrid":
+                return await EmailService._send_via_sendgrid(
+                    to_email, subject, html_body, text_body
+                )
+            return EmailService._send_via_console(to_email, subject, text_body)
+        except Exception as exc:
+            logger.error("Failed to send email to %s: %s", to_email, exc)
+            return False
+
+    @staticmethod
+    async def send_test_email(to_email: str) -> bool:
+        """Send a diagnostic email so admins can verify delivery settings.
+
+        Uses the same backend resolution as password resets, so a successful
+        send proves the configured credentials genuinely work.
+        """
+        subject = "IntegrityDesk email delivery test"
+        html_body = (
+            '<div style="font-family: Arial, sans-serif; max-width: 600px;">'
+            "<h2>Email delivery is working</h2>"
+            "<p>This is a test message sent from the IntegrityDesk settings page.</p>"
+            "<p>If you received it, your email configuration is correct.</p>"
+            "</div>"
+        )
+        text_body = (
+            "Email delivery is working.\n\n"
+            "This is a test message sent from the IntegrityDesk settings page."
+        )
+        return await EmailService._deliver(to_email, subject, html_body, text_body)
 
     @staticmethod
     async def send_password_reset_email(email: str, reset_url: str) -> bool:
@@ -84,35 +171,23 @@ class EmailService:
             f"If you didn't request this, please ignore this email."
         )
 
-        backend = EmailService._get_backend()
-
-        try:
-            if backend == "smtp":
-                return EmailService._send_via_smtp(email, subject, html_body, text_body)
-            elif backend == "sendgrid":
-                return await EmailService._send_via_sendgrid(
-                    email, subject, html_body, text_body
-                )
-            else:
-                return EmailService._send_via_console(email, subject, reset_url)
-        except Exception as e:
-            logger.error(f"Failed to send password reset email to {email}: {e}")
-            return False
+        return await EmailService._deliver(email, subject, html_body, text_body)
 
     @staticmethod
-    def _send_via_console(email: str, subject: str, reset_url: str) -> bool:
-        """Log email to console (development mode)."""
+    def _send_via_console(to_email: str, subject: str, body: str) -> bool:
+        """Log the email to console (development mode)."""
         logger.warning(
-            f"EMAIL_BACKEND=console — not actually sending email.\n"
-            f"  To: {email}\n"
-            f"  Subject: {subject}\n"
-            f"  Reset URL: {reset_url}"
+            "EMAIL_BACKEND=console — not actually sending email.\n"
+            "  To: %s\n  Subject: %s\n  Body:\n%s",
+            to_email,
+            subject,
+            body,
         )
         print(f"\n{'='*60}")
-        print("PASSWORD RESET EMAIL (console mode — not sent)")
-        print(f"  To: {email}")
+        print("EMAIL (console mode — not sent)")
+        print(f"  To: {to_email}")
         print(f"  Subject: {subject}")
-        print(f"  Reset URL: {reset_url}")
+        print(f"  Body:\n{body}")
         print(f"{'='*60}\n")
         return True
 
@@ -138,7 +213,7 @@ class EmailService:
                 server.login(config["user"], config["password"])
             server.sendmail(config["from_email"], to_email, msg.as_string())
 
-        logger.info(f"Password reset email sent to {to_email} via SMTP")
+        logger.info("Email sent to %s via SMTP", to_email)
         return True
 
     @staticmethod
@@ -146,14 +221,14 @@ class EmailService:
         to_email: str, subject: str, html_body: str, text_body: str
     ) -> bool:
         """Send email via SendGrid API."""
-        import os
-
-        api_key = os.getenv("SENDGRID_API_KEY")
+        api_key = _configured_value("SENDGRID_API_KEY", "SENDGRID_API_KEY", None)
         if not api_key:
             logger.error("SENDGRID_API_KEY not set but EMAIL_BACKEND=sendgrid")
             return False
 
-        from_email = os.getenv("EMAIL_FROM", "noreply@integritydesk.com")
+        from_email = str(
+            _configured_value("EMAIL_FROM", "EMAIL_FROM", "noreply@integritydesk.com")
+        )
 
         try:
             from sendgrid import SendGridAPIClient
@@ -167,11 +242,11 @@ class EmailService:
             )
             sg = SendGridAPIClient(api_key)
             sg.send(message)
-            logger.info(f"Password reset email sent to {to_email} via SendGrid")
+            logger.info("Email sent to %s via SendGrid", to_email)
             return True
         except ImportError:
             logger.error("sendgrid package not installed. Run: pip install sendgrid")
             return False
         except Exception as e:
-            logger.error(f"SendGrid API error: {e}")
+            logger.error("SendGrid API error: %s", e)
             return False

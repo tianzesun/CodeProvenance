@@ -91,6 +91,8 @@ export default function SettingsPage() {
   const [validationLoading, setValidationLoading] = useState<boolean>(false);
   const [calibrating, setCalibrating] = useState<boolean>(false);
   const [showCalibrateConfirm, setShowCalibrateConfirm] = useState<boolean>(false);
+  const [testingEmail, setTestingEmail] = useState<boolean>(false);
+  const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     systemLimits: true,
@@ -104,6 +106,8 @@ export default function SettingsPage() {
     previousTermMatching: false,
     aiRewriteDetection: false,
     reviewQueueSize: false,
+    aiDetectors: false,
+    emailDelivery: true,
   });
 
   useEffect(() => {
@@ -132,6 +136,31 @@ export default function SettingsPage() {
         [key]: value,
       },
     } as Settings));
+  };
+
+  // Sends a diagnostic email through the backend's persisted settings. The
+  // backend reads what was last saved, so unsaved edits are not used.
+  const sendTestEmail = async () => {
+    setTestingEmail(true);
+    setTestEmailResult(null);
+    try {
+      const res = await apiClient.post('/api/settings/email/test', {});
+      setTestEmailResult({
+        ok: Boolean(res.data?.ok),
+        message: res.data?.message || 'Test completed.',
+      });
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } };
+      setTestEmailResult({
+        ok: false,
+        message:
+          axiosError?.response?.data?.detail ||
+          (err as Error)?.message ||
+          'Test failed',
+      });
+    } finally {
+      setTestingEmail(false);
+    }
   };
 
   // Changing the sensitivity preset also updates the default cutoff so the
@@ -298,6 +327,16 @@ export default function SettingsPage() {
         audit_log_level: settings.audit_log_level,
         audit_retention_days: settings.audit_retention_days,
         debug_mode: settings.debug_mode,
+        gptzero_api_key: settings.gptzero_api_key,
+        grammarly_api_key: settings.grammarly_api_key,
+        email_backend: settings.email_backend,
+        email_host: settings.email_host,
+        email_port: settings.email_port,
+        email_user: settings.email_user,
+        email_password: settings.email_password,
+        email_from: settings.email_from,
+        email_use_tls: settings.email_use_tls,
+        sendgrid_api_key: settings.sendgrid_api_key,
       };
       await apiClient.patch('/api/settings', payload);
       const fresh = await apiClient.get('/api/settings');
@@ -670,6 +709,43 @@ export default function SettingsPage() {
                   <TextInput label="MOSS User ID" type="password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
                 </div>
               </Accordion>
+
+              {/* AI Detectors (GPTZero / Grammarly) */}
+              <Accordion
+                title="AI Detectors"
+                description="Connect third-party AI-writing detectors used to score essay and report submissions."
+                isOpen={accordions.aiDetectors}
+                onToggle={() => setAccordions(prev => ({ ...prev, aiDetectors: !prev.aiDetectors }))}
+              >
+                <div className="space-y-4">
+                  {([
+                    ['gptzero_api_key', 'GPTZero', 'GPTZero estimates AI-generation probability and returns per-sentence scores.'],
+                    ['grammarly_api_key', 'Grammarly', 'Grammarly adds tone, grammar, and writing-assistance signals for textual submissions.'],
+                  ] as [string, string, string][]).map(([key, name, help]) => (
+                    <div key={key} className="rounded-xl border border-slate-200 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`h-2.5 w-2.5 rounded-full ${settings[`${key}_configured`] ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        <span className={`text-xs font-semibold ${settings[`${key}_configured`] ? 'text-emerald-700' : 'text-slate-500'}`}>
+                          {settings[`${key}_configured`] ? `${name} configured` : `${name} not configured`}
+                        </span>
+                      </div>
+                      <div className="mt-3">
+                        <TextInput
+                          label={`${name} API Key`}
+                          type="password"
+                          value={(settings[key] as string) || ''}
+                          placeholder={settings[`${key}_configured`] ? `Leave blank to keep the current ${name} key` : `Enter your ${name} API key`}
+                          onChange={(value) => updateSetting(key, value)}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">{help}</p>
+                    </div>
+                  ))}
+                  <div className="rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-700">
+                    <strong className="font-semibold">Note:</strong> Keys are stored server-side and never returned to the browser. Leave a field blank to keep an already-configured key.
+                  </div>
+                </div>
+              </Accordion>
             </div>
           )}
 
@@ -932,6 +1008,89 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, webhooks: !prev.webhooks }))}
               >
                 <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" />
+              </Accordion>
+
+              {/* Email Delivery */}
+              <Accordion
+                title="Email Delivery"
+                description="Configure the mail backend used for password resets, review notifications, and test sends."
+                isOpen={accordions.emailDelivery}
+                onToggle={() => setAccordions(prev => ({ ...prev, emailDelivery: !prev.emailDelivery }))}
+              >
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SelectInput
+                      label="Backend"
+                      value={(settings.email_backend as string) || 'console'}
+                      options={[['console', 'Console (development only)'], ['smtp', 'SMTP server'], ['sendgrid', 'SendGrid API']]}
+                      onChange={(value) => updateSetting('email_backend', value)}
+                    />
+                    <TextInput
+                      label="From address"
+                      value={(settings.email_from as string) || ''}
+                      placeholder="noreply@your-university.edu"
+                      onChange={(value) => updateSetting('email_from', value)}
+                    />
+                  </div>
+
+                  {settings.email_backend === 'smtp' && (
+                    <div className="space-y-4 rounded-xl border border-slate-200 p-4">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <TextInput label="SMTP host" value={(settings.email_host as string) || ''} placeholder="smtp.your-university.edu" onChange={(value) => updateSetting('email_host', value)} />
+                        <TextInput label="SMTP port" type="number" value={(settings.email_port as number) ?? 587} onChange={(value) => updateSetting('email_port', Number(value))} />
+                        <TextInput label="SMTP username" value={(settings.email_user as string) || ''} placeholder="mailer@your-university.edu" onChange={(value) => updateSetting('email_user', value)} />
+                        <TextInput label="SMTP password" type="password" value={(settings.email_password as string) || ''} placeholder={settings.email_password_configured ? 'Leave blank to keep the current password' : 'Enter the SMTP password'} onChange={(value) => updateSetting('email_password', value)} />
+                      </div>
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(settings.email_use_tls ?? true)}
+                          onChange={(event) => updateSetting('email_use_tls', event.target.checked)}
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                        <span className="text-sm leading-6 text-slate-600">Use STARTTLS when connecting to the SMTP server.</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {settings.email_backend === 'sendgrid' && (
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <TextInput
+                        label="SendGrid API key"
+                        type="password"
+                        value={(settings.sendgrid_api_key as string) || ''}
+                        placeholder={settings.sendgrid_api_key_configured ? 'Leave blank to keep the current SendGrid key' : 'Enter your SendGrid API key'}
+                        onChange={(value) => updateSetting('sendgrid_api_key', value)}
+                      />
+                    </div>
+                  )}
+
+                  {settings.email_backend === 'console' && (
+                    <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                      Console mode writes messages to the server log instead of sending them. Choose SMTP or SendGrid for real delivery.
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={sendTestEmail}
+                      disabled={testingEmail}
+                      className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {testingEmail ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
+                      {testingEmail ? 'Sending...' : 'Send test email'}
+                    </button>
+                    <span className="text-xs text-slate-500">Save your changes first — the test uses the configuration already stored on the server.</span>
+                  </div>
+
+                  {testEmailResult && (
+                    <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${testEmailResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                      {testEmailResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+                      <span>{testEmailResult.message}</span>
+                    </div>
+                  )}
+                </div>
               </Accordion>
 
               {/* Audit & Logging */}

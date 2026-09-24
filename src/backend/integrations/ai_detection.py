@@ -23,6 +23,20 @@ class AISettings(BaseSettings):
 settings = AISettings()
 
 
+def _live_ai_key(attr: str, fallback: str | None) -> str | None:
+    """Return an AI-detector key from the shared settings when available.
+
+    The settings page applies saved secrets to the live application settings
+    object, so preferring that value over the import-time snapshot lets a newly
+    saved key work without restarting the process.
+    """
+    try:
+        from src.backend.config.settings import settings as app_settings
+    except Exception:  # pragma: no cover - defensive import guard
+        return fallback
+    return getattr(app_settings, attr, None) or fallback
+
+
 class AIDetectionResult(BaseModel):
     """Standardized result format for AI detection analysis"""
 
@@ -46,7 +60,9 @@ class GPTZeroClient:
     BASE_URL = "https://api.gptzero.me/v2"
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.GPTZERO_API_KEY
+        self.api_key = api_key or _live_ai_key(
+            "GPTZERO_API_KEY", settings.GPTZERO_API_KEY
+        )
         if not self.api_key:
             raise ValueError("GPTZero API key not configured")
 
@@ -84,7 +100,9 @@ class GrammarlyClient:
     BASE_URL = "https://api.grammarly.com/v1"
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.GRAMMARLY_API_KEY
+        self.api_key = api_key or _live_ai_key(
+            "GRAMMARLY_API_KEY", settings.GRAMMARLY_API_KEY
+        )
         if not self.api_key:
             raise ValueError("Grammarly API key not configured")
 

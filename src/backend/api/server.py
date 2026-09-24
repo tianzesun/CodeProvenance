@@ -11984,6 +11984,16 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "debug_mode": False,
     "source_scan_enabled": False,
     "source_scan_sites": ["https://github.com"],
+    "gptzero_api_key": settings.GPTZERO_API_KEY or "",
+    "grammarly_api_key": settings.GRAMMARLY_API_KEY or "",
+    "email_backend": settings.EMAIL_BACKEND,
+    "email_host": settings.EMAIL_HOST,
+    "email_port": settings.EMAIL_PORT,
+    "email_user": settings.EMAIL_USER,
+    "email_password": settings.EMAIL_PASSWORD or "",
+    "email_from": settings.EMAIL_FROM,
+    "email_use_tls": settings.EMAIL_USE_TLS,
+    "sendgrid_api_key": settings.SENDGRID_API_KEY or "",
     "professor_profile": {
         "assignment_type": "auto_detect",
         "sensitivity": "balanced",
@@ -12128,6 +12138,16 @@ SETTINGS_ATTR_MAP = {
     "debug_mode": "DEBUG_MODE",
     "source_scan_enabled": "SOURCE_SCAN_ENABLED",
     "source_scan_sites": "SOURCE_SCAN_SITES",
+    "gptzero_api_key": "GPTZERO_API_KEY",
+    "grammarly_api_key": "GRAMMARLY_API_KEY",
+    "email_backend": "EMAIL_BACKEND",
+    "email_host": "EMAIL_HOST",
+    "email_port": "EMAIL_PORT",
+    "email_user": "EMAIL_USER",
+    "email_password": "EMAIL_PASSWORD",
+    "email_from": "EMAIL_FROM",
+    "email_use_tls": "EMAIL_USE_TLS",
+    "sendgrid_api_key": "SENDGRID_API_KEY",
     "v1_review_rules": None,
     "v1_ai_models": None,
     "v1_detection_methods": None,
@@ -12135,7 +12155,15 @@ SETTINGS_ATTR_MAP = {
     "v1_system_limits": None,
 }
 
-SECRET_SETTING_KEYS = {"openai_api_key", "anthropic_api_key", "moss_user_id"}
+SECRET_SETTING_KEYS = {
+    "openai_api_key",
+    "anthropic_api_key",
+    "moss_user_id",
+    "gptzero_api_key",
+    "grammarly_api_key",
+    "email_password",
+    "sendgrid_api_key",
+}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -12180,16 +12208,12 @@ def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
         payload.get("source_scan_sites")
     )
 
-    openai_key = str(payload.get("openai_api_key") or "")
-    anthropic_key = str(payload.get("anthropic_api_key") or "")
-    moss_user_id = str(payload.get("moss_user_id") or "")
-
-    payload["openai_api_key"] = ""
-    payload["openai_api_key_configured"] = bool(openai_key)
-    payload["anthropic_api_key"] = ""
-    payload["anthropic_api_key_configured"] = bool(anthropic_key)
-    payload["moss_user_id"] = ""
-    payload["moss_user_id_configured"] = bool(moss_user_id)
+    # Every secret-like setting is blanked before it leaves the server; the
+    # accompanying ``<key>_configured`` flag lets the UI show status without
+    # ever receiving the stored value.
+    for secret_key in SECRET_SETTING_KEYS:
+        payload[f"{secret_key}_configured"] = bool(str(payload.get(secret_key) or ""))
+        payload[secret_key] = ""
 
     # Per-provider keys are secrets too: blank the values, report which
     # providers have a key stored, and attach the provider catalog so the
@@ -15549,6 +15573,39 @@ async def analyze_evidence_summary(request: Request) -> dict[str, Any]:
 
 
 # === SETTINGS API ENDPOINTS ===
+
+
+@app.post("/api/settings/email/test")
+async def test_email_delivery(request: Request) -> dict[str, Any]:
+    """Send a test email so admins can verify the delivery backend.
+
+    The recipient defaults to the signed-in administrator's address so the
+    button works without extra input, but an explicit ``email`` may be supplied
+    to check an alternate mailbox.
+    """
+    current_user = _require_current_user(request, admin_only=True)
+    from src.backend.infrastructure.email_service import EmailService
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid test payload")
+
+    recipient = str(payload.get("email") or current_user.get("email") or "").strip()
+    if not recipient:
+        raise HTTPException(status_code=400, detail="No recipient email available")
+
+    backend = EmailService._get_backend()
+    ok = await EmailService.send_test_email(recipient)
+    return {
+        "ok": bool(ok),
+        "recipient": recipient,
+        "backend": backend,
+        "message": (
+            f"Test email accepted by the '{backend}' backend."
+            if ok
+            else "Delivery failed. Check the backend configuration and credentials."
+        ),
+    }
 
 
 @app.get("/api/settings/engine-config")
