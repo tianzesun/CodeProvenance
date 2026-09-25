@@ -2,6 +2,7 @@
 'use client';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { Modal, PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
@@ -783,18 +784,12 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
       </div>
       {/* Create Demo Dataset Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8 animate-in zoom-in-95 fade-in duration-200">
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">
-                  <Database size={14} />Dataset Tools
-                </div>
-                <h3 className="text-2xl font-semibold text-slate-900">Demo dataset creation</h3>
-                <p className="mt-2 text-sm text-slate-600 max-w-xl">Generate synthetic datasets with controlled similarity patterns for testing.</p>
-              </div>
-              <button onClick={closeModal} className="p-2 hover:bg-slate-100 rounded-xl transition text-slate-500">✕</button>
-            </div>
+        <Modal
+          open={showCreateModal}
+          onClose={closeModal}
+          title="Demo dataset creation"
+          description="Generate synthetic datasets with controlled similarity patterns for testing."
+        >
             {createError && (
               <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
                 <AlertCircle size={14} className="shrink-0" />{createError}
@@ -851,8 +846,7 @@ function DatasetStep({ selectedDataset, setSelectedDataset, uploadMode, setUploa
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -2360,22 +2354,15 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
   return (
     <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 max-w-none">
+      <div className="theme-page-container">
         <div className="space-y-6">
           {/* ── Page header ─────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-lg shrink-0">
-                <PageIcon size={18} className="text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight">{pageTitle}</h1>
-              </div>
-            </div>
-            <div className="flex-1 sm:max-w-sm md:max-w-md lg:max-w-lg">
-              <StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />
-            </div>
-          </div>
+          <PageHeader
+            eyebrow={modeScope === 'benchmark' ? 'Engine & R&D' : 'Tools'}
+            eyebrowStyle="badge"
+            title={pageTitle}
+            action={<StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />}
+          />
           {/* ── Mode selector (only when multiple modes available) ────── */}
           {availableModes.length > 1 && (
             <div

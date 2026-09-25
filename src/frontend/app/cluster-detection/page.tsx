@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { Modal, PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/apiClient';
@@ -57,37 +58,43 @@ export default function ClusterDetectionPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="theme-page-container">
         {/* Header */}
-        <div className="mb-6">
-          <button 
+        <div className="mb-4">
+          <button
             onClick={() => window.history.back()}
-            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-4"
+            className="theme-link mb-4 flex items-center gap-2 text-sm font-semibold"
           >
             <ChevronLeft size={16} />
             Back to Dashboard
           </button>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">Cluster Detection</h1>
-              <p className="text-slate-500 mt-1">Identify cheating groups through similarity network analysis</p>
-            </div>
+        </div>
+        <PageHeader
+          eyebrow="Engine & R&D"
+          eyebrowStyle="badge"
+          title="Cluster Detection"
+          description="Identify cheating groups through similarity network analysis"
+          action={
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={loadClusters}
                 disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50"
+                className="theme-button-primary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50"
               >
                 {loading ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                 Refresh
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50">
+              <button
+                type="button"
+                className="theme-button-secondary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition"
+              >
                 <Download size={16} />
                 Export
               </button>
             </div>
-          </div>
-        </div>
+          }
+        />
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -190,48 +197,44 @@ export default function ClusterDetectionPage() {
         </div>
 
         {/* Detail Panel */}
-        {selectedCluster && (
-          <div className="fixed inset-0 bg-black/50 flex items-end justify-end p-6 z-50">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-96 overflow-y-auto">
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-                <h3 className="font-semibold text-slate-900">Cluster #{selectedCluster.cluster_id + 1} Details</h3>
-                <button onClick={() => setSelectedCluster(null)} className="p-1 hover:bg-slate-100 rounded">
-                  <AlertCircle size={16} className="text-slate-400" />
-                </button>
-              </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <div className="text-sm text-slate-500 mb-1">Members ({selectedCluster.size})</div>
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {selectedCluster.members.map((m, i) => (
-                      <div key={i} className="text-sm font-mono text-slate-700">
-                        {m}
-                      </div>
-                    ))}
-                  </div>
+        <Modal
+          open={Boolean(selectedCluster)}
+          title={selectedCluster ? `Cluster #${selectedCluster.cluster_id + 1} details` : 'Cluster details'}
+          onClose={() => setSelectedCluster(null)}
+        >
+          {selectedCluster && (
+            <div className="space-y-4">
+              <div>
+                <div className="theme-muted-text mb-1 text-sm">Members ({selectedCluster.size})</div>
+                <div className="scrollbar-thin max-h-48 space-y-1 overflow-y-auto">
+                  {selectedCluster.members.map((m, i) => (
+                    <div key={i} className="text-sm font-mono text-[var(--text-secondary)]">
+                      {m}
+                    </div>
+                  ))}
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <div className="text-slate-400">Avg Similarity</div>
-                    <div className="font-semibold text-slate-900">{(selectedCluster.avg_similarity * 100).toFixed(1)}%</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-400">Max Similarity</div>
-                    <div className="font-semibold text-slate-900">{(selectedCluster.max_similarity * 100).toFixed(1)}%</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-400">Suspicious Pairs</div>
-                    <div className="font-semibold text-slate-900">{selectedCluster.suspicious_pairs}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-400">Evidence Strength</div>
-                    <div className="font-semibold text-slate-900">{selectedCluster.evidence_strength}</div>
-                  </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <div className="theme-muted-text">Avg Similarity</div>
+                  <div className="theme-section-title">{(selectedCluster.avg_similarity * 100).toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div className="theme-muted-text">Max Similarity</div>
+                  <div className="theme-section-title">{(selectedCluster.max_similarity * 100).toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div className="theme-muted-text">Suspicious Pairs</div>
+                  <div className="theme-section-title">{selectedCluster.suspicious_pairs}</div>
+                </div>
+                <div>
+                  <div className="theme-muted-text">Evidence Strength</div>
+                  <div className="theme-section-title">{selectedCluster.evidence_strength}</div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </Modal>
       </div>
     </DashboardLayout>
   );

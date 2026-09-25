@@ -208,15 +208,16 @@ export default function UploadPage() {
   const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
   const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
-  // Course / assignment picker
-  type Course = { id: string; name: string; code?: string };
+  // Course / assignment picker (options are read from the database)
+  type Course = { id: string; name: string; code?: string; assignment_count?: number };
   type Assignment = { id: string; name: string; assignment_type?: string };
   const [courses, setCourses] = useState<Course[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+  const [coursesError, setCoursesError] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
-  const [courseName, setCourseName] = useState('');
-  const [assignmentName, setAssignmentName] = useState('');
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
@@ -392,23 +393,41 @@ export default function UploadPage() {
     }));
   }, [authLoading, selectedAssignmentModeId, uploadFormStorageKey]);
 
-  // Fetch courses on mount (for logged-in users)
-  useEffect(() => {
-    if (!user) return;
-    apiClient.get('/api/courses').then((res) => {
+  // Fetch courses from the database once the session is known
+  const fetchCourses = useCallback(async () => {
+    setCoursesLoading(true);
+    setCoursesError(false);
+    try {
+      const res = await apiClient.get('/api/courses');
       const list = Array.isArray(res.data?.courses) ? res.data.courses : (Array.isArray(res.data) ? res.data : []);
       setCourses(list);
-    }).catch(() => setCourses([]));
-  }, [user]);
+    } catch {
+      setCourses([]);
+      setCoursesError(true);
+    } finally {
+      setCoursesLoading(false);
+    }
+  }, []);
 
-  // Fetch assignments when course selection changes
+  useEffect(() => {
+    // Wait for the session check so we never flash an empty list at sign-in.
+    if (authLoading) return;
+    if (!user) { setCourses([]); setCoursesLoading(false); return; }
+    fetchCourses();
+  }, [authLoading, user, fetchCourses]);
+
+  // Fetch the selected course's assignments from the database
   useEffect(() => {
     if (!selectedCourseId) { setAssignments([]); setSelectedAssignmentId(''); return; }
-    apiClient.get(`/api/courses/${selectedCourseId}/assignments`).then((res) => {
-      const list = Array.isArray(res.data?.assignments) ? res.data.assignments : (Array.isArray(res.data) ? res.data : []);
-      setAssignments(list);
-      setSelectedAssignmentId('');
-    }).catch(() => { setAssignments([]); setSelectedAssignmentId(''); });
+    setAssignmentsLoading(true);
+    setSelectedAssignmentId('');
+    apiClient.get('/api/assignments', { params: { course_id: selectedCourseId } })
+      .then((res) => {
+        const list = Array.isArray(res.data?.assignments) ? res.data.assignments : (Array.isArray(res.data) ? res.data : []);
+        setAssignments(list);
+      })
+      .catch(() => { setAssignments([]); })
+      .finally(() => { setAssignmentsLoading(false); });
   }, [selectedCourseId]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -425,6 +444,10 @@ export default function UploadPage() {
 
   const handleSubmit = async () => {
     setError('');
+    if (!selectedCourseId || !selectedAssignmentId) {
+      setError('Select a course and assignment before starting the review.');
+      return;
+    }
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
@@ -434,9 +457,16 @@ export default function UploadPage() {
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     starterFiles.forEach((f) => fd.append('starter_files', f));
-    fd.append('course_name', courseName.trim() || (courses.find(c => c.id === selectedCourseId)?.name ?? ''));
-    fd.append('assignment_name', assignmentName.trim() || (assignments.find(a => a.id === selectedAssignmentId)?.name ?? ''));
-    if (selectedAssignmentId) fd.append('assignment_id', selectedAssignmentId);
+    const chosenCourse = courses.find((c) => c.id === selectedCourseId);
+    const chosenAssignment = assignments.find((a) => a.id === selectedAssignmentId);
+    if (!chosenCourse || !chosenAssignment) {
+      setError('Select a course and assignment before starting the review.');
+      setUploading(false);
+      return;
+    }
+    fd.append('course_name', chosenCourse.name);
+    fd.append('assignment_name', chosenAssignment.name);
+    fd.append('assignment_id', chosenAssignment.id);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_weights', JSON.stringify(engineWeights));
@@ -462,7 +492,7 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="theme-page-container">
         <div className="space-y-8 lg:space-y-10">
 
           {/* Header */}
@@ -642,70 +672,69 @@ export default function UploadPage() {
             <div className="flex items-center gap-2 mb-4">
               <BookOpen size={15} className="text-slate-500" />
               <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
-              <span className="ml-1 text-xs text-slate-400">(optional — helps organise your history)</span>
+
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Course select */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {/* Course select — options are read from the database */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-slate-500">Course</label>
                 <select
                   value={selectedCourseId}
-                  onChange={(e) => { setSelectedCourseId(e.target.value); setCourseName(''); }}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  onChange={(e) => { setSelectedCourseId(e.target.value); setSelectedAssignmentId(''); }}
+                  disabled={coursesLoading}
+                  className="theme-field"
                 >
-                  <option value="">Select course…</option>
+                  <option value="">
+                    {coursesLoading
+                      ? 'Loading courses…'
+                      : coursesError
+                        ? 'Courses unavailable'
+                        : courses.length > 0
+                          ? 'Select course…'
+                          : user ? 'No courses yet' : 'Sign in to see courses'}
+                  </option>
                   {courses.map((c) => (
-                    <option key={c.id} value={c.id}>{c.code ? `${c.code} – ` : ''}{c.name}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.code ? `${c.code} – ` : ''}{c.name}
+                      {typeof c.assignment_count === 'number' ? ` (${c.assignment_count} assignment${c.assignment_count === 1 ? '' : 's'})` : ''}
+                    </option>
                   ))}
-                  <option value="__manual__">Enter manually…</option>
                 </select>
+                {coursesError && (
+                  <button type="button" onClick={() => { fetchCourses(); }} className="text-left text-xs text-blue-600 hover:underline">
+                    Couldn&apos;t load courses — retry
+                  </button>
+                )}
+                {!coursesLoading && !coursesError && courses.length === 0 && (
+                  <span className="text-xs text-slate-400">
+                    {user ? 'Create a course on the Courses page first.' : 'Sign in to load your courses.'}
+                  </span>
+                )}
               </div>
 
-              {/* Manual course name (shown when no course selected or manual chosen) */}
-              {(!selectedCourseId || selectedCourseId === '__manual__') && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-500">Course name</label>
-                  <input
-                    type="text"
-                    value={courseName}
-                    onChange={(e) => setCourseName(e.target.value)}
-                    placeholder="e.g. Introduction to CS"
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
-                  />
-                </div>
-              )}
-
-              {/* Assignment select */}
-              {selectedCourseId && selectedCourseId !== '__manual__' && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-500">Assignment</label>
-                  <select
-                    value={selectedAssignmentId}
-                    onChange={(e) => { setSelectedAssignmentId(e.target.value); setAssignmentName(''); }}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
-                  >
-                    <option value="">Select assignment…</option>
-                    {assignments.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                    <option value="__manual__">Enter manually…</option>
-                  </select>
-                </div>
-              )}
-
-              {/* Manual assignment name */}
-              {(!selectedAssignmentId || selectedAssignmentId === '__manual__' || selectedCourseId === '__manual__') && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-500">Assignment name</label>
-                  <input
-                    type="text"
-                    value={assignmentName}
-                    onChange={(e) => setAssignmentName(e.target.value)}
-                    placeholder="e.g. Assignment 2 – Sorting"
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-50"
-                  />
-                </div>
-              )}
+              {/* Assignment select — filled from the selected course */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500">Assignment</label>
+                <select
+                  value={selectedAssignmentId}
+                  onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                  disabled={!selectedCourseId || assignmentsLoading}
+                  className="theme-field"
+                >
+                  <option value="">
+                    {!selectedCourseId
+                      ? 'Choose a course first…'
+                      : assignmentsLoading
+                        ? 'Loading assignments…'
+                        : assignments.length > 0
+                          ? 'Select assignment…'
+                          : 'No assignments yet'}
+                  </option>
+                  {assignments.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 

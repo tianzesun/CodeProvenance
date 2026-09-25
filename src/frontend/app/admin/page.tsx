@@ -3,8 +3,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  BookOpen,
-  Calendar,
   CheckCircle2,
   ChevronDown,
   FileText,
@@ -19,11 +17,13 @@ import {
   UserX,
   X,
   Building2,
+  Zap,
 } from 'lucide-react';
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { AuthRole, AuthUser, useAuth } from '@/components/AuthProvider';
 import { apiClient } from '@/lib/apiClient';
+import { buildTermOptions, courseTermLabel } from '@/lib/terms';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -70,6 +70,28 @@ function validatePasswordInput(password: string): string | null {
   return null;
 }
 
+// Engine labels mirror the upload flow's engine picker so the recommendation
+// shown here reads the same as the analysis configuration.
+const RECOMMENDED_ENGINE_LABELS: Record<string, string> = {
+  token: 'Token',
+  ast: 'AST',
+  winnowing: 'Winnowing',
+  gst: 'GST',
+  semantic: 'Semantic',
+  embedding: 'Embedding',
+  cfg: 'Control Flow',
+  execution_cfg: 'Execution CFG',
+  tree_kernel: 'Tree Kernel',
+  fingerprint: 'Fingerprint',
+  ngram: 'N-gram',
+  web: 'Web Matching',
+  ai_detection: 'AI Detection',
+};
+
+function engineLabel(key: string): string {
+  return RECOMMENDED_ENGINE_LABELS[key] ?? key.replace(/_/g, ' ');
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type RoleFilter = 'all' | AuthRole;
@@ -80,12 +102,23 @@ interface CourseInstructor {
   email: string;
 }
 
+interface RecommendedAssignmentMode {
+  assignment_type?: string | null;
+  matched: boolean;
+  mode_id: string | null;
+  mode_name: string | null;
+  engine_weights: Record<string, number>;
+  top_engines: { key: string; weight: number }[];
+  reason: string;
+}
+
 interface CourseAssignment {
   id: string;
   name: string;
   term?: string | null;
   version?: number;
   assignment_type?: string;
+  recommended_mode?: RecommendedAssignmentMode | null;
   due_at?: string | null;
 }
 
@@ -165,7 +198,7 @@ function UserRowSkeleton() {
 function AuthPageSkeleton() {
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+      <div className="theme-page-container space-y-6">
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="h-5 w-28 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
           <div className="mt-4 h-10 w-72 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
@@ -250,6 +283,7 @@ export default function AdminPage() {
   const [expandedCourseIds, setExpandedCourseIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'users' | 'courses'>('users');
   const [courseQuery, setCourseQuery] = useState('');
+  const [courseTermFilter, setCourseTermFilter] = useState('all');
 
   const [form, setForm] = useState({
     full_name: '',
@@ -354,22 +388,40 @@ export default function AdminPage() {
     0
   );
 
+  const termOptions = useMemo(
+    () => buildTermOptions(coursesWithInstructors),
+    [coursesWithInstructors]
+  );
+
+  // Reset the term filter when the selected term no longer exists
+  // (e.g. its last course was deleted or renamed).
+  useEffect(() => {
+    if (courseTermFilter === 'all') return;
+    if (!termOptions.some((option) => option.value === courseTermFilter)) {
+      setCourseTermFilter('all');
+    }
+  }, [termOptions, courseTermFilter]);
+
   const filteredCourses = useMemo(() => {
     const query = courseQuery.trim().toLowerCase();
-    if (!query) return coursesWithInstructors;
     return coursesWithInstructors.filter((course) => {
+      const matchesTerm =
+        courseTermFilter === 'all' || courseTermLabel(course) === courseTermFilter;
+      if (!matchesTerm) return false;
+      if (!query) return true;
       const haystack = [
         course.name,
         course.code ?? '',
         course.department ?? '',
         course.organization_name ?? '',
+        courseTermLabel(course),
         ...(course.instructors?.map((i) => i.full_name) ?? []),
       ]
         .join(' ')
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [coursesWithInstructors, courseQuery]);
+  }, [coursesWithInstructors, courseQuery, courseTermFilter]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -483,7 +535,7 @@ export default function AdminPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+      <div className="theme-page-container space-y-6">
 
         {/* ── Header ──────────────────────────────────────────────────────────── */}
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -889,19 +941,42 @@ export default function AdminPage() {
             </div>
 
             <div className="flex flex-col gap-2 sm:items-end">
-              <div className="relative w-full sm:w-[280px]">
-                <Search
-                  size={15}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  type="search"
-                  value={courseQuery}
-                  onChange={(e) => setCourseQuery(e.target.value)}
-                  placeholder="Search courses, codes, professors…"
-                  aria-label="Search courses"
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
-                />
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <div className="relative w-full sm:w-[280px]">
+                  <Search
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="search"
+                    value={courseQuery}
+                    onChange={(e) => setCourseQuery(e.target.value)}
+                    placeholder="Search courses, codes, professors…"
+                    aria-label="Search courses"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                  />
+                </div>
+                {termOptions.length > 1 && (
+                  <div className="relative w-full sm:w-[190px]">
+                    <select
+                      value={courseTermFilter}
+                      onChange={(e) => setCourseTermFilter(e.target.value)}
+                      aria-label="Filter courses by term"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                    >
+                      <option value="all">All terms</option>
+                      {termOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.value} ({option.count})
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                  </div>
+                )}
               </div>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {filteredCourses.length === totalCourses
@@ -941,10 +1016,12 @@ export default function AdminPage() {
                 <Search size={22} className="text-slate-500 dark:text-slate-400" />
               </div>
               <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
-                No courses match your search
+                {courseQuery || courseTermFilter !== 'all'
+                  ? 'No courses match your filters'
+                  : 'No courses match your search'}
               </h3>
               <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Try a different course name, code, department, organization, or professor.
+                Try a different course name, code, term, department, organization, or professor.
               </p>
             </div>
           ) : (
@@ -971,38 +1048,11 @@ export default function AdminPage() {
                               {course.code}
                             </span>
                           )}
-                          {(course.term || course.year) && (
-                            <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
-                              {course.term} {course.year}
-                            </span>
-                          )}
                         </div>
                         <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
                           {course.name}
                         </h3>
                       </div>
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
-                        <GraduationCap size={17} className="text-blue-600 dark:text-blue-400" />
-                      </div>
-                    </div>
-
-                    {/* Meta */}
-                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                      {course.department && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <BookOpen size={12} className="shrink-0" />
-                          {course.department}
-                        </span>
-                      )}
-                      {course.organization_name && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Building2 size={12} className="shrink-0" />
-                          {course.organization_name}
-                        </span>
-                      )}
-                      {!course.department && !course.organization_name && (
-                        <span>No department or organization on record</span>
-                      )}
                     </div>
 
                     {/* Professors */}
@@ -1018,10 +1068,9 @@ export default function AdminPage() {
 
                       <div className="mt-2.5">
                         {course.instructors.length === 0 ? (
-                          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/70 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                          <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500">
                             No instructors assigned yet
-                          </div>
+                          </p>
                         ) : (
                           <div className="flex flex-wrap gap-2">
                             {course.instructors.map((inst) => (
@@ -1126,33 +1175,36 @@ export default function AdminPage() {
                                     <FileText size={12} />
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                                      {assignment.name}
-                                    </div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                                        {assignment.name}
+                                      </span>
                                       {assignment.assignment_type && (
                                         <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
                                           {assignment.assignment_type.replace(/_/g, ' ')}
                                         </span>
                                       )}
-                                      {assignment.term && (
-                                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                          {assignment.term}
-                                        </span>
-                                      )}
-                                      {typeof assignment.version === 'number' && (
-                                        <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                                          v{assignment.version}
-                                        </span>
-                                      )}
                                     </div>
+                                    {assignment.recommended_mode?.mode_id && (
+                                      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                                        <Zap
+                                          size={11}
+                                          className="shrink-0 text-amber-500 dark:text-amber-400"
+                                        />
+                                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                                          Suggested: {assignment.recommended_mode.mode_name}
+                                        </span>
+                                        {(assignment.recommended_mode.top_engines ?? []).length > 0 && (
+                                          <span>
+                                            ·{' '}
+                                            {(assignment.recommended_mode.top_engines ?? [])
+                                              .map((engine) => engineLabel(engine.key))
+                                              .join(' · ')}
+                                          </span>
+                                        )}
+                                      </p>
+                                    )}
                                   </div>
-                                  {assignment.due_at && (
-                                    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                                      <Calendar size={12} />
-                                      Due {new Date(assignment.due_at).toLocaleDateString()}
-                                    </span>
-                                  )}
                                 </li>
                               ))}
                             </ul>

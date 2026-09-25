@@ -7,6 +7,8 @@ import {
   CardHeader,
   PageHeader,
   StatCard,
+  TableBody,
+  TableHeader,
 } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -185,7 +187,7 @@ export default function AssignmentsPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+      <div className="theme-page-container space-y-6">
         <PageHeader
           eyebrow="Assignment Results"
           title="Review programming assignment risk in one professional table."
@@ -256,7 +258,7 @@ export default function AssignmentsPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">
-              <thead className="bg-slate-50 dark:bg-slate-900/50">
+              <TableHeader>
                 <tr className="border-b border-slate-200 dark:border-slate-800">
                   {[
                     'Rank',
@@ -269,14 +271,14 @@ export default function AssignmentsPage() {
                   ].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                      className="theme-table-header px-4 py-3 text-left"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              </TableHeader>
+              <TableBody>
                 {!loaded ? (
                   <tr>
                     <td
@@ -398,7 +400,7 @@ export default function AssignmentsPage() {
                     </tr>
                   ))
                 )}
-              </tbody>
+              </TableBody>
             </table>
           </div>
         </Card>

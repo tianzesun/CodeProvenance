@@ -2,6 +2,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { EmptyState, ErrorState, LoadingState, Modal, PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useState, useEffect, useCallback, useRef, useMemo, FormEvent } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import axios from 'axios';
@@ -139,32 +140,24 @@ export default function DatasetsPage() {
   return (
     <DashboardLayout>
       <div className="px-6">
-        <div className="mb-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
-                <Database size={24} className="text-blue-600" />
-                Dataset Manager
-              </h1>
-              <p className="mt-2 text-slate-600">
-                Manage benchmark and demonstration datasets for testing detection engines
-              </p>
-            </div>
-            <button 
+        <PageHeader
+          eyebrow="Datasets"
+          eyebrowStyle="badge"
+          title="Dataset Manager"
+          description="Manage benchmark and demonstration datasets for testing detection engines."
+          action={
+            <button
+              type="button"
               onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition shadow-md"
+              className="theme-button-primary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition"
             >
               <Plus size={16} />
               Create New Dataset
             </button>
-          </div>
-        </div>
+          }
+        />
 
-         {error && (
-           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-             {error}
-           </div>
-         )}
+         {error && <ErrorState message={error} />}
 
          {/* View Toggle */}
          <div className="flex items-center justify-between mb-6">
@@ -199,36 +192,22 @@ export default function DatasetsPage() {
 
         {/* Create Dataset Modal */}
         {showCreateModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-[30px] shadow-2xl max-w-3xl w-full p-8">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/10 bg-emerald-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-3">
-                    <Database size={14} />
-                    Dataset Tools
-                  </div>
-                  <h3 className="text-2xl font-semibold text-slate-900">Demo dataset creation</h3>
-                  <p className="mt-2 text-sm text-slate-600 max-w-xl">
-                    Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns.
-                  </p>
-                </div>
-                <button 
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setError('');
-                    setDatasetForm({
-                      name: '',
-                      description: '',
-                      language: 'python',
-                      numFiles: 10,
-                      similarityType: 'type1_exact',
-                    });
-                  }}
-                  className="p-2 hover:bg-slate-100 rounded-xl transition text-slate-500"
-                >
-                  ✕
-                </button>
-              </div>
+          <Modal
+            open={showCreateModal}
+            title="Demo dataset creation"
+            description="Generate synthetic datasets for testing plagiarism detection algorithms. Create custom datasets with controlled similarity patterns."
+            onClose={() => {
+              setShowCreateModal(false);
+              setError('');
+              setDatasetForm({
+                name: '',
+                description: '',
+                language: 'python',
+                numFiles: 10,
+                similarityType: 'type1_exact',
+              });
+            }}
+          >
               
               <form className="space-y-6 mt-6" onSubmit={createDemoDataset}>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -336,21 +315,16 @@ export default function DatasetsPage() {
                   </button>
                 </div>
               </form>
-            </div>
-          </div>
+        </Modal>
         )}
 
          {loading ? (
-           <div className="flex items-center justify-center py-20">
-             <Loader2 size={32} className="animate-spin text-blue-600" />
-             <span className="ml-3 text-slate-600">Loading datasets...</span>
-           </div>
+           <LoadingState label="Loading datasets…" />
          ) : datasets.length === 0 ? (
-           <div className="text-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-             <Database size={48} className="mx-auto text-slate-400 mb-4" />
-             <h3 className="font-semibold text-slate-700">No datasets found</h3>
-             <p className="text-slate-500 mt-2">Create your first dataset or import one from the benchmark library</p>
-           </div>
+           <EmptyState
+             title="No datasets found"
+             description="Create your first dataset or import one from the benchmark library."
+           />
          ) : viewMode === 'grid' ? (
            // Grid View (existing)
            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

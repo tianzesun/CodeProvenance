@@ -476,7 +476,7 @@ export default function AIDetectionAccuracyPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="theme-page-container">
         <div className="space-y-8">
           <section className="theme-card-strong rounded-[30px] overflow-hidden">
             <div className="theme-section-line px-6 py-5 lg:px-7">

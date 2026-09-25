@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/apiClient';
@@ -105,29 +106,31 @@ interface EvidenceData {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="theme-page-container">
         {/* Header */}
-        <div className="mb-6">
-          <button 
+        <div className="mb-4">
+          <button
             onClick={() => window.history.back()}
-            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-4"
+            className="theme-link mb-4 flex items-center gap-2 text-sm font-semibold"
           >
             <ChevronLeft size={16} />
             Back to Results
           </button>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">Evidence Viewer</h1>
-              <p className="text-slate-500 mt-1">Side-by-side comparison with matched elements highlighted</p>
-            </div>
+        </div>
+        <PageHeader
+          eyebrow="Evidence"
+          eyebrowStyle="badge"
+          title="Evidence Viewer"
+          description="Side-by-side comparison with matched elements highlighted"
+          action={
             <div className="flex items-center gap-3">
               <VerdictBadge v={verdict} />
-              <span className="text-sm font-medium text-slate-600">
+              <span className="text-sm font-medium text-[var(--text-secondary)]">
                 Score: {(score * 100).toFixed(1)}%
               </span>
             </div>
-          </div>
-        </div>
+          }
+        />
 
         {/* Controls */}
         <div className="mb-4 flex items-center gap-3">

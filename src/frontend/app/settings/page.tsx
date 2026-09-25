@@ -363,7 +363,7 @@ export default function SettingsPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="max-w-none space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="theme-page-container space-y-6">
         {/* Header */}
         <PageHeader
           eyebrow="Settings"

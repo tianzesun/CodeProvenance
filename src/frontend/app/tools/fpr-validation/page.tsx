@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import { AxiosError } from 'axios';
@@ -319,14 +320,22 @@ export default function FprValidationPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="px-6 py-8">
-        <div className="flex items-center gap-3 mb-6">
-          <ShieldCheck className="text-emerald-600" size={28} />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Real-World FPR Validation</h1>
-            <p className="text-slate-600">Measure actual false positive risk on your own clean student data</p>
-          </div>
-        </div>
+      <div className="theme-page-container">
+        <PageHeader
+          eyebrow="Engine & R&D"
+          eyebrowStyle="badge"
+          title="Real-World FPR Validation"
+          description="Measure actual false positive risk on your own clean student data"
+          action={
+            <button
+              type="button"
+              onClick={reset}
+              className="theme-button-secondary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition"
+            >
+              Reset
+            </button>
+          }
+        />
 
         <div className="bg-white rounded-2xl border border-emerald-200 p-6 shadow-sm">
           <div className="mb-4">

@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/apiClient';
@@ -61,37 +62,43 @@ export default function HistoricalFingerprintPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="theme-page-container">
         {/* Header */}
-        <div className="mb-6">
-          <button 
+        <div className="mb-4">
+          <button
             onClick={() => window.history.back()}
-            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-4"
+            className="theme-link mb-4 flex items-center gap-2 text-sm font-semibold"
           >
             <ChevronLeft size={16} />
             Back to Dashboard
           </button>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">Historical Fingerprint</h1>
-              <p className="text-slate-500 mt-1">Detect sudden style changes that may indicate AI or external code</p>
-            </div>
+        </div>
+        <PageHeader
+          eyebrow="Engine & R&D"
+          eyebrowStyle="badge"
+          title="Historical Fingerprint"
+          description="Detect sudden style changes that may indicate AI or external code"
+          action={
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={loadHistoricalData}
                 disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50"
+                className="theme-button-primary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50"
               >
                 {loading ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                 Refresh
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50">
+              <button
+                type="button"
+                className="theme-button-secondary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition"
+              >
                 <Download size={16} />
                 Export
               </button>
             </div>
-          </div>
-        </div>
+          }
+        />
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

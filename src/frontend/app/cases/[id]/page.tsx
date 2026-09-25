@@ -165,7 +165,7 @@ export default function CompareCasePage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="theme-page-container">
         <section className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>

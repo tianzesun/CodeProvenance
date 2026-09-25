@@ -1,7 +1,18 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { Card, CardHeader, PageHeader, RiskBadge, StatusBadge } from '@/components/saas/SaaSPrimitives';
+import {
+  Card,
+  CardHeader,
+  ErrorState,
+  FilterChip,
+  PageHeader,
+  RiskBadge,
+  StatusBadge,
+  TableBody,
+  TableHeader,
+  TableRow,
+} from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
   ArrowDown,
@@ -235,7 +246,7 @@ export default function CasesQueuePage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+      <div className="theme-page-container">
         <PageHeader
           eyebrow="Cases"
           title="An inbox for academic integrity review."
@@ -255,44 +266,20 @@ export default function CasesQueuePage() {
           }
         />
 
-        {error && (
-          <div className="mb-6 mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+        {error && <ErrorState message={error} />}
 
         {/* Status tabs */}
         <div className="mt-8 mb-6 flex flex-wrap items-center gap-2">
-          {STATUS_TABS.map((tab) => {
-            const isActive = activeStatus === tab.key;
-            const count = statusCounts[tab.key];
-            const isOpenTab = tab.key === 'OPEN' || tab.key === 'ALL';
-            const accent =
-              isOpenTab && count > 0
-                ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                : isActive
-                  ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => handleStatusTab(tab.key)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${
-                  isActive ? '' : 'shadow-sm'
-                }`}
-              >
-                {tab.label}
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                    isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+          {STATUS_TABS.map((tab) => (
+            <FilterChip
+              key={tab.key}
+              active={activeStatus === tab.key}
+              label={tab.label}
+              count={statusCounts[tab.key]}
+              tone={(tab.key === 'OPEN' || tab.key === 'ALL') && statusCounts[tab.key] > 0 ? 'negative' : 'neutral'}
+              onClick={() => handleStatusTab(tab.key)}
+            />
+          ))}
         </div>
 
         <Card>
@@ -332,26 +319,26 @@ export default function CasesQueuePage() {
               </div>
             ) : (
               <table className="w-full min-w-[900px]">
-                <thead className="bg-slate-50">
+                <TableHeader>
                   <tr>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-left">
                       Status
                     </th>
                     {renderSortableTh('course', 'Course')}
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-left">
                       Pair
                     </th>
                     {renderSortableTh('risk', 'Risk')}
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-left">
                       Assigned reviewer
                     </th>
                     {renderSortableTh('updated', 'Updated', 'text-right')}
-                    <th className="px-5 py-3 text-right" />
+                    <th className="theme-table-header px-5 py-3 text-right" />
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
+                </TableHeader>
+                <TableBody>
                   {visible.map((item) => (
-                    <tr key={item.id} className="transition hover:bg-slate-50">
+                    <TableRow key={item.id}>
                       <td className="px-5 py-4">
                         <StatusBadge status={item.status} />
                       </td>
@@ -377,9 +364,9 @@ export default function CasesQueuePage() {
                           Open
                         </a>
                       </td>
-                    </tr>
+                    </TableRow>
                   ))}
-                </tbody>
+                </TableBody>
               </table>
             )}
           </div>
@@ -395,7 +382,7 @@ export default function CasesQueuePage() {
                     setPageSize(Number(e.target.value));
                     setPage(1);
                   }}
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  className="theme-compact-field h-8 w-auto"
                 >
                   {PAGE_SIZES.map((size) => (
                     <option key={size} value={size}>
@@ -411,7 +398,7 @@ export default function CasesQueuePage() {
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   aria-label="Previous page"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="theme-icon-button"
                 >
                   <ChevronLeft size={15} />
                 </button>
@@ -440,7 +427,7 @@ export default function CasesQueuePage() {
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   aria-label="Next page"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="theme-icon-button"
                 >
                   <ChevronRight size={15} />
                 </button>

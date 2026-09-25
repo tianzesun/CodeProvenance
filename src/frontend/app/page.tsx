@@ -810,7 +810,7 @@ export default function Home() {
   };
   return (
     <DashboardLayout>
-      <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="theme-page-container">
         <div className="space-y-8 lg:space-y-10">
           <section className="theme-card-strong theme-section-line relative overflow-hidden rounded-[32px] px-6 py-6 lg:px-8 lg:py-8">
             <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-blue-600/[0.08] blur-3xl" />

@@ -1,7 +1,18 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
+import {
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  FilterChip,
+  LoadingState,
+  StatusBadge,
+  TableBody,
+  TableHeader,
+  TableRow,
+} from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
@@ -247,12 +258,8 @@ export default function HistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+      <div className="theme-page-container">
+        {error && <ErrorState message={error} onRetry={fetchJobs} />}
 
         <Card>
           <CardHeader
@@ -272,30 +279,15 @@ export default function HistoryPage() {
                   />
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  {STATUS_TABS.map((tab) => {
-                    const isActive = activeStatus === tab.key;
-                    const count = statusCounts[tab.key];
-                    const accent = isActive
-                      ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
-                    return (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        onClick={() => handleStatusTab(tab.key)}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${accent} ${isActive ? '' : 'shadow-sm'
-                          }`}
-                      >
-                        {tab.label}
-                        <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20' : 'bg-slate-100 text-slate-500'
-                            }`}
-                        >
-                          {count}
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {STATUS_TABS.map((tab) => (
+                    <FilterChip
+                      key={tab.key}
+                      active={activeStatus === tab.key}
+                      label={tab.label}
+                      count={statusCounts[tab.key]}
+                      onClick={() => handleStatusTab(tab.key)}
+                    />
+                  ))}
                 </div>
                 <span className="text-sm text-slate-500">
                   Showing{' '}
@@ -313,41 +305,36 @@ export default function HistoryPage() {
           />
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="px-5 py-8 text-sm text-slate-500">Loading history...</div>
+              <LoadingState label="Loading history…" />
             ) : sorted.length === 0 ? (
-              <div className="flex flex-col items-center px-5 py-12 text-center">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
-                  <Inbox size={20} />
-                </div>
-                <p className="mt-3 text-sm font-medium text-slate-700">No checks found</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {jobs.length === 0
-                    ? 'Run a plagiarism check to see results here.'
-                    : 'No checks match the current filters or search.'}
-                </p>
-              </div>
+              <EmptyState
+                title="No checks found"
+                description={jobs.length === 0
+                  ? 'Run a plagiarism check to see results here.'
+                  : 'No checks match the current filters or search.'}
+              />
             ) : (
               <table className="w-full min-w-[900px]">
-                <thead className="bg-slate-50">
+                <TableHeader>
                   <tr>
                     {renderSortableTh('date', 'Date')}
                     {renderSortableTh('name', 'Name')}
                     {renderSortableTh('submissions', 'Submissions')}
                     {renderSortableTh('highRisk', 'High-Risk')}
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-left">
                       Review
                     </th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-left">
                       Status
                     </th>
-                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="theme-table-header px-5 py-3 text-right">
                       Actions
                     </th>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
+                </TableHeader>
+                <TableBody>
                   {visible.map((job) => (
-                    <tr key={job.id} className="transition hover:bg-slate-50">
+                    <TableRow key={job.id}>
                       <td className="px-5 py-4 text-xs text-slate-500">
                         {formatDate(job.createdAt)}
                       </td>
@@ -463,9 +450,9 @@ export default function HistoryPage() {
                           </div>
                         </div>
                       </td>
-                    </tr>
+                    </TableRow>
                   ))}
-                </tbody>
+                </TableBody>
               </table>
             )}
           </div>
@@ -480,7 +467,7 @@ export default function HistoryPage() {
                     setPageSize(Number(e.target.value));
                     setPage(1);
                   }}
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50"
+                  className="theme-compact-field h-8 w-auto"
                 >
                   {PAGE_SIZES.map((size) => (
                     <option key={size} value={size}>
@@ -496,7 +483,7 @@ export default function HistoryPage() {
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   aria-label="Previous page"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="theme-icon-button"
                 >
                   <ChevronLeft size={15} />
                 </button>
@@ -524,7 +511,7 @@ export default function HistoryPage() {
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   aria-label="Next page"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="theme-icon-button"
                 >
                   <ChevronRight size={15} />
                 </button>

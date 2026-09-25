@@ -3914,6 +3914,8 @@ def _normalize_job(job: dict[str, Any], from_disk: bool = False) -> dict[str, An
         normalized["summary"] = _build_job_summary(results, threshold)
 
     normalized["course_name"] = normalized.get("course_name") or "Unnamed Course"
+    normalized["assignment_id"] = normalized.get("assignment_id")
+    normalized["course_id"] = normalized.get("course_id")
     normalized["assignment_name"] = (
         normalized.get("assignment_name")
         or normalized["course_name"]
@@ -4530,6 +4532,9 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
             job_dict: dict[str, Any] = {
                 "id": job_id,
                 "status": db_job.status or "completed",
+                "assignment_id": (
+                    str(db_job.assignment_id) if db_job.assignment_id else None
+                ),
                 "assignment_name": db_job.name or f"Job {job_id}",
                 "threshold": (
                     float(db_job.threshold) if db_job.threshold is not None else 0.5
@@ -5300,9 +5305,24 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
             if tenant_id:
                 q = q.filter(Job.tenant_id == tenant_id)
             db_jobs = q.order_by(Job.created_at.desc()).limit(500).all()
+            assignment_ids = [row.assignment_id for row in db_jobs if row.assignment_id]
+            assignment_courses = {}
+            if assignment_ids:
+                assignment_courses = {
+                    str(row.id): str(row.course_id)
+                    for row in db.query(Assignment)
+                    .filter(Assignment.id.in_(assignment_ids))
+                    .all()
+                }
             for db_job in db_jobs:
                 loaded = _get_job(db_job.id)
                 if loaded and _job_is_accessible(loaded, current_user):
+                    loaded["assignment_id"] = (
+                        str(db_job.assignment_id) if db_job.assignment_id else None
+                    )
+                    loaded["course_id"] = assignment_courses.get(
+                        str(db_job.assignment_id)
+                    )
                     jobs_by_id[db_job.id] = loaded
     except Exception:
         logger.warning("DB job listing failed, falling back to filesystem")
@@ -5618,6 +5638,9 @@ async def update_user(request: Request, user_id: str):
 async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any]:
     """Admin view: all courses with their assigned instructors."""
     _require_current_user(request, admin_only=True)
+    from src.backend.engines.scoring.assignment_modes import (
+        recommend_mode_for_assignment_type,
+    )
 
     try:
         with SessionLocal() as db:
@@ -5672,6 +5695,9 @@ async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any
                                 "term": a.term,
                                 "version": a.version,
                                 "assignment_type": a.assignment_type,
+                                "recommended_mode": recommend_mode_for_assignment_type(
+                                    a.assignment_type
+                                ),
                                 "due_at": (a.due_at.isoformat() if a.due_at else None),
                             }
                             for a in assignments
@@ -6857,6 +6883,7 @@ def _ensure_job_row_for_ai_detector(
                 Job(
                     id=job_id,
                     tenant_id=tenant_id,
+                    assignment_id=job.get("assignment_id"),
                     name=job.get("assignment_name") or f"AI Detector {job_id}",
                     status="completed",
                     threshold=0.5,
@@ -6913,6 +6940,7 @@ async def detect_ai_generated_code(
     files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
     assignment_name: str = Form(default=""),
+    assignment_id: str = Form(default=""),
 ):
     """Run AI-generated code detection for one or more uploaded submissions.
 
@@ -6922,6 +6950,59 @@ async def detect_ai_generated_code(
     """
     current_user = getattr(request.state, "user", None)
     job_id = str(uuid.uuid4())
+    resolved_course_name = course_name or "AI Detector"
+    resolved_assignment_name = assignment_name or "AI Generated Code Review"
+    resolved_course_id = None
+    if assignment_id:
+        try:
+            with SessionLocal() as db:
+                assignment = (
+                    db.query(Assignment).filter(Assignment.id == assignment_id).first()
+                )
+                if assignment is None:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "The selected assignment no longer exists."},
+                    )
+                course = (
+                    db.query(Course).filter(Course.id == assignment.course_id).first()
+                )
+                if (
+                    current_user
+                    and current_user.get("tenant_id")
+                    and (
+                        course is None
+                        or str(course.tenant_id) != str(current_user["tenant_id"])
+                    )
+                ):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": "The selected assignment is not available."},
+                    )
+                resolved_assignment_name = assignment.name
+                resolved_course_id = str(assignment.course_id)
+                resolved_course_name = course.name if course else ""
+                if current_user and current_user.get("tenant_id"):
+                    db_job = db.query(Job).filter(Job.id == job_id).first()
+                    if db_job is None:
+                        db_job = Job(
+                            id=job_id,
+                            tenant_id=current_user["tenant_id"],
+                            name=resolved_assignment_name,
+                            assignment_id=assignment_id,
+                            status="processing",
+                        )
+                        db.add(db_job)
+                    else:
+                        db_job.assignment_id = assignment_id
+                        db_job.name = resolved_assignment_name
+                    db.commit()
+        except Exception:
+            logger.warning("Could not resolve AI review assignment", exc_info=True)
+            return JSONResponse(
+                status_code=400,
+                content={"error": "The selected assignment could not be loaded."},
+            )
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6949,8 +7030,10 @@ async def detect_ai_generated_code(
     _jobs[job_id] = {
         "id": job_id,
         "job_type": "ai_detector",
-        "course_name": course_name or "AI Detector",
-        "assignment_name": assignment_name or "AI Generated Code Review",
+        "course_name": resolved_course_name,
+        "course_id": resolved_course_id,
+        "assignment_name": resolved_assignment_name,
+        "assignment_id": assignment_id or None,
         "status": "processing",
         "created_at": datetime.now().isoformat(),
         "file_count": len(submissions),
@@ -8713,10 +8796,20 @@ async def get_courses(request: Request) -> dict[str, Any]:
             # Enrich with assignment/student counts in a single query per course.
             # For typical professor scale this is fine; a materialized analytics
             # table can replace these count queries at larger scale (Phase 8).
-            assignment_counts = _count_by(
-                db, Assignment, Assignment.course_id, course_ids
-            )
-            student_counts = _distinct_enrollment_counts(db, course_ids)
+            # Both are optional enrichments: a failure here must degrade to a
+            # missing count, never to an empty course list.
+            try:
+                assignment_counts = _count_by(
+                    db, Assignment, Assignment.course_id, course_ids
+                )
+            except Exception:
+                logger.warning("Failed to count assignments for courses", exc_info=True)
+                assignment_counts = {}
+            try:
+                student_counts = _distinct_enrollment_counts(db, course_ids)
+            except Exception:
+                logger.warning("Failed to count enrolled students", exc_info=True)
+                student_counts = {}
 
             return {
                 "courses": [
@@ -8736,7 +8829,9 @@ async def get_courses(request: Request) -> dict[str, Any]:
                 ]
             }
     except Exception:
-        logger.warning("Failed to fetch courses (instructor + org scoped)")
+        logger.warning(
+            "Failed to fetch courses (instructor + org scoped)", exc_info=True
+        )
         return {"courses": []}
 
 
@@ -8815,7 +8910,9 @@ async def get_assignments(
                 ]
             }
     except Exception:
-        logger.warning("Failed to fetch assignments (instructor + org scoped)")
+        logger.warning(
+            "Failed to fetch assignments (instructor + org scoped)", exc_info=True
+        )
         return {"assignments": []}
 
 

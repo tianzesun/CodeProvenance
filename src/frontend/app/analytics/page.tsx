@@ -5,6 +5,8 @@ import DashboardLayout from '@/components/DashboardLayout';
 import {
   Card,
   CardHeader,
+  ErrorState,
+  LoadingState,
   PageHeader,
   StatCard,
 } from '@/components/saas/SaaSPrimitives';
@@ -197,7 +199,7 @@ export default function AnalyticsPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-none px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+      <div className="theme-page-container space-y-6">
 
         {/* ── Page header ─────────────────────────────────────────────────── */}
         <PageHeader
@@ -208,19 +210,9 @@ export default function AnalyticsPage() {
           eyebrowStyle="badge"
         />
 
-        {loading && (
-          <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-16 text-sm text-slate-500">
-            <Loader2 size={16} className="animate-spin" />
-            Loading analytics…
-          </div>
-        )}
+        {loading && <LoadingState label="Loading analytics…" />}
 
-        {error && (
-          <section className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </section>
-        )}
+        {error && <ErrorState message={error} />}
 
         {!loading && !error && !data && (
           <ChartEmpty message="No analytics data available yet. Run an analysis on an assignment to start populating this overview." />
