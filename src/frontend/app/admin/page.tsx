@@ -215,6 +215,54 @@ function AddUserCard({
   );
 }
 
+function AddCourseCard({
+  onAdd,
+  buttonRef,
+  variant = 'row',
+}: {
+  onAdd: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+  variant?: 'row' | 'grid';
+}) {
+  if (variant === 'grid') {
+    return (
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={onAdd}
+        aria-label="Add a new course"
+        className="group flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 p-6 text-center transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:hover:border-blue-500 dark:hover:bg-slate-900/40"
+      >
+        <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
+          <Plus size={36} strokeWidth={2} aria-hidden="true" />
+        </span>
+        <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
+          Add course
+        </span>
+        <span className="text-xs text-slate-400">Create a new course in your organization</span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={onAdd}
+      aria-label="Add a new course"
+      className="group flex w-full flex-col items-center justify-center gap-2 border-t border-slate-200 px-5 py-12 text-center transition hover:bg-blue-50/50 dark:border-slate-800 dark:hover:bg-slate-900/40"
+    >
+      <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
+        <Plus size={36} strokeWidth={2} aria-hidden="true" />
+      </span>
+      <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
+        Add course
+      </span>
+      <span className="text-xs text-slate-400">Create a course to organise its assignments</span>
+    </button>
+  );
+}
+
 function UserRowSkeleton() {
   return (
     <tr>
@@ -310,6 +358,7 @@ export default function AdminPage() {
 
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const courseButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -512,6 +561,12 @@ export default function AdminPage() {
     setShowCourseModal(true);
   };
 
+  const closeCourseModal = () => {
+    if (courseSaving) return;
+    setShowCourseModal(false);
+    setTimeout(() => courseButtonRef.current?.focus(), 0);
+  };
+
   const handleCreateCourse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCourseError('');
@@ -532,6 +587,7 @@ export default function AdminPage() {
       await loadCoursesWithInstructors();
       setShowCourseModal(false);
       setSuccessMessage('Course created successfully.');
+      setTimeout(() => courseButtonRef.current?.focus(), 0);
     } catch (error) {
       setCourseError(getErrorMessage(error));
     } finally {
@@ -1132,16 +1188,8 @@ export default function AdminPage() {
               </p>
             </div>
 
-              <div className="flex flex-col gap-2 sm:items-end">
-                <button
-                  type="button"
-                  onClick={openCourseModal}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-                >
-                  <Plus size={15} />
-                  New course
-                </button>
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <div className="flex flex-col gap-2 sm:items-end">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 <div className="relative w-full sm:w-[280px]">
                   <Search
                     size={15}
@@ -1201,14 +1249,8 @@ export default function AdminPage() {
               ))}
             </div>
           ) : totalCourses === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-900">
-                <Building2 size={22} className="text-slate-500 dark:text-slate-400" />
-              </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No courses found</h3>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Create courses first before assigning instructors.
-              </p>
+            <div className="p-5">
+              <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
             </div>
           ) : filteredCourses.length === 0 ? (
             <div className="px-6 py-16 text-center">
@@ -1419,6 +1461,7 @@ export default function AdminPage() {
                   </article>
                 );
               })}
+              <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
             </div>
           )}
         </section>
@@ -1430,7 +1473,7 @@ export default function AdminPage() {
         open={showCourseModal}
         title="Create a new course"
         description="Add a course to your organization. You can assign instructors and create assignments after it is created."
-        onClose={() => !courseSaving && setShowCourseModal(false)}
+        onClose={closeCourseModal}
       >
         <form onSubmit={handleCreateCourse} className="space-y-4">
           {courseError && (
@@ -1506,7 +1549,7 @@ export default function AdminPage() {
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setShowCourseModal(false)}
+              onClick={closeCourseModal}
               disabled={courseSaving}
               className="inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
             >
