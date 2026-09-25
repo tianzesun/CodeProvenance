@@ -2361,6 +2361,9 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
             eyebrow={modeScope === 'benchmark' ? 'Engine & R&D' : 'Tools'}
             eyebrowStyle="badge"
             title={pageTitle}
+            description={modeScope === 'comparison'
+              ? 'Run multiple detection tools against the same dataset and compare quality, speed, and accuracy.'
+              : 'Tune, validate, and improve IntegrityDesk with reproducible labeled benchmarks.'}
             action={<StepIndicator steps={STEPS} currentStep={step} completedSteps={completedSteps} />}
           />
           {/* ── Mode selector (only when multiple modes available) ────── */}
@@ -2436,7 +2439,7 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
             );
           })()}
           {/* ── Step wizard ─────────────────────────────────────────────── */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="theme-card-strong overflow-hidden rounded-[24px] shadow-sm">
             {/* Run config summary bar — visible in steps 1 and 2 */}
             {step >= 1 && step < 3 && (
               <div className="px-5 py-3 bg-slate-50/70 border-b border-slate-100">

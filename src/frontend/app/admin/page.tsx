@@ -24,6 +24,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { AuthRole, AuthUser, useAuth } from '@/components/AuthProvider';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermOptions, courseTermLabel } from '@/lib/terms';
+import { Modal } from '@/components/saas/SaaSPrimitives';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,17 @@ export default function AdminPage() {
     role: 'professor' as AuthRole,
     tenant_name: '',
   });
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [courseSaving, setCourseSaving] = useState(false);
+  const [courseError, setCourseError] = useState('');
+  const [courseForm, setCourseForm] = useState({
+    name: '',
+    code: '',
+    term: 'Fall',
+    year: String(new Date().getFullYear()),
+    department: '',
+    description: '',
+  });
 
   // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -429,6 +441,46 @@ export default function AdminPage() {
     setSuccessMessage('');
     setFormError('');
     setShowCreatePanel(true);
+  };
+
+  const openCourseModal = () => {
+    setCourseError('');
+    setCourseForm({
+      name: '',
+      code: '',
+      term: 'Fall',
+      year: String(new Date().getFullYear()),
+      department: '',
+      description: '',
+    });
+    setShowCourseModal(true);
+  };
+
+  const handleCreateCourse = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCourseError('');
+    if (!courseForm.name.trim()) {
+      setCourseError('Course name is required.');
+      return;
+    }
+    setCourseSaving(true);
+    try {
+      await apiClient.post('/api/courses', {
+        name: courseForm.name.trim(),
+        code: courseForm.code.trim() || null,
+        term: courseForm.term.trim() || null,
+        year: courseForm.year ? Number(courseForm.year) : null,
+        department: courseForm.department.trim() || null,
+        description: courseForm.description.trim() || null,
+      });
+      await loadCoursesWithInstructors();
+      setShowCourseModal(false);
+      setSuccessMessage('Course created successfully.');
+    } catch (error) {
+      setCourseError(getErrorMessage(error));
+    } finally {
+      setCourseSaving(false);
+    }
   };
 
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
@@ -940,8 +992,16 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-2 sm:items-end">
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <div className="flex flex-col gap-2 sm:items-end">
+                <button
+                  type="button"
+                  onClick={openCourseModal}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                >
+                  <Plus size={15} />
+                  New course
+                </button>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 <div className="relative w-full sm:w-[280px]">
                   <Search
                     size={15}
@@ -1225,6 +1285,104 @@ export default function AdminPage() {
         )}
 
       </div>
+
+      <Modal
+        open={showCourseModal}
+        title="Create a new course"
+        description="Add a course to your organization. You can assign instructors and create assignments after it is created."
+        onClose={() => !courseSaving && setShowCourseModal(false)}
+      >
+        <form onSubmit={handleCreateCourse} className="space-y-4">
+          {courseError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <span>{courseError}</span>
+            </div>
+          )}
+          <Field label="Course name">
+            <input
+              required
+              autoFocus
+              value={courseForm.name}
+              onChange={(e) => setCourseForm((c) => ({ ...c, name: e.target.value }))}
+              placeholder="Introduction to Computer Science"
+              className={inputClass}
+            />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Course code" hint="Optional">
+              <input
+                value={courseForm.code}
+                onChange={(e) => setCourseForm((c) => ({ ...c, code: e.target.value }))}
+                placeholder="CS 101"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Department" hint="Optional">
+              <input
+                value={courseForm.department}
+                onChange={(e) => setCourseForm((c) => ({ ...c, department: e.target.value }))}
+                placeholder="Computer Science"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Term">
+              <div className="relative">
+                <select
+                  value={courseForm.term}
+                  onChange={(e) => setCourseForm((c) => ({ ...c, term: e.target.value }))}
+                  className={selectClass}
+                >
+                  <option>Fall</option>
+                  <option>Winter</option>
+                  <option>Spring</option>
+                  <option>Summer</option>
+                </select>
+                <ChevronDown size={14} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+            </Field>
+            <Field label="Year">
+              <input
+                type="number"
+                min="1900"
+                max="2200"
+                value={courseForm.year}
+                onChange={(e) => setCourseForm((c) => ({ ...c, year: e.target.value }))}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <Field label="Description" hint="Optional">
+            <textarea
+              rows={3}
+              value={courseForm.description}
+              onChange={(e) => setCourseForm((c) => ({ ...c, description: e.target.value }))}
+              placeholder="A short description of this course"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+            />
+          </Field>
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowCourseModal(false)}
+              disabled={courseSaving}
+              className="inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={courseSaving}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
+            >
+              {courseSaving && <Loader2 size={15} className="animate-spin" />}
+              {courseSaving ? 'Creating…' : 'Create course'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* ── Create user slide-over ─────────────────────────────────────────────── */}
       {showCreatePanel && (
