@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from src.backend.engines.scoring.assignment_modes import (
+    ASSIGNMENT_TYPE_MODE_MAP,
     DEFAULT_ASSIGNMENT_MODE_ID,
     assignment_modes_payload,
     get_assignment_mode,
     get_assignment_modes,
     recommend_assignment_mode,
+    recommend_mode_for_assignment_type,
     universal_preprocessing_policy,
 )
 from src.backend.engines.scoring.fusion_engine import load_engine_config
@@ -125,3 +127,34 @@ def test_mode_recommender_detects_notebook_assignment() -> None:
     )
 
     assert recommendation["recommended_mode_id"] == "ml_data_science"
+
+
+def test_stored_assignment_types_map_to_modes_with_engine_weights() -> None:
+    """Stored assignment types must resolve to catalog modes that carry engines."""
+    known_modes = set(get_assignment_modes())
+
+    assert set(ASSIGNMENT_TYPE_MODE_MAP.values()) <= known_modes
+    for stored_type in ASSIGNMENT_TYPE_MODE_MAP:
+        recommendation = recommend_mode_for_assignment_type(stored_type)
+
+        assert recommendation["matched"] is True
+        assert recommendation["mode_id"] in known_modes
+        assert recommendation["mode_name"]
+        assert recommendation["engine_weights"]
+        assert 0 < len(recommendation["top_engines"]) <= 3
+
+    assert recommend_mode_for_assignment_type("programming")["mode_id"] == "algorithmic_code"
+    assert recommend_mode_for_assignment_type("Project")["mode_id"] == "systems_projects"
+
+
+def test_unmapped_assignment_type_returns_no_recommendation() -> None:
+    """Unmapped stored types must not invent a mode or engine weights."""
+    for stored_type in (None, "", "   ", "mystery_type"):
+        recommendation = recommend_mode_for_assignment_type(stored_type)
+
+        assert recommendation["matched"] is False
+        assert recommendation["mode_id"] is None
+        assert recommendation["mode_name"] is None
+        assert recommendation["engine_weights"] == {}
+        assert recommendation["top_engines"] == []
+        assert recommendation["reason"]

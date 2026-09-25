@@ -13,6 +13,27 @@ from typing import Any
 MODE_CATALOG_VERSION = "2026.04.phase2"
 DEFAULT_ASSIGNMENT_MODE_ID = "intro_programming"
 
+# Stored ``assignments.assignment_type`` values (see ``Assignment`` in
+# ``src/backend/models/database.py``) mapped onto the modes that carry explicit
+# engine weights in ``engine_weights.yaml``. Modes with empty weights cannot
+# recommend engines, so they are never used as a target here.
+ASSIGNMENT_TYPE_MODE_MAP: dict[str, str] = {
+    "programming": "algorithmic_code",
+    "code": "algorithmic_code",
+    "coding": "algorithmic_code",
+    "project": "systems_projects",
+    "written": "reports_proofs",
+    "essay": "reports_proofs",
+    "report": "reports_proofs",
+    "quiz": "foundations_code",
+    "exam": "foundations_code",
+    "test": "foundations_code",
+    "lab": "foundations_code",
+    "notebook": "notebook_ai",
+    "sql": "sql_data_logic",
+    "database": "sql_data_logic",
+}
+
 
 @dataclass(frozen=True)
 class UniversalPreprocessingPolicy:
@@ -1217,6 +1238,55 @@ def recommend_assignment_mode(
             for alt_id, alt_score in ranked[1:4]
             if alt_score > 0
         ],
+    }
+
+
+def recommend_mode_for_assignment_type(assignment_type: str | None) -> dict[str, Any]:
+    """Recommend an assignment mode and its engines for a stored assignment type.
+
+    Args:
+        assignment_type: Stored ``assignments.assignment_type`` value, for example
+            ``"programming"`` or ``"project"``.
+
+    Returns:
+        Recommendation payload. ``mode_id`` is ``None`` when the stored type has no
+        mapping, which means the caller should keep inferring the mode from the
+        course code instead of overriding engine weights.
+    """
+    normalized = (
+        (assignment_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    )
+    mode_id = ASSIGNMENT_TYPE_MODE_MAP.get(normalized)
+    if mode_id is None:
+        return {
+            "assignment_type": assignment_type or None,
+            "matched": False,
+            "mode_id": None,
+            "mode_name": None,
+            "engine_weights": {},
+            "top_engines": [],
+            "reason": (
+                "No stored assignment type matched a mode with engine weights; "
+                "keep inferring the mode from the course code."
+            ),
+        }
+
+    mode = get_assignment_mode(mode_id)
+    ranked_engines = sorted(
+        mode.weights.items(), key=lambda item: float(item[1]), reverse=True
+    )
+    return {
+        "assignment_type": assignment_type or None,
+        "matched": True,
+        "mode_id": mode.mode_id,
+        "mode_name": mode.name,
+        "engine_weights": dict(mode.weights),
+        "top_engines": [
+            {"key": key, "weight": round(float(weight), 4)}
+            for key, weight in ranked_engines
+            if float(weight) > 0
+        ][:3],
+        "reason": f"Stored assignment type '{normalized}' maps to the {mode.name} mode.",
     }
 
 
