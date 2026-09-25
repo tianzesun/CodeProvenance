@@ -21,6 +21,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -28,6 +29,7 @@ import uuid
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path as PathLib
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -5638,6 +5640,320 @@ async def update_user(request: Request, user_id: str):
             select(User).options(joinedload(User.tenant)).where(User.id == user.id)
         )
         return JSONResponse(status_code=200, content={"user": _serialize_user(user)})
+
+
+# ============================================================
+# Admin - Bulk user import / export
+# ============================================================
+
+#: Columns accepted when importing users. Extra columns are ignored so a file
+#: exported from this endpoint can be edited and re-imported safely even though
+#: the export carries read-only audit fields.
+USER_IMPORT_COLUMNS = (
+    "email",
+    "full_name",
+    "name",
+    "role",
+    "password",
+    "tenant_name",
+    "is_active",
+)
+
+#: Columns emitted when exporting users. Credential material (password hashes,
+#: reset tokens) is deliberately absent.
+USER_EXPORT_COLUMNS = (
+    "email",
+    "full_name",
+    "role",
+    "is_active",
+    "tenant_name",
+    "created_at",
+    "last_login_at",
+)
+
+
+def _coerce_import_bool(value: Any, default: bool = True) -> bool:
+    """Interpret a spreadsheet-style boolean (true/false, 1/0, yes/no)."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "active", "enabled"}
+
+
+def _parse_user_import_content(
+    content: str, file_format: str = "auto"
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse an uploaded user file into normalized row dicts.
+
+    Accepts JSON (a list of objects, or an object with a ``users`` list) or CSV
+    with a header row. Returns the rows plus file-level errors; per-row
+    validation happens in the endpoint so admins receive a full report instead
+    of failing on the first bad row.
+    """
+    text = (content or "").strip()
+    if not text:
+        return [], ["The file is empty."]
+
+    normalized_format = (file_format or "auto").strip().lower()
+    if normalized_format == "auto":
+        normalized_format = "json" if text[0] in "[{" else "csv"
+
+    if normalized_format == "json":
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError as exc:
+            return [], [f"Invalid JSON: {exc.msg} (line {exc.lineno})."]
+        if isinstance(parsed, dict):
+            parsed = parsed.get("users")
+        if not isinstance(parsed, list):
+            return [], [
+                "JSON must be a list of users or an object with a 'users' list."
+            ]
+        raw_rows: list[Any] = parsed
+    else:
+        reader = csv.DictReader(StringIO(text))
+        if not reader.fieldnames:
+            return [], ["CSV must include a header row."]
+        raw_rows = [dict(row) for row in reader]
+
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for index, raw in enumerate(raw_rows, start=1):
+        if not isinstance(raw, dict):
+            errors.append(f"Row {index}: expected an object, got {type(raw).__name__}.")
+            continue
+        row = {
+            str(key)
+            .strip()
+            .lower()
+            .replace(" ", "_"): (value.strip() if isinstance(value, str) else value)
+            for key, value in raw.items()
+            if key is not None
+        }
+        rows.append({"__row__": index, **row})
+
+    if not rows and not errors:
+        errors.append("No user rows were found in the file.")
+    return rows, errors
+
+
+def _serialize_user_export(users: list[User]) -> list[dict[str, Any]]:
+    """Build export rows for users, never including credential material."""
+    rows: list[dict[str, Any]] = []
+    for entry in users:
+        tenant = getattr(entry, "tenant", None)
+        rows.append(
+            {
+                "email": entry.email,
+                "full_name": entry.full_name,
+                "role": entry.role,
+                "is_active": bool(entry.is_active),
+                "tenant_name": tenant.name if tenant is not None else "",
+                "created_at": (
+                    entry.created_at.isoformat() if entry.created_at else ""
+                ),
+                "last_login_at": (
+                    entry.last_login_at.isoformat() if entry.last_login_at else ""
+                ),
+            }
+        )
+    return rows
+
+
+def _users_to_csv(rows: list[dict[str, Any]]) -> str:
+    """Render export rows as CSV text with a stable column order."""
+    buffer = StringIO()
+    writer = csv.DictWriter(
+        buffer, fieldnames=list(USER_EXPORT_COLUMNS), extrasaction="ignore"
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+@app.get("/api/admin/users/export")
+async def export_users(
+    request: Request, file_format: str = Query("csv", alias="format")
+):
+    """Export every user account as CSV (default) or JSON (admin only).
+
+    Password hashes and reset tokens are never included: only the fields needed
+    to audit accounts or round-trip a re-import are returned.
+    """
+    _require_current_user(request, admin_only=True)
+    with SessionLocal() as db:
+        users = list(
+            db.scalars(
+                select(User)
+                .options(joinedload(User.tenant))
+                .order_by(User.created_at.asc())
+            ).all()
+        )
+    rows = _serialize_user_export(users)
+
+    if (file_format or "csv").strip().lower() == "json":
+        return JSONResponse(
+            content={"users": rows},
+            headers={"Content-Disposition": 'attachment; filename="users.json"'},
+        )
+
+    return Response(
+        content=_users_to_csv(rows),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="users.csv"'},
+    )
+
+
+@app.post("/api/admin/users/import")
+async def import_users(request: Request) -> dict[str, Any]:
+    """Bulk-create user accounts from a CSV or JSON payload (admin only).
+
+    Supports a ``dry_run`` preview so an administrator can review exactly which
+    rows would be created before committing. Rows whose email already exists are
+    skipped, and rows without a password receive a generated temporary one that
+    is returned once in the per-row report.
+    """
+    current_user = _require_current_user(request, admin_only=True)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid import payload")
+
+    content = payload.get("content")
+    if isinstance(content, (list, dict)):
+        content = json.dumps(content)
+
+    rows, parse_errors = _parse_user_import_content(
+        str(content or ""), str(payload.get("format") or "auto")
+    )
+    if parse_errors:
+        raise HTTPException(status_code=400, detail=" ".join(parse_errors))
+
+    dry_run = bool(payload.get("dry_run"))
+    default_password = str(payload.get("default_password") or "")
+    default_tenant_name = str(payload.get("default_tenant_name") or "").strip()
+    default_role = str(payload.get("default_role") or "professor").strip().lower()
+
+    results: list[dict[str, Any]] = []
+
+    with SessionLocal() as db:
+        # A shared tenant is only materialised when the import actually writes.
+        shared_tenant = None
+        if default_tenant_name and not dry_run:
+            shared_tenant = _create_tenant(db, default_tenant_name)
+
+        existing_emails = {
+            str(email).lower() for (email,) in db.execute(select(User.email)).all()
+        }
+
+        for row in rows:
+            index = int(row.get("__row__", 0))
+            email = _normalize_email(str(row.get("email") or ""))
+            full_name = str(row.get("full_name") or row.get("name") or "").strip()
+            role = str(row.get("role") or default_role).strip().lower()
+
+            if "@" not in email:
+                results.append(
+                    {
+                        "row": index,
+                        "email": email,
+                        "status": "error",
+                        "detail": "A valid email address is required.",
+                    }
+                )
+                continue
+            if not full_name:
+                results.append(
+                    {
+                        "row": index,
+                        "email": email,
+                        "status": "error",
+                        "detail": "Full name is required.",
+                    }
+                )
+                continue
+            if role not in {"admin", "professor"}:
+                results.append(
+                    {
+                        "row": index,
+                        "email": email,
+                        "status": "error",
+                        "detail": "Role must be admin or professor.",
+                    }
+                )
+                continue
+            if email in existing_emails:
+                results.append(
+                    {
+                        "row": index,
+                        "email": email,
+                        "status": "skipped",
+                        "detail": "A user with that email already exists.",
+                    }
+                )
+                continue
+
+            password = str(row.get("password") or "") or default_password
+            temporary_password = ""
+            if not password:
+                temporary_password = f"Tmp-{secrets.token_urlsafe(9)}"
+                password = temporary_password
+            try:
+                _validate_password_input(password)
+            except HTTPException as exc:
+                results.append(
+                    {
+                        "row": index,
+                        "email": email,
+                        "status": "error",
+                        "detail": str(exc.detail),
+                    }
+                )
+                continue
+
+            entry: dict[str, Any] = {
+                "row": index,
+                "email": email,
+                "status": "preview" if dry_run else "created",
+                "detail": "Would be created." if dry_run else "User created.",
+            }
+            if temporary_password:
+                entry["temporary_password"] = temporary_password
+
+            if not dry_run:
+                tenant_name = str(row.get("tenant_name") or "").strip()
+                tenant = shared_tenant or _create_tenant(
+                    db, tenant_name or _generate_tenant_name(full_name, email)
+                )
+                db.add(
+                    User(
+                        tenant_id=tenant.id,
+                        email=email,
+                        full_name=full_name,
+                        password_hash=_hash_password(password),
+                        role=role,
+                        is_active=_coerce_import_bool(
+                            row.get("is_active"), default=True
+                        ),
+                    )
+                )
+                existing_emails.add(email)
+
+            results.append(entry)
+
+        if not dry_run:
+            db.commit()
+
+    summary = Counter(item["status"] for item in results)
+    return {
+        "dry_run": dry_run,
+        "imported_by": current_user["email"],
+        "created": summary.get("created", 0),
+        "previewed": summary.get("preview", 0),
+        "skipped": summary.get("skipped", 0),
+        "failed": summary.get("error", 0),
+        "results": results,
+    }
 
 
 # ============================================================

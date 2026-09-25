@@ -5,12 +5,14 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  Download,
   FileText,
   GraduationCap,
   Loader2,
   Plus,
   Search,
   ShieldCheck,
+  Upload,
   UserPlus,
   Users,
   UserCheck,
@@ -136,6 +138,25 @@ interface CourseWithInstructors {
   assignments?: CourseAssignment[];
 }
 
+type ImportRowStatus = 'created' | 'preview' | 'skipped' | 'error';
+
+interface ImportRowResult {
+  row: number;
+  email: string;
+  status: ImportRowStatus;
+  detail: string;
+  temporary_password?: string;
+}
+
+interface ImportReport {
+  dry_run: boolean;
+  created: number;
+  previewed: number;
+  skipped: number;
+  failed: number;
+  results: ImportRowResult[];
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function RoleBadge({ role }: { role: AuthRole }) {
@@ -165,6 +186,32 @@ function StatusBadge({ suspended }: { suspended?: boolean }) {
       />
       {suspended ? 'Suspended' : 'Active'}
     </span>
+  );
+}
+
+function AddUserCard({
+  onAdd,
+  buttonRef,
+}: {
+  onAdd: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={onAdd}
+      aria-label="Add a new user"
+      className="group flex w-full flex-col items-center justify-center gap-2 border-t border-slate-200 px-5 py-12 text-center transition hover:bg-blue-50/50 dark:border-slate-800 dark:hover:bg-slate-900/40"
+    >
+      <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
+        <Plus size={36} strokeWidth={2} aria-hidden="true" />
+      </span>
+      <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
+        Add user
+      </span>
+      <span className="text-xs text-slate-400">Invite a professor or administrator</span>
+    </button>
   );
 }
 
@@ -276,6 +323,15 @@ export default function AdminPage() {
   const [showCreatePanel, setShowCreatePanel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [importContent, setImportContent] = useState('');
+  const [importDefaultPassword, setImportDefaultPassword] = useState('');
+  const [importDefaultTenant, setImportDefaultTenant] = useState('');
+  const [importPreview, setImportPreview] = useState<ImportReport | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [exportingUsers, setExportingUsers] = useState(false);
 
   const [coursesWithInstructors, setCoursesWithInstructors] = useState<CourseWithInstructors[]>([]);
   const [loadingCourses, setLoadingCourses] = useState(true);
@@ -514,6 +570,83 @@ export default function AdminPage() {
     }
   };
 
+  const openImportPanel = () => {
+    setImportError('');
+    setImportPreview(null);
+    setShowImportPanel(true);
+  };
+
+  const closeImportPanel = () => {
+    setShowImportPanel(false);
+    setImportPreview(null);
+    setImportError('');
+  };
+
+  const handleExportUsers = async (format: 'csv' | 'json') => {
+    setExportingUsers(true);
+    setPageError('');
+    try {
+      const res = await apiClient.get('/api/admin/users/export', {
+        params: { format },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data as Blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setPageError(getErrorMessage(error));
+    } finally {
+      setExportingUsers(false);
+    }
+  };
+
+  const handleImportFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      setImportContent(await file.text());
+      setImportPreview(null);
+      setImportError('');
+    } catch {
+      setImportError('Could not read that file.');
+    }
+  };
+
+  const runImport = async (dryRun: boolean) => {
+    if (!importContent.trim()) {
+      setImportError('Paste CSV or JSON content, or choose a file first.');
+      return;
+    }
+    setImportBusy(true);
+    setImportError('');
+    try {
+      const res = await apiClient.post('/api/admin/users/import', {
+        content: importContent,
+        dry_run: dryRun,
+        default_password: importDefaultPassword,
+        default_tenant_name: importDefaultTenant,
+      });
+      const report = res.data as ImportReport;
+      setImportPreview(report);
+      if (!dryRun) {
+        await loadUsers();
+        setSuccessMessage(
+          `Imported ${report.created} user(s) — ${report.skipped} skipped, ${report.failed} failed.`
+        );
+      }
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const canImport = Boolean(importPreview && importPreview.previewed > 0);
+
   const handleToggleSuspend = async (entry: AuthUser) => {
     setTogglingId(entry.id);
     setSuccessMessage('');
@@ -606,15 +739,6 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <button
-              ref={createButtonRef}
-              type="button"
-              onClick={openCreatePanel}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-            >
-              <Plus size={16} />
-              New user
-            </button>
           </div>
         </section>
 
@@ -797,6 +921,26 @@ export default function AdminPage() {
                 </select>
                 <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
               </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExportUsers('csv')}
+                  disabled={exportingUsers}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  {exportingUsers ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Export
+                </button>
+                <button
+                  type="button"
+                  onClick={openImportPanel}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <Upload size={14} />
+                  Import
+                </button>
+              </div>
             </div>
           </div>
 
@@ -828,16 +972,8 @@ export default function AdminPage() {
                 No users found
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                No accounts match your current filters. Try a different search, or create a new user.
+                No accounts match your current filters. Try a different search, or add a user below.
               </p>
-              <button
-                type="button"
-                onClick={openCreatePanel}
-                className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-              >
-                <UserPlus size={16} />
-                Create user
-              </button>
             </div>
           ) : (
             <>
@@ -971,6 +1107,10 @@ export default function AdminPage() {
                 })}
               </div>
             </>
+          )}
+
+          {!loadingUsers && (
+            <AddUserCard onAdd={openCreatePanel} buttonRef={createButtonRef} />
           )}
         </section>
         )}
@@ -1519,6 +1659,156 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ── Import users modal ────────────────────────────────────────────────── */}
+      <Modal
+        open={showImportPanel}
+        title="Import users"
+        description="Bulk-create accounts from a CSV or JSON file."
+        onClose={closeImportPanel}
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={closeImportPanel}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => runImport(true)}
+              disabled={importBusy}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              {importBusy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Preview
+            </button>
+            <button
+              type="button"
+              onClick={() => runImport(false)}
+              disabled={importBusy || !canImport}
+              className="theme-button-primary inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:opacity-50"
+            >
+              {importBusy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              Import
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Default password" hint="Used for rows without their own password.">
+              <input
+                type="password"
+                value={importDefaultPassword}
+                onChange={(e) => setImportDefaultPassword(e.target.value)}
+                placeholder="Leave blank to auto-generate"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Default workspace" hint="Share one workspace across every imported row.">
+              <input
+                type="text"
+                value={importDefaultTenant}
+                onChange={(e) => setImportDefaultTenant(e.target.value)}
+                placeholder="Optional"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <Field label="Choose a file" hint="CSV columns: email, full_name, role, password, tenant_name.">
+            <input
+              type="file"
+              accept=".csv,.json,text/csv,application/json"
+              onChange={(e) => handleImportFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200 dark:text-slate-300 dark:file:bg-slate-800 dark:file:text-slate-200"
+            />
+          </Field>
+
+          <Field label="Or paste content" hint="CSV, or JSON as a list or an object with a 'users' list.">
+            <textarea
+              value={importContent}
+              onChange={(e) => { setImportContent(e.target.value); setImportPreview(null); }}
+              rows={6}
+              placeholder={'email,full_name,role\nada@example.edu,Ada Lovelace,professor'}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+            />
+          </Field>
+
+          {importError && (
+            <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{importError}</span>
+            </div>
+          )}
+
+          {importPreview && (
+            <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                  {importPreview.dry_run
+                    ? `${importPreview.previewed} ready`
+                    : `${importPreview.created} created`}
+                </span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {importPreview.skipped} skipped
+                </span>
+                <span className="rounded-full bg-red-100 px-2.5 py-1 text-red-700 dark:bg-red-500/15 dark:text-red-300">
+                  {importPreview.failed} failed
+                </span>
+              </div>
+
+              <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                {importPreview.results.slice(0, 50).map((row) => (
+                  <div
+                    key={`${row.row}-${row.email}`}
+                    className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-slate-900/60"
+                  >
+                    <span className="mt-0.5 shrink-0 font-mono text-[11px] text-slate-400">
+                      #{row.row}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-slate-700 dark:text-slate-200">
+                        {row.email || '(no email)'}
+                      </span>
+                      <span
+                        className={
+                          row.status === 'error'
+                            ? 'text-red-600 dark:text-red-400'
+                            : row.status === 'skipped'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-slate-500 dark:text-slate-400'
+                        }
+                      >
+                        {row.detail}
+                      </span>
+                      {row.temporary_password && (
+                        <span className="mt-0.5 block font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          Temp password: {row.temporary_password}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {importPreview.results.length > 50 && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Showing the first 50 of {importPreview.results.length} rows.
+                </p>
+              )}
+
+              {importPreview.results.some((row) => row.temporary_password) && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  Temporary passwords are shown once — copy them before closing this dialog.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
     </DashboardLayout>
   );
 }
