@@ -105,7 +105,12 @@ from src.backend.models.database import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IntegrityDesk API")
+app = FastAPI(
+    title="IntegrityDesk API",
+    docs_url="/docs" if settings.EXPOSE_API_DOCS else None,
+    redoc_url="/redoc" if settings.EXPOSE_API_DOCS else None,
+    openapi_url="/openapi.json" if settings.EXPOSE_API_DOCS else None,
+)
 
 frontend_origin_candidates = {settings.FRONTEND_URL.rstrip("/")}
 parsed_frontend_url = urlparse(settings.FRONTEND_URL)
@@ -135,38 +140,44 @@ app.add_middleware(
     ],
 )
 
-# Auth exempt paths - must be defined before middleware setup
-AUTH_EXEMPT_PATHS = {
-    "/",
-    "/health",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-    "/api/auth/status",
-    "/api/auth/login",
-    "/api/auth/bootstrap-admin",
-    "/api/auth/forgot-password",
-    "/api/auth/reset-password",
-    "/api/auth/me-api-key",
-    "/api/upload",
-    "/api/upload-zip",
-    "/api/benchmark",
-    "/api/benchmark/stream",
-    "/api/benchmark/start",
-    "/api/error-analysis",
-    "/api/benchmark/export-pdf",
-    "/api/benchmark-tools",
-    "/api/benchmark-datasets",
-    "/api/ai-detect",
-}
-AUTH_EXEMPT_PREFIXES = (
-    "/api/cases/",
-    "/api/users/",
-    "/api/settings",
-    "/api/job/",
-    "/api/jobs/",
+# Endpoints that are reachable without a session cookie or API key. Keep this
+# list deliberately small: every entry is a public surface.
+PUBLIC_PATHS = frozenset(
+    {
+        "/",
+        "/health",
+        "/api/auth/status",
+        "/api/auth/login",
+        "/api/auth/bootstrap-admin",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
+        "/api/auth/me-api-key",
+    }
 )
 
+# Compute-heavy endpoints (uploads, AI review, benchmarking). These require a
+# dashboard session or an API key; deployments that intentionally want the old
+# anonymous behaviour can re-enable it with ALLOW_ANONYMOUS_ANALYSIS.
+ANALYSIS_PATHS = frozenset(
+    {
+        "/api/upload",
+        "/api/upload-zip",
+        "/api/ai-detect",
+        "/api/benchmark",
+        "/api/benchmark/stream",
+        "/api/benchmark/start",
+        "/api/benchmark/export-pdf",
+        "/api/benchmark-tools",
+        "/api/benchmark-datasets",
+        "/api/error-analysis",
+    }
+)
+
+AUTH_EXEMPT_PATHS = set(PUBLIC_PATHS)
+if settings.EXPOSE_API_DOCS:
+    AUTH_EXEMPT_PATHS.update({"/docs", "/redoc", "/openapi.json"})
+if settings.ALLOW_ANONYMOUS_ANALYSIS:
+    AUTH_EXEMPT_PATHS.update(ANALYSIS_PATHS)
 # Setup default API keys for development
 setup_default_keys()
 
@@ -11987,17 +11998,8 @@ def _persist_env_settings(updates: dict[str, Any]) -> None:
 def _should_require_auth(path: str) -> bool:
     if path in AUTH_EXEMPT_PATHS:
         return False
-    # Allow unauthenticated access to exempt prefixes for API-key bypass
-    if path.startswith(AUTH_EXEMPT_PREFIXES):
-        # /api/settings is in AUTH_EXEMPT_PREFIXES for API-key bypass,
-        # but still requires JWT session auth for the dashboard.
-        return bool(path == "/api/settings" or path.startswith("/api/settings/"))
-    # Allow unauthenticated access to job status endpoints
-    if path.startswith(("/api/jobs/", "/api/job/")):
-        return False
-    # Allow unauthenticated access to benchmark status polling
-    if path.startswith("/api/benchmark/status/"):
-        return False
+    # All API, report and benchmark routes are protected. Anonymous polling
+    # would otherwise allow callers to probe job IDs without a tenant context.
     return path.startswith(AUTH_PROTECTED_PREFIXES)
 
 

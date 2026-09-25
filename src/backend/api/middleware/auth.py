@@ -223,9 +223,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.excluded_paths = excluded_paths or [
             "/",
-            "/docs",
-            "/redoc",
-            "/openapi.json",
             "/health",
             "/api/v1/health",
             "/api/v1/auth",
@@ -257,19 +254,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Any:
         """Process authentication for each request."""
-        from src.backend.api.server import AUTH_EXEMPT_PREFIXES
-
         path = request.url.path
 
-        # Skip authentication for excluded paths
-        if any(
-            path == excluded or (excluded != "/" and path.startswith(excluded))
-            for excluded in self.excluded_paths
-        ):
-            return await call_next(request)
-
-        # Skip authentication for exempt prefixes (API-key bypass paths)
-        if path.startswith(AUTH_EXEMPT_PREFIXES):
+        # Preserve explicit public endpoints. Match exact paths to avoid a
+        # permissive value such as /api/upload turning /api/upload-admin public.
+        if path in self.excluded_paths:
             return await call_next(request)
 
         # Dashboard sessions (HttpOnly cookie JWT) take precedence over API keys.
@@ -393,6 +382,10 @@ def setup_default_keys() -> None:
     hardcoded keys that could be used in production.
     """
     from src.backend.config.settings import settings
+
+    if not settings.ALLOW_DEV_API_KEYS:
+        logger.info("Skipping default API key creation (ALLOW_DEV_API_KEYS is off)")
+        return
 
     if not settings.DEBUG_MODE:
         logger.info("Skipping default API key creation (DEBUG_MODE is off)")

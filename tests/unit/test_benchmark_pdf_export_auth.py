@@ -5,14 +5,14 @@ from fastapi.testclient import TestClient
 from src.backend.api import server
 
 
-def test_benchmark_pdf_export_matches_public_benchmark_auth_policy() -> None:
-    """Benchmark PDF export should be available for public benchmark runs."""
-    assert server._should_require_auth("/api/benchmark") is False
-    assert server._should_require_auth("/api/benchmark/export-pdf") is False
+def test_benchmark_pdf_export_requires_authentication() -> None:
+    """Compute-heavy benchmark endpoints must require an authenticated user."""
+    assert server._should_require_auth("/api/benchmark") is True
+    assert server._should_require_auth("/api/benchmark/export-pdf") is True
 
 
-def test_benchmark_pdf_export_endpoint_does_not_require_auth() -> None:
-    """Benchmark PDF export endpoint should return an export file without a session."""
+def test_benchmark_pdf_export_endpoint_rejects_anonymous_requests() -> None:
+    """Benchmark PDF export should return 401 without a session or API key."""
     client = TestClient(server.app)
 
     response = client.post(
@@ -31,6 +31,4 @@ def test_benchmark_pdf_export_endpoint_does_not_require_auth() -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith(("application/pdf", "text/html"))
-    assert "attachment;" in response.headers["content-disposition"]
+    assert response.status_code == 401

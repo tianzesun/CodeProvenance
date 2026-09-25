@@ -9,6 +9,7 @@ from starlette.datastructures import UploadFile
 from fastapi.testclient import TestClient
 
 from src.backend.api import server
+from src.backend.api.middleware.auth import api_key_manager
 
 
 def test_load_benchmark_dataset_supports_legacy_demo_python_extensions(
@@ -552,6 +553,11 @@ def test_pan_benchmark_rejects_unlabeled_dataset(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
 
     client = TestClient(server.app)
+    api_key = api_key_manager.create_key(
+        name="dataset-test",
+        tenant_id="test-tenant",
+        rate_limit=100,
+    )
     response = client.post(
         "/api/benchmark",
         data={
@@ -559,6 +565,7 @@ def test_pan_benchmark_rejects_unlabeled_dataset(tmp_path, monkeypatch):
             "dataset": "unlabeled",
             "tools": ["integritydesk"],
         },
+        headers={"X-API-Key": api_key},
     )
 
     assert response.status_code == 400

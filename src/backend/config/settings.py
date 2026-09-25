@@ -85,6 +85,18 @@ class AppSettings(BaseSettings):
     AUTH_COOKIE_SECURE: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Release security policy
+    #: Serve the interactive API reference at /docs, /redoc and /openapi.json.
+    #: Off by default: the schema describes every endpoint in the system.
+    EXPOSE_API_DOCS: bool = False
+    #: Allow upload / AI review / benchmark endpoints to be called without a
+    #: session cookie or API key. Only enable this for local demos.
+    ALLOW_ANONYMOUS_ANALYSIS: bool = False
+    #: Create the seeded development/demo API keys at startup. Requires
+    #: DEBUG_MODE as well, so a production deployment cannot enable it by
+    #: accident with a single stray variable.
+    ALLOW_DEV_API_KEYS: bool = False
+
     # External plagiarism services
     MOSS_USER_ID: str | None = None
 
