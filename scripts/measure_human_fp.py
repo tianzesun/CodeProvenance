@@ -124,6 +124,18 @@ def main() -> int:
         action="store_true",
         help="Also write per-file scores (name, lines, probability) for analysis",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Cap files per corpus (0 = no cap). Useful when the AI detector "
+        "has a transformer layer, where a full pass is slow.",
+    )
+    parser.add_argument(
+        "--per-corpus",
+        action="store_true",
+        help="Apply --limit within each corpus instead of globally.",
+    )
     args = parser.parse_args()
 
     dataset_root = REPO_ROOT / "data" / "datasets"
@@ -133,6 +145,22 @@ def main() -> int:
         *_iter_poolc_sample(dataset_root, args.poolc_n),
     ]
     items = [i for i in everything if not args.corpora or i[0] in args.corpora]
+
+    if args.limit and args.limit > 0:
+        if args.per_corpus:
+            seen: dict[str, int] = {}
+            capped: list = []
+            for item in items:
+                corpus = item[0]
+                if seen.get(corpus, 0) >= args.limit:
+                    continue
+                seen[corpus] = seen.get(corpus, 0) + 1
+                capped.append(item)
+            items = capped
+        else:
+            items = items[: args.limit]
+        print(f"limited to {len(items)} files", flush=True)
+
     if not items:
         print("No human corpora found under", dataset_root)
         return 1
