@@ -7544,19 +7544,104 @@ async def get_ai_detection_accuracy():
     )
 
 
-def _analytics_term_label(value: datetime | None) -> str:
-    """Return an academic term label (Winter/Summer/Fall + year) for a timestamp.
+def course_term_label_for_analytics(course: Any) -> str:
+    """Render a course's own term label, e.g. ``"Fall 2026"``.
 
-    Terms map from calendar months: Jan–Apr = Winter, May–Aug = Summer,
-    Sep–Dec = Fall. Unknown timestamps fall back to "—".
+    Returns "—" when the course carries no term metadata, so callers can skip
+    the suffix instead of printing a dangling separator.
+    """
+    parts = [course.term, course.year] if course is not None else []
+    label = " ".join(str(p) for p in parts if p).strip()
+    return label or "—"
+
+
+def _empty_analytics_overview() -> dict[str, Any]:
+    """Return a fully zeroed analytics payload.
+
+    Used when the caller has no organization and no instructor assignments, so
+    a user with nothing to see gets honest zeros rather than global figures.
+    """
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "total_cases": 0,
+            "open_cases": 0,
+            "courses_affected": 0,
+            "high_priority": 0,
+            "repeats": 0,
+            "trend_change": None,
+        },
+        "cases_by_course": [],
+        "semester_risk": [],
+        "repeat_offenders": [],
+        "suspicion_trend": [],
+        "insights": [
+            {
+                "kind": "hotspot",
+                "text": "No courses are visible to this account yet.",
+            },
+            {
+                "kind": "trend",
+                "text": "No recorded terms; a second term is needed to measure the high-priority trend.",
+            },
+            {
+                "kind": "repeat",
+                "text": "No prior-warning or repeat-pattern links in the current dataset.",
+            },
+        ],
+    }
+
+
+def _analytics_term_label(value: datetime | None) -> str:
+    """Return an academic term label (e.g. ``"Spring 2026"``) for a timestamp.
+
+    Calendar months map onto the four seasons the rest of the product supports
+    (see the term registry, ``courses.department`` selectors and
+    ``lib/terms.ts``): Jan-Mar = Winter, Apr-Jun = Spring, Jul-Aug = Summer,
+    Sep-Dec = Fall. Unknown timestamps fall back to "—".
+
+    This previously emitted only Winter/Summer/Fall, which mislabelled every
+    spring/summer course's cases as the adjacent term.
     """
     if value is None:
         return "—"
-    if value.month <= 4:
+    if value.month <= 3:
         return f"Winter {value.year}"
+    if value.month <= 6:
+        return f"Spring {value.year}"
     if value.month <= 8:
         return f"Summer {value.year}"
     return f"Fall {value.year}"
+
+
+def _analytics_term_sort_key(label: str) -> tuple[int, int]:
+    """Chronological sort key for a term label produced by ``_analytics_term_label``.
+
+    The calendar mapping is Winter(1) -> Spring(2) -> Summer(3) -> Fall(4),
+    matching the frontend's seasonal ordering in ``lib/terms.ts``. Returns
+    ``(0, 0)`` for the "—" placeholder so it sorts first and can be filtered.
+    """
+    if label == "—":
+        return (0, 0)
+    parts = label.split(" ")
+    if len(parts) != 2:
+        return (0, 0)
+    year_part, season = parts[-1], " ".join(parts[:-1])
+    if not year_part.isdigit():
+        return (0, 0)
+    season_rank = {"winter": 1, "spring": 2, "summer": 3, "fall": 4}.get(
+        season.lower(), 5
+    )
+    return (int(year_part), season_rank)
+
+
+def _analytics_month_sort_key(label: str) -> tuple[int, int]:
+    """Chronological sort key for a "Mon YYYY" month label."""
+    try:
+        parsed = datetime.strptime(label, "%b %Y")
+    except (TypeError, ValueError):
+        return (0, 0)
+    return (parsed.year, parsed.month)
 
 
 def _analytics_month_label(value: datetime | None) -> str:
@@ -7575,30 +7660,82 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
     ``assignments`` and linked-similarity-result rows; nothing is synthesized.
     Empty datasets degrade gracefully to zero-valued series so the dashboard
     charts render honest empties instead of fabricated numbers.
+
+    Scoping: every query is restricted to the caller's organization (plus any
+    course they are an instructor for), matching ``/api/cases``. Without this
+    the dashboard would leak another institution's case counts and course names.
     """
-    _require_current_user(request)
+    current_user = _require_current_user(request)
+    user_id = current_user.get("id")
+    user_org_id = current_user.get("organization_id")
 
     from src.backend.models.database import Case, CaseResultLink
 
     with SessionLocal() as db:
-        courses = db.query(Course).all()
-        assignments = db.query(Assignment).all()
-        cases = db.query(Case).all()
-        links = db.query(CaseResultLink).all()
+        # Visibility filter shared by every query below: own organization, or a
+        # course the user is explicitly an instructor for.
+        course_filters = []
+        if user_id:
+            course_filters.append(
+                Course.id.in_(
+                    db.query(CourseInstructor.course_id).filter(
+                        CourseInstructor.user_id == user_id
+                    )
+                )
+            )
+        if user_org_id:
+            course_filters.append(Course.organization_id == user_org_id)
+        visible_course = or_(*course_filters) if course_filters else None
 
+        if visible_course is not None:
+            courses = db.query(Course).filter(visible_course).all()
+        else:
+            # No org and no instructor assignments → nothing is visible.
+            return _empty_analytics_overview()
+
+        course_ids = [c.id for c in courses]
         course_by_id = {c.id: c for c in courses}
+
+        if course_ids:
+            assignments = (
+                db.query(Assignment).filter(Assignment.course_id.in_(course_ids)).all()
+            )
+            # Cases carry their own organization_id; intersect with the visible
+            # assignment set so a stale or cross-org case cannot leak through.
+            cases = (
+                db.query(Case)
+                .filter(Case.assignment_id.in_([a.id for a in assignments]))
+                .all()
+            )
+        else:
+            assignments, cases = [], []
+
+        case_ids = [str(c.id) for c in cases]
+        links = (
+            db.query(CaseResultLink).filter(CaseResultLink.case_id.in_(case_ids)).all()
+            if case_ids
+            else []
+        )
         assignment_by_id = {a.id: a for a in assignments}
 
         # ── Cases by course (via assignment → course) ──────────────────────
+        # Course codes are NOT unique across terms (the same course is offered
+        # each term), so they are disambiguated with the term label. Keying on
+        # the bare code merged separate offerings into one misleading bar.
         by_course: dict[str, int] = {}
         for case in cases:
             assignment = assignment_by_id.get(case.assignment_id)
             course = course_by_id.get(assignment.course_id) if assignment else None
-            label = course.code or "Unassigned" if course else "Unassigned"
+            if course is None:
+                label = "Unassigned"
+            else:
+                base = course.code or course.name
+                term = course_term_label_for_analytics(course)
+                label = f"{base} · {term}" if term != "—" else base
             by_course[label] = by_course.get(label, 0) + 1
         cases_by_course = [
             {"course": code, "cases": count}
-            for code, count in sorted(by_course.items(), key=lambda kv: -kv[1])
+            for code, count in sorted(by_course.items(), key=lambda kv: (-kv[1], kv[0]))
         ]
 
         # ── Term risk (high vs medium by case priority) ────────────────────
@@ -7612,7 +7749,12 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
                 bucket["medium"] += 1
         semester_risk = [
             {"semester": term, "high": b["high"], "medium": b["medium"]}
-            for term, b in term_risk.items()
+            # Sort chronologically: dict insertion order follows case creation
+            # order, so the previous/next comparison below would otherwise be
+            # between arbitrary terms rather than consecutive ones.
+            for term, b in sorted(
+                term_risk.items(), key=lambda kv: _analytics_term_sort_key(kv[0])
+            )
         ]
 
         # ── Repeat offender buckets (linked-similarity-result count) ───────
@@ -7647,7 +7789,10 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
                 bucket["high"] += 1
         suspicion_trend = [
             {"week": month, "cases": b["cases"], "high": b["high"]}
-            for month, b in month_counts.items()
+            # Chronological, for the same reason as semester_risk above.
+            for month, b in sorted(
+                month_counts.items(), key=lambda kv: _analytics_month_sort_key(kv[0])
+            )
         ]
 
         # ── Derived KPI / insight values ───────────────────────────────────
@@ -9146,6 +9291,7 @@ async def get_courses(request: Request) -> dict[str, Any]:
                         "code": c.code,
                         "term": c.term,
                         "year": c.year,
+                        "term_id": str(c.term_id) if c.term_id else None,
                         "department": c.department,
                         "description": c.description,
                         "organization_id": c.organization_id,
@@ -9167,6 +9313,10 @@ async def get_assignments(
     course_id: str | None = None, request: Request = None
 ) -> dict[str, Any]:
     """Return assignments visible to the current user (instructor + org scoped)."""
+    from src.backend.engines.scoring.assignment_modes import (
+        recommend_mode_for_assignment_type,
+    )
+
     try:
         try:
             current_user = _require_current_user(request, admin_only=False)
@@ -9232,6 +9382,12 @@ async def get_assignments(
                         "allowed_resources": a.allowed_resources or [],
                         "settings": a.settings or {},
                         "submission_count": submission_counts.get(a.id, 0),
+                        # Detection mode + engine weights implied by the stored
+                        # assignment type, so the upload flow can recommend a
+                        # scan engine as soon as an assignment is chosen.
+                        "recommended_mode": recommend_mode_for_assignment_type(
+                            a.assignment_type
+                        ),
                     }
                     for a in assignments
                 ]
@@ -9371,6 +9527,7 @@ async def get_course_detail(course_id: str, request: Request) -> dict[str, Any]:
                 "code": course.code,
                 "term": course.term,
                 "year": course.year,
+                "term_id": str(course.term_id) if course.term_id else None,
                 "department": course.department,
                 "description": course.description,
                 "organization_id": course.organization_id,
@@ -12776,23 +12933,46 @@ def _apply_upload_engine_selection(
 
 
 def _build_fusion_weights(engine_weights: dict[str, float]) -> dict[str, float]:
+    """Translate upload/mode engine weights into the fusion scorer's keys.
+
+    Assignment-mode weight dicts name their signals differently from
+    ``UPLOAD_ENGINE_KEYS`` and from the fusion engine, so several signals used
+    to be read as ``0.0`` and silently dropped:
+
+    * ``cfg`` is the control-flow-graph signal the mode catalog assigns weight
+      to, but the fusion key is ``graph``. Without the alias every mode fed
+      the graph engine a zero.
+    * ``execution_cfg`` is the execution/control-flow behaviour signal, which
+      the fusion scorer groups with ``static_rules``.
+
+    Regression: ``graph`` and ``static_rules`` were ``0.0`` for *all six*
+    weighted modes, so no mode could actually weight the code-graph engine even
+    though the UI advertises "CFG / execution focus".
+    """
+
+    def total(*keys: str) -> float:
+        """Sum every alias that denotes the same underlying engine."""
+        return sum(_coerce_float(engine_weights.get(key)) for key in keys)
+
     fusion_weights = {
         # `token` and `fingerprint` both denote the token-level engine.
-        "fingerprint": (
-            _coerce_float(engine_weights.get("token"))
-            + _coerce_float(engine_weights.get("fingerprint"))
-        ),
-        "winnowing": _coerce_float(engine_weights.get("winnowing")),
-        "string_tiling": _coerce_float(engine_weights.get("gst")),
-        "ast": _coerce_float(engine_weights.get("ast")),
-        "ngram": _coerce_float(engine_weights.get("ngram")),
-        "graph": _coerce_float(engine_weights.get("graph")),
+        "fingerprint": total("token", "fingerprint"),
+        "winnowing": total("winnowing"),
+        "string_tiling": total("gst"),
+        "ast": total("ast"),
+        "ngram": total("ngram"),
+        # `graph` and `cfg` are both the code-graph / control-flow engine.
+        "graph": total("graph", "cfg"),
         # `semantic` and `embedding` both denote the semantic/embedding engine.
-        "embedding": (
-            _coerce_float(engine_weights.get("semantic"))
-            + _coerce_float(engine_weights.get("embedding"))
-        ),
-        "static_rules": _coerce_float(engine_weights.get("static_rules")),
+        "embedding": total("semantic", "embedding"),
+        # `static_rules` and `execution_cfg` are the behavioural/static signal.
+        "static_rules": total("static_rules", "execution_cfg"),
+        # Signals that exist in the mode catalog but have no upload toggle.
+        # They are passed through so a mode's weighting is not silently lost;
+        # the scorer ignores keys it does not consume.
+        "tree_kernel": total("tree_kernel"),
+        "web": total("web"),
+        "ai_detection": total("ai_detection"),
     }
     if not any(value > 0 for value in fusion_weights.values()):
         return {}
