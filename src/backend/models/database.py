@@ -436,11 +436,58 @@ class Organization(Base):
     reports = relationship("Report", back_populates="organization")
 
 
+class Term(Base):
+    """Academic term (e.g. ``Fall 2026``) within an organization.
+
+    A term is a first-class, organization-scoped entity so a new term can be
+    created up front and then assigned to one or more courses. The
+    ``(organization_id, name, year)`` triple is unique, which lets the same term
+    name recur across years ("Fall 2026" vs "Fall 2027") without collision.
+
+    Courses keep their denormalized ``term``/``year`` text columns in sync with
+    their ``term_id`` reference. Those columns are read by existing reporting
+    and historical-matching queries, so they are retained rather than replaced.
+    """
+
+    __tablename__ = "terms"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "name", "year", name="uq_terms_org_name_year"
+        ),
+        Index("idx_terms_organization", "organization_id"),
+        Index("idx_terms_org_year", "organization_id", "year"),
+    )
+
+    id = Column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    organization_id = Column(
+        UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
+    )
+    # Season name, e.g. "Fall", "Winter", "Spring", "Summer".
+    name = Column(String(50), nullable=False)
+    # Calendar year the term belongs to, e.g. 2026.
+    year = Column(Integer, nullable=False)
+    # Optional free-form note, e.g. "Week 6-10".
+    description = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at = Column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+    courses = relationship("Course", back_populates="term_record", lazy="dynamic")
+
+
 class Course(Base):
     """Course / course offering within an organization.
 
     A course offering is identified by ``code`` + ``term`` + ``year`` so the
     same course can repeat across academic terms and be compared historically.
+
+    ``term_id`` points at the organization-scoped :class:`Term` registry entry.
+    It is nullable so pre-registry rows keep working; when set, ``term`` and
+    ``year`` mirror the referenced term for the existing text-based queries.
     """
 
     __tablename__ = "courses"
@@ -448,6 +495,7 @@ class Course(Base):
     __table_args__ = (
         Index("idx_courses_organization", "organization_id"),
         Index("idx_courses_organization_code", "organization_id", "code"),
+        Index("idx_courses_term", "term_id"),
     )
 
     id = Column(
@@ -458,7 +506,10 @@ class Course(Base):
     )
     name = Column(String(255), nullable=False)
     code = Column(String(50), nullable=True)
-    # Academic term support
+    # Academic term support.
+    # ``term_id`` references the org-scoped terms registry; the text columns
+    # below mirror it and remain authoritative for pre-registry courses.
+    term_id = Column(UUID(as_uuid=False), ForeignKey("terms.id"), nullable=True)
     term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
     year = Column(Integer, nullable=True)
     # Course analytics metadata
@@ -472,6 +523,8 @@ class Course(Base):
 
     organization = relationship("Organization", back_populates="courses")
     assignments = relationship("Assignment", back_populates="course", lazy="dynamic")
+    # Registry entry backing the term/year text columns, when one is linked.
+    term_record = relationship("Term", back_populates="courses")
     instructors = relationship(
         "CourseInstructor", back_populates="course", lazy="dynamic"
     )
@@ -523,8 +576,16 @@ class Assignment(Base):
 
     course = relationship("Course", back_populates="assignments")
     jobs = relationship("Job", back_populates="assignment", lazy="dynamic")
+    # ``delete-orphan`` is required, not cosmetic: without it SQLAlchemy
+    # "unlinks" children on parent delete by setting their FK to NULL, which
+    # fails the NOT NULL constraint on assignment_versions.assignment_id.
+    # ``passive_deletes`` lets the database-level ON DELETE CASCADE do the work.
     versions = relationship(
-        "AssignmentVersion", back_populates="assignment", lazy="dynamic"
+        "AssignmentVersion",
+        back_populates="assignment",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -596,6 +657,11 @@ class AssignmentVersion(Base):
     __tablename__ = "assignment_versions"
 
     __table_args__ = (
+        # One row per (assignment, version). The API also checks this before
+        # inserting, but the constraint makes concurrent creates safe.
+        UniqueConstraint(
+            "assignment_id", "version", name="uq_assignment_versions_assignment_version"
+        ),
         Index("idx_assignment_versions_assignment", "assignment_id"),
         Index("idx_assignment_versions_course", "course_id"),
     )
@@ -613,15 +679,19 @@ class AssignmentVersion(Base):
         ForeignKey("courses.id", ondelete="CASCADE"),
         nullable=False,
     )
-    version = Column(Integer, nullable=False, default=1)
+    version = Column(Integer, nullable=False, default=1, server_default=text("1"))
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     starter_files = Column(JSONB, nullable=True)
-    settings = Column(JSONB, default=dict)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    is_active = Column(Boolean, default=True)
+    settings = Column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    created_at = Column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
+    )
+    is_active = Column(
+        Boolean, default=True, server_default=text("TRUE"), nullable=False
+    )
 
-    assignment = relationship("Assignment")
+    assignment = relationship("Assignment", back_populates="versions")
     course = relationship("Course")
 
 

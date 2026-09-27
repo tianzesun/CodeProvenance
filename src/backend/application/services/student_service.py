@@ -34,20 +34,29 @@ class StudentService:
         return student
 
     @staticmethod
-    def get_student_by_email(db: Session, organization_id: str, email: str) -> Optional[Student]:
+    def get_student_by_email(
+        db: Session, organization_id: str, email: str
+    ) -> Optional[Student]:
         """Get student by email within organization."""
-        return db.query(Student).filter(
-            Student.organization_id == organization_id,
-            Student.email == email
-        ).first()
+        return (
+            db.query(Student)
+            .filter(Student.organization_id == organization_id, Student.email == email)
+            .first()
+        )
 
     @staticmethod
-    def get_student_by_number(db: Session, organization_id: str, student_number: str) -> Optional[Student]:
+    def get_student_by_number(
+        db: Session, organization_id: str, student_number: str
+    ) -> Optional[Student]:
         """Get student by student number within organization."""
-        return db.query(Student).filter(
-            Student.organization_id == organization_id,
-            Student.student_number == student_number
-        ).first()
+        return (
+            db.query(Student)
+            .filter(
+                Student.organization_id == organization_id,
+                Student.student_number == student_number,
+            )
+            .first()
+        )
 
     @staticmethod
     def get_or_create_student(
@@ -64,14 +73,20 @@ class StudentService:
             return student
         # Try student number
         if student_number:
-            student = StudentService.get_student_by_number(db, organization_id, student_number)
+            student = StudentService.get_student_by_number(
+                db, organization_id, student_number
+            )
             if student:
                 return student
         # Create new
-        return StudentService.create_student(db, organization_id, email, full_name, student_number)
+        return StudentService.create_student(
+            db, organization_id, email, full_name, student_number
+        )
 
     @staticmethod
-    def enroll_student(db: Session, course_id: str, student_id: str, role: str = "student") -> Enrollment:
+    def enroll_student(
+        db: Session, course_id: str, student_id: str, role: str = "student"
+    ) -> Enrollment:
         """Enroll a student in a course."""
         enrollment = Enrollment(
             course_id=course_id,
@@ -84,12 +99,17 @@ class StudentService:
         return enrollment
 
     @staticmethod
-    def get_enrollment(db: Session, course_id: str, student_id: str) -> Optional[Enrollment]:
+    def get_enrollment(
+        db: Session, course_id: str, student_id: str
+    ) -> Optional[Enrollment]:
         """Get enrollment for student in course."""
-        return db.query(Enrollment).filter(
-            Enrollment.course_id == course_id,
-            Enrollment.student_id == student_id
-        ).first()
+        return (
+            db.query(Enrollment)
+            .filter(
+                Enrollment.course_id == course_id, Enrollment.student_id == student_id
+            )
+            .first()
+        )
 
     @staticmethod
     def get_course_enrollments(db: Session, course_id: str) -> list[Enrollment]:
@@ -117,6 +137,7 @@ class AssignmentVersionService:
         settings: Optional[dict] = None,
     ) -> "AssignmentVersion":
         from src.backend.models.database import AssignmentVersion
+
         av = AssignmentVersion(
             assignment_id=assignment_id,
             course_id=course_id,
@@ -132,24 +153,60 @@ class AssignmentVersionService:
         return av
 
     @staticmethod
-    def get_active_version(db: Session, assignment_id: str) -> Optional["AssignmentVersion"]:
+    def get_active_version(
+        db: Session, assignment_id: str
+    ) -> Optional["AssignmentVersion"]:
+        """Return the single active version of an assignment, if any."""
         from src.backend.models.database import AssignmentVersion
-        return db.query(AssignmentVersion).filter(
-            AssignmentVersion.assignment_id == assignment_id,
-            AssignmentVersion.is_active == True
-        ).first()
+
+        return (
+            db.query(AssignmentVersion)
+            .filter(
+                AssignmentVersion.assignment_id == assignment_id,
+                AssignmentVersion.is_active.is_(True),
+            )
+            .first()
+        )
 
     @staticmethod
-    def get_versions_for_course(db: Session, course_id: str) -> list["AssignmentVersion"]:
+    def get_versions_for_assignment(
+        db: Session, assignment_id: str
+    ) -> list["AssignmentVersion"]:
+        """Return every version of one assignment, newest version first."""
         from src.backend.models.database import AssignmentVersion
-        return db.query(AssignmentVersion).filter(
-            AssignmentVersion.course_id == course_id
-        ).order_by(AssignmentVersion.version.desc()).all()
+
+        return (
+            db.query(AssignmentVersion)
+            .filter(AssignmentVersion.assignment_id == assignment_id)
+            .order_by(AssignmentVersion.version.desc())
+            .all()
+        )
 
     @staticmethod
-    def get_version(db: Session, assignment_id: str, version: int) -> Optional["AssignmentVersion"]:
+    def get_versions_for_course(
+        db: Session, course_id: str
+    ) -> list["AssignmentVersion"]:
+        """Return every version belonging to one course, newest first."""
         from src.backend.models.database import AssignmentVersion
-        return db.query(AssignmentVersion).filter(
-            AssignmentVersion.assignment_id == assignment_id,
-            AssignmentVersion.version == version
-        ).first()
+
+        return (
+            db.query(AssignmentVersion)
+            .filter(AssignmentVersion.course_id == course_id)
+            .order_by(AssignmentVersion.version.desc())
+            .all()
+        )
+
+    @staticmethod
+    def get_version(
+        db: Session, assignment_id: str, version: int
+    ) -> Optional["AssignmentVersion"]:
+        from src.backend.models.database import AssignmentVersion
+
+        return (
+            db.query(AssignmentVersion)
+            .filter(
+                AssignmentVersion.assignment_id == assignment_id,
+                AssignmentVersion.version == version,
+            )
+            .first()
+        )

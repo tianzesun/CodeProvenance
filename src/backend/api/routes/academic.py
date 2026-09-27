@@ -2,12 +2,15 @@
 API routes for managing Organizations, Courses, Assignments, Students, and Enrollments.
 """
 
-from typing import Any, Optional
-from uuid import UUID
+from datetime import datetime
+from typing import Optional
+
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.backend.api.middleware.auth import get_current_tenant, require_admin
 from src.backend.config.database import get_db
@@ -15,19 +18,22 @@ from src.backend.models.database import (
     Assignment,
     AssignmentVersion,
     Course,
-    CourseInstructor,
     Enrollment,
     Organization,
     Student,
-    Tenant,
-    User,
+    Term,
 )
-from src.backend.application.services.student_service import StudentService, AssignmentVersionService
+from src.backend.application.services.student_service import (
+    StudentService,
+    AssignmentVersionService,
+)
 
 router = APIRouter(prefix="/api", tags=["academic"])
+logger = logging.getLogger(__name__)
 
 
 # ==================== Request/Response Models ====================
+
 
 class OrganizationCreate(BaseModel):
     name: str
@@ -42,6 +48,26 @@ class OrganizationResponse(BaseModel):
         from_attributes = True
 
 
+class TermCreate(BaseModel):
+    name: str
+    year: int
+    description: Optional[str] = None
+
+
+class TermResponse(BaseModel):
+    id: str
+    organization_id: str
+    name: str
+    year: int
+    label: str
+    description: Optional[str] = None
+    course_count: int = 0
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
 class CourseCreate(BaseModel):
     name: str
     code: Optional[str] = None
@@ -49,6 +75,8 @@ class CourseCreate(BaseModel):
     year: Optional[int] = None
     department: Optional[str] = None
     description: Optional[str] = None
+    # Registry term to attach. When set, ``term``/``year`` are mirrored from it.
+    term_id: Optional[str] = None
 
 
 class CourseResponse(BaseModel):
@@ -58,6 +86,7 @@ class CourseResponse(BaseModel):
     code: Optional[str]
     term: Optional[str]
     year: Optional[int]
+    term_id: Optional[str]
     created_at: str
 
     class Config:
@@ -70,6 +99,14 @@ class AssignmentCreate(BaseModel):
     version: int = 1
     due_at: Optional[str] = None
     settings: Optional[dict] = None
+    # Analytics metadata. ``assignment_type`` drives which detection mode and
+    # engine weights are recommended for the assignment (see assignment_modes).
+    assignment_type: Optional[str] = None
+    description: Optional[str] = None
+    max_score: Optional[float] = None
+    team_mode: Optional[str] = None
+    open_book: Optional[bool] = None
+    time_limited: Optional[bool] = None
 
 
 class AssignmentResponse(BaseModel):
@@ -80,6 +117,8 @@ class AssignmentResponse(BaseModel):
     version: int
     due_at: Optional[str]
     settings: Optional[dict]
+    assignment_type: Optional[str]
+    description: Optional[str]
     created_at: str
 
     class Config:
@@ -145,9 +184,205 @@ class AssignmentVersionResponse(BaseModel):
         from_attributes = True
 
 
+# ==================== Shared Academic Helpers ====================
+
+# Season display order within a year, used to sort the term registry.
+TERM_SEASON_RANK: dict[str, int] = {
+    "winter": 1,
+    "spring": 2,
+    "summer": 3,
+    "fall": 4,
+    "autumn": 4,
+}
+
+
+def term_label(name: str, year: int) -> str:
+    """Render a term as its display label, e.g. ``("Fall", 2026) -> "Fall 2026"``."""
+    return f"{name.strip().title()} {year}"
+
+
+def _term_sort_key(term: Term) -> tuple[int, int, str]:
+    """Order terms newest-first, then by season within the year.
+
+    Mirrors the frontend ordering in ``src/frontend/lib/terms.ts`` so the API
+    and UI present the same sequence. Unknown season names sort last.
+    """
+    rank = TERM_SEASON_RANK.get((term.name or "").strip().lower(), 99)
+    return (-term.year, rank, term.name or "")
+
+
+def _term_to_response(term: Term, course_count: int) -> TermResponse:
+    """Serialize a term registry row for the API."""
+    return TermResponse(
+        id=str(term.id),
+        organization_id=str(term.organization_id),
+        name=term.name,
+        year=term.year,
+        label=term_label(term.name, term.year),
+        description=term.description,
+        course_count=course_count,
+        created_at=term.created_at.isoformat() if term.created_at else "",
+    )
+
+
+def resolve_course_term(
+    db: Session,
+    organization_id: str,
+    term_id: Optional[str],
+    term_name: Optional[str],
+    year: Optional[int],
+) -> tuple[Optional[str], Optional[str], Optional[int]]:
+    """Resolve a course's term to a ``(term_id, term_name, year)`` triple.
+
+    A ``term_id`` from the org's registry wins, and its name/year are mirrored
+    onto the course. Without one, a ``(term, year)`` pair matching an existing
+    registry entry is linked to it so historical terms stay reusable; an unknown
+    pair is stored as free text with no registry link.
+
+    Raises:
+        HTTPException: 404 when ``term_id`` does not exist, 403 when it belongs
+            to another organization.
+    """
+    if term_id:
+        term = db.query(Term).filter(Term.id == term_id).first()
+        if not term:
+            raise HTTPException(status_code=404, detail="Term not found")
+        if str(term.organization_id) != str(organization_id):
+            raise HTTPException(
+                status_code=403, detail="Term belongs to another organization"
+            )
+        return str(term.id), term.name, term.year
+
+    name = (term_name or "").strip()
+    if not name or year is None:
+        return None, (name or None), year
+
+    match = (
+        db.query(Term)
+        .filter(
+            Term.organization_id == organization_id,
+            Term.year == year,
+            func.lower(Term.name) == name.lower(),
+        )
+        .first()
+    )
+    if match:
+        return str(match.id), match.name, match.year
+    return None, name, year
+
+
+# ==================== Term Routes ====================
+
+
+@router.get("/terms", response_model=list[TermResponse])
+async def list_terms(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """List the terms registered for the current user's organization."""
+    org_id = current_user.get("organization_id")
+    if not org_id:
+        return []
+
+    terms = (
+        db.query(Term)
+        .filter(Term.organization_id == org_id)
+        .order_by(Term.year.desc(), Term.name)
+        .all()
+    )
+    if not terms:
+        return []
+
+    counts = dict(
+        db.query(Course.term_id, func.count(Course.id))
+        .filter(Course.term_id.in_([t.id for t in terms]))
+        .group_by(Course.term_id)
+        .all()
+    )
+    return [
+        _term_to_response(t, int(counts.get(t.id, 0)))
+        for t in sorted(terms, key=_term_sort_key)
+    ]
+
+
+@router.post("/terms", response_model=TermResponse, status_code=status.HTTP_201_CREATED)
+async def create_term(
+    term_data: TermCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Register a new academic term for the current user's organization."""
+    org_id = current_user.get("organization_id")
+    if not org_id:
+        raise HTTPException(
+            status_code=400, detail="No organization associated with user"
+        )
+
+    name = term_data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Term name is required")
+
+    existing = (
+        db.query(Term)
+        .filter(
+            Term.organization_id == org_id,
+            Term.year == term_data.year,
+            func.lower(Term.name) == name.lower(),
+        )
+        .first()
+    )
+    if existing:
+        # Idempotent: returning the existing term (rather than a 409) lets the
+        # UI create-then-assign without a separate pre-check for conflicts.
+        return _term_to_response(existing, 0)
+
+    term = Term(
+        organization_id=org_id,
+        name=name.title(),
+        year=term_data.year,
+        description=term_data.description,
+    )
+    db.add(term)
+    db.commit()
+    db.refresh(term)
+    return _term_to_response(term, 0)
+
+
+@router.delete("/terms/{term_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_term(
+    term_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Unregister a term.
+
+    Courses keep their mirrored ``term``/``year`` text, so removing a term from
+    the registry never strips a course of its term label.
+    """
+    org_id = current_user.get("organization_id")
+    term = db.query(Term).filter(Term.id == term_id).first()
+    if not term:
+        raise HTTPException(status_code=404, detail="Term not found")
+    if org_id and str(term.organization_id) != str(org_id):
+        raise HTTPException(
+            status_code=403, detail="Term belongs to another organization"
+        )
+
+    db.query(Course).filter(Course.term_id == term_id).update(
+        {Course.term_id: None}, synchronize_session=False
+    )
+    db.delete(term)
+    db.commit()
+
+
 # ==================== Organization Routes ====================
 
-@router.post("/organizations", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/organizations",
+    response_model=OrganizationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_organization(
     org_data: OrganizationCreate,
     db: Session = Depends(get_db),
@@ -201,7 +436,12 @@ async def get_organization(
 
 # ==================== Course Routes ====================
 
-@router.post("/organizations/{org_id}/courses", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/organizations/{org_id}/courses",
+    response_model=CourseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_course(
     org_id: str,
     course_data: CourseCreate,
@@ -282,15 +522,17 @@ async def list_my_courses(
     result = []
     for c in courses:
         count = db.query(Assignment).filter(Assignment.course_id == c.id).count()
-        result.append({
-            "id": str(c.id),
-            "name": c.name,
-            "code": c.code,
-            "term": c.term,
-            "year": c.year,
-            "department": c.department,
-            "assignmentCount": count,
-        })
+        result.append(
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "code": c.code,
+                "term": c.term,
+                "year": c.year,
+                "department": c.department,
+                "assignmentCount": count,
+            }
+        )
     return result
 
 
@@ -325,14 +567,21 @@ async def create_course_for_org(
     user = getattr(request.state, "user", {}) or {}
     org_id = user.get("organization_id")
     if not org_id:
-        raise HTTPException(status_code=400, detail="No organization associated with user")
+        raise HTTPException(
+            status_code=400, detail="No organization associated with user"
+        )
+
+    term_id, term_name, year = resolve_course_term(
+        db, org_id, course_data.term_id, course_data.term, course_data.year
+    )
 
     course = Course(
         organization_id=org_id,
         name=course_data.name,
         code=course_data.code,
-        term=course_data.term,
-        year=course_data.year,
+        term_id=term_id,
+        term=term_name,
+        year=year,
         department=course_data.department,
         description=course_data.description,
     )
@@ -345,6 +594,7 @@ async def create_course_for_org(
         "code": course.code,
         "term": course.term,
         "year": course.year,
+        "term_id": str(course.term_id) if course.term_id else None,
         "department": course.department,
         "assignmentCount": 0,
     }
@@ -361,10 +611,18 @@ async def update_course_by_id(
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+    term_id, term_name, year = resolve_course_term(
+        db,
+        str(course.organization_id),
+        course_data.term_id,
+        course_data.term,
+        course_data.year,
+    )
     course.name = course_data.name
     course.code = course_data.code
-    course.term = course_data.term
-    course.year = course_data.year
+    course.term_id = term_id
+    course.term = term_name
+    course.year = year
     course.department = course_data.department
     course.description = course_data.description
     db.commit()
@@ -375,6 +633,7 @@ async def update_course_by_id(
         "code": course.code,
         "term": course.term,
         "year": course.year,
+        "term_id": str(course.term_id) if course.term_id else None,
         "department": course.department,
     }
 
@@ -393,9 +652,45 @@ async def delete_course_by_id(
     db.commit()
 
 
+def _parse_due_at(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 due date, returning ``None`` when absent or invalid.
+
+    Invalid input is tolerated (a bad date must not block assignment creation)
+    but surfaces as a warning log so the data problem is still visible.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        logger.warning("Ignoring unparseable due_at value: %r", value)
+        return None
+
+
+def _assignment_to_response(assignment: Assignment) -> AssignmentResponse:
+    """Serialize an assignment for the API."""
+    return AssignmentResponse(
+        id=str(assignment.id),
+        course_id=str(assignment.course_id),
+        name=assignment.name,
+        term=assignment.term,
+        version=assignment.version,
+        due_at=assignment.due_at.isoformat() if assignment.due_at else None,
+        settings=assignment.settings,
+        assignment_type=assignment.assignment_type or "programming",
+        description=assignment.description,
+        created_at=assignment.created_at.isoformat() if assignment.created_at else "",
+    )
+
+
 # ==================== Assignment Routes ====================
 
-@router.post("/courses/{course_id}/assignments", response_model=AssignmentResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/courses/{course_id}/assignments",
+    response_model=AssignmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_assignment(
     course_id: str,
     assignment_data: AssignmentCreate,
@@ -412,22 +707,25 @@ async def create_assignment(
         name=assignment_data.name,
         term=assignment_data.term or course.term,
         version=assignment_data.version,
-        due_at=assignment_data.due_at,
+        due_at=_parse_due_at(assignment_data.due_at),
         settings=assignment_data.settings or {},
+        assignment_type=assignment_data.assignment_type or "programming",
+        description=assignment_data.description,
+        max_score=assignment_data.max_score,
+        team_mode=assignment_data.team_mode or "individual",
+        open_book=(
+            True if assignment_data.open_book is None else assignment_data.open_book
+        ),
+        time_limited=(
+            False
+            if assignment_data.time_limited is None
+            else assignment_data.time_limited
+        ),
     )
     db.add(assignment)
     db.commit()
     db.refresh(assignment)
-    return AssignmentResponse(
-        id=str(assignment.id),
-        course_id=str(assignment.course_id),
-        name=assignment.name,
-        term=assignment.term,
-        version=assignment.version,
-        due_at=assignment.due_at.isoformat() if assignment.due_at else None,
-        settings=assignment.settings,
-        created_at=assignment.created_at.isoformat() if assignment.created_at else "",
-    )
+    return _assignment_to_response(assignment)
 
 
 @router.get("/courses/{course_id}/assignments", response_model=list[AssignmentResponse])
@@ -442,19 +740,7 @@ async def list_assignments(
     if term:
         query = query.filter(Assignment.term == term)
     assignments = query.order_by(Assignment.created_at.desc()).all()
-    return [
-        AssignmentResponse(
-            id=str(a.id),
-            course_id=str(a.course_id),
-            name=a.name,
-            term=a.term,
-            version=a.version,
-            due_at=a.due_at.isoformat() if a.due_at else None,
-            settings=a.settings,
-            created_at=a.created_at.isoformat() if a.created_at else "",
-        )
-        for a in assignments
-    ]
+    return [_assignment_to_response(a) for a in assignments]
 
 
 @router.get("/assignments/{assignment_id}", response_model=AssignmentResponse)
@@ -467,16 +753,7 @@ async def get_assignment(
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    return AssignmentResponse(
-        id=str(assignment.id),
-        course_id=str(assignment.course_id),
-        name=assignment.name,
-        term=assignment.term,
-        version=assignment.version,
-        due_at=assignment.due_at.isoformat() if assignment.due_at else None,
-        settings=assignment.settings,
-        created_at=assignment.created_at.isoformat() if assignment.created_at else "",
-    )
+    return _assignment_to_response(assignment)
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -495,7 +772,12 @@ async def delete_assignment_by_id(
 
 # ==================== Student Routes ====================
 
-@router.post("/organizations/{org_id}/students", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/organizations/{org_id}/students",
+    response_model=StudentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_student(
     org_id: str,
     student_data: StudentCreate,
@@ -510,7 +792,9 @@ async def create_student(
     # Check if student already exists
     existing = StudentService.get_student_by_email(db, org_id, student_data.email)
     if existing:
-        raise HTTPException(status_code=400, detail="Student with this email already exists")
+        raise HTTPException(
+            status_code=400, detail="Student with this email already exists"
+        )
 
     student = StudentService.create_student(
         db,
@@ -572,7 +856,12 @@ async def get_student(
 
 # ==================== Enrollment Routes ====================
 
-@router.post("/courses/{course_id}/enrollments", response_model=EnrollmentResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/courses/{course_id}/enrollments",
+    response_model=EnrollmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def enroll_student(
     course_id: str,
     enrollment_data: EnrollmentCreate,
@@ -591,7 +880,9 @@ async def enroll_student(
     # Check if already enrolled
     existing = StudentService.get_enrollment(db, course_id, enrollment_data.student_id)
     if existing:
-        raise HTTPException(status_code=400, detail="Student already enrolled in this course")
+        raise HTTPException(
+            status_code=400, detail="Student already enrolled in this course"
+        )
 
     enrollment = StudentService.enroll_student(
         db, course_id, enrollment_data.student_id, enrollment_data.role
@@ -601,7 +892,9 @@ async def enroll_student(
         course_id=str(enrollment.course_id),
         student_id=str(enrollment.student_id),
         role=enrollment.role,
-        enrolled_at=enrollment.enrolled_at.isoformat() if enrollment.enrolled_at else "",
+        enrolled_at=(
+            enrollment.enrolled_at.isoformat() if enrollment.enrolled_at else ""
+        ),
         student=StudentResponse(
             id=str(student.id),
             organization_id=str(student.organization_id),
@@ -628,21 +921,29 @@ async def list_enrollments(
     result = []
     for e in enrollments:
         student = db.query(Student).filter(Student.id == e.student_id).first()
-        result.append(EnrollmentResponse(
-            id=str(e.id),
-            course_id=str(e.course_id),
-            student_id=str(e.student_id),
-            role=e.role,
-            enrolled_at=e.enrolled_at.isoformat() if e.enrolled_at else "",
-            student=StudentResponse(
-                id=str(student.id),
-                organization_id=str(student.organization_id),
-                email=student.email,
-                full_name=student.full_name,
-                student_number=student.student_number,
-                created_at=student.created_at.isoformat() if student.created_at else "",
-            ) if student else None,
-        ))
+        result.append(
+            EnrollmentResponse(
+                id=str(e.id),
+                course_id=str(e.course_id),
+                student_id=str(e.student_id),
+                role=e.role,
+                enrolled_at=e.enrolled_at.isoformat() if e.enrolled_at else "",
+                student=(
+                    StudentResponse(
+                        id=str(student.id),
+                        organization_id=str(student.organization_id),
+                        email=student.email,
+                        full_name=student.full_name,
+                        student_number=student.student_number,
+                        created_at=(
+                            student.created_at.isoformat() if student.created_at else ""
+                        ),
+                    )
+                    if student
+                    else None
+                ),
+            )
+        )
     return result
 
 
@@ -654,10 +955,11 @@ async def remove_enrollment(
     current_user: dict = Depends(require_admin),
 ):
     """Remove a student from a course."""
-    enrollment = db.query(Enrollment).filter(
-        Enrollment.id == enrollment_id,
-        Enrollment.course_id == course_id
-    ).first()
+    enrollment = (
+        db.query(Enrollment)
+        .filter(Enrollment.id == enrollment_id, Enrollment.course_id == course_id)
+        .first()
+    )
     if not enrollment:
         raise HTTPException(status_code=404, detail="Enrollment not found")
     db.delete(enrollment)
@@ -667,7 +969,12 @@ async def remove_enrollment(
 
 # ==================== Assignment Version Routes ====================
 
-@router.post("/assignments/{assignment_id}/versions", response_model=AssignmentVersionResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/assignments/{assignment_id}/versions",
+    response_model=AssignmentVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_assignment_version(
     assignment_id: str,
     version_data: AssignmentVersionCreate,
@@ -680,15 +987,19 @@ async def create_assignment_version(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     # Check if version already exists
-    existing = AssignmentVersionService.get_version(db, assignment_id, version_data.version)
+    existing = AssignmentVersionService.get_version(
+        db, assignment_id, version_data.version
+    )
     if existing:
-        raise HTTPException(status_code=400, detail=f"Version {version_data.version} already exists")
+        raise HTTPException(
+            status_code=400, detail=f"Version {version_data.version} already exists"
+        )
 
     # Deactivate other versions if this is the new active one
     if version_data.settings and version_data.settings.get("is_active"):
         db.query(AssignmentVersion).filter(
             AssignmentVersion.assignment_id == assignment_id,
-            AssignmentVersion.is_active == True
+            AssignmentVersion.is_active.is_(True),
         ).update({"is_active": False})
 
     av = AssignmentVersionService.create_version(
@@ -715,14 +1026,17 @@ async def create_assignment_version(
     )
 
 
-@router.get("/assignments/{assignment_id}/versions", response_model=list[AssignmentVersionResponse])
+@router.get(
+    "/assignments/{assignment_id}/versions",
+    response_model=list[AssignmentVersionResponse],
+)
 async def list_assignment_versions(
     assignment_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
     """List all versions of an assignment."""
-    versions = AssignmentVersionService.get_versions_for_course(db, assignment_id)
+    versions = AssignmentVersionService.get_versions_for_assignment(db, assignment_id)
     return [
         AssignmentVersionResponse(
             id=str(v.id),
@@ -740,7 +1054,10 @@ async def list_assignment_versions(
     ]
 
 
-@router.get("/assignments/{assignment_id}/versions/active", response_model=Optional[AssignmentVersionResponse])
+@router.get(
+    "/assignments/{assignment_id}/versions/active",
+    response_model=Optional[AssignmentVersionResponse],
+)
 async def get_active_assignment_version(
     assignment_id: str,
     db: Session = Depends(get_db),
