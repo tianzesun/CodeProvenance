@@ -4,25 +4,265 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
   Bot,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
+  Database,
+  Eye,
   FileText,
-  FlaskConical,
+  Fingerprint,
+  GitCompare,
+  History,
   LayoutDashboard,
   LogOut,
   Menu,
   MoonStar,
   PlusCircle,
+  Scale,
+  ScrollText,
   Settings,
   Shield,
   ShieldCheck,
   SunMedium,
   X,
+  type LucideIcon,
 } from 'lucide-react';
+
+/** Roles a nav item can be visible to. Mirrors ``AuthRole`` in AuthProvider. */
+export type NavRole = 'admin' | 'professor';
+
+export interface NavItem {
+  /** Route to link to. */
+  href: string;
+  /** Single label used for every role — divergence between roles is avoided. */
+  label: string;
+  icon: LucideIcon;
+  /**
+   * Additional path prefixes that should also mark this item active.
+   * Needed for nested routes (e.g. /ai-detector/accuracy under /ai-detector).
+   */
+  activeOn?: string[];
+  /** Roles allowed to see and reach this item. */
+  roles: NavRole[];
+  /**
+   * Marks items that are core to the daily loop. Used to decide what stays
+   * visible when the rail is collapsed to icons on short viewports.
+   */
+  primary?: boolean;
+}
+
+export interface NavGroup {
+  /** Section heading. Hidden entirely when the group has no visible items. */
+  title: string;
+  items: NavItem[];
+}
+
+/**
+ * Single source of truth for the sidebar and for route access.
+ *
+ * Grouping is by workflow stage rather than by owning team, so the rail reads
+ * as "what am I doing" instead of "which squad built it":
+ *
+ *   - Teaching / Academic   — run a check, review its output
+ *   - Insights              — understand outcomes over time
+ *   - Engine & Validation   — prove the detector behaves
+ *   - Administration       — manage the workspace
+ *
+ * `roles` is an explicit allowlist rather than nested role ternaries, so adding
+ * a role (TA, department head) is a one-token change per item instead of
+ * restructuring every group.
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    // Dashboard sits outside the groups: it is the universal landing page, not
+    // a workflow stage, and it should read as a distinct "home" affordance.
+    title: 'Overview',
+    items: [
+      {
+        href: '/',
+        label: 'Dashboard',
+        icon: LayoutDashboard,
+        // "/" is a prefix of every path, so active state is handled explicitly
+        // in the render (exact match only) rather than by prefix matching.
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+    ],
+  },
+  {
+    title: 'Teaching',
+    items: [
+      {
+        href: '/upload',
+        label: 'Plagiarism Checker',
+        icon: PlusCircle,
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+      {
+        href: '/history',
+        label: 'Check History',
+        icon: History,
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+      {
+        href: '/ai-detector',
+        label: 'AI Code Review',
+        icon: Bot,
+        // /ai-detector/accuracy is a separate nav item, so it must not light
+        // up the parent entry.
+        activeOn: ['/ai-detector'],
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+      {
+        href: '/cases',
+        label: 'My Cases',
+        icon: Scale,
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+      {
+        href: '/courses',
+        label: 'Courses & Assignments',
+        icon: BookOpen,
+        roles: ['professor', 'admin'],
+        primary: true,
+      },
+    ],
+  },
+  {
+    title: 'Insights',
+    items: [
+      {
+        href: '/analytics',
+        label: 'Analytics',
+        icon: BarChart3,
+        roles: ['admin'],
+        primary: true,
+      },
+      {
+        href: '/reports',
+        label: 'Reports',
+        icon: ScrollText,
+        roles: ['admin'],
+      },
+      {
+        href: '/assignments',
+        label: 'Assignments',
+        icon: FileText,
+        roles: ['admin'],
+      },
+      {
+        href: '/historical-fingerprint',
+        label: 'Historical Fingerprints',
+        icon: Fingerprint,
+        roles: ['admin'],
+      },
+      {
+        href: '/cluster-detection',
+        label: 'Cluster Detection',
+        icon: GitCompare,
+        roles: ['admin'],
+      },
+      {
+        href: '/evidence-view',
+        label: 'Evidence Viewer',
+        icon: Eye,
+        roles: ['admin'],
+      },
+      {
+        href: '/error-analysis',
+        label: 'Error Analysis',
+        icon: AlertTriangle,
+        roles: ['admin'],
+      },
+    ],
+  },
+  {
+    title: 'Engine & Validation',
+    items: [
+      {
+        href: '/benchmark',
+        label: 'Benchmark',
+        icon: ShieldCheck,
+        roles: ['admin'],
+      },
+      {
+        href: '/compare-tools',
+        label: 'Compare Tools',
+        icon: GitCompare,
+        roles: ['admin'],
+      },
+      {
+        href: '/tools/fpr-validation',
+        label: 'FPR Validation',
+        icon: Scale,
+        roles: ['admin'],
+      },
+      {
+        href: '/ai-detector/accuracy',
+        label: 'AI Accuracy',
+        icon: Bot,
+        roles: ['admin'],
+      },
+      {
+        href: '/datasets',
+        label: 'Datasets',
+        icon: Database,
+        roles: ['admin'],
+      },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      {
+        href: '/admin',
+        label: 'Users',
+        icon: Shield,
+        roles: ['admin'],
+      },
+      {
+        href: '/settings',
+        label: 'Settings',
+        icon: Settings,
+        roles: ['professor', 'admin'],
+      },
+    ],
+  },
+];
+
+/**
+ * Flat list of every route a role may reach, longest prefix first.
+ *
+ * ``DashboardLayout`` uses this to gate navigation instead of maintaining a
+ * separate hand-written allowlist that drifts out of sync with the sidebar.
+ */
+export function routesForRole(role: NavRole | undefined): string[] {
+  if (!role) return [];
+  return [
+    '/',
+    ...NAV_GROUPS.flatMap((group) =>
+      group.items
+        .filter((item) => item.roles.includes(role))
+        .map((item) => item.href),
+    ),
+  ].sort((a, b) => b.length - a.length);
+}
+
+/** True when ``path`` is reachable by ``role``. */
+export function canRoleAccessPath(role: NavRole | undefined, path: string | null): boolean {
+  if (!role || !path) return false;
+  return routesForRole(role).some(
+    (route) => path === route || (route !== '/' && path.startsWith(`${route}/`)),
+  );
+}
+
 
 import { useAuth } from '@/components/AuthProvider';
 import { useTheme } from '@/components/ThemeProvider';
@@ -41,124 +281,13 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-width', collapsed ? '80px' : '288px');
   }, [collapsed]);
 
-    const isProfessor = user?.role === 'professor';
-
-    const navGroups = [
-    {
-      title: 'ACADEMIC',
-      items: [
-        {
-          href: '/',
-          label: 'Dashboard',
-          icon: LayoutDashboard,
-          activeOn: ['/'],
-        },
-        {
-          href: '/upload',
-          label: 'Plagiarism Checker',
-          icon: PlusCircle,
-          activeOn: ['/upload'],
-        },
-        ...(isProfessor
-          ? [
-            {
-              href: '/ai-detector',
-              label: 'AI-Generated Code Review',
-              icon: Bot,
-              activeOn: ['/ai-detector'],
-            },
-          ]
-          : [
-            {
-              href: '/ai-detector',
-              label: 'AI Detector',
-              icon: Bot,
-              activeOn: ['/ai-detector'],
-            },
-          ]),
-      ],
-    },
-    ...(isProfessor
-      ? [
-        {
-          title: 'TEACHING',
-          items: [
-            {
-              href: '/courses',
-              label: 'Courses & Assignments',
-              icon: BookOpen,
-              activeOn: ['/courses'],
-            },
-          ],
-        },
-      ]
-      : []),
-    ...(!isProfessor
-      ? [
-        {
-          title: 'ENGINE & R&D',
-          items: [
-            ...(user?.role === 'admin'
-              ? [
-                {
-                  href: '/benchmark',
-                  label: 'Benchmark',
-                  icon: ClipboardList,
-                  activeOn: ['/benchmark'],
-                },
-                {
-                  href: '/tools/fpr-validation',
-                  label: 'Real-World FPR Validation',
-                  icon: ShieldCheck,
-                  activeOn: ['/tools/fpr-validation'],
-                },
-                {
-                  href: '/ai-detector/accuracy',
-                  label: 'AI Accuracy',
-                  icon: FlaskConical,
-                  activeOn: ['/ai-detector/accuracy'],
-                },
-              ]
-              : []),
-            {
-              href: '/analytics',
-              label: 'Analytics',
-              icon: BarChart3,
-              activeOn: ['/analytics'],
-            },
-          ],
-        },
-        {
-          title: 'MANAGEMENT',
-          items: [
-            {
-              href: '/reports',
-              label: 'Reports',
-              icon: FileText,
-              activeOn: ['/reports'],
-            },
-            {
-              href: '/settings',
-              label: 'Settings',
-              icon: Settings,
-              activeOn: ['/settings'],
-            },
-            ...(user?.role === 'admin'
-              ? [
-                {
-                  href: '/admin',
-                  label: 'Users',
-                  icon: Shield,
-                  activeOn: ['/admin'],
-                },
-              ]
-              : []),
-          ],
-        },
-      ]
-      : []
-    ),
-  ];
+  // Nav is derived from the shared config rather than rebuilt with nested role
+  // ternaries, so visibility and route access stay in sync by construction.
+  const role = (user?.role ?? undefined) as NavRole | undefined;
+  const navGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => role && item.roles.includes(role)),
+  })).filter((group) => group.items.length > 0);
 
   const handleLogout = async () => {
     if (loggingOut) return; // Prevent multiple logout attempts
@@ -216,7 +345,15 @@ export default function Sidebar() {
 
         </div>
 
-        <nav className={`scrollbar-thin flex-1 overflow-y-auto py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}>
+        {/* min-h-0 lets the flex child actually shrink below its content height
+            so overflow-y-auto engages; without it a tall nav list pushes the
+            whole aside past the viewport instead of scrolling internally.
+            overscroll-behavior keeps the wheel from chaining to the page. */}
+        <nav
+          className={`scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain py-8 transition-all duration-300 ${collapsed ? 'px-2' : 'px-4'}`}
+          tabIndex={0}
+          aria-label="Main navigation"
+        >
           <div className={`space-y-6 ${collapsed ? 'flex flex-col items-center' : ''}`}>
             {navGroups.map((group) => (
               <div key={group.title} className="space-y-2">
@@ -226,7 +363,16 @@ export default function Sidebar() {
                   </div>
                 )}
                 {group.items.map((item) => {
-                  const active = item.activeOn?.some((path) => path === pathname || (path !== '/' && pathname?.startsWith(path)));
+                  // "/" is a prefix of every path, so the Dashboard entry
+                  // matches exactly while other entries match on segment prefix.
+                  const active = item.activeOn
+                    ? item.activeOn.some(
+                        (path) =>
+                          path === pathname ||
+                          (path !== '/' && pathname?.startsWith(`${path}/`)),
+                      )
+                    : item.href === pathname ||
+                      pathname?.startsWith(`${item.href}/`);
 
                   return (
                     <Link

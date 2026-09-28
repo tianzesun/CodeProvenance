@@ -2353,7 +2353,10 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
   const pageTitle = modeScope === 'comparison' ? 'Compare Tools' : 'Benchmark';
   const PageIcon = modeScope === 'comparison' ? GitCompare : FlaskConical;
   return (
-    <DashboardLayout modeScope="benchmark" requiredRole={modeScope === 'benchmark' ? 'admin' : undefined}>
+    // Both scopes are admin-only tools. The gate used to be conditional
+    // (`modeScope === 'benchmark' ? 'admin' : undefined`), which left
+    // /compare-tools ungated and relied solely on the professor route redirect.
+    <DashboardLayout requiredRole="admin">
       <div className="theme-page-container">
         <div className="space-y-6">
           {/* ── Page header ─────────────────────────────────────────────── */}

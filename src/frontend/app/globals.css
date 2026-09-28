@@ -116,8 +116,35 @@ main {
   100% { background-position: 200% 0; }
 }
 
+/* Settings category tabs: cross-fade + short lift for the panel content. */
+@keyframes tabContentIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out both;
+}
+
+.animate-tab-content {
+  animation: tabContentIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Sliding pill behind the active settings category tab. */
+.settings-tab-indicator {
+  transition:
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, width;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-tab-content,
+  .settings-tab-indicator {
+    animation: none;
+    transition: none;
+  }
 }
 
 .animate-slide-in {

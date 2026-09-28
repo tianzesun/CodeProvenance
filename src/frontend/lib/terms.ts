@@ -88,3 +88,23 @@ export function buildTermOptions<T extends TermCourse>(courses: T[]): TermOption
     count: counts.get(value) ?? 0,
   }));
 }
+
+/** A term registered for the organization via the terms API. */
+export interface Term {
+  id: string;
+  name: string;
+  year: number;
+  label: string;
+  description?: string | null;
+  course_count?: number;
+}
+
+/**
+ * Build a label for a term the same way the backend does, so a term shown in
+ * the registry matches the label derived from a course's term/year text.
+ */
+export function buildTermLabel(name: string, year: number): string {
+  const season = name.trim();
+  const titled = season ? season[0].toUpperCase() + season.slice(1).toLowerCase() : season;
+  return `${titled} ${year}`;
+}

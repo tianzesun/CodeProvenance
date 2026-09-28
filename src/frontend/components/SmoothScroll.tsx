@@ -16,6 +16,13 @@ export default function SmoothScroll({ children }: SmoothScrollProps) {
       gestureOrientation: 'vertical',
       smoothWheel: true,
       touchMultiplier: 2,
+      // Lenis intercepts every wheel event and calls preventDefault. Without
+      // this, wheel scrolling is swallowed anywhere inside a nested scrollable
+      // region (e.g. the sidebar's nav list), leaving the user to drag the
+      // scrollbar. With it, Lenis yields to any inner scroller that can still
+      // move in the wheel direction, and only takes over once that region hits
+      // its edge — so the sidebar scrolls natively and still chains to the page.
+      allowNestedScroll: true,
     });
     let frameId = 0;
 

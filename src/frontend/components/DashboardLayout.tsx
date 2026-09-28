@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
 import { useTheme } from '@/components/ThemeProvider';
-import Sidebar from '@/components/Sidebar';
+import Sidebar, { canRoleAccessPath, type NavRole } from '@/components/Sidebar';
 import SkeletonLoader from '@/components/SkeletonLoader';
 import { SunMedium, MoonStar } from 'lucide-react';
 
@@ -25,20 +25,19 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   const lastRedirectRef = useRef<string | null>(null);
 
   // Routes visible to the professor role. Professors focus on plagiarism
-  // checks (single + whole-class) and AI-generated code review only.
-  const PROFESSOR_ROUTES = [
-    '/',
-    '/upload',
-    '/ai-detector',
-    '/courses',
-    '/results',
-  ];
+  // checks (single + whole-class), AI-generated code review, and reviewing
+  // flagged cases.
+  //
+  // Access is derived from the shared nav config in Sidebar.tsx so the route
+  // gate and the sidebar cannot drift apart. Detail views that are reached by
+  // drilling in (rather than from the rail) stay reachable under their owning
+  // section.
+  const DETAIL_ROUTE_PREFIXES = ['/results', '/dossier'];
 
   const isProfessorRouteAllowed = (path: string | null): boolean => {
     if (!path) return false;
-    if (path === '/') return true;
-    // Exact match or a nested route under an allowed section.
-    return PROFESSOR_ROUTES.some((route) => route !== '/' && (path === route || path.startsWith(`${route}/`)));
+    if (canRoleAccessPath('professor' as NavRole, path)) return true;
+    return DETAIL_ROUTE_PREFIXES.some((prefix) => path.startsWith(`${prefix}/`));
   };
 
   const professorBlocked = Boolean(

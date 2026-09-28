@@ -41,6 +41,31 @@ const UPLOAD_ENGINE_OPTIONS = [
   { key: 'ai_detection', label: 'AI Detection' },
 ];
 
+/**
+ * Engine key -> human label, for rendering server-side recommendations.
+ * Covers every key an assignment-mode weight dict can use, which is a superset
+ * of the upload toggles (e.g. execution_cfg and fingerprint are weight-only
+ * signals that have no toggle).
+ */
+const ENGINE_LABELS: Record<string, string> = {
+  ...Object.fromEntries(UPLOAD_ENGINE_OPTIONS.map((o) => [o.key, o.label])),
+  ast: 'AST',
+  cfg: 'Control Flow',
+  execution_cfg: 'Execution Flow',
+  fingerprint: 'Fingerprint',
+  graph: 'Code Graph',
+  ngram: 'N-gram',
+  static_rules: 'Static Rules',
+  web: 'Web Matching',
+  ai_detection: 'AI Detection',
+  semantic: 'Semantic',
+  embedding: 'Embedding',
+  token: 'Token',
+  winnowing: 'Winnowing',
+  gst: 'GST',
+  tree_kernel: 'Tree Kernel',
+};
+
 const ASSIGNMENT_TYPE_OPTIONS = [
   {
     id: 'auto_detect',
@@ -210,7 +235,20 @@ export default function UploadPage() {
 
   // Course / assignment picker (options are read from the database)
   type Course = { id: string; name: string; code?: string; assignment_count?: number };
-  type Assignment = { id: string; name: string; assignment_type?: string };
+  type RecommendedMode = {
+    matched: boolean;
+    mode_id: string | null;
+    mode_name: string | null;
+    engine_weights: Record<string, number>;
+    top_engines: { key: string; weight: number }[];
+    reason: string;
+  };
+  type Assignment = {
+    id: string;
+    name: string;
+    assignment_type?: string;
+    recommended_mode?: RecommendedMode | null;
+  };
   const [courses, setCourses] = useState<Course[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [coursesError, setCoursesError] = useState(false);
@@ -430,6 +468,26 @@ export default function UploadPage() {
       .finally(() => { setAssignmentsLoading(false); });
   }, [selectedCourseId]);
 
+  // Recommendation for the chosen assignment, derived server-side from its
+  // stored assignment_type. Null until a course + assignment are picked, and
+  // also null when the stored type has no engine-weight-backed mode.
+  const selectedAssignment = useMemo(
+    () => assignments.find((a) => a.id === selectedAssignmentId) ?? null,
+    [assignments, selectedAssignmentId],
+  );
+  const recommendedMode = selectedAssignment?.recommended_mode ?? null;
+
+  // Apply the recommendation so the scan actually uses it rather than merely
+  // displaying it. Guarded per-assignment so re-renders do not fight the
+  // professor's own choice made afterwards in Advanced detection settings.
+  const appliedRecommendationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!recommendedMode?.matched || !recommendedMode.mode_id) return;
+    if (appliedRecommendationRef.current === selectedAssignmentId) return;
+    setSelectedAssignmentModeId(recommendedMode.mode_id);
+    appliedRecommendationRef.current = selectedAssignmentId;
+  }, [recommendedMode, selectedAssignmentId]);
+
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
     const f = Array.from(e.dataTransfer.files);
@@ -635,38 +693,6 @@ export default function UploadPage() {
             </div>
           )}
 
-          {/* External Source Scan status + per-submission control */}
-          <div className="mb-4">
-            <div className="rounded-2xl bg-white p-5 overflow-hidden" style={cardShadow}>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500">External Source Scan:</span>
-                  {tenantExternalScanEnabled === true ? (
-                    <span className="font-medium text-emerald-700">
-                      Enabled ({configuredSourceCount} source{configuredSourceCount === 1 ? '' : 's'})
-                    </span>
-                  ) : tenantExternalScanEnabled === false ? (
-                    <span className="font-medium text-amber-700">Disabled</span>
-                  ) : (
-                    <span className="text-slate-400">Loading…</span>
-                  )}
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={sourceScanEnabled}
-                    onChange={(e) => setSourceScanEnabled(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>Scan for this submission</span>
-                </label>
-
-                <a href="/settings" className="text-xs text-blue-600 hover:underline">Manage in Settings → External Sources</a>
-              </div>
-            </div>
-          </div>
-
           {/* Course & Assignment Picker */}
           <div className="rounded-2xl bg-white p-5" style={cardShadow}>
             <div className="flex items-center gap-2 mb-4">
@@ -736,6 +762,63 @@ export default function UploadPage() {
                 </select>
               </div>
             </div>
+
+            {/* Recommended scan engine — appears once a course and assignment are
+                chosen, so the professor can confirm the detection strategy
+                before uploading rather than after. */}
+            {recommendedMode?.matched && recommendedMode.mode_id && (
+              <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3.5">
+                <div className="flex flex-wrap items-start gap-3">
+                  <SearchCheck size={15} className="mt-0.5 shrink-0 text-blue-600" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-semibold text-slate-900">
+                        Recommended scan engine
+                      </span>
+                      <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        {recommendedMode.mode_name}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      {selectedAssignment?.name} is stored as{' '}
+                      <span className="font-medium">
+                        {selectedAssignment?.assignment_type?.replace(/_/g, ' ') ?? 'programming'}
+                      </span>
+                      , so this detection strategy and its engine weighting were selected
+                      automatically.
+                    </p>
+                    {recommendedMode.top_engines.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          Key engines
+                        </span>
+                        {recommendedMode.top_engines.map((engine) => (
+                          <span
+                            key={engine.key}
+                            className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-blue-200"
+                          >
+                            {ENGINE_LABELS[engine.key] ?? engine.key}
+                            <span className="ml-1 text-slate-400">
+                              {Math.round(engine.weight * 100)}%
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const details = document.getElementById('advanced-detection');
+                        if (details instanceof HTMLDetailsElement) details.open = true;
+                      }}
+                      className="mt-2 text-xs font-medium text-blue-700 hover:underline"
+                    >
+                      Change engine weights →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Upload Cards */}
@@ -1037,13 +1120,42 @@ export default function UploadPage() {
           </div>
 
           {/* Config */}
-          <details className="rounded-2xl bg-white p-5" style={cardShadow}>
+          <details id="advanced-detection" className="rounded-2xl bg-white p-5" style={cardShadow}>
             <summary className="cursor-pointer text-sm font-semibold text-slate-800">
               Advanced detection settings
             </summary>
             <p className="mt-2 text-sm text-slate-500">
               Defaults are recommended for professors. Adjust engine weights for your specific assignment type.
             </p>
+
+            {/* External Source Scan moved out of the main flow into advanced
+                settings: it is a per-submission opt-in that most professors
+                never change, so it should not compete with the primary
+                upload/analysis controls. */}
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3.5">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sourceScanEnabled}
+                  onChange={(e) => setSourceScanEnabled(e.target.checked)}
+                  disabled={tenantExternalScanEnabled === false}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-800">
+                    External Source Scan
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+                    {tenantExternalScanEnabled === false
+                      ? 'Disabled for this workspace. A tenant administrator can enable it in Settings → External Sources.'
+                      : tenantExternalScanEnabled === true
+                        ? `Check public sources for this submission (${configuredSourceCount} source${configuredSourceCount === 1 ? '' : 's'} configured).`
+                        : 'Checking public sources for this submission.'}
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
 
               {/* Assignment Type - Left side */}

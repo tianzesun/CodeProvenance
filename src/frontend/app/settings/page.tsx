@@ -3,7 +3,7 @@
 'use client';
 
 import React from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { apiClient } from '@/lib/apiClient';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -17,7 +17,6 @@ import {
   ExternalLink,
   FileCog,
   FolderTree,
-  GitMerge,
   Landmark,
   Loader2,
   RefreshCw,
@@ -72,10 +71,34 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
 
 // 4 main categories - each shows all sections on one page
 const MAIN_TABS = [
-  { id: 'detection', label: 'Detection Settings', icon: FolderTree },
-  { id: 'intelligence', label: 'AI & Evidence', icon: Brain },
-  { id: 'workflow', label: 'Review & Workflow', icon: Workflow },
-  { id: 'system', label: 'System Settings', icon: Server },
+  {
+    id: 'detection',
+    label: 'Detection Settings',
+    icon: FolderTree,
+    description:
+      'Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically.',
+  },
+  {
+    id: 'intelligence',
+    label: 'AI & Evidence',
+    icon: Brain,
+    description:
+      'Configure AI-generated code detection, embedding models, and the evidence sources used to support each finding.',
+  },
+  {
+    id: 'workflow',
+    label: 'Review & Workflow',
+    icon: Workflow,
+    description:
+      'Set how aggressively submissions are flagged, how starter code and prior terms are handled, and how much review load to surface.',
+  },
+  {
+    id: 'system',
+    label: 'System Settings',
+    icon: Server,
+    description:
+      'Manage integration credentials, webhooks, email delivery, storage limits, and audit logging for this workspace.',
+  },
 ];
 
 export default function SettingsPage() {
@@ -93,6 +116,47 @@ export default function SettingsPage() {
   const [showCalibrateConfirm, setShowCalibrateConfirm] = useState<boolean>(false);
   const [testingEmail, setTestingEmail] = useState<boolean>(false);
   const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Sliding active-tab indicator. Measured from the tab list so the pill stays
+  // aligned on wrap, resize, and font load.
+  const tabListRef = useRef<HTMLDivElement | null>(null);
+  const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState<{ x: number; width: number } | null>(null);
+
+  const syncIndicator = useCallback(() => {
+    const list = tabListRef.current;
+    const button = tabButtonRefs.current[activeTab];
+    if (!list || !button) return;
+    const listBox = list.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    // Ignore zero-size measurements (hidden/collapsed container) so we never
+    // park the pill at 0px and lose the active tab's background.
+    if (buttonBox.width === 0 || listBox.width === 0) return;
+    setIndicator({ x: buttonBox.left - listBox.left, width: buttonBox.width });
+  }, [activeTab]);
+
+  // Measure on mount and on every active-tab change. useLayoutEffect alone
+  // missed the first paint because the tab bar mounts only after the settings
+  // request resolves, and a missed measurement left the active tab invisible
+  // until the user clicked another tab.
+  useLayoutEffect(() => {
+    syncIndicator();
+    // Re-measure once webfonts settle, since a font swap reflows the labels.
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      let cancelled = false;
+      document.fonts.ready.then(() => {
+        if (!cancelled) syncIndicator();
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [syncIndicator]);
+
+  useEffect(() => {
+    window.addEventListener('resize', syncIndicator);
+    return () => window.removeEventListener('resize', syncIndicator);
+  }, [syncIndicator]);
 
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     systemLimits: true,
@@ -123,6 +187,7 @@ export default function SettingsPage() {
   const profile = settings?.professor_profile || DEFAULT_PROFILE;
   const catalog = settings?.professor_profile_catalog || {};
   const applied = settings?.applied_professor_profile || {};
+  const activeTabInfo = MAIN_TABS.find((tab) => tab.id === activeTab);
 
   const updateSetting = (key: string, value: unknown) => {
     setSettings((current: Settings | null) => ({ ...(current || {}), [key]: value } as Settings));
@@ -364,11 +429,12 @@ export default function SettingsPage() {
   return (
     <DashboardLayout requiredRole="admin">
       <div className="theme-page-container space-y-6">
-        {/* Header */}
+        {/* Header - title and description follow the active category so the page
+            does not keep claiming "Detection Settings" on every tab. */}
         <PageHeader
           eyebrow="Settings"
-          title="Detection Settings"
-          description="Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically."
+          title={activeTabInfo?.label ?? 'Settings'}
+          description={activeTabInfo?.description ?? ''}
           action={
             <button
               type="button"
@@ -389,14 +455,29 @@ export default function SettingsPage() {
 
         {/* Main Tab Navigation */}
         <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Settings Categories</div>
-        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm mb-6">
+        <div className="relative flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm mb-6" ref={tabListRef}>
+          {indicator && (
+            <span
+              aria-hidden="true"
+              className="settings-tab-indicator absolute top-2 bottom-2 left-0 rounded-lg bg-blue-600 shadow-lg shadow-blue-500/15"
+              style={{ transform: `translateX(${indicator.x}px)`, width: indicator.width }}
+            />
+          )}
           {MAIN_TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
+              ref={(node) => { tabButtonRefs.current[tab.id] = node; }}
               onClick={() => setActiveTab(tab.id)}
-              className={`inline-flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${activeTab === tab.id
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/15'
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              // Until the sliding pill has been measured it is not rendered, so
+              // the active tab carries its own background. Without this the
+              // active label was white text on a white card and looked missing
+              // on first paint; the pill then only refines the styling.
+              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 ${activeTab === tab.id
+                ? indicator
+                  ? 'text-white'
+                  : 'bg-blue-600 text-white shadow-lg shadow-blue-500/15'
                 : 'text-slate-600 hover:bg-slate-50'
                 }`}
             >
@@ -406,8 +487,9 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {/* Tab Content - All sections shown per category */}
-        <div className="space-y-8">
+        {/* Tab Content - All sections shown per category. Keyed on activeTab so
+            the entrance animation replays on every category switch. */}
+        <div key={activeTab} className="animate-tab-content space-y-8">
           {/* DETECTION SETTINGS */}
           {activeTab === 'detection' && (
             <div className="space-y-6">
@@ -752,19 +834,6 @@ export default function SettingsPage() {
           {/* REVIEW & WORKFLOW */}
           {activeTab === 'workflow' && (
             <div className="space-y-6">
-              {/* Assignment Type */}
-              <SettingsGroup
-                title="Assignment Type"
-                description="Auto Detect is recommended. It automatically chooses the right rules based on your assignment language, size, notebooks, starter code, and tests."
-                icon={GitMerge}
-              >
-                <OptionGrid
-                  options={catalog.assignment_types || []}
-                  value={profile.assignment_type}
-                  onChange={(value) => updateProfile('assignment_type', value)}
-                />
-              </SettingsGroup>
-
               {/* Sensitivity & Detection Profile */}
               <SettingsGroup
                 title="Sensitivity & Threshold"
@@ -918,10 +987,6 @@ export default function SettingsPage() {
                   <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="text-sm font-semibold text-slate-950">Profile Quick Stats</div>
                     <div className="mt-3 space-y-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Assignment Type</span>
-                        <span className="font-semibold text-slate-900 capitalize">{profile.assignment_type?.replace(/_/g, ' ') || 'Auto'}</span>
-                      </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">Sensitivity</span>
                         <span className="font-semibold text-slate-900">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
@@ -1267,25 +1332,6 @@ function SettingsGroup({ title, description, children, icon: Icon }: { title: st
       </div>
       <div className="mt-4">{children}</div>
     </section>
-  );
-}
-
-function OptionGrid({ options, value, onChange }: { options: { id: string; label: string; description: string }[]; value: string; onChange: (id: string) => void }) {
-  return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          className={`rounded-xl border p-4 text-left transition ${value === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
-            }`}
-        >
-          <div className="text-sm font-semibold text-slate-950">{option.label}</div>
-          <div className="mt-1 text-sm leading-5 text-slate-500">{option.description}</div>
-        </button>
-      ))}
-    </div>
   );
 }
 
