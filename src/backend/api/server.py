@@ -187,13 +187,18 @@ setup_default_keys()
 app.add_middleware(AuthMiddleware, excluded_paths=list(AUTH_EXEMPT_PATHS))
 
 # Include cases and users routers
+#
+# NOTE: `academic.router` and `settings_router.router` already declare their own
+# `prefix` ("/api" and "/api/settings"), so they are mounted WITHOUT an extra
+# `prefix="/api"` below; doing that produced /api/api/... paths and those
+# endpoints 404'd from the frontend (including /api/terms).
+#
+# They are mounted at the very bottom of this module (see _mount_secondary_
+# routers) so that the canonical handlers defined in server.py keep precedence
+# on the paths both definitions share.
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
-app.include_router(settings_router.router, prefix="/api")
-from src.backend.api.routes import academic as academic_router  # noqa: E402
-
-app.include_router(academic_router.router, prefix="/api")
 # Public REST API (documented in docs/product/API_REFERENCE.md). Submissions
 # are processed by the same background pipeline as the upload flow.
 from src.backend.api.routes import analyze as analyze_router  # noqa: E402
@@ -16466,6 +16471,25 @@ async def get_integrity_assessment_report(
         f'attachment; filename="integrity_report_{job_id}.pdf"'
     )
     return response
+
+
+# ==================== Secondary router mounting ====================
+# These two routers already carry their own `prefix`, so they are mounted here
+# without an extra "/api" (which previously produced /api/api/... paths that the
+# frontend could not reach). They are mounted last, at the end of the module, so
+# that the canonical handlers defined above in server.py keep precedence on the
+# handful of paths both definitions share (GET /api/courses, the settings
+# calibration/validation endpoints). FastAPI matches the first registered route.
+def _mount_secondary_routers() -> None:
+    """Mount routers that must not shadow server.py's own route definitions."""
+    from src.backend.api.routes import academic as academic_router
+    from src.backend.api.routes import settings as settings_module
+
+    app.include_router(settings_module.router)
+    app.include_router(academic_router.router)
+
+
+_mount_secondary_routers()
 
 
 def main():

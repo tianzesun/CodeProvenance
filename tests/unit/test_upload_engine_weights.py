@@ -166,3 +166,68 @@ def test_empty_weights_still_return_empty_mapping() -> None:
     """All-zero input must keep returning {} (the scorer's 'nothing enabled')."""
     assert server._build_fusion_weights({}) == {}
     assert server._build_fusion_weights({"ast": 0.0, "cfg": 0.0}) == {}
+
+
+# ---------------------------------------------------------------------------
+# Route mounting
+#
+# `academic.router` and `settings.router` already declare their own prefix and
+# were additionally mounted with prefix="/api". That produced /api/api/... paths,
+# so the frontend could not reach /api/terms, /api/settings/validation, or the
+# assignment-create endpoint at all.
+# ---------------------------------------------------------------------------
+
+
+def test_no_double_prefixed_api_routes() -> None:
+    """No route may be mounted at /api/api/... .
+
+    Regression: a router already carrying prefix="/api" was mounted with
+    prefix="/api" again, silently relocating 34 endpoints the frontend could
+    not find.
+    """
+    paths = [getattr(route, "path", "") for route in server.app.routes]
+    doubled = sorted(p for p in paths if p.startswith("/api/api"))
+    assert not doubled, f"double-prefixed routes: {doubled}"
+
+
+def test_frontend_reachable_routes_exist() -> None:
+    """The paths the frontend actually calls must be registered on the app."""
+    paths = {getattr(route, "path", "") for route in server.app.routes}
+    required = {
+        "/api/terms",
+        "/api/courses",
+        "/api/courses/{course_id}",
+        "/api/courses/{course_id}/assignments",
+        "/api/assignments",
+        "/api/settings/validation",
+        "/api/settings/engine-config",
+    }
+    missing = sorted(required - paths)
+    assert not missing, f"called by the frontend but absent: {missing}"
+
+
+def test_server_owned_routes_win_over_router_duplicates() -> None:
+    """server.py's handlers must take precedence on the shared paths.
+
+    These paths are intentionally defined twice (server.py and the routers).
+    The duplicates are fine as long as the server.py handler is the one FastAPI
+    dispatches to, since that version carries the richer response (notably
+    assignment_count / student_count on GET /api/courses).
+    """
+    seen: dict[tuple[str, str], str] = {}
+    problems: list[str] = []
+    for route in server.app.routes:
+        path = getattr(route, "path", None)
+        if not path:
+            continue
+        endpoint = getattr(route, "endpoint", None)
+        module = getattr(endpoint, "__module__", "?") if endpoint else "?"
+        for method in sorted(getattr(route, "methods", []) or []):
+            key = (method, path)
+            if key in seen and seen[key] != module:
+                # The first registration is the one FastAPI dispatches to.
+                if seen[key] != "src.backend.api.server":
+                    problems.append(f"{method} {path} served by {seen[key]}, not server.py")
+            else:
+                seen.setdefault(key, module)
+    assert not problems, "; ".join(problems)
