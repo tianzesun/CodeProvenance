@@ -160,10 +160,14 @@ interface ImportReport {
   results: ImportRowResult[];
 }
 
-interface AcademicTerm {
+/** One entry of the organization's term registry (see GET /api/terms). */
+interface AdminTerm {
   id: string;
   name: string;
   year: number;
+  /** Server-rendered "Fall 2026" display label. */
+  label: string;
+  description?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   course_count: number;
@@ -431,7 +435,7 @@ export default function AdminPage() {
   const [courseQuery, setCourseQuery] = useState('');
   const [courseTermFilter, setCourseTermFilter] = useState('all');
 
-  const [terms, setTerms] = useState<AcademicTerm[]>([]);
+  const [terms, setTerms] = useState<AdminTerm[]>([]);
   const [loadingTerms, setLoadingTerms] = useState(true);
   const [showTermModal, setShowTermModal] = useState(false);
   const [termSaving, setTermSaving] = useState(false);
@@ -443,6 +447,7 @@ export default function AdminPage() {
     year: String(new Date().getFullYear()),
     start_date: '',
     end_date: '',
+    description: '',
   });
 
   const [form, setForm] = useState({
@@ -673,11 +678,12 @@ export default function AdminPage() {
       year: String(new Date().getFullYear()),
       start_date: '',
       end_date: '',
+      description: '',
     });
     setShowTermModal(true);
   };
 
-  const openEditTerm = (term: AcademicTerm) => {
+  const openEditTerm = (term: AdminTerm) => {
     setTermError('');
     setEditingTermId(term.id);
     setTermForm({
@@ -685,6 +691,7 @@ export default function AdminPage() {
       year: String(term.year),
       start_date: term.start_date ?? '',
       end_date: term.end_date ?? '',
+      description: term.description ?? '',
     });
     setShowTermModal(true);
   };
@@ -719,13 +726,22 @@ export default function AdminPage() {
         year,
         start_date: termForm.start_date || null,
         end_date: termForm.end_date || null,
+        description: termForm.description.trim() || null,
       };
       if (editingTermId) {
         await apiClient.put(`/api/terms/${editingTermId}`, payload);
         setSuccessMessage('Term updated successfully.');
       } else {
-        await apiClient.post('/api/terms', payload);
-        setSuccessMessage('Term created successfully.');
+        // POST is idempotent: when the (name, year) pair is already registered the
+        // API returns that row instead of creating a duplicate, so say so.
+        const knownIds = new Set(terms.map((t) => t.id));
+        const res = await apiClient.post('/api/terms', payload);
+        const saved = res?.data as AdminTerm | undefined;
+        setSuccessMessage(
+          saved?.id && knownIds.has(saved.id)
+            ? `${saved.label || `${name} ${year}`} was already in the registry.`
+            : 'Term created successfully.',
+        );
       }
       await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
       setShowTermModal(false);
@@ -737,18 +753,20 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteTerm = async (term: AcademicTerm) => {
-    const label = `${term.name} ${term.year}`;
+  const handleDeleteTerm = async (term: AdminTerm) => {
+    // Deleting only unlinks: the registry row goes, each linked course keeps the
+    // term/year text it already carries.
+    const label = term.label || `${term.name} ${term.year}`;
     const message = term.course_count > 0
-      ? `Delete ${label}? It will be removed from ${term.course_count} course(s) and their assignments.`
-      : `Delete ${label}?`;
+      ? `Remove ${label} from the registry? ${term.course_count} course(s) keep their current term label but will no longer be linked to it.`
+      : `Remove ${label} from the registry?`;
     if (!confirm(message)) return;
     setDeletingTermId(term.id);
     setPageError('');
     try {
       await apiClient.delete(`/api/terms/${term.id}`);
       await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
-      setSuccessMessage(`Term ${label} deleted.`);
+      setSuccessMessage(`Term ${label} removed.`);
     } catch (error) {
       setPageError(getErrorMessage(error));
     } finally {
@@ -1669,8 +1687,8 @@ export default function AdminPage() {
                 Academic terms
               </h2>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Create the terms courses are scheduled in. Renaming or deleting a term
-                updates every course and assignment that uses it.
+                Create the terms courses are scheduled in. Renaming a term relabels the
+                courses that use it; removing one only unlinks it from them.
               </p>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -1712,14 +1730,19 @@ export default function AdminPage() {
                           </span>
                         </div>
                         <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
-                          {term.name} {term.year}
+                          {term.label || `${term.name} ${term.year}`}
                         </h3>
+                        {term.description && (
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                            {term.description}
+                          </p>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         <button
                           type="button"
                           onClick={() => openEditTerm(term)}
-                          aria-label={`Edit ${term.name} ${term.year}`}
+                          aria-label={`Edit ${term.label || `${term.name} ${term.year}`}`}
                           className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                         >
                           <Pencil size={15} />
@@ -1728,7 +1751,7 @@ export default function AdminPage() {
                           type="button"
                           onClick={() => handleDeleteTerm(term)}
                           disabled={isDeleting}
-                          aria-label={`Delete ${term.name} ${term.year}`}
+                          aria-label={`Remove ${term.label || `${term.name} ${term.year}`} from registry`}
                           className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                         >
                           {isDeleting ? (
@@ -1881,7 +1904,7 @@ export default function AdminPage() {
         title={editingTermId ? 'Edit term' : 'Add a term'}
         description={
           editingTermId
-            ? 'Rename the term or adjust its dates. Courses and assignments using it are updated automatically.'
+            ? 'Rename the term or adjust its dates. Courses scheduled in it are relabelled to match.'
             : 'Add an academic term so courses can be scheduled into it.'
         }
         onClose={closeTermModal}
@@ -1934,6 +1957,15 @@ export default function AdminPage() {
               />
             </Field>
           </div>
+          <Field label="Notes" hint="Optional">
+            <textarea
+              rows={2}
+              value={termForm.description}
+              onChange={(e) => setTermForm((t) => ({ ...t, description: e.target.value }))}
+              placeholder="Registration window, grading deadline, anything the team should know"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+            />
+          </Field>
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
             <button
               type="button"

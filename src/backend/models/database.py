@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     Float,
     ForeignKey,
     Index,
@@ -471,6 +472,10 @@ class Term(Base):
     year = Column(Integer, nullable=False)
     # Optional free-form note, e.g. "Week 6-10".
     description = Column(Text, nullable=True)
+    # Optional planning window for the term. Purely informational: no scheduling
+    # logic reads them, and either end may be left unset.
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
         TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")

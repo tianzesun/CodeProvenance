@@ -7,7 +7,7 @@ falling back to free text for unregistered terms.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -15,10 +15,22 @@ from fastapi import HTTPException
 
 from src.backend.api.routes.academic import (
     TERM_SEASON_RANK,
+    TermCreate,
+    _request_org_id,
+    _term_date_to_response,
     _term_sort_key,
+    _validate_term_window,
+    create_term,
+    delete_term,
+    find_term_conflict,
+    list_terms,
     resolve_course_term,
+    router,
+    sync_term_on_courses,
     term_label,
+    update_term,
 )
+from src.backend.models.database import Course, Term
 
 ORG_ID = "org-123"
 
@@ -405,3 +417,194 @@ def test_analytics_course_labels_include_term() -> None:
     source = inspect.getsource(get_analytics_overview)
     assert "course_term_label_for_analytics" in source
     assert "course.code or course.name" in source
+
+
+# ── Term date window + rename cascade ──────────────────────────────────────────
+
+
+class _RecordingQuery:
+    """Fake query that records filters and bulk updates issued against it."""
+
+    def __init__(self, result=None, rowcount=0):
+        self._result = result
+        self._rowcount = rowcount
+        self.filters: list = []
+        self.updates: list[dict] = []
+
+    def filter(self, *args):
+        self.filters.append(args)
+        return self
+
+    def order_by(self, *args):
+        self.ordered_by = args
+        return self
+
+    def group_by(self, *args):
+        self.grouped_by = args
+        return self
+
+    def all(self):
+        return [] if self._result is None else [self._result]
+
+    def first(self):
+        return self._result
+
+    def update(self, values, synchronize_session=False):
+        self.updates.append(values)
+        return self._rowcount
+
+
+class _ModelDb:
+    """Fake session handing out one recording query per model class."""
+
+    def __init__(self, queries: dict):
+        self._queries = queries
+        self.calls: list = []
+
+    def query(self, *models):
+        key = models[0] if len(models) == 1 else models
+        query = self._queries.get(key, _RecordingQuery())
+        self.calls.append(key)
+        return query
+
+
+def test_term_window_accepts_ordered_and_open_ended_ranges() -> None:
+    """A window is valid when ordered, and either end may be missing."""
+    _validate_term_window(date(2026, 1, 12), date(2026, 5, 1))
+    _validate_term_window(date(2026, 1, 12), None)
+    _validate_term_window(None, date(2026, 5, 1))
+    _validate_term_window(None, None)
+
+
+def test_term_window_rejects_inverted_range() -> None:
+    """An end date before the start date is rejected rather than stored."""
+    with pytest.raises(HTTPException) as exc:
+        _validate_term_window(date(2026, 5, 1), date(2026, 1, 12))
+    assert exc.value.status_code == 400
+
+
+def test_term_dates_serialize_to_iso_or_none() -> None:
+    """Dates reach the client as ``YYYY-MM-DD`` strings, or null when unset."""
+    assert _term_date_to_response(date(2026, 9, 1)) == "2026-09-01"
+    assert _term_date_to_response(None) is None
+
+
+def test_term_conflict_ignores_the_row_being_renamed() -> None:
+    """Self is excluded during a rename so saving the same term still works."""
+    scoped = _ModelDb({Term: _RecordingQuery()})
+    assert find_term_conflict(scoped, ORG_ID, 2026, "Fall") is None
+    assert len(scoped._queries[Term].filters) == 1
+
+    scoped = _ModelDb({Term: _RecordingQuery()})
+    assert find_term_conflict(scoped, ORG_ID, 2026, "Fall", exclude_id="term-1") is None
+    # The extra filter is the ``Term.id != exclude_id`` guard.
+    assert len(scoped._queries[Term].filters) == 2
+
+
+def test_sync_term_on_courses_mirrors_name_and_year() -> None:
+    """Renaming rewrites only the courses linked to the registry row."""
+    query = _RecordingQuery(rowcount=3)
+    db = _ModelDb({Course: query})
+    term = SimpleNamespace(id="term-1", name="Winter", year=2027)
+
+    assert sync_term_on_courses(db, term) == 3
+    assert query.updates == [{Course.term: "Winter", Course.year: 2027}]
+
+
+def test_update_term_route_is_org_scoped_and_cascades() -> None:
+    """The rename endpoint enforces tenancy and mirrors onto linked courses."""
+    import inspect
+
+    source = inspect.getsource(update_term)
+    assert "Term belongs to another organization" in source
+    assert "sync_term_on_courses" in source
+    # A colliding (name, year) must not slip through to the unique constraint.
+    assert "status_code=409" in source
+
+
+def test_term_date_routes_are_registered() -> None:
+    """PUT is exposed alongside GET/POST/DELETE on the terms collection."""
+    paths = {
+        (route.path, method)
+        for route in router.routes
+        for method in getattr(route, "methods", [])
+    }
+    assert ("/api/terms/{term_id}", "PUT") in paths
+    assert ("/api/terms", "POST") in paths
+
+
+def _term_row(
+    name: str,
+    year: int,
+    description: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SimpleNamespace:
+    """Build a fully populated stand-in for a ``Term`` row in ``ORG_ID``."""
+    return SimpleNamespace(
+        id=f"term-{name}-{year}",
+        organization_id=ORG_ID,
+        name=name,
+        year=year,
+        description=description,
+        start_date=start_date,
+        end_date=end_date,
+        created_at=None,
+    )
+
+
+def test_request_org_id_reads_the_session_user() -> None:
+    """The academic org helper reads ``request.state.user`` and stringifies it.
+
+    ``get_current_tenant`` hands routes the tenant id, which is a different
+    value from the organization the academic tables are scoped by.
+    """
+    import uuid
+
+    org_id = uuid.uuid4()
+    request = SimpleNamespace(state=SimpleNamespace(user={"organization_id": org_id}))
+    assert _request_org_id(request) == str(org_id)
+
+    assert _request_org_id(SimpleNamespace(state=SimpleNamespace(user={}))) is None
+    assert _request_org_id(SimpleNamespace(state=SimpleNamespace())) is None
+
+
+def test_term_handlers_scope_by_the_session_users_organization() -> None:
+    """Term handlers resolve the org from the session user, not the tenant id.
+
+    Regression: the handlers called ``current_user.get("organization_id")`` on
+    the value injected by ``get_current_tenant``, which is a plain tenant id
+    string, so every authenticated term request died with ``AttributeError``
+    before touching the database.
+    """
+    import asyncio
+
+    request = SimpleNamespace(state=SimpleNamespace(user={"organization_id": ORG_ID}))
+    tenant_id = "tenant-1"  # What get_current_tenant injects, a str not a dict.
+
+    listed = _ModelDb({Term: _RecordingQuery(result=_term_row("Fall", 2031))})
+    assert [t.name for t in asyncio.run(list_terms(request, listed, tenant_id))] == [
+        "Fall"
+    ]
+    # Scoping has to reach the query, so the filter is applied, not skipped.
+    assert len(listed._queries[Term].filters) == 1
+
+    # An existing (name, year) is reused rather than erroring, proving the
+    # conflict lookup ran with the session user's organization.
+    existing = _term_row("Fall", 2031, description="Semester")
+    reused = _ModelDb({Term: _RecordingQuery(result=existing)})
+    response = asyncio.run(
+        create_term(request, TermCreate(name="fall", year=2031), reused, tenant_id)
+    )
+    assert response.id == "term-Fall-2031"
+    assert response.description == "Semester"
+
+
+def test_every_term_handler_uses_the_shared_org_lookup() -> None:
+    """No term handler may treat the tenant id as the user dict again."""
+    import inspect
+
+    for handler in (list_terms, create_term, update_term, delete_term):
+        source = inspect.getsource(handler)
+        assert "_request_org_id(request)" in source
+        assert "current_user.get(" not in source

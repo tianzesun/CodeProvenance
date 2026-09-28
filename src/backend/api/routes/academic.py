@@ -2,7 +2,7 @@
 API routes for managing Organizations, Courses, Assignments, Students, and Enrollments.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 import logging
@@ -52,6 +52,25 @@ class TermCreate(BaseModel):
     name: str
     year: int
     description: Optional[str] = None
+    # Optional planning window. Either end may be omitted.
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class TermUpdate(BaseModel):
+    """Full replacement of the fields the admin term form edits.
+
+    ``name`` and ``year`` are always applied. ``start_date`` / ``end_date`` are
+    applied as given, so omitting or sending ``null`` clears that end of the
+    window. ``description`` is only touched when the body includes it, which
+    keeps a registry note intact when a client edits just the name or dates.
+    """
+
+    name: str
+    year: int
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
 
 
 class TermResponse(BaseModel):
@@ -61,6 +80,8 @@ class TermResponse(BaseModel):
     year: int
     label: str
     description: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     course_count: int = 0
     created_at: str
 
@@ -211,6 +232,82 @@ def _term_sort_key(term: Term) -> tuple[int, int, str]:
     return (-term.year, rank, term.name or "")
 
 
+def _request_org_id(request: Request) -> Optional[str]:
+    """Resolve the caller's organization id from the authenticated request.
+
+    ``get_current_tenant`` deliberately returns the *tenant id*, and this
+    deployment keeps tenants and organizations as separate tables, so academic
+    routes that scope by organization must read the session user instead (the
+    same source ``list_my_courses`` uses). Kept as a helper so every term route
+    scopes identically.
+    """
+    user = getattr(request.state, "user", None) or {}
+    org_id = user.get("organization_id")
+    return str(org_id) if org_id else None
+
+
+def _term_date_to_response(value: Optional[date]) -> Optional[str]:
+    """Serialize an optional term date as ``YYYY-MM-DD``, or ``None``."""
+    return value.isoformat() if value else None
+
+
+def _validate_term_window(start_date: Optional[date], end_date: Optional[date]) -> None:
+    """Reject an inverted planning window.
+
+    Raises:
+        HTTPException: 400 when both ends are set and start is after end.
+    """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=400, detail="Term start date must be on or before the end date"
+        )
+
+
+def find_term_conflict(
+    db: Session,
+    organization_id: str,
+    year: int,
+    name: str,
+    exclude_id: Optional[str] = None,
+) -> Optional[Term]:
+    """Find an existing term with the same ``(name, year)`` for the org.
+
+    Matching is case-insensitive to mirror the registry's uniqueness rule. When
+    ``exclude_id`` is given that row is ignored, so a term can be saved without
+    colliding with itself.
+    """
+    query = db.query(Term).filter(
+        Term.organization_id == organization_id,
+        Term.year == year,
+        func.lower(Term.name) == name.strip().lower(),
+    )
+    if exclude_id:
+        query = query.filter(Term.id != exclude_id)
+    return query.first()
+
+
+def sync_term_on_courses(db: Session, term: Term) -> int:
+    """Mirror a term's name/year onto every course linked to it.
+
+    ``courses.term`` / ``courses.year`` are denormalized copies kept in sync
+    with the registry (see :func:`resolve_course_term`), so renaming a term has
+    to rewrite them or listings and reporting that read the text go stale. Only
+    courses whose ``term_id`` points at this term are touched, which keeps other
+    organizations' rows untouched.
+
+    Returns:
+        The number of course rows updated.
+    """
+    return (
+        db.query(Course)
+        .filter(Course.term_id == term.id)
+        .update(
+            {Course.term: term.name, Course.year: term.year},
+            synchronize_session=False,
+        )
+    )
+
+
 def _term_to_response(term: Term, course_count: int) -> TermResponse:
     """Serialize a term registry row for the API."""
     return TermResponse(
@@ -220,6 +317,8 @@ def _term_to_response(term: Term, course_count: int) -> TermResponse:
         year=term.year,
         label=term_label(term.name, term.year),
         description=term.description,
+        start_date=_term_date_to_response(term.start_date),
+        end_date=_term_date_to_response(term.end_date),
         course_count=course_count,
         created_at=term.created_at.isoformat() if term.created_at else "",
     )
@@ -276,11 +375,12 @@ def resolve_course_term(
 
 @router.get("/terms", response_model=list[TermResponse])
 async def list_terms(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
     """List the terms registered for the current user's organization."""
-    org_id = current_user.get("organization_id")
+    org_id = _request_org_id(request)
     if not org_id:
         return []
 
@@ -307,12 +407,13 @@ async def list_terms(
 
 @router.post("/terms", response_model=TermResponse, status_code=status.HTTP_201_CREATED)
 async def create_term(
+    request: Request,
     term_data: TermCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
     """Register a new academic term for the current user's organization."""
-    org_id = current_user.get("organization_id")
+    org_id = _request_org_id(request)
     if not org_id:
         raise HTTPException(
             status_code=400, detail="No organization associated with user"
@@ -321,16 +422,9 @@ async def create_term(
     name = term_data.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Term name is required")
+    _validate_term_window(term_data.start_date, term_data.end_date)
 
-    existing = (
-        db.query(Term)
-        .filter(
-            Term.organization_id == org_id,
-            Term.year == term_data.year,
-            func.lower(Term.name) == name.lower(),
-        )
-        .first()
-    )
+    existing = find_term_conflict(db, org_id, term_data.year, name)
     if existing:
         # Idempotent: returning the existing term (rather than a 409) lets the
         # UI create-then-assign without a separate pre-check for conflicts.
@@ -341,6 +435,8 @@ async def create_term(
         name=name.title(),
         year=term_data.year,
         description=term_data.description,
+        start_date=term_data.start_date,
+        end_date=term_data.end_date,
     )
     db.add(term)
     db.commit()
@@ -348,8 +444,69 @@ async def create_term(
     return _term_to_response(term, 0)
 
 
+@router.put("/terms/{term_id}", response_model=TermResponse)
+async def update_term(
+    request: Request,
+    term_id: str,
+    term_data: TermUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_tenant),
+):
+    """Rename a term or adjust its planning window, mirroring the change on courses.
+
+    Courses linked to the term keep ``term``/``year`` text copies that listings
+    and reporting read, so the new name/year are written onto them in the same
+    transaction. Only rows whose ``term_id`` points at this term change, which
+    leaves other organizations (and unlinked free-text terms) untouched.
+
+    Raises:
+        HTTPException: 404 unknown term, 403 term from another organization,
+            400 blank name or inverted date window, 409 when the new
+            ``(name, year)`` is already registered for the organization.
+    """
+    org_id = _request_org_id(request)
+    term = db.query(Term).filter(Term.id == term_id).first()
+    if not term:
+        raise HTTPException(status_code=404, detail="Term not found")
+    if org_id and str(term.organization_id) != str(org_id):
+        raise HTTPException(
+            status_code=403, detail="Term belongs to another organization"
+        )
+
+    name = term_data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Term name is required")
+    _validate_term_window(term_data.start_date, term_data.end_date)
+
+    conflict = find_term_conflict(
+        db, term.organization_id, term_data.year, name, exclude_id=str(term.id)
+    )
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{term_label(name, term_data.year)} is already registered",
+        )
+
+    term.name = name.title()
+    term.year = term_data.year
+    term.start_date = term_data.start_date
+    term.end_date = term_data.end_date
+    if "description" in term_data.model_fields_set:
+        term.description = term_data.description
+
+    # Flush first so the mirrored course text carries the new name/year.
+    db.flush()
+    sync_term_on_courses(db, term)
+    db.commit()
+    db.refresh(term)
+
+    course_count = db.query(Course).filter(Course.term_id == term.id).count()
+    return _term_to_response(term, course_count)
+
+
 @router.delete("/terms/{term_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_term(
+    request: Request,
     term_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
@@ -359,7 +516,7 @@ async def delete_term(
     Courses keep their mirrored ``term``/``year`` text, so removing a term from
     the registry never strips a course of its term label.
     """
-    org_id = current_user.get("organization_id")
+    org_id = _request_org_id(request)
     term = db.query(Term).filter(Term.id == term_id).first()
     if not term:
         raise HTTPException(status_code=404, detail="Term not found")
