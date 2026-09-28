@@ -3,15 +3,18 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Calendar,
   CheckCircle2,
   ChevronDown,
   Download,
   FileText,
   GraduationCap,
   Loader2,
+  Pencil,
   Plus,
   Search,
   ShieldCheck,
+  Trash2,
   Upload,
   UserPlus,
   Users,
@@ -157,6 +160,16 @@ interface ImportReport {
   results: ImportRowResult[];
 }
 
+interface AcademicTerm {
+  id: string;
+  name: string;
+  year: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  course_count: number;
+  created_at: string;
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function RoleBadge({ role }: { role: AuthRole }) {
@@ -263,6 +276,32 @@ function AddCourseCard({
   );
 }
 
+function AddTermCard({
+  onAdd,
+  buttonRef,
+}: {
+  onAdd: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={onAdd}
+      aria-label="Add a new academic term"
+      className="group flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 text-center transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-700 dark:hover:border-blue-500 dark:hover:bg-slate-900/40"
+    >
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
+        <Plus size={30} strokeWidth={2} aria-hidden="true" />
+      </span>
+      <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
+        Add term
+      </span>
+      <span className="text-xs text-slate-400">Plan a new academic term</span>
+    </button>
+  );
+}
+
 function UserRowSkeleton() {
   return (
     <tr>
@@ -359,6 +398,7 @@ export default function AdminPage() {
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const courseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const termButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -387,9 +427,23 @@ export default function AdminPage() {
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
   const [expandedCourseIds, setExpandedCourseIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'users' | 'courses'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'courses' | 'terms'>('users');
   const [courseQuery, setCourseQuery] = useState('');
   const [courseTermFilter, setCourseTermFilter] = useState('all');
+
+  const [terms, setTerms] = useState<AcademicTerm[]>([]);
+  const [loadingTerms, setLoadingTerms] = useState(true);
+  const [showTermModal, setShowTermModal] = useState(false);
+  const [termSaving, setTermSaving] = useState(false);
+  const [termError, setTermError] = useState('');
+  const [editingTermId, setEditingTermId] = useState<string | null>(null);
+  const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
+  const [termForm, setTermForm] = useState({
+    name: 'Fall',
+    year: String(new Date().getFullYear()),
+    start_date: '',
+    end_date: '',
+  });
 
   const [form, setForm] = useState({
     full_name: '',
@@ -437,16 +491,30 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadTerms = useCallback(async () => {
+    setLoadingTerms(true);
+    try {
+      const res = await apiClient.get('/api/terms');
+      setTerms(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error('Failed to load terms', error);
+    } finally {
+      setLoadingTerms(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!bootstrapped || authLoading || status === 'loading') return;
     if (!user || user.role !== 'admin') {
       setLoadingUsers(false);
       setLoadingCourses(false);
+      setLoadingTerms(false);
       return;
     }
     loadUsers();
     loadCoursesWithInstructors();
-  }, [bootstrapped, authLoading, status, user, loadUsers, loadCoursesWithInstructors]);
+    loadTerms();
+  }, [bootstrapped, authLoading, status, user, loadUsers, loadCoursesWithInstructors, loadTerms]);
 
   // ── Panel open/close ──────────────────────────────────────────────────────────
 
@@ -592,6 +660,99 @@ export default function AdminPage() {
       setCourseError(getErrorMessage(error));
     } finally {
       setCourseSaving(false);
+    }
+  };
+
+  // ── Term handlers ────────────────────────────────────────────────────────────
+
+  const openTermModal = () => {
+    setTermError('');
+    setEditingTermId(null);
+    setTermForm({
+      name: 'Fall',
+      year: String(new Date().getFullYear()),
+      start_date: '',
+      end_date: '',
+    });
+    setShowTermModal(true);
+  };
+
+  const openEditTerm = (term: AcademicTerm) => {
+    setTermError('');
+    setEditingTermId(term.id);
+    setTermForm({
+      name: term.name,
+      year: String(term.year),
+      start_date: term.start_date ?? '',
+      end_date: term.end_date ?? '',
+    });
+    setShowTermModal(true);
+  };
+
+  const closeTermModal = () => {
+    if (termSaving) return;
+    setShowTermModal(false);
+    setTimeout(() => termButtonRef.current?.focus(), 0);
+  };
+
+  const handleSaveTerm = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setTermError('');
+    const name = termForm.name.trim();
+    const year = Number(termForm.year);
+    if (!name) {
+      setTermError('Term name is required.');
+      return;
+    }
+    if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+      setTermError('Year must be a number between 1900 and 2200.');
+      return;
+    }
+    if (termForm.start_date && termForm.end_date && termForm.start_date > termForm.end_date) {
+      setTermError('Start date must be on or before end date.');
+      return;
+    }
+    setTermSaving(true);
+    try {
+      const payload = {
+        name,
+        year,
+        start_date: termForm.start_date || null,
+        end_date: termForm.end_date || null,
+      };
+      if (editingTermId) {
+        await apiClient.put(`/api/terms/${editingTermId}`, payload);
+        setSuccessMessage('Term updated successfully.');
+      } else {
+        await apiClient.post('/api/terms', payload);
+        setSuccessMessage('Term created successfully.');
+      }
+      await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
+      setShowTermModal(false);
+      setTimeout(() => termButtonRef.current?.focus(), 0);
+    } catch (error) {
+      setTermError(getErrorMessage(error));
+    } finally {
+      setTermSaving(false);
+    }
+  };
+
+  const handleDeleteTerm = async (term: AcademicTerm) => {
+    const label = `${term.name} ${term.year}`;
+    const message = term.course_count > 0
+      ? `Delete ${label}? It will be removed from ${term.course_count} course(s) and their assignments.`
+      : `Delete ${label}?`;
+    if (!confirm(message)) return;
+    setDeletingTermId(term.id);
+    setPageError('');
+    try {
+      await apiClient.delete(`/api/terms/${term.id}`);
+      await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
+      setSuccessMessage(`Term ${label} deleted.`);
+    } catch (error) {
+      setPageError(getErrorMessage(error));
+    } finally {
+      setDeletingTermId(null);
     }
   };
 
@@ -833,7 +994,7 @@ export default function AdminPage() {
         )}
 
         {/* ── Stat cards ──────────────────────────────────────────────────────── */}
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
           <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-center justify-between">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
@@ -903,10 +1064,24 @@ export default function AdminPage() {
               {totalAssignments}
             </div>
           </div>
+
+          <div className="rounded-[24px] border border-sky-100 bg-white p-5 shadow-sm dark:border-sky-900/40 dark:bg-slate-950">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                Terms
+              </div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 dark:bg-sky-900/30">
+                <Calendar size={14} className="text-sky-600 dark:text-sky-400" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-semibold text-sky-700 tabular-nums dark:text-sky-300">
+              {terms.length}
+            </div>
+          </div>
         </section>
 
         {/* ── Section tabs ──────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setActiveTab('users')}
@@ -933,6 +1108,20 @@ export default function AdminPage() {
             Courses &amp; assignments
             <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
               {totalCourses}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('terms')}
+            aria-pressed={activeTab === 'terms'}
+            className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'terms'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+          >
+            <Calendar size={15} />
+            Terms
+            <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {terms.length}
             </span>
           </button>
         </div>
@@ -1467,6 +1656,126 @@ export default function AdminPage() {
         </section>
         )}
 
+        {/* ── Academic terms ─────────────────────────────────────────────────── */}
+        {activeTab === 'terms' && (
+        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
+                <Calendar size={14} />
+                Terms
+              </div>
+              <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
+                Academic terms
+              </h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Create the terms courses are scheduled in. Renaming or deleting a term
+                updates every course and assignment that uses it.
+              </p>
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {terms.length} term{terms.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+
+          {loadingTerms ? (
+            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
+                  <div className="h-4 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  <div className="mt-3 h-5 w-32 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          ) : terms.length === 0 ? (
+            <div className="p-5">
+              <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
+            </div>
+          ) : (
+            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+              {terms.map((term) => {
+                const isDeleting = deletingTermId === term.id;
+                return (
+                  <article
+                    key={term.id}
+                    className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                            {term.name}
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            {term.year}
+                          </span>
+                        </div>
+                        <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
+                          {term.name} {term.year}
+                        </h3>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditTerm(term)}
+                          aria-label={`Edit ${term.name} ${term.year}`}
+                          className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTerm(term)}
+                          disabled={isDeleting}
+                          aria-label={`Delete ${term.name} ${term.year}`}
+                          className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                        >
+                          {isDeleting ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={15} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                          Courses
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {term.course_count}
+                        </span>
+                      </div>
+                      {(term.start_date || term.end_date) && (
+                        <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                          {term.start_date && term.end_date
+                            ? `${term.start_date} → ${term.end_date}`
+                            : term.start_date
+                              ? `From ${term.start_date}`
+                              : `Until ${term.end_date}`}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openEditTerm(term)}
+                      className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+                    >
+                      Edit term
+                    </button>
+                  </article>
+                );
+              })}
+              <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
+            </div>
+          )}
+        </section>
+        )}
+
       </div>
 
       <Modal
@@ -1562,6 +1871,89 @@ export default function AdminPage() {
             >
               {courseSaving && <Loader2 size={15} className="animate-spin" />}
               {courseSaving ? 'Creating…' : 'Create course'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={showTermModal}
+        title={editingTermId ? 'Edit term' : 'Add a term'}
+        description={
+          editingTermId
+            ? 'Rename the term or adjust its dates. Courses and assignments using it are updated automatically.'
+            : 'Add an academic term so courses can be scheduled into it.'
+        }
+        onClose={closeTermModal}
+      >
+        <form onSubmit={handleSaveTerm} className="space-y-4">
+          {termError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <span>{termError}</span>
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Term name">
+              <input
+                required
+                autoFocus
+                value={termForm.name}
+                onChange={(e) => setTermForm((t) => ({ ...t, name: e.target.value }))}
+                placeholder="Fall"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Year">
+              <input
+                type="number"
+                min="1900"
+                max="2200"
+                required
+                value={termForm.year}
+                onChange={(e) => setTermForm((t) => ({ ...t, year: e.target.value }))}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Start date" hint="Optional">
+              <input
+                type="date"
+                value={termForm.start_date}
+                onChange={(e) => setTermForm((t) => ({ ...t, start_date: e.target.value }))}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="End date" hint="Optional">
+              <input
+                type="date"
+                value={termForm.end_date}
+                onChange={(e) => setTermForm((t) => ({ ...t, end_date: e.target.value }))}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={closeTermModal}
+              disabled={termSaving}
+              className="inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={termSaving}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
+            >
+              {termSaving && <Loader2 size={15} className="animate-spin" />}
+              {termSaving
+                ? 'Saving…'
+                : editingTermId
+                  ? 'Save changes'
+                  : 'Create term'}
             </button>
           </div>
         </form>
