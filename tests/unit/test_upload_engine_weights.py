@@ -76,3 +76,93 @@ def test_apply_selection_noop_when_no_upload_engine_selected() -> None:
     base = {"tree_kernel": 0.5}
     out = server._apply_upload_engine_selection(dict(base), ["tree_kernel"])
     assert out == base
+
+
+# ---------------------------------------------------------------------------
+# Fusion weight mapping
+#
+# Regression: mode weight dicts name signals ``cfg``/``execution_cfg``, but the
+# fusion engine reads ``graph``/``static_rules``. The mismatch meant the
+# code-graph engine received 0.0 for *every* assignment mode, so the "CFG /
+# execution focus" the UI advertises never influenced a score.
+# ---------------------------------------------------------------------------
+
+
+def test_cfg_alias_feeds_the_graph_engine() -> None:
+    """``cfg`` is the mode-catalog name for the code-graph signal."""
+    weights = server._build_fusion_weights({"cfg": 0.25})
+    assert weights["graph"] == pytest.approx(0.25)
+
+
+def test_execution_cfg_feeds_static_rules() -> None:
+    """``execution_cfg`` is the behavioural signal grouped with static rules."""
+    weights = server._build_fusion_weights({"execution_cfg": 0.30})
+    assert weights["static_rules"] == pytest.approx(0.30)
+
+
+def test_graph_and_cfg_aliases_are_summed() -> None:
+    """Both spellings of the graph engine add together rather than overwrite."""
+    weights = server._build_fusion_weights({"graph": 0.10, "cfg": 0.15})
+    assert weights["graph"] == pytest.approx(0.25)
+
+
+def test_mode_only_signals_reach_the_fusion_scorer() -> None:
+    """Signals with no upload toggle are passed through, not dropped."""
+    weights = server._build_fusion_weights(
+        {"tree_kernel": 0.12, "web": 0.06, "ai_detection": 0.01}
+    )
+    assert weights["tree_kernel"] == pytest.approx(0.12)
+    assert weights["web"] == pytest.approx(0.06)
+    assert weights["ai_detection"] == pytest.approx(0.01)
+
+
+def test_no_weighted_mode_starves_an_engine() -> None:
+    """Every weighted mode must give every declared signal a non-zero weight.
+
+    This is the invariant the old mapping broke: ``graph`` and ``static_rules``
+    were 0.0 across all six modes.
+    """
+    from src.backend.engines.scoring.assignment_modes import get_assignment_modes
+
+    # Mode-catalog key -> fusion key.
+    aliases = {
+        "token": "fingerprint",
+        "fingerprint": "fingerprint",
+        "winnowing": "winnowing",
+        "gst": "string_tiling",
+        "ast": "ast",
+        "ngram": "ngram",
+        "graph": "graph",
+        "cfg": "graph",
+        "semantic": "embedding",
+        "embedding": "embedding",
+        "static_rules": "static_rules",
+        "execution_cfg": "static_rules",
+        "tree_kernel": "tree_kernel",
+        "web": "web",
+        "ai_detection": "ai_detection",
+    }
+
+    checked = 0
+    for mode_id, mode in get_assignment_modes().items():
+        if not mode.weights:
+            continue
+        fusion = server._build_fusion_weights(dict(mode.weights))
+        assert fusion, f"{mode_id} produced no fusion weights"
+        for source_key, weight in mode.weights.items():
+            if weight <= 0:
+                continue
+            target = aliases.get(source_key)
+            assert target is not None, f"{mode_id}.{source_key} has no fusion mapping"
+            assert fusion.get(target, 0.0) > 0, (
+                f"{mode_id}: {source_key} -> {target} is zero, "
+                f"so the signal cannot influence a score"
+            )
+        checked += 1
+    assert checked >= 6, f"expected the six weighted modes, saw {checked}"
+
+
+def test_empty_weights_still_return_empty_mapping() -> None:
+    """All-zero input must keep returning {} (the scorer's 'nothing enabled')."""
+    assert server._build_fusion_weights({}) == {}
+    assert server._build_fusion_weights({"ast": 0.0, "cfg": 0.0}) == {}

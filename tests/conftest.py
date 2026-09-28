@@ -1,12 +1,20 @@
 """
 Pytest configuration for IntegrityDesk tests.
 """
+
+import os
 import sys
 from pathlib import Path
 import pytest
 import asyncio
 from typing import Generator, AsyncGenerator
 from fastapi.testclient import TestClient
+
+# Keep the AI detector on its fast, deterministic heuristic path during tests.
+# Without this, Binoculars loads two ~500MB model checkpoints and the suite
+# takes hours (and its results depend on a model download being present).
+# Tests that specifically exercise Binoculars inject a fake instance instead.
+os.environ.setdefault("BINOCULARS_ENABLED", "0")
 
 # Add backend to Python path
 backend_path = Path(__file__).parent.parent / "src" / "backend"
@@ -25,6 +33,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 def client() -> Generator[TestClient, None, None]:
     """Create a test client for the FastAPI app."""
     from src.backend.main import app
+
     with TestClient(app) as test_client:
         yield test_client
 
