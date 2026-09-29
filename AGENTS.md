@@ -12,7 +12,8 @@
 
 ## Code Style
 - Format with `black` before committing
-- Lint with `ruff` (default settings; no `pyproject.toml` exists yet — add a `[tool.ruff]` section when clearing lint debt)
+- Lint with `ruff` and format with `black` — configuration lives in the existing
+  `pyproject.toml` (`[tool.ruff]`, line length 100)
 - All functions and classes must have docstrings
 - Follow PEP 8 style guide
 - Maximum line length: 100 characters
@@ -25,6 +26,6 @@
 - Test changes: run relevant unit tests first with `pytest tests/unit/`, then integration tests when appropriate
 - Use existing logging patterns from src/infrastructure/
 - Avoid introducing async patterns unless necessary
-- Always use the virtual environment: `source /home/tsun/Documents/CodeProvenance/venv/bin/activate`
+- Always use the virtual environment: `source /home/tsun/Documents/Projects/CodeProvenance/venv/bin/activate`
 - Never hardcode secrets; use .env via python-dotenv (see .env.example for reference)
 - Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
