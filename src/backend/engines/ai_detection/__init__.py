@@ -16,6 +16,13 @@ from .model_fingerprinting import (
     detect_model,
     get_fingerprinter,
 )
+from .ast_analyzer import (
+    ASTAnalyzer,
+    ASTFeatures,
+    analyze_ast,
+    compute_ast_score,
+    get_analyzer as get_ast_analyzer,
+)
 
 __all__ = [
     "TransformerPerplexityAnalyzer",
@@ -26,4 +33,9 @@ __all__ = [
     "ModelFingerprint",
     "detect_model",
     "get_fingerprinter",
+    "ASTAnalyzer",
+    "ASTFeatures",
+    "analyze_ast",
+    "compute_ast_score",
+    "get_ast_analyzer",
 ]

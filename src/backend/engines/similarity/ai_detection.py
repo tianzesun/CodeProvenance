@@ -148,7 +148,26 @@ class AIDetectionEngine:
         "docstring_density": 0.03,
     }
 
-    def __init__(self, calibrator_path: str | None = None, use_transformer: bool = False) -> None:
+    # V3 weights (with AST analysis) - activate via use_ast=True
+    _WEIGHTS_V3: ClassVar[dict[str, float]] = {
+        "perplexity": 0.08,
+        "transformer_perplexity": 0.18,
+        "ast_structural": 0.16,  # New AST-based signal
+        "burstiness": 0.10,
+        "stylometry": 0.12,
+        "pattern_library": 0.16,
+        "structural_entropy": 0.08,
+        "vocabulary_richness": 0.06,
+        "whitespace_rhythm": 0.03,
+        "docstring_density": 0.03,
+    }
+
+    def __init__(
+        self,
+        calibrator_path: str | None = None,
+        use_transformer: bool = False,
+        use_ast: bool = False,
+    ) -> None:
         """Initialise the detection engine.
 
         Args:
@@ -156,14 +175,17 @@ class AIDetectionEngine:
                            If provided and exists, the calibrated scores will be used.
             use_transformer: If True, use GPT-2 for perplexity (slower but more accurate).
                            Requires transformers+torch installed.
+            use_ast: If True, add AST-based structural analysis (immune to renaming).
         """
         self.stylometry_extractor = StylometryExtractor()
         self.calibrator = None
         self.calibrator_samples = 0
         self._calibrator_path = calibrator_path
         self.use_transformer = use_transformer
+        self.use_ast = use_ast
         self._transformer_analyzer = None
         self._model_fingerprinter = None
+        self._ast_analyzer = None
         self._load_calibrator()
 
     def _load_calibrator(self) -> None:
@@ -279,6 +301,10 @@ class AIDetectionEngine:
         if self.use_transformer:
             signals["transformer_perplexity"] = self._signal_transformer_perplexity(code)
 
+        # Add AST structural analysis if enabled
+        if self.use_ast:
+            signals["ast_structural"] = self._signal_ast_structural(code, language)
+
         return signals
 
     def _signal_perplexity(self, code: str) -> float:
@@ -343,6 +369,30 @@ class AIDetectionEngine:
             logger.warning(f"Transformer perplexity failed, falling back to bigram: {e}")
             # Fall back to bigram perplexity if transformers not available
             return self._signal_perplexity(code)
+
+    def _signal_ast_structural(self, code: str, language: str) -> float:
+        """AST-based structural analysis signal.
+
+        Detects AI-typical structural patterns immune to variable renaming:
+        - Uniform function complexity
+        - Perfect import organization
+        - Defensive programming patterns
+
+        Returns:
+            Float [0, 1] where 1.0 = very AI-like structure
+        """
+        try:
+            # Lazy-load AST analyzer
+            if self._ast_analyzer is None:
+                from src.backend.engines.ai_detection import get_ast_analyzer
+
+                self._ast_analyzer = get_ast_analyzer()
+
+            features = self._ast_analyzer.analyze(code, language)
+            return self._ast_analyzer.compute_ai_score(features)
+        except Exception as e:
+            logger.warning(f"AST analysis failed: {e}")
+            return 0.0
 
     def _signal_burstiness(self, code: str) -> float:
         """Burstiness signal.
@@ -544,8 +594,13 @@ class AIDetectionEngine:
 
     def _fuse(self, signals: dict[str, float]) -> float:
         """Weighted average fusion with optional calibration."""
-        # Choose weights based on mode
-        weights = self._WEIGHTS_V2 if self.use_transformer else self._WEIGHTS
+        # Choose weights based on enabled features
+        if self.use_ast and self.use_transformer:
+            weights = self._WEIGHTS_V3
+        elif self.use_transformer:
+            weights = self._WEIGHTS_V2
+        else:
+            weights = self._WEIGHTS
 
         total_score = 0.0
         total_weight = 0.0
