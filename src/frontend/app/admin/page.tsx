@@ -174,6 +174,9 @@ interface AdminTerm {
   created_at: string;
 }
 
+/** Season names offered by the registry's term-name dropdown. */
+const TERM_NAMES: readonly string[] = ['Fall', 'Winter', 'Spring', 'Summer'];
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function RoleBadge({ role }: { role: AuthRole }) {
@@ -371,16 +374,24 @@ function AuthPageSkeleton() {
 function Field({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  /** Marks a mandatory field with a red asterisk next to its label. */
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
         {label}
+        {required && (
+          <span aria-hidden="true" className="ml-0.5 text-red-500 dark:text-red-400">
+            *
+          </span>
+        )}
       </label>
       {children}
       {hint && <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
@@ -1917,17 +1928,31 @@ export default function AdminPage() {
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Term name">
-              <input
-                required
-                autoFocus
-                value={termForm.name}
-                onChange={(e) => setTermForm((t) => ({ ...t, name: e.target.value }))}
-                placeholder="Fall"
-                className={inputClass}
-              />
+            <Field label="Term name" required>
+              <div className="relative">
+                <select
+                  required
+                  autoFocus
+                  value={termForm.name}
+                  onChange={(e) => setTermForm((t) => ({ ...t, name: e.target.value }))}
+                  className={selectClass}
+                >
+                  {/* A legacy row can carry a name outside the season list; keep it
+                      selectable so editing one does not silently rename it. */}
+                  {termForm.name && !TERM_NAMES.includes(termForm.name) && (
+                    <option>{termForm.name}</option>
+                  )}
+                  {TERM_NAMES.map((season) => (
+                    <option key={season}>{season}</option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+              </div>
             </Field>
-            <Field label="Year">
+            <Field label="Year" required>
               <input
                 type="number"
                 min="1900"
@@ -1940,7 +1965,7 @@ export default function AdminPage() {
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Start date" hint="Optional">
+            <Field label="Start date">
               <input
                 type="date"
                 value={termForm.start_date}
@@ -1948,7 +1973,7 @@ export default function AdminPage() {
                 className={inputClass}
               />
             </Field>
-            <Field label="End date" hint="Optional">
+            <Field label="End date">
               <input
                 type="date"
                 value={termForm.end_date}
@@ -1957,7 +1982,7 @@ export default function AdminPage() {
               />
             </Field>
           </div>
-          <Field label="Notes" hint="Optional">
+          <Field label="Notes">
             <textarea
               rows={2}
               value={termForm.description}
