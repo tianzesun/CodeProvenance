@@ -67,12 +67,8 @@ _LLM_COMMENT_PATTERNS: list[re.Pattern] = [
 _LLM_NAMING_PATTERNS: list[re.Pattern] = [
     # Bare generic words (result/data/value/...) are ubiquitous in human code;
     # matched via density only (see _signal_pattern_library), not as hard hits.
-    re.compile(
-        r"\b(process_|handle_|compute_|calculate_|generate_|validate_|parse_)\w+"
-    ),
-    re.compile(
-        r"\b(input_data|output_data|result_list|data_list|item_list|temp_list)\b"
-    ),
+    re.compile(r"\b(process_|handle_|compute_|calculate_|generate_|validate_|parse_)\w+"),
+    re.compile(r"\b(input_data|output_data|result_list|data_list|item_list|temp_list)\b"),
     re.compile(r"\b(is_valid|is_empty|is_none|has_error|has_value)\b"),
 ]
 
@@ -89,9 +85,7 @@ _LLM_STRUCTURAL_PATTERNS: list[re.Pattern] = [
     re.compile(r"-> (?:None|bool|int|str|float|List|Dict|Optional)\s*:"),
 ]
 
-_ALL_LLM_PATTERNS = (
-    _LLM_COMMENT_PATTERNS + _LLM_NAMING_PATTERNS + _LLM_STRUCTURAL_PATTERNS
-)
+_ALL_LLM_PATTERNS = _LLM_COMMENT_PATTERNS + _LLM_NAMING_PATTERNS + _LLM_STRUCTURAL_PATTERNS
 
 
 def _safe_entropy(counter: Counter) -> float:
@@ -102,20 +96,14 @@ def _safe_entropy(counter: Counter) -> float:
     n_unique = len(counter)
     if n_unique <= 1:
         return 0.0
-    entropy = -sum(
-        (c / total) * math.log2(c / total) for c in counter.values() if c > 0
-    )
+    entropy = -sum((c / total) * math.log2(c / total) for c in counter.values() if c > 0)
     max_entropy = math.log2(n_unique)
     return entropy / max_entropy if max_entropy > 0 else 0.0
 
 
 def _tokenize(code: str) -> list[str]:
     """Lightweight code tokeniser — identifiers, keywords, operators."""
-    return [
-        t.lower()
-        for t in re.findall(r"\b\w+\b|[+\-*/=<>!&|]+|[{}()\[\],;:]", code)
-        if t
-    ]
+    return [t.lower() for t in re.findall(r"\b\w+\b|[+\-*/=<>!&|]+|[{}()\[\],;:]", code) if t]
 
 
 class AIDetectionEngine:
@@ -147,17 +135,34 @@ class AIDetectionEngine:
         "docstring_density": 0.06,
     }
 
-    def __init__(self, calibrator_path: str | None = None) -> None:
+    # V2 weights (with transformer perplexity) - activate via use_transformer=True
+    _WEIGHTS_V2: ClassVar[dict[str, float]] = {
+        "perplexity": 0.10,  # Reduce old bigram weight
+        "transformer_perplexity": 0.22,  # Add new transformer signal
+        "burstiness": 0.12,
+        "stylometry": 0.14,
+        "pattern_library": 0.18,
+        "structural_entropy": 0.10,
+        "vocabulary_richness": 0.07,
+        "whitespace_rhythm": 0.04,
+        "docstring_density": 0.03,
+    }
+
+    def __init__(self, calibrator_path: str | None = None, use_transformer: bool = False) -> None:
         """Initialise the detection engine.
 
         Args:
             calibrator_path: Optional path to a calibrated model pickle file.
                            If provided and exists, the calibrated scores will be used.
+            use_transformer: If True, use GPT-2 for perplexity (slower but more accurate).
+                           Requires transformers+torch installed.
         """
         self.stylometry_extractor = StylometryExtractor()
         self.calibrator = None
         self.calibrator_samples = 0
         self._calibrator_path = calibrator_path
+        self.use_transformer = use_transformer
+        self._transformer_analyzer = None
         self._load_calibrator()
 
     def _load_calibrator(self) -> None:
@@ -168,9 +173,7 @@ class AIDetectionEngine:
             from pathlib import Path
 
             default_path = (
-                Path(__file__).parent.parent.parent.parent
-                / "backend"
-                / ".calibrator.pkl"
+                Path(__file__).parent.parent.parent.parent / "backend" / ".calibrator.pkl"
             )
             if default_path.exists():
                 calibrator_path = str(default_path)
@@ -256,7 +259,7 @@ class AIDetectionEngine:
 
     def _compute_all_signals(self, code: str, language: str) -> dict[str, float]:
         """Compute all eight detection signals."""
-        return {
+        signals = {
             "perplexity": self._signal_perplexity(code),
             "burstiness": self._signal_burstiness(code),
             "stylometry": self._signal_stylometry(code),
@@ -266,6 +269,12 @@ class AIDetectionEngine:
             "whitespace_rhythm": self._signal_whitespace_rhythm(code),
             "docstring_density": self._signal_docstring_density(code),
         }
+
+        # Add transformer perplexity if enabled
+        if self.use_transformer:
+            signals["transformer_perplexity"] = self._signal_transformer_perplexity(code)
+
+        return signals
 
     def _signal_perplexity(self, code: str) -> float:
         """N-gram perplexity signal.
@@ -281,9 +290,7 @@ class AIDetectionEngine:
         unigram_counter: Counter = Counter(tokens)
         total = len(tokens)
         raw_unigram = -sum(
-            (c / total) * math.log2(c / total)
-            for c in unigram_counter.values()
-            if c > 0
+            (c / total) * math.log2(c / total) for c in unigram_counter.values() if c > 0
         )
 
         # Raw bigram entropy (bits)
@@ -291,9 +298,7 @@ class AIDetectionEngine:
         bigram_counter: Counter = Counter(bigrams)
         btotal = len(bigrams)
         raw_bigram = -sum(
-            (c / btotal) * math.log2(c / btotal)
-            for c in bigram_counter.values()
-            if c > 0
+            (c / btotal) * math.log2(c / btotal) for c in bigram_counter.values() if c > 0
         )
 
         # Combined raw entropy — typical human code: 3.5–5.5 bits
@@ -304,16 +309,35 @@ class AIDetectionEngine:
         # bins), so 10–25-line student files looked "low-entropy / AI-like"
         # purely for being short. Miller–Madow adds ~ (K-1)/(2N) bits, where K
         # is the number of distinct bins and N the sample size.
-        corrected_unigram = raw_unigram + (len(unigram_counter) - 1) / (
-            2.0 * max(1, total)
-        )
-        corrected_bigram = raw_bigram + (len(bigram_counter) - 1) / (
-            2.0 * max(1, btotal)
-        )
+        corrected_unigram = raw_unigram + (len(unigram_counter) - 1) / (2.0 * max(1, total))
+        corrected_bigram = raw_bigram + (len(bigram_counter) - 1) / (2.0 * max(1, btotal))
         combined = 0.4 * corrected_unigram + 0.6 * corrected_bigram
 
         # Map: 0 bits → 1.0 (very AI-like), 5.0 bits → 0.0 (very human-like)
         return max(0.0, min(1.0, 1.0 - combined / 5.0))
+
+    def _signal_transformer_perplexity(self, code: str) -> float:
+        """Transformer-based perplexity using GPT-2.
+
+        Uses actual language model perplexity instead of bigram approximation.
+        More accurate but slower (~100-300ms vs <1ms for bigram).
+
+        Returns:
+            Float [0, 1] where 1.0 = very AI-like (low perplexity)
+        """
+        try:
+            # Lazy-load transformer analyzer
+            if self._transformer_analyzer is None:
+                from src.backend.engines.ai_detection import get_analyzer
+
+                self._transformer_analyzer = get_analyzer()
+
+            result = self._transformer_analyzer.compute_normalized_score(code, max_length=1024)
+            return result["ai_score"]
+        except Exception as e:
+            logger.warning(f"Transformer perplexity failed, falling back to bigram: {e}")
+            # Fall back to bigram perplexity if transformers not available
+            return self._signal_perplexity(code)
 
     def _signal_burstiness(self, code: str) -> float:
         """Burstiness signal.
@@ -383,15 +407,9 @@ class AIDetectionEngine:
         innocent student files to 1.0 on a single comment style.
         """
         total_lines = max(1, len(code.splitlines()))
-        comment_hits = sum(
-            len(pattern.findall(code)) for pattern in _LLM_COMMENT_PATTERNS
-        )
-        structural_hits = sum(
-            len(pattern.findall(code)) for pattern in _LLM_STRUCTURAL_PATTERNS
-        )
-        naming_hits = min(
-            8, sum(len(pattern.findall(code)) for pattern in _LLM_NAMING_PATTERNS)
-        )
+        comment_hits = sum(len(pattern.findall(code)) for pattern in _LLM_COMMENT_PATTERNS)
+        structural_hits = sum(len(pattern.findall(code)) for pattern in _LLM_STRUCTURAL_PATTERNS)
+        naming_hits = min(8, sum(len(pattern.findall(code)) for pattern in _LLM_NAMING_PATTERNS))
         families = [
             (2.0, comment_hits),
             (2.0, structural_hits),
@@ -438,9 +456,7 @@ class AIDetectionEngine:
         lines = [ln for ln in code.splitlines() if ln.strip()]
         if not lines:
             return 0.0
-        indent_levels: Counter = Counter(
-            (len(ln) - len(ln.lstrip())) // 4 for ln in lines
-        )
+        indent_levels: Counter = Counter((len(ln) - len(ln.lstrip())) // 4 for ln in lines)
         entropy = _safe_entropy(indent_levels)
         return max(0.0, min(1.0, 1.0 - entropy)) * 0.6
 
@@ -523,9 +539,12 @@ class AIDetectionEngine:
 
     def _fuse(self, signals: dict[str, float]) -> float:
         """Weighted average fusion with optional calibration."""
+        # Choose weights based on mode
+        weights = self._WEIGHTS_V2 if self.use_transformer else self._WEIGHTS
+
         total_score = 0.0
         total_weight = 0.0
-        for name, weight in self._WEIGHTS.items():
+        for name, weight in weights.items():
             if name in signals:
                 total_score += signals[name] * weight
                 total_weight += weight
@@ -565,26 +584,20 @@ class AIDetectionEngine:
     # Indicators and flagged lines
     # ------------------------------------------------------------------
 
-    def _indicators(
-        self, code: str, signals: dict[str, float], ai_prob: float
-    ) -> list[str]:
+    def _indicators(self, code: str, signals: dict[str, float], ai_prob: float) -> list[str]:
         """Generate human-readable evidence strings."""
         items: list[tuple[float, str]] = []
 
         for pattern in _LLM_COMMENT_PATTERNS:
             matches = pattern.findall(code)
             if matches:
-                items.append(
-                    (0.9, f"LLM-style comment pattern detected ({len(matches)}\u00d7)")
-                )
+                items.append((0.9, f"LLM-style comment pattern detected ({len(matches)}\u00d7)"))
                 break
 
         for pattern in _LLM_NAMING_PATTERNS:
             matches = pattern.findall(code)
             if len(matches) >= 3:
-                items.append(
-                    (0.8, f"Generic AI naming convention ({len(matches)} occurrences)")
-                )
+                items.append((0.8, f"Generic AI naming convention ({len(matches)} occurrences)"))
                 break
 
         for pattern in _LLM_STRUCTURAL_PATTERNS:
@@ -610,9 +623,7 @@ class AIDetectionEngine:
             )
 
         if signals.get("stylometry", 0) > 0.6:
-            items.append(
-                (signals["stylometry"], "Stylometric profile matches LLM output")
-            )
+            items.append((signals["stylometry"], "Stylometric profile matches LLM output"))
 
         if signals.get("vocabulary_richness", 0) > 0.6:
             items.append(
@@ -623,9 +634,7 @@ class AIDetectionEngine:
             )
 
         if signals.get("whitespace_rhythm", 0) > 0.65:
-            items.append(
-                (signals["whitespace_rhythm"], "Highly regular blank-line spacing")
-            )
+            items.append((signals["whitespace_rhythm"], "Highly regular blank-line spacing"))
 
         if signals.get("pattern_library", 0) > 0.5:
             items.append(
@@ -639,9 +648,7 @@ class AIDetectionEngine:
             re.findall(r"-> (?:None|bool|int|str|float|List|Dict|Optional|Union)", code)
         )
         if type_hint_count >= 3:
-            items.append(
-                (0.7, f"Saturated type annotations ({type_hint_count} return hints)")
-            )
+            items.append((0.7, f"Saturated type annotations ({type_hint_count} return hints)"))
 
         try_count = len(re.findall(r"^\s*try\s*:", code, re.MULTILINE))
         func_count = max(1, len(re.findall(r"^\s*def\s+\w+", code, re.MULTILINE)))
@@ -692,9 +699,7 @@ class AIDetectionEngine:
 
     def train_classifier(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Legacy training interface — not implemented in this version."""
-        raise NotImplementedError(
-            "ML classifier training is not available in this version."
-        )
+        raise NotImplementedError("ML classifier training is not available in this version.")
 
     # ------------------------------------------------------------------
     # Legacy method aliases (kept for backward compatibility with tests)

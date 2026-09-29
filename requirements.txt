@@ -50,6 +50,10 @@ joblib==1.5.3
 
 # AI Detection - Multi-layer ensemble (Binoculars + existing signals)
 # Binoculars (ICML 2024) - zero-shot SOTA detector, very low false positive rate
+transformers==4.36.2
+torch==2.1.2
+sentencepiece==0.1.99
+lightgbm==4.3.0
 
 # PDF & Forensic Reporting (requires wkhtmltopdf system package)
 pdfkit==1.0.0
