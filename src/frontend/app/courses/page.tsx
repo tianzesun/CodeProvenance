@@ -4,7 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermLabel, buildTermOptions, courseTermLabel, type Term } from '@/lib/terms';
-import { BookOpen, CalendarPlus, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { BookOpen, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Assignment = { id: string; name: string; term: string | null; assignment_type: string; due_at?: string | null };
@@ -41,9 +41,6 @@ export default function CoursesPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [terms, setTerms] = useState<Term[]>([]);
-  const [showTermForm, setShowTermForm] = useState(false);
-  const [termForm, setTermForm] = useState({ name: '', year: String(new Date().getFullYear()) });
-  const [termSaving, setTermSaving] = useState(false);
   const [assignmentCourseId, setAssignmentCourseId] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(EMPTY_ASSIGNMENT);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
@@ -98,20 +95,6 @@ export default function CoursesPage() {
       closeForm(); await fetchCourses();
     } catch { setError('Failed to save course.'); }
     finally { setSaving(false); }
-  };
-
-  const saveTerm = async () => {
-    const name = termForm.name.trim();
-    const year = Number(termForm.year);
-    if (!name || !Number.isFinite(year)) return;
-    setTermSaving(true);
-    try {
-      await apiClient.post('/api/terms', { name, year });
-      setTermForm({ name: '', year: termForm.year });
-      setShowTermForm(false);
-      await fetchTerms();
-    } catch { setError('Failed to create term.'); }
-    finally { setTermSaving(false); }
   };
 
   const deleteCourse = async (id: string) => {
@@ -191,14 +174,6 @@ export default function CoursesPage() {
                 <Search size={15} />
                 <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search courses..." className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none" aria-label="Search courses" />
               </label>
-              <button
-                type="button"
-                onClick={() => setShowTermForm((v) => !v)}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              >
-                <CalendarPlus size={15} />
-                Add term
-              </button>
               {termOptions.length > 1 && (
                 <select
                   value={termFilter}
@@ -216,75 +191,6 @@ export default function CoursesPage() {
               )}
             </div>
           } />
-
-          {showTermForm && (
-            <div className="border-b border-slate-200 bg-blue-50/40 px-5 py-4">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                New term
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Season *">
-                  <input
-                    type="text"
-                    value={termForm.name}
-                    onChange={(e) => setTermForm({ ...termForm, name: e.target.value })}
-                    placeholder="Fall, Winter, Spring, Summer"
-                    list="term-season-suggestions"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50"
-                  />
-                  <datalist id="term-season-suggestions">
-                    <option value="Winter" />
-                    <option value="Spring" />
-                    <option value="Summer" />
-                    <option value="Fall" />
-                  </datalist>
-                </Field>
-                <Field label="Year *">
-                  <input
-                    type="number"
-                    value={termForm.year}
-                    onChange={(e) => setTermForm({ ...termForm, year: e.target.value })}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50"
-                  />
-                </Field>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={saveTerm}
-                  disabled={termSaving || !termForm.name.trim() || !termForm.year}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {termSaving ? 'Saving...' : 'Create term'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowTermForm(false)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <span className="text-xs text-slate-500">
-                  Creating a term makes it selectable for any course.
-                </span>
-              </div>
-              {terms.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {terms.map((t) => (
-                    <span
-                      key={t.id}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200"
-                    >
-                      {t.label}
-                      <span className="text-slate-400">
-                        {t.course_count ?? 0} {t.course_count === 1 ? 'course' : 'courses'}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {showForm && (
             <div className="border-b border-slate-200 bg-slate-50/60 px-5 py-4">
