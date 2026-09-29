@@ -10,10 +10,20 @@ from .transformer_perplexity import (
     compute_ai_score,
     get_analyzer,
 )
+from .model_fingerprinting import (
+    ModelFingerprinter,
+    ModelFingerprint,
+    detect_model,
+    get_fingerprinter,
+)
 
 __all__ = [
     "TransformerPerplexityAnalyzer",
     "compute_perplexity",
     "compute_ai_score",
     "get_analyzer",
+    "ModelFingerprinter",
+    "ModelFingerprint",
+    "detect_model",
+    "get_fingerprinter",
 ]

@@ -163,6 +163,7 @@ class AIDetectionEngine:
         self._calibrator_path = calibrator_path
         self.use_transformer = use_transformer
         self._transformer_analyzer = None
+        self._model_fingerprinter = None
         self._load_calibrator()
 
     def _load_calibrator(self) -> None:
@@ -231,6 +232,9 @@ class AIDetectionEngine:
             indicators = self._indicators(code, signals, ai_probability)
             flagged_lines = self._flagged_lines(code)
 
+            # Add model fingerprinting
+            model_fingerprint = self._detect_model(code, language)
+
             return {
                 "ai_probability": round(max(0.0, min(1.0, ai_probability)), 3),
                 "confidence": round(max(0.0, min(1.0, confidence)), 3),
@@ -239,6 +243,7 @@ class AIDetectionEngine:
                 "indicators": indicators[:6],
                 "flagged_lines": flagged_lines[:30],
                 "language": language,
+                "model_fingerprint": model_fingerprint,
             }
         except Exception as exc:
             logger.exception("AI detection failed")
@@ -734,3 +739,18 @@ class AIDetectionEngine:
     def _tokenize_code(self, code: str) -> list[str]:
         """Legacy: tokenise code into lowercase tokens."""
         return _tokenize(code)
+
+    def _detect_model(self, code: str, language: str) -> dict[str, Any]:
+        """Detect which AI model likely generated the code."""
+        try:
+            # Lazy-load model fingerprinter
+            if self._model_fingerprinter is None:
+                from src.backend.engines.ai_detection import get_fingerprinter
+
+                self._model_fingerprinter = get_fingerprinter()
+
+            fingerprint = self._model_fingerprinter.analyze(code, language)
+            return fingerprint.to_dict()
+        except Exception as e:
+            logger.warning(f"Model fingerprinting failed: {e}")
+            return {"detected_model": None, "confidence": 0.0, "model_scores": {}, "evidence": []}
