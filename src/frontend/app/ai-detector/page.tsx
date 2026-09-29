@@ -143,23 +143,27 @@ export default function AIDetectorPage() {
     () => buildPageNumbers(safeHistoryPage, totalHistoryPages),
     [safeHistoryPage, totalHistoryPages]
   );
-  const canRun = files.length > 0 && Boolean(selectedCourseId && selectedAssignmentId) && !uploading;
+  const canRun = files.length > 0 && !uploading;
   const runDetection = async () => {
     if (!canRun) return;
     setUploading(true);
     setError('');
-    const selectedCourse = courses.find((course) => course.id === selectedCourseId);
-    const selectedAssignment = assignments.find((assignment) => assignment.id === selectedAssignmentId);
-    if (!selectedCourse || !selectedAssignment) {
-      setError('Select a course and assignment before running the assessment.');
-      setUploading(false);
-      return;
-    }
+
     const fd = new FormData();
     files.forEach((file) => fd.append('files', file));
-    fd.append('course_name', selectedCourse.name);
-    fd.append('assignment_name', selectedAssignment.name);
-    fd.append('assignment_id', selectedAssignment.id);
+
+    // Only add course/assignment if selected
+    if (selectedCourseId && selectedAssignmentId) {
+      const selectedCourse = courses.find((course) => course.id === selectedCourseId);
+      const selectedAssignment = assignments.find((assignment) => assignment.id === selectedAssignmentId);
+
+      if (selectedCourse && selectedAssignment) {
+        fd.append('course_name', selectedCourse.name);
+        fd.append('assignment_name', selectedAssignment.name);
+        fd.append('assignment_id', selectedAssignment.id);
+      }
+    }
+
     try {
       const res = await apiClient.post('/api/ai-detect', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -208,19 +212,23 @@ export default function AIDetectorPage() {
             </div>
           </section>
           <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <div className="mb-4 text-sm font-semibold text-slate-800">Course &amp; Assignment</div>
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-800">
+              Course &amp; Assignment
+              <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">Optional</span>
+            </div>
+            <p className="mb-4 text-xs text-slate-500">Associate this assessment with a course and assignment for better organization (optional)</p>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Course</label>
                 <select value={selectedCourseId} onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }} disabled={coursesLoading} className="theme-field">
-                  <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'Select course…' : 'No courses yet'}</option>
+                  <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
                   {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Assignment</label>
                 <select value={selectedAssignmentId} onChange={(event) => setSelectedAssignmentId(event.target.value)} disabled={!selectedCourseId || assignmentsLoading} className="theme-field disabled:text-slate-400">
-                  <option value="">{!selectedCourseId ? 'Choose a course first…' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'Select assignment…' : 'No assignments yet'}</option>
+                  <option value="">{!selectedCourseId ? 'None (choose course first if needed)' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
                   {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
                 </select>
               </div>
@@ -427,8 +435,8 @@ export default function AIDetectorPage() {
             )}
           </section>
 
-         </div>
-       </div>
+        </div>
+      </div>
     </DashboardLayout>
   );
 }

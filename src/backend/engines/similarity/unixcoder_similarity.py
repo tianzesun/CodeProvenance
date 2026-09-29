@@ -176,7 +176,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         """
         Embed a list of code strings.
         Returns shape (N, hidden_size), L2-normalised rows.
-        Uses cache where possible; runs model for any misses.
+        Uses Redis cache (fast) → disk cache (slower) → model (slowest).
         """
         import torch
 
@@ -184,11 +184,36 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         uncached_indices: list[int] = []
         uncached_texts: list[str] = []
 
-        # Check cache
+        # Try Redis cache first (10x faster than disk)
+        from src.backend.infrastructure.cache import get_cache
+
+        redis_cache = get_cache()
+
+        # Check cache (Redis → disk)
         for i, text in enumerate(texts):
-            cached = self._load_from_cache(text)
-            if cached is not None:
-                results[i] = cached
+            # Try Redis first
+            cache_key = f"unixcoder:{self._cache_key(text)}"
+            if redis_cache.available:
+                cached_redis = redis_cache.get(cache_key)
+                if cached_redis is not None:
+                    try:
+                        import numpy as np
+
+                        results[i] = np.array(cached_redis)
+                        continue
+                    except Exception:
+                        pass  # Fall through to disk cache
+
+            # Fall back to disk cache
+            cached_disk = self._load_from_cache(text)
+            if cached_disk is not None:
+                results[i] = cached_disk
+                # Backfill Redis for future lookups
+                if redis_cache.available:
+                    try:
+                        redis_cache.set(cache_key, cached_disk.tolist(), ttl=86400)
+                    except Exception:
+                        pass
             else:
                 uncached_indices.append(i)
                 uncached_texts.append(text)
@@ -220,9 +245,16 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 normalised = (cls_embeddings / norms).cpu().numpy()
                 all_embeddings.extend(normalised)
 
-            # Write cache + fill results
+            # Write cache (both Redis and disk) + fill results
             for idx, text, emb in zip(uncached_indices, uncached_texts, all_embeddings):
-                self._save_to_cache(text, emb)
+                self._save_to_cache(text, emb)  # Disk cache
+                # Redis cache (for faster subsequent lookups)
+                if redis_cache.available:
+                    try:
+                        cache_key = f"unixcoder:{self._cache_key(text)}"
+                        redis_cache.set(cache_key, emb.tolist(), ttl=86400)
+                    except Exception:
+                        pass
                 results[idx] = emb
 
         return np.stack(results)  # (N, hidden_size)

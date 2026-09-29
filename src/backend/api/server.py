@@ -199,6 +199,11 @@ app.add_middleware(AuthMiddleware, excluded_paths=list(AUTH_EXEMPT_PATHS))
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+
+# Cache administration routes
+from src.backend.api.routes import cache_admin  # noqa: E402
+
+app.include_router(cache_admin.router)
 # Public REST API (documented in docs/product/API_REFERENCE.md). Submissions
 # are processed by the same background pipeline as the upload flow.
 from src.backend.api.routes import analyze as analyze_router  # noqa: E402
