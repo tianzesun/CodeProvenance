@@ -2,7 +2,10 @@
 # Install with: pip install -r requirements-load-test.txt
 
 locust>=2.15.0
-k6-runner>=0.0.1
 requests>=2.28.0
 gevent>=21.8.0
 flask>=2.2.0
+
+# NOTE: k6 is a standalone Go binary, not a pip package (there is no
+# "k6-runner" on PyPI — a previous pin to it made this whole file fail to
+# install). Install k6 separately: https://k6.io/docs/get-started/installation/
