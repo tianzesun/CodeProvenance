@@ -1,7 +1,7 @@
 """AI Detection Engine - Advanced code generation detection.
 
 Provides transformer-based perplexity, model fingerprinting, AST analysis,
-and ensemble ML for state-of-the-art AI code detection.
+adversarial defense, and ensemble ML for state-of-the-art AI code detection.
 """
 
 from .transformer_perplexity import (
@@ -23,6 +23,13 @@ from .ast_analyzer import (
     compute_ast_score,
     get_analyzer as get_ast_analyzer,
 )
+from .adversarial_defense import (
+    AdversarialDefense,
+    AdversarialAnalysis,
+    analyze_adversarial,
+    compute_semantic_hash,
+    get_defense,
+)
 
 __all__ = [
     "TransformerPerplexityAnalyzer",
@@ -38,4 +45,9 @@ __all__ = [
     "analyze_ast",
     "compute_ast_score",
     "get_ast_analyzer",
+    "AdversarialDefense",
+    "AdversarialAnalysis",
+    "analyze_adversarial",
+    "compute_semantic_hash",
+    "get_defense",
 ]

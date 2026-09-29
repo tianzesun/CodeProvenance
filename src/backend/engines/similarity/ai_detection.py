@@ -257,6 +257,9 @@ class AIDetectionEngine:
             # Add model fingerprinting
             model_fingerprint = self._detect_model(code, language)
 
+            # Add adversarial analysis
+            adversarial_analysis = self._analyze_adversarial(code, language)
+
             return {
                 "ai_probability": round(max(0.0, min(1.0, ai_probability)), 3),
                 "confidence": round(max(0.0, min(1.0, confidence)), 3),
@@ -266,6 +269,7 @@ class AIDetectionEngine:
                 "flagged_lines": flagged_lines[:30],
                 "language": language,
                 "model_fingerprint": model_fingerprint,
+                "adversarial_analysis": adversarial_analysis,
             }
         except Exception as exc:
             logger.exception("AI detection failed")
@@ -809,3 +813,21 @@ class AIDetectionEngine:
         except Exception as e:
             logger.warning(f"Model fingerprinting failed: {e}")
             return {"detected_model": None, "confidence": 0.0, "model_scores": {}, "evidence": []}
+
+    def _analyze_adversarial(self, code: str, language: str) -> dict[str, Any]:
+        """Analyze code for adversarial obfuscation attempts."""
+        try:
+            from src.backend.engines.ai_detection import get_defense
+
+            defense = get_defense()
+            analysis = defense.analyze(code, language)
+            return analysis.to_dict()
+        except Exception as e:
+            logger.warning(f"Adversarial analysis failed: {e}")
+            return {
+                "semantic_hash": "",
+                "obfuscation_score": 0.0,
+                "paraphrase_indicators": [],
+                "evasion_detected": False,
+                "confidence": 0.0,
+            }
