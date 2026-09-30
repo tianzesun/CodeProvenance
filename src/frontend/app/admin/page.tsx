@@ -53,6 +53,137 @@ function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+/** Turn a timestamp into a friendly relative label ("3 days ago"). */
+function relativeTime(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+
+  const years = Math.round(months / 12);
+  return `${years} year${years === 1 ? '' : 's'} ago`;
+}
+
+/** Background/text classes for an avatar by role. */
+const AVATAR_TONES: Record<AuthRole, string> = {
+  admin: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+  professor: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300',
+};
+
+/** Initials avatar used across the users table and course cards. */
+function Avatar({
+  name,
+  role = 'professor',
+  size = 36,
+  title,
+}: {
+  name: string;
+  role?: AuthRole;
+  size?: number;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title ?? name}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+      className={`inline-flex shrink-0 select-none items-center justify-center rounded-full font-bold leading-none ${AVATAR_TONES[role]}`}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+/** Tone palettes for KPI cards. */
+const STAT_TONES: Record<string, { border: string; icon: string; value: string }> = {
+  slate: {
+    border: 'border-slate-200 dark:border-slate-800',
+    icon: 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400',
+    value: 'text-slate-900 dark:text-white',
+  },
+  emerald: {
+    border: 'border-emerald-100 dark:border-emerald-900/40',
+    icon: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
+    value: 'text-emerald-700 dark:text-emerald-300',
+  },
+  amber: {
+    border: 'border-amber-100 dark:border-amber-900/40',
+    icon: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
+    value: 'text-amber-700 dark:text-amber-300',
+  },
+  blue: {
+    border: 'border-blue-100 dark:border-blue-900/40',
+    icon: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
+    value: 'text-blue-700 dark:text-blue-300',
+  },
+  violet: {
+    border: 'border-violet-100 dark:border-violet-900/40',
+    icon: 'bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400',
+    value: 'text-violet-700 dark:text-violet-300',
+  },
+  sky: {
+    border: 'border-sky-100 dark:border-sky-900/40',
+    icon: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
+    value: 'text-sky-700 dark:text-sky-300',
+  },
+};
+
+/**
+ * One KPI in the header strip. Clicking it opens the tab the number describes,
+ * so the card doubles as navigation.
+ */
+function StatCard({
+  label,
+  value,
+  hint,
+  icon,
+  tone,
+  onClick,
+  active,
+}: {
+  label: string;
+  value: number | string;
+  hint: string;
+  icon: React.ReactNode;
+  tone: keyof typeof STAT_TONES;
+  onClick: () => void;
+  active: boolean;
+}) {
+  const palette = STAT_TONES[tone] ?? STAT_TONES.slate;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`group relative overflow-hidden rounded-[24px] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-950 ${palette.border} ${
+        active ? 'ring-2 ring-blue-500/40' : 'ring-0'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+          {label}
+        </span>
+        <span className={`flex h-8 w-8 items-center justify-center rounded-xl transition group-hover:scale-110 ${palette.icon}`}>
+          {icon}
+        </span>
+      </div>
+      <div className={`mt-3 text-3xl font-semibold tabular-nums ${palette.value}`}>{value}</div>
+      <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{hint}</div>
+    </button>
+  );
+}
+
 interface AxiosErrorResponse {
   response?: {
     data?: {
@@ -402,6 +533,58 @@ const DEFAULT_TERM_ACCENT: TermAccent = {
   wash: 'bg-gradient-to-br from-blue-500/12 via-transparent to-transparent',
   text: 'text-blue-600 dark:text-blue-300',
 };
+
+/** Accent palette shared by course cards, keyed off a stable string hash. */
+interface CourseAccent {
+  bar: string;
+  wash: string;
+  text: string;
+}
+
+const COURSE_ACCENTS: CourseAccent[] = [
+  {
+    bar: 'bg-gradient-to-r from-blue-500 via-indigo-500 to-slate-400',
+    wash: 'bg-gradient-to-br from-blue-500/12 via-transparent to-transparent',
+    text: 'text-blue-600 dark:text-blue-300',
+  },
+  {
+    bar: 'bg-gradient-to-r from-violet-500 via-fuchsia-500 to-purple-400',
+    wash: 'bg-gradient-to-br from-violet-500/12 via-transparent to-transparent',
+    text: 'text-violet-600 dark:text-violet-300',
+  },
+  {
+    bar: 'bg-gradient-to-r from-emerald-500 via-teal-500 to-green-400',
+    wash: 'bg-gradient-to-br from-emerald-500/12 via-transparent to-transparent',
+    text: 'text-emerald-600 dark:text-emerald-300',
+  },
+  {
+    bar: 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-400',
+    wash: 'bg-gradient-to-br from-amber-500/12 via-transparent to-transparent',
+    text: 'text-amber-600 dark:text-amber-300',
+  },
+  {
+    bar: 'bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-400',
+    wash: 'bg-gradient-to-br from-sky-500/12 via-transparent to-transparent',
+    text: 'text-sky-600 dark:text-sky-300',
+  },
+  {
+    bar: 'bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-400',
+    wash: 'bg-gradient-to-br from-rose-500/12 via-transparent to-transparent',
+    text: 'text-rose-600 dark:text-rose-300',
+  },
+];
+
+/**
+ * Pick a stable accent for a course from its department (or code/name), so
+ * departments read as a group without anyone having to configure colours.
+ */
+function courseAccent(seed: string): CourseAccent {
+  let hash = 0;
+  for (const character of seed.trim().toLowerCase()) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return COURSE_ACCENTS[hash % COURSE_ACCENTS.length];
+}
 
 /**
  * Approximate season windows (``[monthIndex, day]`` pairs) used only when a
@@ -1039,6 +1222,15 @@ export default function AdminPage() {
     0
   );
 
+  // Secondary figures shown under each KPI so the strip answers "how is the
+  // organization doing?" instead of just showing raw counts.
+  const adminCount = users.filter((u) => u.role === 'admin').length;
+  const professorCount = totalUsers - adminCount;
+  const coursesWithStaff = coursesWithInstructors.filter((c) => c.instructors.length > 0).length;
+  const activePercent = totalUsers > 0 ? Math.round((activeUsers / totalUsers) * 100) : 0;
+  const assignmentsPerCourse = totalCourses > 0 ? totalAssignments / totalCourses : 0;
+  const inSessionTerm = terms.find((term) => termStatus(term, new Date()).label === 'In session');
+
   const termOptions = useMemo(
     () => buildTermOptions(coursesWithInstructors),
     [coursesWithInstructors]
@@ -1442,8 +1634,12 @@ export default function AdminPage() {
       <div className="theme-page-container space-y-6">
 
         {/* ── Header ──────────────────────────────────────────────────────────── */}
-        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <section className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div
+            className="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-500/[0.07] via-transparent to-violet-500/[0.06]"
+            aria-hidden
+          />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
                 <Users size={14} />
@@ -1458,6 +1654,41 @@ export default function AdminPage() {
               </p>
             </div>
 
+            {/* Quick action for the tab you are on */}
+            <div className="flex flex-wrap items-center gap-2">
+              {activeTab === 'users' && (
+                <button
+                  type="button"
+                  onClick={openCreatePanel}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+                >
+                  <UserPlus size={15} />
+                  Add user
+                </button>
+              )}
+
+              {activeTab === 'courses' && (
+                <button
+                  type="button"
+                  onClick={openCourseModal}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+                >
+                  <Plus size={15} />
+                  Add course
+                </button>
+              )}
+
+              {activeTab === 'terms' && (
+                <button
+                  type="button"
+                  onClick={openTermModal}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+                >
+                  <Plus size={15} />
+                  Add term
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
@@ -1496,90 +1727,65 @@ export default function AdminPage() {
         )}
 
         {/* ── Stat cards ──────────────────────────────────────────────────────── */}
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
-          <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Total users
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900">
-                <Users size={14} className="text-slate-600 dark:text-slate-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-slate-900 tabular-nums dark:text-white">
-              {totalUsers}
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-emerald-100 bg-white p-5 shadow-sm dark:border-emerald-900/40 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Active
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-900/30">
-                <UserCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-emerald-700 tabular-nums dark:text-emerald-300">
-              {activeUsers}
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-amber-100 bg-white p-5 shadow-sm dark:border-amber-900/40 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Suspended
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-900/30">
-                <UserX size={14} className="text-amber-600 dark:text-amber-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-amber-700 tabular-nums dark:text-amber-300">
-              {suspendedUsers}
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-blue-100 bg-white p-5 shadow-sm dark:border-blue-900/40 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Courses
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-900/30">
-                <GraduationCap size={14} className="text-blue-600 dark:text-blue-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-blue-700 tabular-nums dark:text-blue-300">
-              {totalCourses}
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-violet-100 bg-white p-5 shadow-sm dark:border-violet-900/40 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Assignments
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-50 dark:bg-violet-900/30">
-                <FileText size={14} className="text-violet-600 dark:text-violet-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-violet-700 tabular-nums dark:text-violet-300">
-              {totalAssignments}
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-sky-100 bg-white p-5 shadow-sm dark:border-sky-900/40 dark:bg-slate-950">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Terms
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 dark:bg-sky-900/30">
-                <Calendar size={14} className="text-sky-600 dark:text-sky-400" />
-              </div>
-            </div>
-            <div className="mt-3 text-3xl font-semibold text-sky-700 tabular-nums dark:text-sky-300">
-              {terms.length}
-            </div>
-          </div>
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <StatCard
+            label="Total users"
+            value={totalUsers}
+            hint={`${adminCount} admin${adminCount === 1 ? '' : 's'} · ${professorCount} professor${professorCount === 1 ? '' : 's'}`}
+            icon={<Users size={14} />}
+            tone="slate"
+            active={activeTab === 'users'}
+            onClick={() => setActiveTab('users')}
+          />
+          <StatCard
+            label="Active"
+            value={activeUsers}
+            hint={totalUsers > 0 ? `${activePercent}% of accounts active` : 'No accounts yet'}
+            icon={<UserCheck size={14} />}
+            tone="emerald"
+            active={false}
+            onClick={() => {
+              setRoleFilter('all');
+              setSearchQuery('');
+              setActiveTab('users');
+            }}
+          />
+          <StatCard
+            label="Suspended"
+            value={suspendedUsers}
+            hint={suspendedUsers === 0 ? 'All accounts in good standing' : 'Disabled from signing in'}
+            icon={<UserX size={14} />}
+            tone="amber"
+            active={false}
+            onClick={() => setActiveTab('users')}
+          />
+          <StatCard
+            label="Courses"
+            value={totalCourses}
+            hint={coursesWithStaff === totalCourses ? 'All staffed with professors' : `${coursesWithStaff} of ${totalCourses} staffed`}
+            icon={<GraduationCap size={14} />}
+            tone="blue"
+            active={activeTab === 'courses'}
+            onClick={() => setActiveTab('courses')}
+          />
+          <StatCard
+            label="Assignments"
+            value={totalAssignments}
+            hint={totalCourses > 0 ? `${assignmentsPerCourse.toFixed(1)} per course on average` : 'No courses yet'}
+            icon={<FileText size={14} />}
+            tone="violet"
+            active={false}
+            onClick={() => setActiveTab('courses')}
+          />
+          <StatCard
+            label="Terms"
+            value={terms.length}
+            hint={inSessionTerm ? `${inSessionTerm.label} is in session` : 'No term currently running'}
+            icon={<Calendar size={14} />}
+            tone="sky"
+            active={activeTab === 'terms'}
+            onClick={() => setActiveTab('terms')}
+          />
         </section>
 
         {/* ── Section tabs ──────────────────────────────────────────────────────── */}
@@ -1637,7 +1843,7 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Users</h2>
                 <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
                   {filteredUsers.length === totalUsers
-                    ? `${totalUsers} account${totalUsers !== 1 ? 's' : ''}`
+                    ? `${totalUsers} account${totalUsers !== 1 ? 's' : ''} · ${adminCount} admin${adminCount !== 1 ? 's' : ''} · ${professorCount} professor${professorCount !== 1 ? 's' : ''}`
                     : `${filteredUsers.length} of ${totalUsers} accounts`}
                 </p>
               </div>
@@ -1742,20 +1948,48 @@ export default function AdminPage() {
                         const isToggling = togglingId === entry.id;
                         const isSelf = user?.id === entry.id;
                         return (
-                          <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                          <tr key={entry.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50">
                             <td className="px-5 py-4">
-                              <div className="font-medium text-slate-900 dark:text-white">{entry.full_name}</div>
-                              <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{entry.email}</div>
+                              <div className="flex items-center gap-3">
+                                <Avatar name={entry.full_name} role={entry.role} title={entry.email} />
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="truncate font-medium text-slate-900 dark:text-white">
+                                      {entry.full_name}
+                                    </span>
+                                    {isSelf && (
+                                      <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                        You
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">
+                                    {entry.email}
+                                  </div>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-5 py-4"><RoleBadge role={entry.role} /></td>
                             <td className="px-5 py-4"><StatusBadge suspended={entry.suspended} /></td>
                             <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
-                              {formatDate(entry.last_login_at)}
+                              {entry.last_login_at ? (
+                                <span title={`Last sign-in: ${formatDate(entry.last_login_at)}`}>
+                                  <span className="block font-medium text-slate-700 dark:text-slate-300">
+                                    {relativeTime(entry.last_login_at) ?? 'Never'}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
+                                    {formatDate(entry.last_login_at)}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 dark:text-slate-500">Never signed in</span>
+                              )}
                             </td>
                             <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
-                              {entry.tenant_name || (
-                                <span className="text-slate-400 dark:text-slate-600">Default workspace</span>
-                              )}
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                <Building2 size={12} />
+                                {entry.tenant_name || 'Default workspace'}
+                              </span>
                             </td>
                             <td className="px-5 py-4">
                               <div className="flex justify-end">
@@ -1801,13 +2035,23 @@ export default function AdminPage() {
                         className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <h3 className="truncate text-base font-semibold text-slate-900 dark:text-white">
-                              {entry.full_name}
-                            </h3>
-                            <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">
-                              {entry.email}
-                            </p>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Avatar name={entry.full_name} role={entry.role} size={40} title={entry.email} />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="truncate text-base font-semibold text-slate-900 dark:text-white">
+                                  {entry.full_name}
+                                </h3>
+                                {isSelf && (
+                                  <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                    You
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">
+                                {entry.email}
+                              </p>
+                            </div>
                           </div>
                           <RoleBadge role={entry.role} />
                         </div>
@@ -1819,7 +2063,9 @@ export default function AdminPage() {
                           </div>
                           <div>
                             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Last login</div>
-                            <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{formatDate(entry.last_login_at)}</div>
+                            <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">
+                              {relativeTime(entry.last_login_at) ?? 'Never signed in'}
+                            </div>
                           </div>
                           <div className="col-span-2">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Workspace</div>
@@ -1966,40 +2212,63 @@ export default function AdminPage() {
                   const isAssigning = assigningCourse === course.id;
                   const assignmentCount = course.assignment_count ?? course.assignments?.length ?? 0;
                   const isAssignmentsOpen = expandedCourseIds.has(course.id);
+                  const accent = courseAccent(course.department || course.code || course.name);
+                  const linkedTerm = course.term
+                    ? `${course.term}${course.year ? ` ${course.year}` : ''}`
+                    : 'No term';
 
                   return (
                     <article
                       key={course.id}
-                      className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                      className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-950"
                     >
-                      {/* Course header */}
-                      <div className="flex items-start justify-between gap-3">
+                      {/* Course accent */}
+                      <div className={`h-1.5 w-full ${accent.bar}`} aria-hidden />
+                      <div className={`pointer-events-none absolute inset-x-0 top-0 h-28 ${accent.wash}`} aria-hidden />
+
+                      <div className="relative flex flex-1 flex-col gap-4 p-5">
+                        {/* Course header */}
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             {course.code && (
-                              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                              <span className="rounded-md bg-white/80 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900/80 dark:text-slate-300 dark:ring-slate-700">
                                 {course.code}
                               </span>
                             )}
+                            {course.department && (
+                              <span className={`text-[11px] font-bold uppercase tracking-[0.16em] ${accent.text}`}>
+                                {course.department}
+                              </span>
+                            )}
                           </div>
-                          <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
+                          <h3 className="mt-2 text-lg font-semibold leading-6 tracking-tight text-slate-900 dark:text-white">
                             {course.name}
                           </h3>
-                        </div>
-                      </div>
-
-                      {/* Term assignment */}
-                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                            Term
-                          </span>
-                          {course.term && (
-                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-500/20">
-                              {course.term}{course.year ? ` ${course.year}` : ''}
+                          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                            <span className={`font-semibold ${accent.text}`}>{linkedTerm}</span>
+                            <span aria-hidden>·</span>
+                            <span>
+                              {course.instructors.length} professor{course.instructors.length === 1 ? '' : 's'}
                             </span>
-                          )}
+                            <span aria-hidden>·</span>
+                            <span>
+                              {assignmentCount} assignment{assignmentCount === 1 ? '' : 's'}
+                            </span>
+                          </p>
                         </div>
+
+                        {/* Term assignment */}
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                              Term
+                            </span>
+                            {course.term && (
+                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-500/20">
+                                {linkedTerm}
+                              </span>
+                            )}
+                          </div>
                         {terms.length === 0 ? (
                           <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
                             No terms in the registry yet. Add one in the Terms tab.
@@ -2053,7 +2322,7 @@ export default function AdminPage() {
                       </div>
 
                       {/* Professors */}
-                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                      <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                             Professors
@@ -2076,9 +2345,7 @@ export default function AdminPage() {
                                   title={inst.email}
                                   className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
                                 >
-                                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-                                    {initialsOf(inst.full_name)}
-                                  </span>
+                                  <Avatar name={inst.full_name} size={24} title={inst.email} />
                                   <span className="max-w-[9rem] truncate">{inst.full_name}</span>
                                   <button
                                     type="button"
@@ -2139,7 +2406,7 @@ export default function AdminPage() {
                       </div>
 
                       {/* Assignments */}
-                      <div className="mt-auto pt-4">
+                      <div className="mt-auto">
                         <button
                           type="button"
                           onClick={() => toggleCourseAssignments(course.id)}
@@ -2212,6 +2479,7 @@ export default function AdminPage() {
                             )}
                           </div>
                         )}
+                      </div>
                       </div>
                     </article>
                   );
