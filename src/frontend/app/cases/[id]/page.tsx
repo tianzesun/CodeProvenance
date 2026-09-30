@@ -165,8 +165,8 @@ export default function CompareCasePage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
-        <section className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+      <div className="theme-page-container space-y-6 lg:space-y-8">
+        <section className="rounded-2xl border border-slate-200 bg-white px-6 py-6 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm font-medium text-slate-500">
@@ -183,7 +183,7 @@ export default function CompareCasePage() {
                   <span className="font-medium text-slate-500">Assignee:</span> {caseData?.investigator?.name || 'Unassigned'}
                 </div>
               </div>
-              <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-6 grid gap-4 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
                 <HeaderMetric value={totalSubmissions.toLocaleString()} label="submissions analyzed" />
                 <HeaderMetric value={casesNeedingReview} label="cases need instructor review" />
                 <HeaderMetric value={analysesCompleted.toLocaleString()} label="analyses completed" />
@@ -196,8 +196,8 @@ export default function CompareCasePage() {
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <Card className="p-5">
+        <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <Card>
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-500">Risk Summary</div>
@@ -219,7 +219,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="p-5">
+          <Card>
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
               <ShieldCheck size={17} className="text-blue-600" />
               Confidence Basis
@@ -234,12 +234,13 @@ export default function CompareCasePage() {
           </Card>
         </section>
 
-        <Card>
+        {/* ── Why flagged ─────────────────────────────────────────────────────── */}
+        <Card className="space-y-5">
           <CardHeader
             title="Why This Case Was Flagged"
             description="Plain-language evidence for instructor review."
           />
-          <div className="grid gap-3 p-5 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {[
               'Same unusual recursive decomposition',
               'Identical edge-case handling',
@@ -255,12 +256,13 @@ export default function CompareCasePage() {
           </div>
         </Card>
 
-        <Card>
+        {/* ── Compare code ────────────────────────────────────────────────────── */}
+        <Card className="space-y-5">
           <CardHeader
             title="Compare Code"
             description="Matching regions are highlighted. Starter code is greyed out and excluded from the risk summary."
           />
-          <div className="grid gap-4 p-5 xl:grid-cols-2">
+          <div className="grid items-start gap-6 xl:grid-cols-2">
             <CodePanel
               title={studentA || 'Student A'}
               code={`def tree_score(node):
@@ -302,10 +304,11 @@ export default function CompareCasePage() {
           </div>
         </Card>
 
-        <section className="grid gap-4 lg:grid-cols-3">
-          <Card>
+        {/* ── History / context / actions ─────────────────────────────────────── */}
+        <section className="grid items-start gap-6 lg:grid-cols-3">
+          <Card className="space-y-5">
             <CardHeader title="Previous History" description="Historical context, not a standalone conclusion." />
-            <div className="space-y-3 p-5">
+            <div className="space-y-4">
               <EvidenceRow
                 icon={History}
                 title="Similar to Winter 2025 submission set."
@@ -319,9 +322,9 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="space-y-5">
             <CardHeader title="Context Notes" description="False-positive controls applied before ranking." />
-            <div className="space-y-3 p-5">
+            <div className="space-y-4">
               {[
                 'Starter template overlap excluded.',
                 'Instructor-provided tests and LMS packaging files ignored.',
@@ -332,9 +335,9 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="space-y-5">
             <CardHeader title="Decision Actions" description="Keep the review outcome simple and auditable." />
-            <div className="space-y-4 p-5">
+            <div className="space-y-5">
               {/* Assign Reviewer */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">Assign Reviewer</label>
@@ -421,9 +424,10 @@ export default function CompareCasePage() {
           </Card>
         </section>
 
-        <Card>
+        {/* ── Notes ───────────────────────────────────────────────────────────── */}
+        <Card className="space-y-5">
           <CardHeader title="Notes" description="Reviewer notes are kept with the case audit trail." />
-          <div className="p-5 space-y-4">
+          <div className="space-y-5">
             {/* Existing Comments */}
             <div className="space-y-3 max-h-60 overflow-y-auto">
               {comments && comments.length > 0 ? (

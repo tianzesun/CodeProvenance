@@ -289,7 +289,7 @@ export function Card({ children, className = '' }: CardProps) {
   return (
     <motion.section
       {...fadeUp}
-      className={`theme-card-strong rounded-[24px] shadow-sm ${className}`}
+      className={`theme-card-strong rounded-[24px] p-6 shadow-sm lg:p-7 ${className}`}
     >
       {children}
     </motion.section>
@@ -298,11 +298,11 @@ export function Card({ children, className = '' }: CardProps) {
 
 export function CardHeader({ title, description, action }: CardHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between dark:border-slate-800">
-      <div>
+    <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between dark:border-slate-800">
+      <div className="min-w-0">
         <h2 className="theme-section-title text-lg">{title}</h2>
         {description && (
-          <p className="mt-1 text-sm text-[var(--text-muted)]">{description}</p>
+          <p className="mt-1.5 text-sm leading-6 text-[var(--text-muted)]">{description}</p>
         )}
       </div>
       {action}
