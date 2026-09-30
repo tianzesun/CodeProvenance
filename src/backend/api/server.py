@@ -6010,6 +6010,7 @@ async def admin_list_courses_with_instructors(request: Request) -> dict[str, Any
                         "code": course.code,
                         "term": course.term,
                         "year": course.year,
+                        "term_id": str(course.term_id) if course.term_id else None,
                         "department": course.department,
                         "organization_id": course.organization_id,
                         "organization_name": (

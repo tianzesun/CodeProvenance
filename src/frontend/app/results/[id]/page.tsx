@@ -954,13 +954,12 @@ export default function ResultsPage() {
                       </span>
                       <div className="h-1 w-16 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                         <div
-                          className={`h-full rounded-full ${
-                            confidenceDisplay >= 75
+                          className={`h-full rounded-full ${confidenceDisplay >= 75
                               ? 'bg-red-500'
                               : confidenceDisplay >= 45
                                 ? 'bg-amber-500'
                                 : 'bg-emerald-500'
-                          }`}
+                            }`}
                           style={{ width: `${Math.max(confidenceDisplay, 4)}%` }}
                         />
                       </div>
@@ -997,11 +996,10 @@ export default function ResultsPage() {
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={() => setReportsOpen(false)}
-                              className={`block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 ${
-                                item.accent
+                              className={`block px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 ${item.accent
                                   ? 'text-blue-700 dark:text-blue-300'
                                   : 'text-slate-700 dark:text-slate-300'
-                              }`}
+                                }`}
                             >
                               {item.label}
                             </a>
@@ -1047,19 +1045,17 @@ export default function ResultsPage() {
                     <button
                       key={tab.id}
                       onClick={() => setDetailTab(tab.id)}
-                      className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition ${
-                        isActive
+                      className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition ${isActive
                           ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
                           : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-                      }`}
+                        }`}
                     >
                       {tab.label}
                       {tab.count !== null && (
-                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                          isActive
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isActive
                             ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
                             : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-                        }`}>
+                          }`}>
                           {tab.count}
                         </span>
                       )}
@@ -1072,80 +1068,80 @@ export default function ResultsPage() {
             {detailTab === 'signals' && (
               <div>
                 <Card className="overflow-hidden">
-                <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
-                <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
-                <div>
-                  <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    The signals below are the independent checks that support this verdict. A check is
-                    marked as contributing when its score crosses the alert threshold.
-                  </div>
-                </div>
-              </div>
-              <div className="px-5 py-4">
-                {evidenceSignals.length > 0 ? (
-                  <div className="space-y-3">
-                    {evidenceSignals.map((signal) => (
-                      <div
-                        key={signal.key}
-                        className={`rounded-lg border p-3 ${signal.fired ? 'border-blue-200 bg-blue-50/70 dark:border-blue-800/40 dark:bg-blue-950/30' : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40'}`}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-slate-950 dark:text-white">{signal.name}</span>
-                            {signal.fired ? (
-                              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                Contributing
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                                Supporting
-                              </span>
-                            )}
-                            <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">
-                              {Math.round(signal.score * 100)}%
-                            </span>
-                          </div>
-                        </div>
-                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-                          <div
-                            className={`h-full rounded-full ${signal.fired ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-400 dark:bg-slate-600'}`}
-                            style={{ width: `${Math.min(100, Math.max(0, Math.round(signal.score * 100)))}%` }}
-                          />
-                        </div>
-                        <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
-                          {signal.what}{' '}
-                          <span className="font-medium text-slate-700 dark:text-slate-300">{signal.why}</span>
-                        </p>
+                  <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
+                    <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
+                    <div>
+                      <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        The signals below are the independent checks that support this verdict. A check is
+                        marked as contributing when its score crosses the alert threshold.
                       </div>
-                    ))}
+                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
-                    No individual engine signal was above zero for this pair. Review the highlighted
-                    blocks and verdict context below for guidance.
-                  </div>
-                )}
-              </div>
-              </Card>
-
-              {/* Evidence chips — simplified signal summary */}
-              {evidenceTypes.length > 0 && (
-                <Card className="overflow-hidden">
                   <div className="px-5 py-4">
-                    <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Evidence Signals
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {evidenceTypes.map((item) => (
-                        <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                          {item}
-                        </span>
-                      ))}
-                    </div>
+                    {evidenceSignals.length > 0 ? (
+                      <div className="space-y-3">
+                        {evidenceSignals.map((signal) => (
+                          <div
+                            key={signal.key}
+                            className={`rounded-lg border p-3 ${signal.fired ? 'border-blue-200 bg-blue-50/70 dark:border-blue-800/40 dark:bg-blue-950/30' : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40'}`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-950 dark:text-white">{signal.name}</span>
+                                {signal.fired ? (
+                                  <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                    Contributing
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                    Supporting
+                                  </span>
+                                )}
+                                <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">
+                                  {Math.round(signal.score * 100)}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                              <div
+                                className={`h-full rounded-full ${signal.fired ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-400 dark:bg-slate-600'}`}
+                                style={{ width: `${Math.min(100, Math.max(0, Math.round(signal.score * 100)))}%` }}
+                              />
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
+                              {signal.what}{' '}
+                              <span className="font-medium text-slate-700 dark:text-slate-300">{signal.why}</span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+                        No individual engine signal was above zero for this pair. Review the highlighted
+                        blocks and verdict context below for guidance.
+                      </div>
+                    )}
                   </div>
                 </Card>
-              )}
+
+                {/* Evidence chips — simplified signal summary */}
+                {evidenceTypes.length > 0 && (
+                  <Card className="overflow-hidden">
+                    <div className="px-5 py-4">
+                      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Evidence Signals
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {evidenceTypes.map((item) => (
+                          <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
+                )}
               </div>
             )}
 
@@ -1181,55 +1177,55 @@ export default function ResultsPage() {
 
             {detailTab === 'code' && (
               <>
-            {/* Similarity Legend */}
-            <Card className="overflow-hidden">
-              <div className="px-5 py-3">
-                <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Highlight Legend
-                </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-red-500/60 border border-red-400"></span>
-                    Identical (exact copy)
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-amber-500/50 border border-amber-400"></span>
-                    Renamed (renamed identifiers/literals)
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-3 rounded-sm bg-blue-500/50 border border-blue-400"></span>
-                    Logic (modified or semantically similar)
-                  </span>
-                </div>
-              </div>
-            </Card>
+                {/* Similarity Legend */}
+                <Card className="overflow-hidden">
+                  <div className="px-5 py-3">
+                    <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Highlight Legend
+                    </div>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 dark:text-slate-400">
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-3 rounded-sm bg-red-500/60 border border-red-400"></span>
+                        Identical (exact copy)
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-3 rounded-sm bg-amber-500/50 border border-amber-400"></span>
+                        Renamed (renamed identifiers/literals)
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-3 rounded-sm bg-blue-500/50 border border-blue-400"></span>
+                        Logic (modified or semantically similar)
+                      </span>
+                    </div>
+                  </div>
+                </Card>
 
-            {/* Side-by-side code comparison */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <CodePanel
-                title={activeResult?.file_a || 'Student A'}
-                code={leftCode}
-                highlights={leftHighlights}
-                panelRef={leftRef}
-                isLeft={true}
-                onScroll={() => syncScroll(leftRef, rightRef)}
-              />
-              <CodePanel
-                title={activeResult?.file_b || 'Student B'}
-                code={rightCode}
-                highlights={rightHighlights}
-                panelRef={rightRef}
-                isLeft={false}
-                onScroll={() => syncScroll(rightRef, leftRef)}
-              />
-            </div>
+                {/* Side-by-side code comparison */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <CodePanel
+                    title={activeResult?.file_a || 'Student A'}
+                    code={leftCode}
+                    highlights={leftHighlights}
+                    panelRef={leftRef}
+                    isLeft={true}
+                    onScroll={() => syncScroll(leftRef, rightRef)}
+                  />
+                  <CodePanel
+                    title={activeResult?.file_b || 'Student B'}
+                    code={rightCode}
+                    highlights={rightHighlights}
+                    panelRef={rightRef}
+                    isLeft={false}
+                    onScroll={() => syncScroll(rightRef, leftRef)}
+                  />
+                </div>
 
-            {job?.review_notes && (
-              <Card>
-                <div className="font-semibold text-slate-950 dark:text-white mb-1">Review Note</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">{job.review_notes}</div>
-              </Card>
-            )}
+                {job?.review_notes && (
+                  <Card>
+                    <div className="font-semibold text-slate-950 dark:text-white mb-1">Review Note</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-400">{job.review_notes}</div>
+                  </Card>
+                )}
               </>
             )}
 

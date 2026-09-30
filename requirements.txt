@@ -1,9 +1,12 @@
 # CodeProvenance - Python Dependencies
 
 # Core Framework
-fastapi==0.109.0
+fastapi==0.115.2
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+python-multipart==0.0.18
+
+# Starlette dependency for gradio compatibility
+starlette==0.40.0
 
 # Database
 sqlalchemy==2.0.25
@@ -54,7 +57,7 @@ joblib==1.5.3
 
 # AI Detection - Multi-layer ensemble (Binoculars + existing signals)
 # Binoculars (ICML 2024) - zero-shot SOTA detector, very low false positive rate
-transformers==4.36.2
+transformers==4.41.0
 torch==2.2.1
 sentencepiece==0.2.2
 lightgbm==4.3.0
@@ -72,8 +75,11 @@ pylti1p3==1.12.2
 requests==2.33.1
 
 # CLI & Terminal
-typer==0.9.0
+typer==0.12
 rich==13.7.0
+
+# Additional dependencies
+seaborn>=0.13.0
 
 # Testing & Dev
 pytest==8.0.0

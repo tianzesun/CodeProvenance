@@ -134,6 +134,7 @@ interface CourseWithInstructors {
   code?: string;
   term?: string | null;
   year?: number | null;
+  term_id?: string | null;
   department?: string | null;
   organization_name?: string;
   instructors: CourseInstructor[];
@@ -183,8 +184,8 @@ function RoleBadge({ role }: { role: AuthRole }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${role === 'admin'
-          ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
-          : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+        ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
+        : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
         }`}
     >
       {role === 'admin' ? 'Admin' : 'Professor'}
@@ -196,8 +197,8 @@ function StatusBadge({ suspended }: { suspended?: boolean }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${suspended
-          ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
-          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
         }`}
     >
       <span
@@ -251,15 +252,28 @@ function AddCourseCard({
         type="button"
         onClick={onAdd}
         aria-label="Add a new course"
-        className="group flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 p-6 text-center transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:hover:border-blue-500 dark:hover:bg-slate-900/40"
+        className="group relative flex min-h-[240px] w-full flex-col items-center justify-center rounded-3xl bg-white dark:bg-slate-900 transition hover:bg-blue-50/30 dark:hover:bg-slate-800/50"
       >
-        <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
-          <Plus size={36} strokeWidth={2} aria-hidden="true" />
-        </span>
-        <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
-          Add course
-        </span>
-        <span className="text-xs text-slate-400">Create a new course in your organization</span>
+        {/* Card border */}
+        <div className="absolute inset-0 rounded-3xl border-2 border-slate-200 dark:border-slate-700 group-hover:border-blue-400 group-hover:dark:border-blue-500 transition-colors" />
+
+        {/* Icon container */}
+        <div className="relative z-10 flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-500/10 dark:to-indigo-500/10 group-hover:from-blue-100 group-hover:to-indigo-100 dark:group-hover:from-blue-500/20 dark:group-hover:to-indigo-500/20 transition-colors shadow-sm group-hover:shadow-md">
+          <Plus size={48} className="text-blue-500 dark:text-blue-400 transition-transform group-hover:scale-110 group-hover:text-blue-600 dark:group-hover:text-blue-300" />
+        </div>
+
+        {/* Text content */}
+        <div className="relative z-10 mt-6 flex flex-col items-center gap-2 px-6">
+          <span className="text-lg font-semibold text-slate-700 dark:text-slate-200 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300">
+            Add Course
+          </span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-[220px]">
+            Create a new course to organize assignments
+          </span>
+        </div>
+
+        {/* Subtle glow effect on hover */}
+        <div className="absolute inset-0 rounded-3xl bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </button>
     );
   }
@@ -270,15 +284,28 @@ function AddCourseCard({
       type="button"
       onClick={onAdd}
       aria-label="Add a new course"
-      className="group flex w-full flex-col items-center justify-center gap-2 border-t border-slate-200 px-5 py-12 text-center transition hover:bg-blue-50/50 dark:border-slate-800 dark:hover:bg-slate-900/40"
+      className="group relative flex w-full flex-col items-center justify-center rounded-xl bg-white dark:bg-slate-900 px-5 py-10 transition hover:bg-blue-50/30 dark:hover:bg-slate-800/50"
     >
-      <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
-        <Plus size={36} strokeWidth={2} aria-hidden="true" />
-      </span>
-      <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
-        Add course
-      </span>
-      <span className="text-xs text-slate-400">Create a course to organise its assignments</span>
+      {/* Card border */}
+      <div className="absolute inset-0 rounded-xl border-2 border-slate-200 dark:border-slate-700 group-hover:border-blue-400 group-hover:dark:border-blue-500 transition-colors" />
+
+      {/* Icon container */}
+      <div className="relative z-10 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-500/10 dark:to-indigo-500/10 group-hover:from-blue-100 group-hover:to-indigo-100 dark:group-hover:from-blue-500/20 dark:group-hover:to-indigo-500/20 transition-colors shadow-sm group-hover:shadow-md">
+        <Plus size={36} className="text-blue-500 dark:text-blue-400 transition-transform group-hover:scale-110 group-hover:text-blue-600 dark:group-hover:text-blue-300" />
+      </div>
+
+      {/* Text content */}
+      <div className="relative z-10 mt-3 flex flex-col items-center gap-1">
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300">
+          Add Course
+        </span>
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          Create a course to organize its assignments
+        </span>
+      </div>
+
+      {/* Subtle glow effect on hover */}
+      <div className="absolute inset-0 rounded-xl bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
     </button>
   );
 }
@@ -296,15 +323,28 @@ function AddTermCard({
       type="button"
       onClick={onAdd}
       aria-label="Add a new academic term"
-      className="group flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 text-center transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-700 dark:hover:border-blue-500 dark:hover:bg-slate-900/40"
+      className="group relative flex min-h-[200px] w-full flex-col items-center justify-center rounded-3xl bg-white dark:bg-slate-900 transition hover:bg-blue-50/30 dark:hover:bg-slate-800/50"
     >
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition group-hover:border-blue-400 group-hover:bg-white group-hover:text-blue-600 dark:border-slate-700 dark:group-hover:border-blue-500 dark:group-hover:bg-slate-900">
-        <Plus size={30} strokeWidth={2} aria-hidden="true" />
-      </span>
-      <span className="mt-1 text-sm font-semibold text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">
-        Add term
-      </span>
-      <span className="text-xs text-slate-400">Plan a new academic term</span>
+      {/* Card border */}
+      <div className="absolute inset-0 rounded-3xl border-2 border-slate-200 dark:border-slate-700 group-hover:border-blue-400 group-hover:dark:border-blue-500 transition-colors" />
+
+      {/* Icon container */}
+      <div className="relative z-10 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-500/10 dark:to-indigo-500/10 group-hover:from-blue-100 group-hover:to-indigo-100 dark:group-hover:from-blue-500/20 dark:group-hover:to-indigo-500/20 transition-colors shadow-sm group-hover:shadow-md">
+        <Plus size={40} className="text-blue-500 dark:text-blue-400 transition-transform group-hover:scale-110 group-hover:text-blue-600 dark:group-hover:text-blue-300" />
+      </div>
+
+      {/* Text content */}
+      <div className="relative z-10 mt-6 flex flex-col items-center gap-2 px-6">
+        <span className="text-lg font-semibold text-slate-700 dark:text-slate-200 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300">
+          Add Term
+        </span>
+        <span className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-[200px]">
+          Create a new academic term (Fall 2026, etc.)
+        </span>
+      </div>
+
+      {/* Subtle glow effect on hover */}
+      <div className="absolute inset-0 rounded-3xl bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
     </button>
   );
 }
@@ -442,6 +482,9 @@ export default function AdminPage() {
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
   const [expandedCourseIds, setExpandedCourseIds] = useState<Set<string>>(new Set());
+  // term assignment per course: courseId → selected term_id in dropdown
+  const [selectedTermForCourse, setSelectedTermForCourse] = useState<Record<string, string>>({});
+  const [assigningTermForCourse, setAssigningTermForCourse] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'users' | 'courses' | 'terms'>('users');
   const [courseQuery, setCourseQuery] = useState('');
   const [courseTermFilter, setCourseTermFilter] = useState('all');
@@ -453,6 +496,7 @@ export default function AdminPage() {
   const [termError, setTermError] = useState('');
   const [editingTermId, setEditingTermId] = useState<string | null>(null);
   const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
+  const [termToDelete, setTermToDelete] = useState<AdminTerm | null>(null);
   const [termForm, setTermForm] = useState({
     name: 'Fall',
     year: String(new Date().getFullYear()),
@@ -764,14 +808,15 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteTerm = async (term: AdminTerm) => {
-    // Deleting only unlinks: the registry row goes, each linked course keeps the
-    // term/year text it already carries.
+  const handleDeleteTerm = (term: AdminTerm) => {
+    setTermToDelete(term);
+  };
+
+  const confirmDeleteTerm = async () => {
+    if (!termToDelete) return;
+    const term = termToDelete;
     const label = term.label || `${term.name} ${term.year}`;
-    const message = term.course_count > 0
-      ? `Remove ${label} from the registry? ${term.course_count} course(s) keep their current term label but will no longer be linked to it.`
-      : `Remove ${label} from the registry?`;
-    if (!confirm(message)) return;
+    setTermToDelete(null);
     setDeletingTermId(term.id);
     setPageError('');
     try {
@@ -941,6 +986,28 @@ export default function AdminPage() {
       await loadCoursesWithInstructors();
     } catch (error) {
       setPageError(getErrorMessage(error));
+    }
+  };
+
+  const assignCourseTerm = async (courseId: string, termId: string) => {
+    // Find the course to preserve required fields for the PUT body
+    const course = coursesWithInstructors.find((c) => c.id === courseId);
+    if (!course) return;
+    setAssigningTermForCourse(courseId);
+    try {
+      await apiClient.put(`/api/courses/${courseId}`, {
+        name: course.name,
+        code: course.code ?? null,
+        department: course.department ?? null,
+        term_id: termId || null,   // empty string → unlink
+      });
+      await loadCoursesWithInstructors();
+      setSelectedTermForCourse((prev) => ({ ...prev, [courseId]: '' }));
+      setSuccessMessage('Term assignment updated.');
+    } catch (error) {
+      setPageError(getErrorMessage(error));
+    } finally {
+      setAssigningTermForCourse(null);
     }
   };
 
@@ -1116,8 +1183,8 @@ export default function AdminPage() {
             onClick={() => setActiveTab('users')}
             aria-pressed={activeTab === 'users'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'users'
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+              : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
           >
             <Users size={15} />
             Users
@@ -1130,8 +1197,8 @@ export default function AdminPage() {
             onClick={() => setActiveTab('courses')}
             aria-pressed={activeTab === 'courses'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'courses'
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+              : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
           >
             <GraduationCap size={15} />
             Courses &amp; assignments
@@ -1144,8 +1211,8 @@ export default function AdminPage() {
             onClick={() => setActiveTab('terms')}
             aria-pressed={activeTab === 'terms'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'terms'
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+              : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
           >
             <Calendar size={15} />
             Terms
@@ -1157,101 +1224,69 @@ export default function AdminPage() {
 
         {/* ── Users table ─────────────────────────────────────────────────────── */}
         {activeTab === 'users' && (
-        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          {/* Table header + filters */}
-          <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Users</h2>
-              <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-                {filteredUsers.length === totalUsers
-                  ? `${totalUsers} account${totalUsers !== 1 ? 's' : ''}`
-                  : `${filteredUsers.length} of ${totalUsers} accounts`}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="relative min-w-[240px]">
-                <Search
-                  size={16}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by name, email, workspace…"
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
-                />
+          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            {/* Table header + filters */}
+            <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Users</h2>
+                <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                  {filteredUsers.length === totalUsers
+                    ? `${totalUsers} account${totalUsers !== 1 ? 's' : ''}`
+                    : `${filteredUsers.length} of ${totalUsers} accounts`}
+                </p>
               </div>
 
-              <div className="relative">
-                <select
-                  value={roleFilter}
-                  onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-9 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
-                >
-                  <option value="all">All roles</option>
-                  <option value="admin">Admin</option>
-                  <option value="professor">Professor</option>
-                </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="relative min-w-[240px]">
+                  <Search
+                    size={16}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by name, email, workspace…"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                  />
+                </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleExportUsers('csv')}
-                  disabled={exportingUsers}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  {exportingUsers ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Export
-                </button>
-                <button
-                  type="button"
-                  onClick={openImportPanel}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  <Upload size={14} />
-                  Import
-                </button>
-              </div>
-            </div>
-          </div>
+                <div className="relative">
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-9 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="all">All roles</option>
+                    <option value="admin">Admin</option>
+                    <option value="professor">Professor</option>
+                  </select>
+                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
 
-          {/* Desktop table */}
-          {loadingUsers ? (
-            <div className="hidden md:block overflow-x-auto">
-              <table className="min-w-full text-left">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
-                  <tr>
-                    <th className="px-5 py-3">User</th>
-                    <th className="px-5 py-3">Role</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Last login</th>
-                    <th className="px-5 py-3">Workspace</th>
-                    <th className="px-5 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {Array.from({ length: 5 }).map((_, i) => <UserRowSkeleton key={i} />)}
-                </tbody>
-              </table>
-            </div>
-          ) : filteredUsers.length === 0 ? (
-            <div className="px-5 py-16 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                <Users size={22} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExportUsers('csv')}
+                    disabled={exportingUsers}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {exportingUsers ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImportPanel}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <Upload size={14} />
+                    Import
+                  </button>
+                </div>
               </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
-                No users found
-              </h3>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                No accounts match your current filters. Try a different search, or add a user below.
-              </p>
             </div>
-          ) : (
-            <>
-              {/* Desktop */}
+
+            {/* Desktop table */}
+            {loadingUsers ? (
               <div className="hidden md:block overflow-x-auto">
                 <table className="min-w-full text-left">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
@@ -1265,549 +1300,638 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {filteredUsers.map((entry) => {
-                      const isToggling = togglingId === entry.id;
-                      const isSelf = user?.id === entry.id;
-                      return (
-                        <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
-                          <td className="px-5 py-4">
-                            <div className="font-medium text-slate-900 dark:text-white">{entry.full_name}</div>
-                            <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{entry.email}</div>
-                          </td>
-                          <td className="px-5 py-4"><RoleBadge role={entry.role} /></td>
-                          <td className="px-5 py-4"><StatusBadge suspended={entry.suspended} /></td>
-                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
-                            {formatDate(entry.last_login_at)}
-                          </td>
-                          <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
-                            {entry.tenant_name || (
-                              <span className="text-slate-400 dark:text-slate-600">Default workspace</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex justify-end">
-                              {isSelf ? (
-                                <span className="text-xs text-slate-400 dark:text-slate-600 italic">You</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={isToggling}
-                                  onClick={() => handleToggleSuspend(entry)}
-                                  className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${entry.suspended
-                                      ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
-                                      : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
-                                    }`}
-                                >
-                                  {isToggling ? (
-                                    <Loader2 size={13} className="animate-spin" />
-                                  ) : entry.suspended ? (
-                                    <UserCheck size={13} />
-                                  ) : (
-                                    <UserX size={13} />
-                                  )}
-                                  {entry.suspended ? 'Activate' : 'Suspend'}
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {Array.from({ length: 5 }).map((_, i) => <UserRowSkeleton key={i} />)}
                   </tbody>
                 </table>
               </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="px-5 py-16 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <Users size={22} />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+                  No users found
+                </h3>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  No accounts match your current filters. Try a different search, or add a user below.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Desktop */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="min-w-full text-left">
+                    <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
+                      <tr>
+                        <th className="px-5 py-3">User</th>
+                        <th className="px-5 py-3">Role</th>
+                        <th className="px-5 py-3">Status</th>
+                        <th className="px-5 py-3">Last login</th>
+                        <th className="px-5 py-3">Workspace</th>
+                        <th className="px-5 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {filteredUsers.map((entry) => {
+                        const isToggling = togglingId === entry.id;
+                        const isSelf = user?.id === entry.id;
+                        return (
+                          <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                            <td className="px-5 py-4">
+                              <div className="font-medium text-slate-900 dark:text-white">{entry.full_name}</div>
+                              <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{entry.email}</div>
+                            </td>
+                            <td className="px-5 py-4"><RoleBadge role={entry.role} /></td>
+                            <td className="px-5 py-4"><StatusBadge suspended={entry.suspended} /></td>
+                            <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
+                              {formatDate(entry.last_login_at)}
+                            </td>
+                            <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
+                              {entry.tenant_name || (
+                                <span className="text-slate-400 dark:text-slate-600">Default workspace</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="flex justify-end">
+                                {isSelf ? (
+                                  <span className="text-xs text-slate-400 dark:text-slate-600 italic">You</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={isToggling}
+                                    onClick={() => handleToggleSuspend(entry)}
+                                    className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${entry.suspended
+                                      ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
+                                      : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
+                                      }`}
+                                  >
+                                    {isToggling ? (
+                                      <Loader2 size={13} className="animate-spin" />
+                                    ) : entry.suspended ? (
+                                      <UserCheck size={13} />
+                                    ) : (
+                                      <UserX size={13} />
+                                    )}
+                                    {entry.suspended ? 'Activate' : 'Suspend'}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
-              {/* Mobile cards */}
-              <div className="grid gap-3 p-4 md:hidden">
-                {filteredUsers.map((entry) => {
-                  const isToggling = togglingId === entry.id;
-                  const isSelf = user?.id === entry.id;
-                  return (
-                    <article
-                      key={entry.id}
-                      className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-semibold text-slate-900 dark:text-white">
-                            {entry.full_name}
-                          </h3>
-                          <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">
-                            {entry.email}
-                          </p>
+                {/* Mobile cards */}
+                <div className="grid gap-3 p-4 md:hidden">
+                  {filteredUsers.map((entry) => {
+                    const isToggling = togglingId === entry.id;
+                    const isSelf = user?.id === entry.id;
+                    return (
+                      <article
+                        key={entry.id}
+                        className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-base font-semibold text-slate-900 dark:text-white">
+                              {entry.full_name}
+                            </h3>
+                            <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">
+                              {entry.email}
+                            </p>
+                          </div>
+                          <RoleBadge role={entry.role} />
                         </div>
-                        <RoleBadge role={entry.role} />
-                      </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900">
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Status</div>
-                          <div className="mt-2"><StatusBadge suspended={entry.suspended} /></div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Last login</div>
-                          <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{formatDate(entry.last_login_at)}</div>
-                        </div>
-                        <div className="col-span-2">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Workspace</div>
-                          <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">
-                            {entry.tenant_name || 'Default workspace'}
+                        <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900">
+                          <div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Status</div>
+                            <div className="mt-2"><StatusBadge suspended={entry.suspended} /></div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Last login</div>
+                            <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{formatDate(entry.last_login_at)}</div>
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Workspace</div>
+                            <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">
+                              {entry.tenant_name || 'Default workspace'}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {!isSelf && (
-                        <button
-                          type="button"
-                          disabled={isToggling}
-                          onClick={() => handleToggleSuspend(entry)}
-                          className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition disabled:opacity-50 ${entry.suspended
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            disabled={isToggling}
+                            onClick={() => handleToggleSuspend(entry)}
+                            className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition disabled:opacity-50 ${entry.suspended
                               ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
                               : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
-                            }`}
-                        >
-                          {isToggling ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : entry.suspended ? (
-                            <UserCheck size={14} />
-                          ) : (
-                            <UserX size={14} />
-                          )}
-                          {entry.suspended ? 'Activate user' : 'Suspend user'}
-                        </button>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
-            </>
-          )}
+                              }`}
+                          >
+                            {isToggling ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : entry.suspended ? (
+                              <UserCheck size={14} />
+                            ) : (
+                              <UserX size={14} />
+                            )}
+                            {entry.suspended ? 'Activate user' : 'Suspend user'}
+                          </button>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
-          {!loadingUsers && (
-            <AddUserCard onAdd={openCreatePanel} buttonRef={createButtonRef} />
-          )}
-        </section>
+            {!loadingUsers && (
+              <AddUserCard onAdd={openCreatePanel} buttonRef={createButtonRef} />
+            )}
+          </section>
         )}
 
         {/* ── Course & Instructor Assignments ─────────────────────────────────── */}
         {activeTab === 'courses' && (
-        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
-                <GraduationCap size={14} />
-                Courses
-              </div>
-              <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
-                Courses &amp; assignments
-              </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Manage course access and see which assignments belong to each course.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:items-end">
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                <div className="relative w-full sm:w-[280px]">
-                  <Search
-                    size={15}
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-                  <input
-                    type="search"
-                    value={courseQuery}
-                    onChange={(e) => setCourseQuery(e.target.value)}
-                    placeholder="Search courses, codes, professors…"
-                    aria-label="Search courses"
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
-                  />
+          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
+                  <GraduationCap size={14} />
+                  Courses
                 </div>
-                {termOptions.length > 1 && (
-                  <div className="relative w-full sm:w-[190px]">
-                    <select
-                      value={courseTermFilter}
-                      onChange={(e) => setCourseTermFilter(e.target.value)}
-                      aria-label="Filter courses by term"
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
-                    >
-                      <option value="all">All terms</option>
-                      {termOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.value} ({option.count})
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
+                  Courses &amp; assignments
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Manage course access and see which assignments belong to each course.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:items-end">
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  <div className="relative w-full sm:w-[280px]">
+                    <Search
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      type="search"
+                      value={courseQuery}
+                      onChange={(e) => setCourseQuery(e.target.value)}
+                      placeholder="Search courses, codes, professors…"
+                      aria-label="Search courses"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
                     />
                   </div>
-                )}
-              </div>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {filteredCourses.length === totalCourses
-                  ? `${totalCourses} course${totalCourses !== 1 ? 's' : ''} · ${totalAssignments} assignment${totalAssignments !== 1 ? 's' : ''}`
-                  : `${filteredCourses.length} of ${totalCourses} courses`}
-              </p>
-            </div>
-          </div>
-
-          {loadingCourses ? (
-            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <div className="h-4 w-20 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                    <div className="h-4 w-16 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  </div>
-                  <div className="mt-3 h-5 w-40 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-3 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                  {termOptions.length > 1 && (
+                    <div className="relative w-full sm:w-[190px]">
+                      <select
+                        value={courseTermFilter}
+                        onChange={(e) => setCourseTermFilter(e.target.value)}
+                        aria-label="Filter courses by term"
+                        className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                      >
+                        <option value="all">All terms</option>
+                        {termOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.value} ({option.count})
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          ) : totalCourses === 0 ? (
-            <div className="p-5">
-              <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
-            </div>
-          ) : filteredCourses.length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-900">
-                <Search size={22} className="text-slate-500 dark:text-slate-400" />
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {filteredCourses.length === totalCourses
+                    ? `${totalCourses} course${totalCourses !== 1 ? 's' : ''} · ${totalAssignments} assignment${totalAssignments !== 1 ? 's' : ''}`
+                    : `${filteredCourses.length} of ${totalCourses} courses`}
+                </p>
               </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
-                {courseQuery || courseTermFilter !== 'all'
-                  ? 'No courses match your filters'
-                  : 'No courses match your search'}
-              </h3>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Try a different course name, code, term, department, organization, or professor.
-              </p>
             </div>
-          ) : (
-            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredCourses.map((course) => {
-                const professors = users.filter((u) => u.role === 'professor' || u.role === 'admin');
-                const currentInstructorIds = course.instructors.map((i) => i.id);
-                const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
-                const isAssigning = assigningCourse === course.id;
-                const assignmentCount = course.assignment_count ?? course.assignments?.length ?? 0;
-                const isAssignmentsOpen = expandedCourseIds.has(course.id);
 
-                return (
-                  <article
-                    key={course.id}
-                    className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                  >
-                    {/* Course header */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {course.code && (
-                            <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                              {course.code}
+            {loadingCourses ? (
+              <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <div className="h-4 w-20 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                      <div className="h-4 w-16 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    </div>
+                    <div className="mt-3 h-5 w-40 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                    <div className="mt-3 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                ))}
+              </div>
+            ) : totalCourses === 0 ? (
+              <div className="p-5">
+                <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
+              </div>
+            ) : filteredCourses.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-900">
+                  <Search size={22} className="text-slate-500 dark:text-slate-400" />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+                  {courseQuery || courseTermFilter !== 'all'
+                    ? 'No courses match your filters'
+                    : 'No courses match your search'}
+                </h3>
+                <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  Try a different course name, code, term, department, organization, or professor.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+                {filteredCourses.map((course) => {
+                  const professors = users.filter((u) => u.role === 'professor' || u.role === 'admin');
+                  const currentInstructorIds = course.instructors.map((i) => i.id);
+                  const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
+                  const isAssigning = assigningCourse === course.id;
+                  const assignmentCount = course.assignment_count ?? course.assignments?.length ?? 0;
+                  const isAssignmentsOpen = expandedCourseIds.has(course.id);
+
+                  return (
+                    <article
+                      key={course.id}
+                      className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                    >
+                      {/* Course header */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {course.code && (
+                              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                {course.code}
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
+                            {course.name}
+                          </h3>
+                        </div>
+                      </div>
+
+                      {/* Term assignment */}
+                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                            Term
+                          </span>
+                          {course.term && (
+                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-500/20">
+                              {course.term}{course.year ? ` ${course.year}` : ''}
                             </span>
                           )}
                         </div>
-                        <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
-                          {course.name}
-                        </h3>
-                      </div>
-                    </div>
-
-                    {/* Professors */}
-                    <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                          Professors
-                        </span>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {course.instructors.length}
-                        </span>
-                      </div>
-
-                      <div className="mt-2.5">
-                        {course.instructors.length === 0 ? (
-                          <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500">
-                            No instructors assigned yet
+                        {terms.length === 0 ? (
+                          <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+                            No terms in the registry yet. Add one in the Terms tab.
                           </p>
                         ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {course.instructors.map((inst) => (
-                              <div
-                                key={inst.id}
-                                title={inst.email}
-                                className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+                          <div className="mt-2.5 flex items-center gap-2">
+                            <div className="relative min-w-0 flex-1">
+                              <select
+                                value={selectedTermForCourse[course.id] ?? ''}
+                                onChange={(e) =>
+                                  setSelectedTermForCourse((prev) => ({ ...prev, [course.id]: e.target.value }))
+                                }
+                                aria-label={`Assign term to ${course.name}`}
+                                className="h-9 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                               >
-                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-                                  {initialsOf(inst.full_name)}
-                                </span>
-                                <span className="max-w-[9rem] truncate">{inst.full_name}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeInstructor(course.id, inst.id, inst.full_name)}
-                                  className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                                  title={`Remove ${inst.full_name}`}
-                                >
-                                  <X size={11} />
-                                </button>
-                              </div>
-                            ))}
+                                <option value="">
+                                  {course.term_id ? '— Remove term link —' : 'Assign a term…'}
+                                </option>
+                                {terms.map((t) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.label || `${t.name} ${t.year}`}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown
+                                size={13}
+                                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              disabled={
+                                selectedTermForCourse[course.id] === undefined ||
+                                selectedTermForCourse[course.id] === '' ||
+                                assigningTermForCourse === course.id
+                              }
+                              onClick={() =>
+                                assignCourseTerm(course.id, selectedTermForCourse[course.id] ?? '')
+                              }
+                              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {assigningTermForCourse === course.id ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <Calendar size={13} />
+                              )}
+                              Save
+                            </button>
                           </div>
                         )}
                       </div>
 
-                      {/* Assign a professor */}
-                      {availableProfessors.length > 0 ? (
-                        <div className="mt-3 flex items-center gap-2">
-                          <div className="relative min-w-0 flex-1">
-                            <select
-                              value={selectedProfessorForCourse[course.id] || ''}
-                              onChange={(e) =>
-                                setSelectedProfessorForCourse((prev) => ({ ...prev, [course.id]: e.target.value }))
-                              }
-                              aria-label={`Choose a professor for ${course.name}`}
-                              className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
-                            >
-                              <option value="">Choose professor…</option>
-                              {availableProfessors.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.full_name}
-                                </option>
-                              ))}
-                            </select>
-                            <ChevronDown
-                              size={13}
-                              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            disabled={!selectedProfessorForCourse[course.id] || isAssigning}
-                            onClick={() => {
-                              const uid = selectedProfessorForCourse[course.id];
-                              if (uid) assignInstructor(course.id, uid);
-                            }}
-                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isAssigning ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
-                            Assign
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-xs leading-5 text-slate-400 dark:text-slate-500">
-                          No other professor accounts available to assign.
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Assignments */}
-                    <div className="mt-auto pt-4">
-                      <button
-                        type="button"
-                        onClick={() => toggleCourseAssignments(course.id)}
-                        aria-expanded={isAssignmentsOpen}
-                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
-                      >
-                        <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-                          <FileText size={13} className="text-violet-500 dark:text-violet-400" />
-                          Assignments
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {assignmentCount}
+                      {/* Professors */}
+                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                            Professors
                           </span>
-                        </span>
-                        <ChevronDown
-                          size={15}
-                          className={`text-slate-400 transition-transform ${isAssignmentsOpen ? 'rotate-180' : ''}`}
-                        />
-                      </button>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {course.instructors.length}
+                          </span>
+                        </div>
 
-                      {isAssignmentsOpen && (
-                        <div className="mt-3">
-                          {course.assignments && course.assignments.length > 0 ? (
-                            <ul className="space-y-2">
-                              {course.assignments.map((assignment) => (
-                                <li
-                                  key={assignment.id}
-                                  className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/70"
-                                >
-                                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
-                                    <FileText size={12} />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                      <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                                        {assignment.name}
-                                      </span>
-                                      {assignment.assignment_type && (
-                                        <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
-                                          {assignment.assignment_type.replace(/_/g, ' ')}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {assignment.recommended_mode?.mode_id && (
-                                      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
-                                        <Zap
-                                          size={11}
-                                          className="shrink-0 text-amber-500 dark:text-amber-400"
-                                        />
-                                        <span className="font-semibold text-slate-600 dark:text-slate-300">
-                                          Suggested: {assignment.recommended_mode.mode_name}
-                                        </span>
-                                        {(assignment.recommended_mode.top_engines ?? []).length > 0 && (
-                                          <span>
-                                            ·{' '}
-                                            {(assignment.recommended_mode.top_engines ?? [])
-                                              .map((engine) => engineLabel(engine.key))
-                                              .join(' · ')}
-                                          </span>
-                                        )}
-                                      </p>
-                                    )}
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
+                        <div className="mt-2.5">
+                          {course.instructors.length === 0 ? (
+                            <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500">
+                              No instructors assigned yet
+                            </p>
                           ) : (
-                            <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-xs leading-5 text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
-                              No assignments have been created for this course yet.
+                            <div className="flex flex-wrap gap-2">
+                              {course.instructors.map((inst) => (
+                                <div
+                                  key={inst.id}
+                                  title={inst.email}
+                                  className="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+                                >
+                                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                                    {initialsOf(inst.full_name)}
+                                  </span>
+                                  <span className="max-w-[9rem] truncate">{inst.full_name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeInstructor(course.id, inst.id, inst.full_name)}
+                                    className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                                    title={`Remove ${inst.full_name}`}
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-              <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
-            </div>
-          )}
-        </section>
+
+                        {/* Assign a professor */}
+                        {availableProfessors.length > 0 ? (
+                          <div className="mt-3 flex items-center gap-2">
+                            <div className="relative min-w-0 flex-1">
+                              <select
+                                value={selectedProfessorForCourse[course.id] || ''}
+                                onChange={(e) =>
+                                  setSelectedProfessorForCourse((prev) => ({ ...prev, [course.id]: e.target.value }))
+                                }
+                                aria-label={`Choose a professor for ${course.name}`}
+                                className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                              >
+                                <option value="">Choose professor…</option>
+                                {availableProfessors.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.full_name}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown
+                                size={13}
+                                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!selectedProfessorForCourse[course.id] || isAssigning}
+                              onClick={() => {
+                                const uid = selectedProfessorForCourse[course.id];
+                                if (uid) assignInstructor(course.id, uid);
+                              }}
+                              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isAssigning ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
+                              Assign
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-xs leading-5 text-slate-400 dark:text-slate-500">
+                            No other professor accounts available to assign.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Assignments */}
+                      <div className="mt-auto pt-4">
+                        <button
+                          type="button"
+                          onClick={() => toggleCourseAssignments(course.id)}
+                          aria-expanded={isAssignmentsOpen}
+                          className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
+                        >
+                          <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+                            <FileText size={13} className="text-violet-500 dark:text-violet-400" />
+                            Assignments
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {assignmentCount}
+                            </span>
+                          </span>
+                          <ChevronDown
+                            size={15}
+                            className={`text-slate-400 transition-transform ${isAssignmentsOpen ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+
+                        {isAssignmentsOpen && (
+                          <div className="mt-3">
+                            {course.assignments && course.assignments.length > 0 ? (
+                              <ul className="space-y-2">
+                                {course.assignments.map((assignment) => (
+                                  <li
+                                    key={assignment.id}
+                                    className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/70"
+                                  >
+                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
+                                      <FileText size={12} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                        <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                                          {assignment.name}
+                                        </span>
+                                        {assignment.assignment_type && (
+                                          <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
+                                            {assignment.assignment_type.replace(/_/g, ' ')}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {assignment.recommended_mode?.mode_id && (
+                                        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                                          <Zap
+                                            size={11}
+                                            className="shrink-0 text-amber-500 dark:text-amber-400"
+                                          />
+                                          <span className="font-semibold text-slate-600 dark:text-slate-300">
+                                            Suggested: {assignment.recommended_mode.mode_name}
+                                          </span>
+                                          {(assignment.recommended_mode.top_engines ?? []).length > 0 && (
+                                            <span>
+                                              ·{' '}
+                                              {(assignment.recommended_mode.top_engines ?? [])
+                                                .map((engine) => engineLabel(engine.key))
+                                                .join(' · ')}
+                                            </span>
+                                          )}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-xs leading-5 text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
+                                No assignments have been created for this course yet.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+                <AddCourseCard onAdd={openCourseModal} buttonRef={courseButtonRef} variant="grid" />
+              </div>
+            )}
+          </section>
         )}
 
         {/* ── Academic terms ─────────────────────────────────────────────────── */}
         {activeTab === 'terms' && (
-        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
-                <Calendar size={14} />
-                Terms
+          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
+                  <Calendar size={14} />
+                  Terms
+                </div>
+                <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
+                  Academic terms
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Create the terms courses are scheduled in. Renaming a term relabels the
+                  courses that use it; removing one only unlinks it from them.
+                </p>
               </div>
-              <h2 className="mt-3 text-xl font-semibold text-slate-900 dark:text-white">
-                Academic terms
-              </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Create the terms courses are scheduled in. Renaming a term relabels the
-                courses that use it; removing one only unlinks it from them.
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {terms.length} term{terms.length !== 1 ? 's' : ''}
               </p>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {terms.length} term{terms.length !== 1 ? 's' : ''}
-            </p>
-          </div>
 
-          {loadingTerms ? (
-            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
-                  <div className="h-4 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-3 h-5 w-32 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-                </div>
-              ))}
-            </div>
-          ) : terms.length === 0 ? (
-            <div className="p-5">
-              <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
-            </div>
-          ) : (
-            <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
-              {terms.map((term) => {
-                const isDeleting = deletingTermId === term.id;
-                return (
-                  <article
-                    key={term.id}
-                    className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-                            {term.name}
+            {loadingTerms ? (
+              <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="rounded-3xl border border-slate-200 p-5 dark:border-slate-800">
+                    <div className="h-4 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="mt-3 h-5 w-32 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="mt-4 h-9 w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                ))}
+              </div>
+            ) : terms.length === 0 ? (
+              <div className="p-5">
+                <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
+              </div>
+            ) : (
+              <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+                {terms.map((term) => {
+                  const isDeleting = deletingTermId === term.id;
+                  return (
+                    <article
+                      key={term.id}
+                      className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                              {term.name}
+                            </span>
+                            <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              {term.year}
+                            </span>
+                          </div>
+                          <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
+                            {term.label || `${term.name} ${term.year}`}
+                          </h3>
+                          {term.description && (
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              {term.description}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditTerm(term)}
+                            aria-label={`Edit ${term.label || `${term.name} ${term.year}`}`}
+                            className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTerm(term)}
+                            disabled={isDeleting}
+                            aria-label={`Remove ${term.label || `${term.name} ${term.year}`} from registry`}
+                            className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                          >
+                            {isDeleting ? (
+                              <Loader2 size={15} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={15} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                            Courses
                           </span>
-                          <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
-                            {term.year}
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {term.course_count}
                           </span>
                         </div>
-                        <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
-                          {term.label || `${term.name} ${term.year}`}
-                        </h3>
-                        {term.description && (
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                            {term.description}
+                        {(term.start_date || term.end_date) && (
+                          <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                            {term.start_date && term.end_date
+                              ? `${term.start_date} → ${term.end_date}`
+                              : term.start_date
+                                ? `From ${term.start_date}`
+                                : `Until ${term.end_date}`}
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEditTerm(term)}
-                          aria-label={`Edit ${term.label || `${term.name} ${term.year}`}`}
-                          className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTerm(term)}
-                          disabled={isDeleting}
-                          aria-label={`Remove ${term.label || `${term.name} ${term.year}`} from registry`}
-                          className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                        >
-                          {isDeleting ? (
-                            <Loader2 size={15} className="animate-spin" />
-                          ) : (
-                            <Trash2 size={15} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
 
-                    <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                          Courses
-                        </span>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {term.course_count}
-                        </span>
-                      </div>
-                      {(term.start_date || term.end_date) && (
-                        <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                          {term.start_date && term.end_date
-                            ? `${term.start_date} → ${term.end_date}`
-                            : term.start_date
-                              ? `From ${term.start_date}`
-                              : `Until ${term.end_date}`}
-                        </p>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => openEditTerm(term)}
-                      className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
-                    >
-                      Edit term
-                    </button>
-                  </article>
-                );
-              })}
-              <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
-            </div>
-          )}
-        </section>
+                    </article>
+                  );
+                })}
+                <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
+              </div>
+            )}
+          </section>
         )}
 
       </div>
@@ -2015,6 +2139,87 @@ export default function AdminPage() {
           </div>
         </form>
       </Modal>
+
+      {/* ── Delete term confirmation modal ───────────────────────────────────── */}
+      {termToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-term-title"
+          onClick={() => setTermToDelete(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-2xl dark:bg-slate-950 ring-1 ring-slate-200 dark:ring-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start gap-4 px-6 pt-6 pb-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/15">
+                <Trash2 size={20} className="text-red-600 dark:text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3
+                  id="delete-term-title"
+                  className="text-base font-semibold text-slate-900 dark:text-white"
+                >
+                  Remove term from registry?
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  <strong className="font-semibold text-slate-700 dark:text-slate-300">
+                    {termToDelete.label || `${termToDelete.name} ${termToDelete.year}`}
+                  </strong>{' '}
+                  will be removed from the registry.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTermToDelete(null)}
+                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+                aria-label="Cancel"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Warning when courses are linked */}
+            {termToDelete.course_count > 0 && (
+              <div className="mx-6 mb-2 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  <strong>{termToDelete.course_count} course{termToDelete.course_count !== 1 ? 's' : ''}</strong>{' '}
+                  {termToDelete.course_count !== 1 ? 'are' : 'is'} linked to this term. Each course will
+                  keep its term label but will no longer be linked to the registry entry.
+                </p>
+              </div>
+            )}
+
+            {/* Info note */}
+            <p className="px-6 pb-4 text-xs text-slate-400 dark:text-slate-500">
+              This only removes the registry entry — no courses, assignments, or submission data will be deleted.
+            </p>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTermToDelete(null)}
+                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteTerm}
+                className="h-10 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                <Trash2 size={14} />
+                Remove term
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Create user slide-over ─────────────────────────────────────────────── */}
       {showCreatePanel && (
