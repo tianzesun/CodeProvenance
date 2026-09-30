@@ -349,6 +349,412 @@ function AddTermCard({
   );
 }
 
+/** Season accent palette so every term card has its own identity at a glance. */
+interface TermAccent {
+  /** Status chip colors. */
+  chip: string;
+  /** Small status dot. */
+  dot: string;
+  /** Top edge gradient. */
+  bar: string;
+  /** Soft wash behind the card header. */
+  wash: string;
+  /** Season label text colors. */
+  text: string;
+}
+
+const TERM_ACCENTS: Record<string, TermAccent> = {
+  fall: {
+    chip: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25',
+    dot: 'bg-amber-500',
+    bar: 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500',
+    wash: 'bg-gradient-to-br from-amber-500/12 via-transparent to-transparent',
+    text: 'text-amber-600 dark:text-amber-300',
+  },
+  winter: {
+    chip: 'bg-sky-100 text-sky-700 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/25',
+    dot: 'bg-sky-500',
+    bar: 'bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-500',
+    wash: 'bg-gradient-to-br from-sky-500/12 via-transparent to-transparent',
+    text: 'text-sky-600 dark:text-sky-300',
+  },
+  spring: {
+    chip: 'bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25',
+    dot: 'bg-emerald-500',
+    bar: 'bg-gradient-to-r from-emerald-500 via-teal-500 to-green-500',
+    wash: 'bg-gradient-to-br from-emerald-500/12 via-transparent to-transparent',
+    text: 'text-emerald-600 dark:text-emerald-300',
+  },
+  summer: {
+    chip: 'bg-violet-100 text-violet-700 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/25',
+    dot: 'bg-violet-500',
+    bar: 'bg-gradient-to-r from-violet-500 via-fuchsia-500 to-purple-500',
+    wash: 'bg-gradient-to-br from-violet-500/12 via-transparent to-transparent',
+    text: 'text-violet-600 dark:text-violet-300',
+  },
+};
+
+/** Neutral accent for term names that are not one of the four seasons. */
+const DEFAULT_TERM_ACCENT: TermAccent = {
+  chip: 'bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/25',
+  dot: 'bg-blue-500',
+  bar: 'bg-gradient-to-r from-blue-500 via-indigo-500 to-slate-500',
+  wash: 'bg-gradient-to-br from-blue-500/12 via-transparent to-transparent',
+  text: 'text-blue-600 dark:text-blue-300',
+};
+
+/**
+ * Approximate season windows (``[monthIndex, day]`` pairs) used only when a
+ * term has no stored dates, so status and progress can still be shown.
+ */
+const SEASON_WINDOWS: Record<string, [[number, number], [number, number]]> = {
+  winter: [[0, 5], [3, 30]],
+  spring: [[2, 20], [5, 10]],
+  summer: [[4, 20], [7, 15]],
+  fall: [[7, 15], [11, 20]],
+};
+
+/** Resolve the accent palette for a term by season name. */
+function termAccent(name: string): TermAccent {
+  return TERM_ACCENTS[name.trim().toLowerCase()] ?? DEFAULT_TERM_ACCENT;
+}
+
+/** Parse a ``YYYY-MM-DD`` string into a local date, or ``null`` when unset. */
+function parseTermDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const parsed = new Date(year, month - 1, day);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Build an estimated window from a season name and year (month is 0-based). */
+function approximateTermWindow(name: string, year: number): { start: Date; end: Date } | null {
+  const window = SEASON_WINDOWS[name.trim().toLowerCase()];
+  if (!window || !year) return null;
+  const [[startMonth, startDay], [endMonth, endDay]] = window;
+  const start = new Date(year, startMonth, startDay);
+  const end = new Date(year, endMonth, endDay);
+  return end > start ? { start, end } : null;
+}
+
+/** Status of a term relative to today, plus the window it was derived from. */
+interface TermStatus {
+  label: string;
+  /** True when the term stores no dates and the window is season-estimated. */
+  estimated: boolean;
+  start: Date | null;
+  end: Date | null;
+  /** Percent through the window, ``null`` when no window could be derived. */
+  progress: number | null;
+}
+
+/** Compute a term's status, timeline window and progress percentage. */
+function termStatus(term: AdminTerm, now: Date): TermStatus {
+  const storedStart = parseTermDate(term.start_date);
+  const storedEnd = parseTermDate(term.end_date);
+  const hasBothDates = Boolean(storedStart && storedEnd);
+  const hasAnyDate = Boolean(storedStart || storedEnd);
+
+  if (hasBothDates && storedStart && storedEnd) {
+    const span = storedEnd.getTime() - storedStart.getTime();
+    const raw = span > 0 ? ((now.getTime() - storedStart.getTime()) / span) * 100 : 100;
+    const label = now < storedStart ? 'Upcoming' : now > storedEnd ? 'Completed' : 'In session';
+    return {
+      label,
+      estimated: false,
+      start: storedStart,
+      end: storedEnd,
+      progress: Math.min(100, Math.max(0, raw)),
+    };
+  }
+
+  // Partial or missing dates: estimate the window from the season so the card
+  // can still say whether the term is running, but only show the timeline when
+  // the term stores no dates at all (a partial range is surfaced as-is).
+  const estimatedWindow = approximateTermWindow(term.name, term.year);
+  if (!estimatedWindow) {
+    return { label: 'Dates not set', estimated: true, start: null, end: null, progress: null };
+  }
+
+  const span = estimatedWindow.end.getTime() - estimatedWindow.start.getTime();
+  const raw = span > 0 ? ((now.getTime() - estimatedWindow.start.getTime()) / span) * 100 : 100;
+  const label =
+    now < estimatedWindow.start ? 'Upcoming' : now > estimatedWindow.end ? 'Completed' : 'In session';
+
+  return {
+    label,
+    estimated: true,
+    start: hasAnyDate ? null : estimatedWindow.start,
+    end: hasAnyDate ? null : estimatedWindow.end,
+    progress: Math.min(100, Math.max(0, raw)),
+  };
+}
+
+/** Format a date for the term timeline (e.g. "Aug 15, 2026"). */
+function formatTermDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+/** Number of weeks spanned by a term window, for the "N weeks" timeline hint. */
+function termWeeks(start: Date | null, end: Date | null): number {
+  if (!start || !end) return 0;
+  return (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7);
+}
+
+/**
+ * One academic term card: status, date timeline with progress, headline
+ * counts and the courses it covers.
+ */
+function TermCard({
+  term,
+  courses,
+  onEdit,
+  onDelete,
+  deleting,
+  onOpenCourses,
+}: {
+  term: AdminTerm;
+  courses: CourseWithInstructors[];
+  onEdit: (term: AdminTerm) => void;
+  onDelete: (term: AdminTerm) => void;
+  deleting: boolean;
+  onOpenCourses: (label: string) => void;
+}) {
+  const accent = termAccent(term.name);
+  const status = termStatus(term, new Date());
+  const label = term.label || `${term.name} ${term.year}`;
+
+  const hasBothDates = Boolean(
+    parseTermDate(term.start_date) && parseTermDate(term.end_date),
+  );
+  const singleDate = hasBothDates
+    ? null
+    : parseTermDate(term.start_date) ?? parseTermDate(term.end_date);
+  const singleDateIsStart = Boolean(term.start_date);
+
+  const professorCount = new Set(
+    courses.flatMap((course) => course.instructors.map((instructor) => instructor.id)),
+  ).size;
+  const assignmentCount = courses.reduce(
+    (sum, course) => sum + (course.assignment_count ?? course.assignments?.length ?? 0),
+    0,
+  );
+  const courseCount = term.course_count ?? courses.length;
+
+  const stats = [
+    { value: courseCount, label: courseCount === 1 ? 'Course' : 'Courses' },
+    { value: professorCount, label: professorCount === 1 ? 'Professor' : 'Professors' },
+    { value: assignmentCount, label: assignmentCount === 1 ? 'Assignment' : 'Assignments' },
+  ];
+
+  const previewCourses = courses.slice(0, 3);
+  const remainingCourses = Math.max(0, courses.length - previewCourses.length);
+
+  const statusTone =
+    status.label === 'In session'
+      ? 'bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25'
+      : status.label === 'Upcoming'
+        ? 'bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/25'
+        : status.label === 'Completed'
+          ? 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:ring-slate-500/25'
+          : 'bg-slate-100 text-slate-500 ring-slate-200 dark:bg-slate-500/15 dark:text-slate-400 dark:ring-slate-500/25';
+
+  return (
+    <article className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-950">
+      {/* Season accent */}
+      <div className={`h-1.5 w-full ${accent.bar}`} aria-hidden />
+      <div className={`pointer-events-none absolute inset-x-0 top-0 h-32 ${accent.wash}`} aria-hidden />
+
+      <div className="relative flex flex-1 flex-col gap-4 p-5">
+        {/* Status + actions */}
+        <div className="flex items-start justify-between gap-3">
+          <span
+            title={
+              status.estimated && status.label !== 'Dates not set'
+                ? 'No dates set — status estimated from the season.'
+                : undefined
+            }
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusTone}`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                status.label === 'In session'
+                  ? 'animate-pulse bg-emerald-500'
+                  : status.label === 'Upcoming'
+                    ? 'bg-blue-500'
+                    : 'bg-slate-400'
+              }`}
+            />
+            {status.label}
+            {status.estimated && status.label !== 'Dates not set' && (
+              <span className="font-normal opacity-70">· est.</span>
+            )}
+          </span>
+
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onEdit(term)}
+              aria-label={`Edit ${label}`}
+              className="rounded-md p-2 text-slate-400 transition hover:bg-white/80 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
+              <Pencil size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(term)}
+              disabled={deleting}
+              aria-label={`Remove ${label} from registry`}
+              className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+            >
+              {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Title */}
+        <div className="min-w-0">
+          <p className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] ${accent.text}`}>
+            <span className={`h-2 w-2 rounded-full ${accent.dot}`} aria-hidden />
+            {term.name}
+          </p>
+          <h3 className="mt-1.5 truncate text-xl font-semibold tracking-tight text-slate-900 dark:text-white">
+            {label}
+          </h3>
+          {term.description && (
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              {term.description}
+            </p>
+          )}
+        </div>
+
+        {/* Timeline */}
+        <div
+          title={
+            status.estimated && status.start && status.end
+              ? 'No dates stored for this term — this window is estimated from the season.'
+              : undefined
+          }
+          className="rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/50"
+        >
+          {status.start && status.end ? (
+            <>
+              <div className="flex items-baseline justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <span
+                  className={`font-medium text-slate-600 dark:text-slate-300 ${
+                    status.estimated ? 'border-b border-dashed border-slate-300 dark:border-slate-600' : ''
+                  }`}
+                >
+                  {formatTermDate(status.start)}
+                </span>
+                <span aria-hidden>→</span>
+                <span
+                  className={`font-medium text-slate-600 dark:text-slate-300 ${
+                    status.estimated ? 'border-b border-dashed border-slate-300 dark:border-slate-600' : ''
+                  }`}
+                >
+                  {formatTermDate(status.end)}
+                </span>
+              </div>
+              <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <div
+                  className={`h-full rounded-full transition-all ${accent.bar}`}
+                  style={{ width: `${status.progress ?? 0}%` }}
+                />
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-400 dark:text-slate-500">
+                <span>{Math.round(status.progress ?? 0)}% through the term</span>
+                {status.estimated ? (
+                  <button
+                    type="button"
+                    onClick={() => onEdit(term)}
+                    className="font-semibold text-blue-600 transition hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+                  >
+                    Set dates
+                  </button>
+                ) : (
+                  <span>{Math.max(1, Math.round(termWeeks(status.start, status.end)))} weeks</span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">
+                {singleDate
+                  ? `${singleDateIsStart ? 'Starts' : 'Ends'} ${formatTermDate(singleDate)}`
+                  : 'No date range set'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onEdit(term)}
+                className="font-semibold text-blue-600 transition hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+              >
+                {singleDate ? 'Complete dates' : 'Add dates'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Headline counts */}
+        <div className="grid grid-cols-3 divide-x divide-slate-200 rounded-2xl bg-slate-50 py-3 dark:divide-slate-800 dark:bg-slate-900/70">
+          {stats.map((stat) => (
+            <div key={stat.label} className="flex flex-col items-center gap-0.5 px-1">
+              <span className="text-xl font-bold tabular-nums leading-6 text-slate-900 dark:text-white">
+                {stat.value}
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                {stat.label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Courses in this term */}
+        <div className="flex flex-col gap-2">
+          {previewCourses.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {previewCourses.map((course) => (
+                <span
+                  key={course.id}
+                  title={course.name}
+                  className="max-w-[11rem] truncate rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                >
+                  {course.code || course.name}
+                </span>
+              ))}
+              {remainingCourses > 0 && (
+                <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  +{remainingCourses}
+                </span>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              No courses linked to this term yet.
+            </p>
+          )}
+        </div>
+
+        {courseCount > 0 && (
+          <button
+            type="button"
+            onClick={() => onOpenCourses(label)}
+            className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-semibold text-slate-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500/40 dark:hover:text-blue-300"
+          >
+            Open {courseCount} course{courseCount !== 1 ? 's' : ''}
+            <ChevronDown size={13} className="-rotate-90" />
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 function UserRowSkeleton() {
   return (
     <tr>
@@ -1834,7 +2240,8 @@ export default function AdminPage() {
                 </p>
               </div>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {terms.length} term{terms.length !== 1 ? 's' : ''}
+                {terms.length} term{terms.length !== 1 ? 's' : ''} ·{' '}
+                {terms.reduce((total, term) => total + (term.course_count ?? 0), 0)} courses
               </p>
             </div>
 
@@ -1855,77 +2262,24 @@ export default function AdminPage() {
             ) : (
               <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
                 {terms.map((term) => {
-                  const isDeleting = deletingTermId === term.id;
+                  const termCourses = coursesWithInstructors.filter(
+                    (course) =>
+                      course.term_id === term.id ||
+                      (!course.term_id && courseTermLabel(course) === term.label),
+                  );
                   return (
-                    <article
+                    <TermCard
                       key={term.id}
-                      className="flex flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-                              {term.name}
-                            </span>
-                            <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
-                              {term.year}
-                            </span>
-                          </div>
-                          <h3 className="mt-2 text-base font-semibold leading-6 text-slate-900 dark:text-white">
-                            {term.label || `${term.name} ${term.year}`}
-                          </h3>
-                          {term.description && (
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                              {term.description}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditTerm(term)}
-                            aria-label={`Edit ${term.label || `${term.name} ${term.year}`}`}
-                            className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                          >
-                            <Pencil size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTerm(term)}
-                            disabled={isDeleting}
-                            aria-label={`Remove ${term.label || `${term.name} ${term.year}`} from registry`}
-                            className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                          >
-                            {isDeleting ? (
-                              <Loader2 size={15} className="animate-spin" />
-                            ) : (
-                              <Trash2 size={15} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/70">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                            Courses
-                          </span>
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {term.course_count}
-                          </span>
-                        </div>
-                        {(term.start_date || term.end_date) && (
-                          <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                            {term.start_date && term.end_date
-                              ? `${term.start_date} → ${term.end_date}`
-                              : term.start_date
-                                ? `From ${term.start_date}`
-                                : `Until ${term.end_date}`}
-                          </p>
-                        )}
-                      </div>
-
-                    </article>
+                      term={term}
+                      courses={termCourses}
+                      deleting={deletingTermId === term.id}
+                      onEdit={openEditTerm}
+                      onDelete={handleDeleteTerm}
+                      onOpenCourses={(label) => {
+                        setCourseTermFilter(label);
+                        setActiveTab('courses');
+                      }}
+                    />
                   );
                 })}
                 <AddTermCard onAdd={openTermModal} buttonRef={termButtonRef} />
