@@ -354,12 +354,66 @@ def get_current_tenant(request: Request) -> str:
     return tenant_id
 
 
-def require_admin(request: Request) -> dict:
-    """FastAPI dependency requiring an authenticated admin user.
+#: Dashboard roles the console supports. The ``api`` principal built from an API
+#: key is intentionally absent: it is a machine identity with no dashboard role.
+DASHBOARD_ROLES: tuple[str, ...] = ("admin", "professor")
 
-    Resolves the dashboard user attached to the request by the auth middleware
-    and rejects non-admin callers. Keeps academic CRUD reachable for admins
-    while professors continue to use the instructor/org-scoped read endpoints.
+#: Permission granted to each dashboard role — the single source of truth for
+#: RBAC, so a route guard and a UI affordance can never disagree about who may
+#: do what.
+#:
+#: The split mirrors the product's division of labour:
+#:
+#: * ``admin`` owns the academic *registry* — creating users, terms and courses,
+#:   binding a course to a term, and assigning users to courses. Admins
+#:   deliberately hold no ``assignment:manage`` right: an assignment is a
+#:   teaching artefact owned by the professor who teaches the course.
+#: * ``professor`` owns the *teaching* workflow — running checks and managing
+#:   the assignments of the courses they are assigned to. Professors hold no
+#:   registry rights, so they cannot create or edit courses, terms or users.
+#:
+#: ``course:read:all`` / ``course:read:assigned`` are read scopes rather than
+#: booleans: the assignment-aware details (which courses a professor may touch)
+#: are resolved against ``course_instructors`` in
+#: ``src.backend.application.services.academic_access``.
+ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
+    "admin": frozenset(
+        {
+            "user:manage",
+            "term:manage",
+            "course:manage",
+            "roster:manage",
+            "course:read:all",
+        }
+    ),
+    "professor": frozenset({"assignment:manage", "course:read:assigned"}),
+}
+
+
+def permissions_for_role(role: str | None) -> frozenset[str]:
+    """Return the permission set granted to ``role``.
+
+    Unknown and missing roles (including the ``api`` machine principal) get an
+    empty set so every permission check fails closed rather than opening up.
+    """
+    if not role:
+        return frozenset()
+    return ROLE_PERMISSIONS.get(str(role).strip().lower(), frozenset())
+
+
+def has_permission(user: dict | None, permission: str) -> bool:
+    """Return True when the dashboard ``user`` dict holds ``permission``."""
+    if not isinstance(user, dict):
+        return False
+    return permission in permissions_for_role(user.get("role"))
+
+
+def dashboard_user(request: Request) -> dict:
+    """Return the dashboard user attached by the middleware, else raise 401.
+
+    Public so route modules can build their own role + row-level guards (see
+    ``src.backend.api.routes.academic``) on top of the same authentication
+    resolution used by :func:`require_roles`.
     """
     user = getattr(request.state, "user", None)
     if not isinstance(user, dict) or not user.get("id"):
@@ -367,12 +421,90 @@ def require_admin(request: Request) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
-    if user.get("role") != "admin":
+    return user
+
+
+def _require_role(request: Request, allowed: tuple[str, ...]) -> dict:
+    """Return the dashboard user when its role is in ``allowed``.
+
+    Raises:
+        HTTPException: 401 when unauthenticated, 403 when the role is not allowed.
+    """
+    user = dashboard_user(request)
+    role = str(user.get("role") or "").strip().lower()
+    if role not in allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator role required",
+            detail=f"{' or '.join(allowed).title()} role required",
         )
     return user
+
+
+def require_roles(*roles: str) -> Callable:
+    """Build a FastAPI dependency accepting only the listed dashboard roles.
+
+    Args:
+        *roles: Role names allowed to reach the endpoint, e.g. ``"admin"``.
+
+    Returns:
+        A dependency returning the caller's user dict, or raising 401 / 403.
+
+    Raises:
+        ValueError: When called without any role, which would deny everything.
+    """
+    allowed = tuple(str(role).strip().lower() for role in roles)
+    if not allowed:
+        raise ValueError("require_roles() needs at least one role")
+
+    def dependency(request: Request) -> dict:
+        """Return the authenticated caller when their role is allowed."""
+        return _require_role(request, allowed)
+
+    # A descriptive name keeps FastAPI diagnostics (and route-wiring tests that
+    # assert which guard protects a path) readable instead of "dependency".
+    dependency.__name__ = f"require_roles_{'_'.join(allowed)}"
+    return dependency
+
+
+def require_user_permission(permission: str) -> Callable:
+    """Build a FastAPI dependency requiring a *role* permission.
+
+    Unlike :func:`require_permission` (which checks the ``permissions`` list of
+    an API key), this resolves the dashboard user's role to the
+    :data:`ROLE_PERMISSIONS` matrix, so guards stay declarative and one matrix
+    edit moves every route at once.
+
+    Args:
+        permission: Permission name, e.g. ``"course:manage"``.
+
+    Returns:
+        A dependency returning the caller's user dict, or raising 401 / 403.
+    """
+
+    def dependency(request: Request) -> dict:
+        """Return the authenticated caller when their role holds the permission."""
+        user = dashboard_user(request)
+        if not has_permission(user, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission '{permission}' required",
+            )
+        return user
+
+    # Named after the permission so a route's guard is identifiable from the
+    # FastAPI dependency graph (see the RBAC route-wiring test).
+    dependency.__name__ = f"require_user_permission_{permission.replace(':', '_')}"
+    return dependency
+
+
+def require_admin(request: Request) -> dict:
+    """FastAPI dependency requiring an authenticated admin user.
+
+    Resolves the dashboard user attached to the request by the auth middleware
+    and rejects non-admin callers. Keeps academic registry CRUD reachable for
+    admins while professors continue to use the course-scoped endpoints.
+    """
+    return _require_role(request, ("admin",))
 
 
 def setup_default_keys() -> None:

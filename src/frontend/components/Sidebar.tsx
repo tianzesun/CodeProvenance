@@ -214,7 +214,10 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/settings',
         label: 'Settings',
         icon: Settings,
-        roles: ['professor', 'admin'],
+        // The settings page renders with requiredRole="admin" (tenant and
+        // engine configuration), so showing it to professors would only ever
+        // bounce them back to the dashboard.
+        roles: ['admin'],
       },
     ],
   },

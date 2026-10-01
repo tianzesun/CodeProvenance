@@ -12,7 +12,13 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.backend.api.middleware.auth import get_current_tenant, require_admin
+from src.backend.api.middleware.auth import (
+    dashboard_user,
+    get_current_tenant,
+    require_admin,
+    require_user_permission,
+)
+from src.backend.application.services import academic_access
 from src.backend.config.database import get_db
 from src.backend.models.database import (
     Assignment,
@@ -32,6 +38,90 @@ from src.backend.application.services.student_service import (
 
 router = APIRouter(prefix="/api", tags=["academic"])
 logger = logging.getLogger(__name__)
+
+
+# ==================== Role dependencies ====================
+#
+# Guards are derived from the RBAC matrix in
+# ``src.backend.api.middleware.auth`` rather than from role names inline, so a
+# single matrix edit moves every route at once:
+#
+#   * term / course / roster writes are admin registry work;
+#   * assignment writes belong to the professor teaching the course, resolved
+#     against ``course_instructors`` here because the path only carries ids.
+
+#: Registry writes: create/rename/delete terms.
+require_term_write = require_user_permission("term:manage")
+
+#: Registry writes: create/update/delete courses and bind a course to a term.
+require_course_write = require_user_permission("course:manage")
+
+#: Roster writes: enroll or remove a student in a course.
+require_roster_write = require_user_permission("roster:manage")
+
+
+def require_course_read_access(
+    course_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dependency: the caller must be allowed to read ``course_id``.
+
+    Admins may read any course in their organization; professors only the
+    courses they are assigned to.
+    """
+    user = dashboard_user(request)
+    if not academic_access.can_read_course(db, user, course_id):
+        raise HTTPException(status_code=403, detail="Not authorized for this course")
+    return user
+
+
+def require_assignment_write_access(
+    course_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dependency: only the professor teaching ``course_id`` may write its assignments."""
+    user = dashboard_user(request)
+    if not academic_access.can_manage_course_assignments(db, user, course_id):
+        raise HTTPException(
+            status_code=403, detail=academic_access.ASSIGNMENT_MANAGER_REQUIRED
+        )
+    return user
+
+
+def require_assignment_read_access(
+    assignment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dependency: the caller must be allowed to read the assignment's course."""
+    user = dashboard_user(request)
+    course_id = academic_access.course_id_for_assignment(db, assignment_id)
+    if course_id is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not academic_access.can_read_course(db, user, course_id):
+        raise HTTPException(
+            status_code=403, detail="Not authorized for this assignment"
+        )
+    return user
+
+
+def require_assignment_write_access_by_id(
+    assignment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dependency for ``/assignments/{id}``: resolve its course, then check rights."""
+    user = dashboard_user(request)
+    course_id = academic_access.course_id_for_assignment(db, assignment_id)
+    if course_id is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not academic_access.can_manage_course_assignments(db, user, course_id):
+        raise HTTPException(
+            status_code=403, detail=academic_access.ASSIGNMENT_MANAGER_REQUIRED
+        )
+    return user
 
 
 # ==================== Request/Response Models ====================
@@ -412,9 +502,14 @@ async def create_term(
     request: Request,
     term_data: TermCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_term_write),
 ):
-    """Register a new academic term for the current user's organization."""
+    """Register a new academic term for the current user's organization.
+
+    Admin-only: the term registry is part of the academic structure an
+    administrator owns. Professors only ever read the terms their courses are
+    already filed under (``GET /api/terms``).
+    """
     org_id = _request_org_id(request)
     if not org_id:
         raise HTTPException(
@@ -452,9 +547,11 @@ async def update_term(
     term_id: str,
     term_data: TermUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_term_write),
 ):
     """Rename a term or adjust its planning window, mirroring the change on courses.
+
+    Admin-only: reorganising the term registry is registry work, not teaching.
 
     Courses linked to the term keep ``term``/``year`` text copies that listings
     and reporting read, so the new name/year are written onto them in the same
@@ -511,9 +608,11 @@ async def delete_term(
     request: Request,
     term_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_term_write),
 ):
     """Unregister a term.
+
+    Admin-only: deleting registry entries is administrative.
 
     Courses keep their mirrored ``term``/``year`` text, so removing a term from
     the registry never strips a course of its term label.
@@ -641,8 +740,15 @@ async def list_courses(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
-    """List courses for an organization, optionally filtered by term."""
+    """List courses for an organization, optionally filtered by term.
+
+    A professor's listing is narrowed to the courses they are assigned to, so
+    the org filter can never widen "my courses" into the whole catalog.
+    """
     query = db.query(Course).filter(Course.organization_id == org_id)
+    query = query.filter(
+        Course.id.in_(academic_access.visible_course_id_query(db, current_user))
+    )
     if term:
         query = query.filter(Course.term == term)
     courses = query.order_by(Course.created_at.desc()).all()
@@ -665,15 +771,18 @@ async def list_my_courses(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """List all courses for the current user's organization with assignment counts."""
+    """List the courses the caller may work on, with assignment counts.
+
+    Admins see the whole organization's catalog (they own it); professors see
+    only the courses they are assigned to, across every term and year, so past
+    offerings and their assignments stay reachable.
+    """
     user = getattr(request.state, "user", {}) or {}
-    org_id = user.get("organization_id")
-    if not org_id:
-        return []
+    visible_ids = academic_access.visible_course_id_query(db, user)
 
     courses = (
         db.query(Course)
-        .filter(Course.organization_id == org_id)
+        .filter(Course.id.in_(visible_ids))
         .order_by(Course.created_at.desc())
         .all()
     )
@@ -699,9 +808,13 @@ async def list_my_courses(
 async def get_course(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_course_read_access),
 ):
-    """Get course by ID."""
+    """Get course by ID.
+
+    Read access is row-scoped: an admin reaches any course in their
+    organization, a professor only a course they teach.
+    """
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -721,13 +834,8 @@ async def create_course_for_org(
     request: Request,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_admin),
 ):
-    """Create a new course in the current user's organization.
-
-    Course maintenance (create/update/delete) is admin-only; professors
-    keep the read endpoints and the assignment routes they maintain.
-    """
+    """Create a new course in the current user's organization."""
     user = getattr(request.state, "user", {}) or {}
     org_id = user.get("organization_id")
     if not org_id:
@@ -769,9 +877,9 @@ async def update_course_by_id(
     course_id: str,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_tenant),
 ):
-    """Update a course by ID (admin-only, like the rest of course maintenance)."""
+    """Update a course by ID."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -838,16 +946,9 @@ def _attachment_detail(jobs: int, cases: int) -> str:
 async def delete_course_by_id(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_tenant),
 ):
-    """Delete a course by ID (admin-only), taking its assignments with it.
-
-    ``assignments.course_id`` has no ON DELETE rule, so the course's own
-    assignments are removed first (their versions cascade) — which is what the
-    confirmation copy has always promised. An assignment carrying check history
-    or a case is not silently orphaned: the whole delete is refused with 409
-    naming the evidence that has to be cleared first.
-    """
+    """Delete a course by ID."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -909,9 +1010,14 @@ async def create_assignment(
     course_id: str,
     assignment_data: AssignmentCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_write_access),
 ):
-    """Create a new assignment within a course."""
+    """Create a new assignment within a course.
+
+    Only the professor assigned to the course may create assignments: an
+    assignment is a teaching artefact. An admin creating a course assigns a
+    professor to it, and that professor authors the assignments.
+    """
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -947,9 +1053,13 @@ async def list_assignments(
     course_id: str,
     term: Optional[str] = Query(None, description="Filter by term"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_course_read_access),
 ):
-    """List assignments for a course, optionally filtered by term."""
+    """List assignments for a course, optionally filtered by term.
+
+    No term filter is applied by default, so a professor reviewing a past
+    offering still sees that course's older assignments.
+    """
     query = db.query(Assignment).filter(Assignment.course_id == course_id)
     if term:
         query = query.filter(Assignment.term == term)
@@ -961,9 +1071,9 @@ async def list_assignments(
 async def get_assignment(
     assignment_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_read_access),
 ):
-    """Get assignment by ID."""
+    """Get assignment by ID (read access is scoped to the owning course)."""
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -974,13 +1084,9 @@ async def get_assignment(
 async def delete_assignment_by_id(
     assignment_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_write_access_by_id),
 ):
-    """Delete an assignment by ID.
-
-    Check history and cases attached to the assignment block the delete with
-    409 (see :func:`_history_attachments`) instead of failing at the driver.
-    """
+    """Delete an assignment by ID."""
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -1006,9 +1112,9 @@ async def create_student(
     org_id: str,
     student_data: StudentCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_roster_write),
 ):
-    """Create a new student profile."""
+    """Create a new student profile (admin-only: the roster is registry data)."""
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -1090,9 +1196,9 @@ async def enroll_student(
     course_id: str,
     enrollment_data: EnrollmentCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_roster_write),
 ):
-    """Enroll a student in a course."""
+    """Enroll a student in a course (admin-only: assigning users is registry work)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -1134,9 +1240,9 @@ async def enroll_student(
 async def list_enrollments(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_course_read_access),
 ):
-    """List all enrollments for a course."""
+    """List a course's roster (admin, or the professor teaching the course)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -1203,9 +1309,9 @@ async def create_assignment_version(
     assignment_id: str,
     version_data: AssignmentVersionCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_write_access_by_id),
 ):
-    """Create a new version of an assignment."""
+    """Create a new version of an assignment (professor teaching the course)."""
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -1257,9 +1363,9 @@ async def create_assignment_version(
 async def list_assignment_versions(
     assignment_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_read_access),
 ):
-    """List all versions of an assignment."""
+    """List all versions of an assignment (read access scoped to its course)."""
     versions = AssignmentVersionService.get_versions_for_assignment(db, assignment_id)
     return [
         AssignmentVersionResponse(
@@ -1285,7 +1391,7 @@ async def list_assignment_versions(
 async def get_active_assignment_version(
     assignment_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_assignment_read_access),
 ):
     """Get the currently active version of an assignment."""
     av = AssignmentVersionService.get_active_version(db, assignment_id)

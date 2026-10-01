@@ -1,8 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { useAuth } from '@/components/AuthProvider';
-import { Card, CardHeader, Modal, StatusBadge } from '@/components/saas/SaaSPrimitives';
+import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermLabel, buildTermOptions, courseTermLabel, type Term } from '@/lib/terms';
 import { BookOpen, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
@@ -66,8 +65,6 @@ export default function CoursesPage() {
   const [assignmentCourseId, setAssignmentCourseId] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(EMPTY_ASSIGNMENT);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const fetchTerms = useCallback(async () => {
     try {
@@ -219,11 +216,7 @@ export default function CoursesPage() {
       <div className="theme-page-container">
         {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
         <Card>
-          <CardHeader title="Courses" description={
-            canManageCourses
-              ? 'Manage your courses and their assignments.'
-              : 'Your courses and their assignments. Course details are maintained by an administrator.'
-          } action={
+          <CardHeader title="Courses" description="Manage your courses and assignments." action={
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 shadow-sm lg:w-72">
                 <Search size={15} />
@@ -247,7 +240,7 @@ export default function CoursesPage() {
             </div>
           } />
 
-          {showForm && (
+          {showForm && isAdmin && (
             <div className="border-b border-slate-200 bg-slate-50/60 px-5 py-4">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <Field label="Name *">
@@ -308,7 +301,7 @@ export default function CoursesPage() {
           <div className="divide-y divide-slate-100">
             {loading ? <div className="px-5 py-12 text-center text-sm text-slate-500">Loading courses…</div>
             : filtered.length === 0 && (Boolean(search) || termFilter !== 'all') ? <NoMatches />
-            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} canManageCourses={canManageCourses} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id, c.name, c.assignment_count)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}{canManageCourses ? <AddCourseCard onAdd={openCreate} /> : filtered.length === 0 ? <CoursesReadOnlyHint /> : null}</>}
+            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}<AddCourseCard onAdd={openCreate} /></>}
           </div>
         </Card>
 
@@ -381,25 +374,6 @@ function AddCourseCard({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-/**
- * Stands in for the "Add course" card when the viewer may not create courses.
- * It keeps the empty state actionable instead of silently blank.
- */
-function CoursesReadOnlyHint() {
-  return (
-    <div className="flex flex-col items-center px-5 py-14 text-center">
-      <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400">
-        <BookOpen size={30} strokeWidth={2} aria-hidden="true" />
-      </span>
-      <span className="mt-3 text-sm font-semibold text-slate-600">No courses yet</span>
-      <span className="mt-1 max-w-sm text-xs leading-5 text-slate-400">
-        An administrator creates and maintains courses. Once a course exists you can add
-        and remove its assignments from here.
-      </span>
-    </div>
-  );
-}
-
 function NoMatches() {
   return (
     <div className="flex flex-col items-center px-5 py-16 text-center">
@@ -410,9 +384,9 @@ function NoMatches() {
   );
 }
 
-function CourseRow({ course: c, canManageCourses, expanded, assignments, assignmentsLoading, onEdit, onDelete, onToggle, onDeleteAssignment, showAssignmentForm, assignmentForm, assignmentSaving, onAssignmentFormChange, onOpenAssignmentForm, onCloseAssignmentForm, onSaveAssignment }: {
-  course: Course; canManageCourses: boolean; expanded: boolean; assignments: Assignment[]; assignmentsLoading: boolean;
-  onEdit: () => void; onDelete: () => void; onToggle: () => void; onDeleteAssignment: (id: string, label: string) => void;
+function CourseRow({ course: c, expanded, assignments, assignmentsLoading, onEdit, onDelete, onToggle, onDeleteAssignment, showAssignmentForm, assignmentForm, assignmentSaving, onAssignmentFormChange, onOpenAssignmentForm, onCloseAssignmentForm, onSaveAssignment }: {
+  course: Course; expanded: boolean; assignments: Assignment[]; assignmentsLoading: boolean;
+  onEdit: () => void; onDelete: () => void; onToggle: () => void; onDeleteAssignment: (id: string) => void;
   showAssignmentForm: boolean; assignmentForm: AssignmentForm; assignmentSaving: boolean;
   onAssignmentFormChange: (form: AssignmentForm) => void;
   onOpenAssignmentForm: () => void; onCloseAssignmentForm: () => void; onSaveAssignment: () => void;
@@ -426,12 +400,8 @@ function CourseRow({ course: c, canManageCourses, expanded, assignments, assignm
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">{c.department && <span>{c.department}</span>}<span>{c.department ? '· ' : ''}{c.assignment_count ?? 0} {c.assignment_count === 1 ? 'assignment' : 'assignments'}</span></div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {canManageCourses && (
-            <>
-              <button type="button" onClick={onEdit} aria-label={`Edit ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Pencil size={15} /></button>
-              <button type="button" onClick={onDelete} aria-label={`Delete ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
-            </>
-          )}
+          <button type="button" onClick={onEdit} aria-label={`Edit ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Pencil size={15} /></button>
+          <button type="button" onClick={onDelete} aria-label={`Delete ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
           <button type="button" onClick={onToggle} aria-label="Toggle" className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ChevronRight size={15} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} /></button>
         </div>
       </div>
@@ -441,16 +411,18 @@ function CourseRow({ course: c, canManageCourses, expanded, assignments, assignm
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Assignments
             </span>
-            <button
-              type="button"
-              onClick={onOpenAssignmentForm}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
-            >
-              <Plus size={13} />
-              {showAssignmentForm ? 'Cancel' : 'Add assignment'}
-            </button>
+            {canManageAssignments && (
+              <button
+                type="button"
+                onClick={onOpenAssignmentForm}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                <Plus size={13} />
+                {showAssignmentForm ? 'Cancel' : 'Add assignment'}
+              </button>
+            )}
           </div>
-          {showAssignmentForm && (
+          {showAssignmentForm && canManageAssignments && (
             <div className="mb-3 rounded-lg border border-blue-200 bg-white p-3">
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Name *">
@@ -508,12 +480,12 @@ function CourseRow({ course: c, canManageCourses, expanded, assignments, assignm
             </div>
           )}
           {assignmentsLoading ? <div className="py-4 text-xs text-slate-500">Loading…</div>
-          : assignments.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-500">No assignments yet.</div>
+          : assignments.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-500">{canManageAssignments ? 'No assignments yet.' : 'No assignments yet. The professor teaching this course creates them.'}</div>
           : <div className="space-y-2">{assignments.map((a) => (
             <div key={a.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-slate-800">{a.name}</div><div className="text-xs text-slate-500">{a.assignment_type}</div></div>
               <StatusBadge status={a.assignment_type} />
-              <button type="button" onClick={() => onDeleteAssignment(a.id, a.name)} aria-label={`Delete ${a.name}`} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
+              <button type="button" onClick={() => onDeleteAssignment(a.id)} aria-label={`Delete ${a.name}`} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
             </div>
           ))}</div>}
         </div>

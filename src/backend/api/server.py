@@ -55,7 +55,7 @@ from fastapi.responses import (
 )
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
@@ -83,6 +83,7 @@ from src.backend.infrastructure.security import (
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
+from src.backend.application.services import academic_access
 from src.backend.config.database import SessionLocal
 from src.backend.infrastructure.professional_report_generator import ReportGenerator
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
@@ -7681,31 +7682,17 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
     the dashboard would leak another institution's case counts and course names.
     """
     current_user = _require_current_user(request)
-    user_id = current_user.get("id")
-    user_org_id = current_user.get("organization_id")
 
     from src.backend.models.database import Case, CaseResultLink
 
     with SessionLocal() as db:
-        # Visibility filter shared by every query below: own organization, or a
-        # course the user is explicitly an instructor for.
-        course_filters = []
-        if user_id:
-            course_filters.append(
-                Course.id.in_(
-                    db.query(CourseInstructor.course_id).filter(
-                        CourseInstructor.user_id == user_id
-                    )
-                )
-            )
-        if user_org_id:
-            course_filters.append(Course.organization_id == user_org_id)
-        visible_course = or_(*course_filters) if course_filters else None
-
-        if visible_course is not None:
-            courses = db.query(Course).filter(visible_course).all()
-        else:
-            # No org and no instructor assignments → nothing is visible.
+        # Visibility filter shared with /api/courses and /api/assignments:
+        # an admin sees their whole organization, a professor only the courses
+        # a course_instructors row ties them to. One policy, one implementation.
+        visible_ids = academic_access.visible_course_id_query(db, current_user)
+        courses = db.query(Course).filter(Course.id.in_(visible_ids)).all()
+        if not courses:
+            # Nothing visible → honest empty series rather than fabricated data.
             return _empty_analytics_overview()
 
         course_ids = [c.id for c in courses]
@@ -9241,43 +9228,33 @@ def _distinct_enrollment_counts(db: Any, course_ids: list[Any]) -> dict[Any, int
 
 @app.get("/api/courses")
 async def get_courses(request: Request) -> dict[str, Any]:
-    """Return courses visible to the current user.
+    """Return the courses visible to the current user.
 
-    A user can see a course if:
-    - They are explicitly assigned as an instructor (via course_instructors), or
-    - They belong to the same organization as the course.
+    Visibility is tighter than authentication:
+
+    * An **admin** owns the registry, so they see every course of their
+      organization (all terms and years).
+    * A **professor** sees only the courses a ``course_instructors`` row ties
+      them to — the courses they teach or taught. Courses still waiting for an
+      instructor are hidden until an admin performs that assignment.
+
+    ``academic_access`` owns that policy so this endpoint, the academic router
+    and the UI cannot drift apart.
     """
     try:
         try:
             current_user = _require_current_user(request, admin_only=False)
-            user_id = current_user.get("id")
-            user_org_id = current_user.get("organization_id")
         except Exception:
             return {"courses": []}
 
         with SessionLocal() as db:
-            q = db.query(Course)
-
-            # Build OR condition: direct instructor OR same organization
-            filters = []
-            if user_id:
-                filters.append(
-                    Course.id.in_(
-                        db.query(CourseInstructor.course_id).filter(
-                            CourseInstructor.user_id == user_id
-                        )
-                    )
-                )
-            if user_org_id:
-                filters.append(Course.organization_id == user_org_id)
-
-            if filters:
-                q = q.filter(or_(*filters))
-            else:
-                # No org and no assignments → return nothing
-                return {"courses": []}
-
-            courses = q.order_by(Course.name).all()
+            visible_ids = academic_access.visible_course_id_query(db, current_user)
+            courses = (
+                db.query(Course)
+                .filter(Course.id.in_(visible_ids))
+                .order_by(Course.name)
+                .all()
+            )
             course_ids = [c.id for c in courses]
 
             # Enrich with assignment/student counts in a single query per course.
@@ -9327,7 +9304,13 @@ async def get_courses(request: Request) -> dict[str, Any]:
 async def get_assignments(
     course_id: str | None = None, request: Request = None
 ) -> dict[str, Any]:
-    """Return assignments visible to the current user (instructor + org scoped)."""
+    """Return the assignments visible to the current user.
+
+    Same visibility policy as ``/api/courses``: an admin sees their
+    organization's assignments, a professor sees only the assignments of the
+    courses they are assigned to (any term, so past assignments stay
+    manageable).
+    """
     from src.backend.engines.scoring.assignment_modes import (
         recommend_mode_for_assignment_type,
     )
@@ -9335,33 +9318,16 @@ async def get_assignments(
     try:
         try:
             current_user = _require_current_user(request, admin_only=False)
-            user_id = current_user.get("id")
-            user_org_id = current_user.get("organization_id")
         except Exception:
             return {"assignments": []}
 
         with SessionLocal() as db:
-            q = db.query(Assignment)
-
-            # Join to Course to apply visibility rules
-            q = q.join(Course)
-
-            filters = []
-            if user_id:
-                filters.append(
-                    Course.id.in_(
-                        db.query(CourseInstructor.course_id).filter(
-                            CourseInstructor.user_id == user_id
-                        )
-                    )
-                )
-            if user_org_id:
-                filters.append(Course.organization_id == user_org_id)
-
-            if filters:
-                q = q.filter(or_(*filters))
-            else:
-                return {"assignments": []}
+            # Join to Course to apply the shared visibility policy: admins see
+            # their organization's assignments, professors only those of the
+            # courses they teach (every term, so past assignments remain
+            # manageable).
+            visible_ids = academic_access.visible_course_id_query(db, current_user)
+            q = db.query(Assignment).join(Course).filter(Course.id.in_(visible_ids))
 
             if course_id:
                 q = q.filter(Assignment.course_id == course_id)
@@ -9495,26 +9461,14 @@ async def get_course_detail(course_id: str, request: Request) -> dict[str, Any]:
     except Exception:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    user_id = current_user.get("id")
-    user_org_id = current_user.get("organization_id")
-
     with SessionLocal() as db:
         course = db.query(Course).filter(Course.id == course_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        scope_ok = bool(user_org_id and course.organization_id == user_org_id)
-        if not scope_ok and user_id:
-            instructor = (
-                db.query(CourseInstructor)
-                .filter(
-                    CourseInstructor.course_id == course_id,
-                    CourseInstructor.user_id == user_id,
-                )
-                .first()
-            )
-            scope_ok = instructor is not None
-        if not scope_ok:
+        # Same row-level policy as the list endpoint: an admin reaches any
+        # course of their organization, a professor only a course they teach.
+        if not academic_access.can_read_course(db, current_user, course_id):
             raise HTTPException(
                 status_code=403, detail="Not authorized for this course"
             )
