@@ -1,6 +1,10 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
+  // Dark styles follow the in-app theme toggle (documentElement[data-theme]),
+  // not the OS preference. globals.css remaps the shared utilities from the
+  // same attribute, so `dark:` variants and the theme button now agree.
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
