@@ -287,15 +287,25 @@ function ExportMenu({ job }: { job: JobItem }) {
       Math.max(GAP, window.innerWidth - MENU_WIDTH - GAP)
     );
     const spaceBelow = window.innerHeight - anchor.bottom - GAP;
+    // main.dashboard-main carries z-10, so the portaled menu needs an explicit
+    // z-index of its own or it renders underneath the page content.
     menuStyle =
       spaceBelow >= MIN_HEIGHT
-        ? { position: 'fixed', top: anchor.bottom + GAP, left, width: MENU_WIDTH, maxHeight: spaceBelow }
+        ? {
+            position: 'fixed',
+            top: anchor.bottom + GAP,
+            left,
+            width: MENU_WIDTH,
+            maxHeight: spaceBelow,
+            zIndex: 1000,
+          }
         : {
             position: 'fixed',
             bottom: window.innerHeight - anchor.top + GAP,
             left,
             width: MENU_WIDTH,
             maxHeight: Math.max(160, anchor.top - GAP * 2),
+            zIndex: 1000,
           };
   }
 
@@ -396,7 +406,10 @@ function HistoryCard({ job }: { job: JobItem }) {
             <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">{job.courseName}</div>
           </div>
         </div>
-        <ExportMenu job={job} />
+        <div className="flex shrink-0 items-center gap-2">
+          <OpenLink job={job} />
+          <ExportMenu job={job} />
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -422,10 +435,6 @@ function HistoryCard({ job }: { job: JobItem }) {
         <span>
           {job.totalSubmissions} submission{job.totalSubmissions === 1 ? '' : 's'}
         </span>
-      </div>
-
-      <div className="mt-3 flex justify-end">
-        <OpenLink job={job} />
       </div>
     </div>
   );
@@ -719,8 +728,8 @@ export default function HistoryPage() {
           ) : (
             <>
               {/* Desktop table */}
-              <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[940px]">
+              <div className="hidden overflow-x-auto xl:block">
+                <table className="w-full min-w-[900px]">
                   <TableHeader>
                     <tr>
                       {renderSortableTh('date', 'Date')}
@@ -822,7 +831,7 @@ export default function HistoryPage() {
               </div>
 
               {/* Mobile cards */}
-              <div className="divide-y divide-[color:var(--border)] lg:hidden">
+              <div className="divide-y divide-[color:var(--border)] xl:hidden">
                 {visible.map((job) => (
                   <HistoryCard key={job.id} job={job} />
                 ))}
