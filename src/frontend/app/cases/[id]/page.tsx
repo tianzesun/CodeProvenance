@@ -247,7 +247,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="h-full gap-4">
+          <Card className="h-full gap-5 lg:gap-6">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
               <ShieldCheck size={17} className="text-blue-600" />
               Confidence Basis
@@ -264,36 +264,39 @@ export default function CompareCasePage() {
 
         {/* ── Why flagged ─────────────────────────────────────────────────────── */}
         <Card>
-          <CardHeader
-            title="Why This Case Was Flagged"
-            description="Plain-language evidence for instructor review."
-          />
-          <div className="grid gap-4 md:grid-cols-2">
-            {[
-              'Same unusual recursive decomposition',
-              'Identical edge-case handling',
-              'Renamed variables but same structure',
-              'Matching helper function logic',
-              'Similarity exceeds course baseline',
-            ].map((reason) => (
-              <div key={reason} className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <SearchCheck size={18} className="mt-0.5 shrink-0 text-blue-600" />
-                <div className="text-sm font-medium text-slate-800">{reason}</div>
-              </div>
-            ))}
+          <div className="flex flex-col gap-5 lg:gap-6">
+            <CardHeader
+              title="Why This Case Was Flagged"
+              description="Plain-language evidence for instructor review."
+            />
+            <div className="grid gap-4 md:grid-cols-2">
+              {[
+                'Same unusual recursive decomposition',
+                'Identical edge-case handling',
+                'Renamed variables but same structure',
+                'Matching helper function logic',
+                'Similarity exceeds course baseline',
+              ].map((reason) => (
+                <div key={reason} className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <SearchCheck size={18} className="mt-0.5 shrink-0 text-blue-600" />
+                  <div className="text-sm font-medium text-slate-800">{reason}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </Card>
 
         {/* ── Compare code ────────────────────────────────────────────────────── */}
         <Card>
-          <CardHeader
-            title="Compare Code"
-            description="Matching regions are highlighted. Starter code is greyed out and excluded from the risk summary."
-          />
-          <div className="grid items-start gap-6 xl:grid-cols-2">
-            <CodePanel
-              title={studentA || 'Student A'}
-              code={`def tree_score(node):
+          <div className="flex flex-col gap-5 lg:gap-6">
+            <CardHeader
+              title="Compare Code"
+              description="Matching regions are highlighted. Starter code is greyed out and excluded from the risk summary."
+            />
+            <div className="grid items-start gap-6 xl:grid-cols-2">
+              <CodePanel
+                title={studentA || 'Student A'}
+                code={`def tree_score(node):
     if node is None:
         return 0
 
@@ -307,12 +310,12 @@ export default function CompareCasePage() {
         return left_total + node.value
 
     return right_total + node.value`}
-              panelRef={leftRef}
-              onScroll={() => syncScroll(leftRef, rightRef)}
-            />
-            <CodePanel
-              title={studentB || 'Student B'}
-              code={`def calculate_tree(current):
+                panelRef={leftRef}
+                onScroll={() => syncScroll(leftRef, rightRef)}
+              />
+              <CodePanel
+                title={studentB || 'Student B'}
+                code={`def calculate_tree(current):
     if current is None:
         return 0
 
@@ -326,15 +329,16 @@ export default function CompareCasePage() {
         return first_branch + current.value
 
     return second_branch + current.value`}
-              panelRef={rightRef}
-              onScroll={() => syncScroll(rightRef, leftRef)}
-            />
+                panelRef={rightRef}
+                onScroll={() => syncScroll(rightRef, leftRef)}
+              />
+            </div>
           </div>
         </Card>
 
         {/* ── History / context / actions ─────────────────────────────────────── */}
         <section className="grid items-start gap-6 lg:grid-cols-3">
-          <Card className="h-full gap-5">
+          <Card className="h-full gap-5 lg:gap-6">
             <CardHeader title="Previous History" description="Historical context, not a standalone conclusion." />
             <div className="flex flex-col gap-4">
               <EvidenceRow
@@ -350,7 +354,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="h-full gap-5">
+          <Card className="h-full gap-5 lg:gap-6">
             <CardHeader title="Context Notes" description="False-positive controls applied before ranking." />
             <div className="flex flex-col gap-4">
               {[
@@ -363,7 +367,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="gap-5">
+          <Card className="gap-5 lg:gap-6">
             <CardHeader title="Decision Actions" description="Keep the review outcome simple and auditable." />
             <div className="flex flex-col gap-5">
               {/* Assign Reviewer */}
@@ -453,7 +457,7 @@ export default function CompareCasePage() {
         </section>
 
         {/* ── Notes ───────────────────────────────────────────────────────────── */}
-        <Card className="gap-5">
+        <Card className="gap-5 lg:gap-6">
           <CardHeader title="Notes" description="Reviewer notes are kept with the case audit trail." />
           <div className="flex flex-col gap-5">
             {/* Existing Comments */}

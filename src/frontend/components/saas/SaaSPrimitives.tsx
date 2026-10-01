@@ -303,7 +303,7 @@ export function Card({ children, className = '' }: CardProps) {
     <motion.section
       {...fadeUp}
       className={`theme-card-strong rounded-[24px] shadow-sm ${hasPaddingOverride ? '' : 'p-6 lg:p-7'} ${
-        hasGapOverride ? '' : 'flex flex-col gap-6'
+        hasGapOverride ? '' : 'flex flex-col gap-5 lg:gap-6'
       } ${className}`}
     >
       {children}
