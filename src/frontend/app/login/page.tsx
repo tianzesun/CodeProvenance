@@ -125,7 +125,9 @@ export default function LoginPage() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
-  const showLogin = bootstrapped || forceSignIn;
+  // Treat "status still loading" as sign-in so returning professors never see
+  // the bootstrap form flash before /api/auth/status resolves.
+  const showLogin = loading || bootstrapped || forceSignIn;
 
   const passwordStrength = useMemo(
     () => calculatePasswordStrength(password),
@@ -175,7 +177,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (!bootstrapped && !forceSignIn) {
+    if (!showLogin) {
       if (!trimmedFullName) {
         setFormError('Full name is required.');
         return;
@@ -196,7 +198,7 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      if (bootstrapped || forceSignIn) {
+      if (showLogin) {
         await login(trimmedEmail, password);
       } else {
         await bootstrapAdmin({
@@ -267,10 +269,10 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                                    {(bootstrapped || forceSignIn) ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
+                                    {showLogin ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
-                                    {(bootstrapped || forceSignIn)
+                                    {showLogin
                     ? 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'
                     : 'Create the first administrator account and configure the workspace for your institution.'}
                 </p>
@@ -322,7 +324,9 @@ export default function LoginPage() {
                   ? resetEmailSent
                     ? 'If the account exists, password reset instructions have been sent.'
                     : 'Enter your email address and we will send reset instructions.'
-                                      : 'Set up the first administrator account for this workspace.'}
+                                      : showLogin
+                    ? 'Sign in with your account to continue to this workspace.'
+                    : 'Set up the first administrator account for this workspace.'}
               </p>
             </div>
 
@@ -346,7 +350,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={handleBackToLogin}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition"
                   >
                     <ArrowLeft size={16} aria-hidden="true" />
                     Return to sign in
@@ -400,13 +404,9 @@ export default function LoginPage() {
 <button
                   type="submit"
                   disabled={loading || submitting}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {submitting
-                    ? 'Processing...'
-                    : bootstrapped
-                      ? 'Sign In'
-                      : 'Create Administrator Account'}
+                  {submitting ? 'Sending...' : 'Send reset instructions'}
                 </button>
 
                   <button
@@ -421,7 +421,7 @@ export default function LoginPage() {
               )
             ) : (
               <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-                                {!bootstrapped && !forceSignIn && (
+                                {!showLogin && (
                   <>
                     <div className="space-y-2">
                       <label htmlFor="full-name" className="block text-sm font-medium text-slate-700">
@@ -501,7 +501,7 @@ export default function LoginPage() {
                       onChange={(event) => handlePasswordChange(event.target.value)}
                       aria-invalid={passwordError ? true : undefined}
                       aria-describedby={passwordError ? 'password-error' : undefined}
-                      autoComplete={bootstrapped ? 'current-password' : 'new-password'}
+                      autoComplete={showLogin ? 'current-password' : 'new-password'}
                       placeholder="Enter your password"
                       className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${passwordError
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
@@ -522,7 +522,7 @@ export default function LoginPage() {
                     </button>
                   </div>
 
-                  {!bootstrapped && password && (
+                  {!showLogin && password && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="mb-2 flex items-center justify-between">
                         <span className={`text-sm font-medium ${passwordStrength.tone}`}>
@@ -542,7 +542,7 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                                    {!bootstrapped && !forceSignIn && !password && (
+                                    {!showLogin && !password && (
                     <p className="text-xs text-slate-500">
                       Use at least 8 characters with upper/lowercase letters, a number, and a symbol.
                     </p>
@@ -555,7 +555,7 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                                {(bootstrapped || forceSignIn) && (
+                                {showLogin && (
                   <div className="flex items-center justify-between gap-4">
                     <label htmlFor="rememberMe" className="flex items-center gap-3 text-sm text-slate-600">
                       <input
@@ -588,17 +588,17 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading || submitting}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
                   {submitting
                     ? 'Processing...'
-                                        : forceSignIn
+                    : showLogin
                       ? 'Sign in'
                       : 'Create administrator account'}
                 </button>
 
-                {!forceSignIn && (
+                {!showLogin && (
                   <button
                     type="button"
                     onClick={() => setForceSignIn(true)}
