@@ -22,7 +22,6 @@ import {
   UserX,
   X,
   Building2,
-  Zap,
 } from 'lucide-react';
 
 import DashboardLayout from '@/components/DashboardLayout';
@@ -208,28 +207,6 @@ function getErrorMessage(error: unknown): string {
 function validatePasswordInput(password: string): string | null {
   if (password.length < 8) return 'Password must be at least 8 characters long.';
   return null;
-}
-
-// Engine labels mirror the upload flow's engine picker so the recommendation
-// shown here reads the same as the analysis configuration.
-const RECOMMENDED_ENGINE_LABELS: Record<string, string> = {
-  token: 'Token',
-  ast: 'AST',
-  winnowing: 'Winnowing',
-  gst: 'GST',
-  semantic: 'Semantic',
-  embedding: 'Embedding',
-  cfg: 'Control Flow',
-  execution_cfg: 'Execution CFG',
-  tree_kernel: 'Tree Kernel',
-  fingerprint: 'Fingerprint',
-  ngram: 'N-gram',
-  web: 'Web Matching',
-  ai_detection: 'AI Detection',
-};
-
-function engineLabel(key: string): string {
-  return RECOMMENDED_ENGINE_LABELS[key] ?? key.replace(/_/g, ' ');
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -1079,7 +1056,6 @@ export default function AdminPage() {
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [selectedProfessorForCourse, setSelectedProfessorForCourse] = useState<Record<string, string>>({});
   const [assigningCourse, setAssigningCourse] = useState<string | null>(null);
-  const [expandedCourseIds, setExpandedCourseIds] = useState<Set<string>>(new Set());
   // term assignment per course: courseId → selected term_id in dropdown
   const [selectedTermForCourse, setSelectedTermForCourse] = useState<Record<string, string>>({});
   const [assigningTermForCourse, setAssigningTermForCourse] = useState<string | null>(null);
@@ -1692,18 +1668,6 @@ export default function AdminPage() {
     }
   };
 
-  const toggleCourseAssignments = (courseId: string) => {
-    setExpandedCourseIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(courseId)) {
-        next.delete(courseId);
-      } else {
-        next.add(courseId);
-      }
-      return next;
-    });
-  };
-
   // ── Early returns ─────────────────────────────────────────────────────────────
 
   if (!bootstrapped || authLoading || status === 'loading') {
@@ -2295,7 +2259,6 @@ export default function AdminPage() {
                   const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
                   const isAssigning = assigningCourse === course.id;
                   const assignmentCount = courseAssignmentCount(course);
-                  const isAssignmentsOpen = expandedCourseIds.has(course.id);
                   const accent = courseAccent(course.department || course.code || course.name);
                   const linkedTerm = course.term
                     ? `${course.term}${course.year ? ` ${course.year}` : ''}`
@@ -2430,7 +2393,7 @@ export default function AdminPage() {
                       {/* Professors. The headcount lives in the summary line, so
                           the header stays a plain label and the chips carry the
                           names. */}
-                      <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+                      <div className="mt-auto rounded-2xl border border-slate-200/80 bg-white/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
                         <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                           Professors
                         </span>
@@ -2505,78 +2468,6 @@ export default function AdminPage() {
                           <p className="mt-3 text-xs leading-5 text-slate-400 dark:text-slate-500">
                             No other professor accounts available to assign.
                           </p>
-                        )}
-                      </div>
-
-                      {/* Assignments */}
-                      <div className="mt-auto">
-                        <button
-                          type="button"
-                          onClick={() => toggleCourseAssignments(course.id)}
-                          aria-expanded={isAssignmentsOpen}
-                          className="flex w-full items-center justify-between rounded-2xl border border-slate-200/80 bg-white/70 px-3.5 py-3 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
-                        >
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                            Assignments
-                          </span>
-                          <ChevronDown
-                            size={15}
-                            className={`text-slate-400 transition-transform ${isAssignmentsOpen ? 'rotate-180' : ''}`}
-                          />
-                        </button>
-
-                        {isAssignmentsOpen && (
-                          <div className="mt-3">
-                            {course.assignments && course.assignments.length > 0 ? (
-                              <ul className="space-y-2">
-                                {course.assignments.map((assignment) => (
-                                  <li
-                                    key={assignment.id}
-                                    className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/70"
-                                  >
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
-                                      <FileText size={12} />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                        <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                                          {assignment.name}
-                                        </span>
-                                        {assignment.assignment_type && (
-                                          <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
-                                            {assignment.assignment_type.replace(/_/g, ' ')}
-                                          </span>
-                                        )}
-                                      </div>
-                                      {assignment.recommended_mode?.mode_id && (
-                                        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
-                                          <Zap
-                                            size={11}
-                                            className="shrink-0 text-amber-500 dark:text-amber-400"
-                                          />
-                                          <span className="font-semibold text-slate-600 dark:text-slate-300">
-                                            Suggested: {assignment.recommended_mode.mode_name}
-                                          </span>
-                                          {(assignment.recommended_mode.top_engines ?? []).length > 0 && (
-                                            <span>
-                                              ·{' '}
-                                              {(assignment.recommended_mode.top_engines ?? [])
-                                                .map((engine) => engineLabel(engine.key))
-                                                .join(' · ')}
-                                            </span>
-                                          )}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-xs leading-5 text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
-                                No assignments have been created for this course yet.
-                              </div>
-                            )}
-                          </div>
                         )}
                       </div>
                       </div>
