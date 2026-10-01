@@ -335,13 +335,13 @@ export default function DatasetsPage() {
                      <Database size={18} className="text-blue-600" />
                    </div>
                    <div className="flex items-center gap-1">
-                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
+                     <button type="button" aria-label={`Edit ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
                        <Edit size={14} />
                      </button>
-                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
+                     <button type="button" aria-label={`Delete ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
                        <Trash2 size={14} />
                      </button>
-                     <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
+                     <button type="button" aria-label={`Open ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
                        <ExternalLink size={14} />
                      </button>
                    </div>
@@ -411,13 +411,13 @@ export default function DatasetsPage() {
 
                  {/* Action Buttons */}
                  <div className="flex items-center gap-1 flex-shrink-0">
-                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
+                   <button type="button" aria-label={`Edit ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-slate-700">
                      <Edit size={16} />
                    </button>
-                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
+                   <button type="button" aria-label={`Delete ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-red-600">
                      <Trash2 size={16} />
                    </button>
-                   <button className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
+                   <button type="button" aria-label={`Open ${dataset.name}`} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-500 hover:text-blue-600">
                      <ExternalLink size={16} />
                    </button>
                  </div>
