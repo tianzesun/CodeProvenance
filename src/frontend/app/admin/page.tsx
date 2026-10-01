@@ -2333,29 +2333,25 @@ export default function AdminPage() {
                           </div>
                           <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                             <span className={`font-semibold ${accent.text}`}>{linkedTerm}</span>
-                            <span aria-hidden>·</span>
+                            <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
                             <span>
                               {course.instructors.length} professor{course.instructors.length === 1 ? '' : 's'}
                             </span>
-                            <span aria-hidden>·</span>
+                            <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
                             <span>
                               {assignmentCount} assignment{assignmentCount === 1 ? '' : 's'}
                             </span>
                           </p>
                         </div>
 
-                        {/* Term assignment */}
-                        <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                              Term
-                            </span>
-                            {course.term && (
-                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-500/20">
-                                {linkedTerm}
-                              </span>
-                            )}
-                          </div>
+                        {/* Term assignment. The term value is stated once in the
+                            summary line above, so this block only owns the
+                            control — repeating it as a pill made every card
+                            read the same term twice. */}
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                            Term
+                          </span>
                         {terms.length === 0 ? (
                           <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
                             No terms in the registry yet. Add one in the Terms tab.
@@ -2372,7 +2368,11 @@ export default function AdminPage() {
                                 className="h-9 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                               >
                                 <option value="">
-                                  {course.term_id ? '— Remove term link —' : 'Assign a term…'}
+                                  {course.term_id
+                                    ? '— Remove term link —'
+                                    : course.term
+                                      ? 'Assign a registry term…'
+                                      : 'Assign a term…'}
                                 </option>
                                 {terms.map((t) => (
                                   <option key={t.id} value={t.id}>
@@ -2395,7 +2395,7 @@ export default function AdminPage() {
                               onClick={() =>
                                 assignCourseTerm(course.id, selectedTermForCourse[course.id] ?? '')
                               }
-                              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {assigningTermForCourse === course.id ? (
                                 <Loader2 size={13} className="animate-spin" />
@@ -2408,16 +2408,13 @@ export default function AdminPage() {
                         )}
                       </div>
 
-                      {/* Professors */}
-                      <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                            Professors
-                          </span>
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {course.instructors.length}
-                          </span>
-                        </div>
+                      {/* Professors. The headcount lives in the summary line, so
+                          the header stays a plain label and the chips carry the
+                          names. */}
+                      <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+                        <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                          Professors
+                        </span>
 
                         <div className="mt-2.5">
                           {course.instructors.length === 0 ? (
@@ -2458,7 +2455,7 @@ export default function AdminPage() {
                                   setSelectedProfessorForCourse((prev) => ({ ...prev, [course.id]: e.target.value }))
                                 }
                                 aria-label={`Choose a professor for ${course.name}`}
-                                className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                                className="h-9 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                               >
                                 <option value="">Choose professor…</option>
                                 {availableProfessors.map((p) => (
@@ -2479,7 +2476,7 @@ export default function AdminPage() {
                                 const uid = selectedProfessorForCourse[course.id];
                                 if (uid) assignInstructor(course.id, uid);
                               }}
-                              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {isAssigning ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
                               Assign
@@ -2498,14 +2495,10 @@ export default function AdminPage() {
                           type="button"
                           onClick={() => toggleCourseAssignments(course.id)}
                           aria-expanded={isAssignmentsOpen}
-                          className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
+                          className="flex w-full items-center justify-between rounded-2xl border border-slate-200/80 bg-white/70 px-3.5 py-3 text-left transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
                         >
-                          <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-                            <FileText size={13} className="text-violet-500 dark:text-violet-400" />
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                             Assignments
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              {assignmentCount}
-                            </span>
                           </span>
                           <ChevronDown
                             size={15}
