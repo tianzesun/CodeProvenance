@@ -224,6 +224,23 @@ class TestGuestWriteGuard:
         assert "/api/upload-zip" in server.GUEST_WRITE_EXEMPT_PATHS
         assert "/api/auth/refresh" in server.GUEST_WRITE_EXEMPT_PATHS
 
+    def test_ai_review_runs_while_detector_training_stays_blocked(self) -> None:
+        """The AI code review is a demo write; tuning the model is not.
+
+        The exemption is exact: running /api/ai-detect is part of the guest
+        flow, but its calibrate/retraining siblings would let an anonymous
+        session alter the shared detector for everyone.
+        """
+        assert "/api/ai-detect" in server.GUEST_WRITE_EXEMPT_PATHS
+        assert "/api/ai-detect/calibrate" not in server.GUEST_WRITE_EXEMPT_PATHS
+        assert "/api/ai-detect/retrain" not in server.GUEST_WRITE_EXEMPT_PATHS
+
+        client = _guest_client()
+        response = client.post("/api/ai-detect/calibrate")
+
+        assert response.status_code == 403, response.text
+        assert "guest" in response.json()["detail"].lower()
+
     def test_professor_sessions_are_not_affected_by_the_guard(self) -> None:
         """A real session writes exactly as before — no guest flag, no 403."""
         assert (
@@ -561,3 +578,91 @@ class TestGuestReadsSkipWorkspaceQueries:
         assert assignments.status_code == 200, assignments.text
         assert assignments.json() == {"assignments": []}
         assert policy_calls == [], "the guest must never reach the policy query"
+
+
+class TestGuestAiCodeReview:
+    """The AI-Generated Code Review page is part of the guest demo.
+
+    Same contract as the similarity check: the guest can run an assessment
+    and read its own result, and nothing about it reaches the database.
+    """
+
+    def test_guest_can_run_an_ai_review_and_read_its_own_result(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """POST /api/ai-detect answers, and the first poll is authorised."""
+        # Keep the (model-loading) scoring out of the test: only the seeded
+        # job and its access rules matter here.
+        monkeypatch.setattr(server, "_finalize_ai_detection_job", lambda *a, **k: None)
+        monkeypatch.setattr(server, "_jobs", dict(server._jobs))
+        monkeypatch.setattr(server, "UPLOADS_DIR", tmp_path / "uploads")
+        monkeypatch.setattr(
+            server, "_job_report_dir", lambda job_id: tmp_path / "reports" / job_id
+        )
+        client = _guest_client()
+        session_user = client.get("/api/auth/me").json()["user"]
+
+        response = client.post(
+            "/api/ai-detect",
+            files=[("files", ("sample.py", "print('hi')\n", "text/x-python"))],
+            timeout=30,
+        )
+
+        assert response.status_code == 200, response.text
+        job_id = response.json()["job_id"]
+
+        poll = client.get(f"/api/job/{job_id}")
+
+        assert poll.status_code == 200, poll.text
+        job = poll.json()
+        assert job["guest"] is True
+        assert job["job_type"] == "ai_detector"
+        assert job["owner_user_id"] == session_user["id"]
+
+    def test_scoring_a_guest_ai_review_opens_no_database_session(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """Background scoring completes with zero ``SessionLocal`` round trips.
+
+        The spy records rather than merely raising, because some persistence
+        helpers swallow their own errors — an attempt that was logged and
+        swallowed must still fail this test.
+        """
+        monkeypatch.setattr(server, "_jobs", dict(server._jobs))
+        monkeypatch.setattr(server, "UPLOADS_DIR", tmp_path / "uploads")
+        monkeypatch.setattr(
+            server, "_job_report_dir", lambda job_id: tmp_path / "reports" / job_id
+        )
+        monkeypatch.setattr(
+            server,
+            "_build_ai_detection_summary",
+            lambda submissions: {"flagged_count": 1, "highest_score": 0.9},
+        )
+        db_calls: list[str] = []
+
+        def db_spy(*args, **kwargs):
+            db_calls.append("SessionLocal")
+            raise AssertionError("guest AI review reached the database")
+
+        monkeypatch.setattr(server, "SessionLocal", db_spy)
+
+        client = _guest_client()
+        response = client.post(
+            "/api/ai-detect",
+            files=[("files", ("sample.py", "print('hi')\n", "text/x-python"))],
+            timeout=30,
+        )
+        assert response.status_code == 200, response.text
+        job_id = response.json()["job_id"]
+
+        # TestClient runs background tasks inline; calling it again keeps the
+        # assertions below independent of that behaviour.
+        server._finalize_ai_detection_job(job_id, {"sample.py": "print('hi')\n"})
+
+        assert db_calls == [], "the guest AI review opened a database session"
+        job = server._jobs[job_id]
+        assert job["status"] == "completed"
+        assert job["ai_detection"]["flagged_count"] == 1
+        assert job["guest"] is True
+        report_dir = tmp_path / "reports" / job_id
+        assert not (report_dir / server.JOB_METADATA_FILENAME).exists()

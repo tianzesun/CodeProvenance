@@ -115,7 +115,7 @@ export const NAV_GROUPS: NavGroup[] = [
         // /ai-detector/accuracy is a separate nav item, so it must not light
         // up the parent entry.
         activeOn: ['/ai-detector'],
-        roles: ['professor', 'admin'],
+        roles: ['professor', 'admin', 'guest'],
         primary: true,
       },
       {

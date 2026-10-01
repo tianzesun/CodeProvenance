@@ -162,13 +162,16 @@ PUBLIC_PATHS = frozenset(
     }
 )
 
-# Writes a guest demo session may make: the demo flow itself (uploading), plus
-# its own session lifecycle. Every other method is rejected for guests, so no
-# review, setting, course or case can ever be persisted on their behalf.
+# Writes a guest demo session may make: the two demo flows themselves (the
+# similarity check and the AI code review), plus its own session lifecycle.
+# Every other method is rejected for guests, so no review, setting, course or
+# case can ever be persisted on their behalf. Exact paths only: /api/ai-detect
+# is exempt, while its calibration/retraining siblings stay blocked.
 GUEST_WRITE_EXEMPT_PATHS = frozenset(
     {
         "/api/upload",
         "/api/upload-zip",
+        "/api/ai-detect",
         "/api/auth/guest",
         "/api/auth/refresh",
         "/api/auth/logout",

@@ -1,6 +1,7 @@
 // @ts-nocheck — TODO: add proper types (tracked in types/api.ts)
 'use client';
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { ErrorState } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import Link from 'next/link';
@@ -49,6 +50,11 @@ function buildPageNumbers(current, total) {
 }
 export default function AIDetectorPage() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+  // A guest demo session can run assessments but owns no workspace: no
+  // courses to file one under, and no history to list (the workspace
+  // listing endpoint denies guests by design).
+  const isGuest = user?.role === 'guest';
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -76,8 +82,11 @@ export default function AIDetectorPage() {
     }
   };
   useEffect(() => {
+    // Wait for the session to resolve, then skip the workspace listing for
+    // guests — /api/jobs answers 403 for them, so the call is pure noise.
+    if (authLoading || isGuest) return;
     loadHistory();
-  }, []);
+  }, [authLoading, isGuest]);
   useEffect(() => {
     let active = true;
     apiClient.get('/api/courses')
@@ -211,29 +220,33 @@ export default function AIDetectorPage() {
               </div>
             </div>
           </section>
-          <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-800">
-              Course &amp; Assignment
-              <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">Optional</span>
-            </div>
-            <p className="mb-4 text-xs text-slate-500">Associate this assessment with a course and assignment for better organization (optional)</p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Course</label>
-                <select value={selectedCourseId} onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }} disabled={coursesLoading} className="theme-field">
-                  <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
-                  {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
-                </select>
+          {/* Course & Assignment — hidden for the guest demo: it owns no
+              workspace, so there is nothing to associate an assessment with. */}
+          {!isGuest && (
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-800">
+                Course &amp; Assignment
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">Optional</span>
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Assignment</label>
-                <select value={selectedAssignmentId} onChange={(event) => setSelectedAssignmentId(event.target.value)} disabled={!selectedCourseId || assignmentsLoading} className="theme-field disabled:text-slate-400">
-                  <option value="">{!selectedCourseId ? 'None (choose course first if needed)' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
-                  {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
-                </select>
+              <p className="mb-4 text-xs text-slate-500">Associate this assessment with a course and assignment for better organization (optional)</p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Course</label>
+                  <select value={selectedCourseId} onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }} disabled={coursesLoading} className="theme-field">
+                    <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
+                    {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Assignment</label>
+                  <select value={selectedAssignmentId} onChange={(event) => setSelectedAssignmentId(event.target.value)} disabled={!selectedCourseId || assignmentsLoading} className="theme-field disabled:text-slate-400">
+                    <option value="">{!selectedCourseId ? 'None (choose course first if needed)' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
+                    {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
+                  </select>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
           <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
             {files.length === 0 ? (
               <button
@@ -289,151 +302,155 @@ export default function AIDetectorPage() {
             />
           </section>
           {error && <ErrorState message={error} />}
-          <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-            <button
-              type="button"
-              onClick={() => setHistoryExpanded((expanded) => !expanded)}
-              aria-expanded={historyExpanded}
-              className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50"
-            >
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Assessment History</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {historyExpanded
-                    ? 'Previous analyses retained for institutional review.'
-                    : `${history.length} previous assessment${history.length === 1 ? '' : 's'} — click to view`}
+          {/* Assessment History — hidden for guests: the workspace listing
+              they would read is denied to them, so it is always empty. */}
+          {!isGuest && (
+            <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+              <button
+                type="button"
+                onClick={() => setHistoryExpanded((expanded) => !expanded)}
+                aria-expanded={historyExpanded}
+                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50"
+              >
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Assessment History</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {historyExpanded
+                      ? 'Previous analyses retained for institutional review.'
+                      : `${history.length} previous assessment${history.length === 1 ? '' : 's'} — click to view`}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 text-slate-400">
-                <CalendarClock size={18} />
-                <ChevronDown size={16} className={`transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            {historyExpanded && (
-              <div className="border-t border-slate-100">
-                {history.length === 0 ? (
-                  <div className="px-5 py-8 text-sm text-slate-500">No prior assessments recorded.</div>
-                ) : (
-                  <>
-                    <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2">
-                      <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
-                        Filter by course
-                        <select
-                          value={historyCourseId}
-                          onChange={(event) => {
-                            setHistoryCourseId(event.target.value);
-                            setHistoryAssignmentId('');
-                            setHistoryPage(1);
-                          }}
-                          className="theme-compact-field"
-                        >
-                          <option value="">All courses</option>
-                          {courses.map((course) => (
-                            <option key={course.id} value={course.id}>
-                              {course.code ? `${course.code} – ` : ''}{course.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
-                        Filter by assignment
-                        <select
-                          value={historyAssignmentId}
-                          onChange={(event) => {
-                            setHistoryAssignmentId(event.target.value);
-                            setHistoryPage(1);
-                          }}
-                          disabled={!historyCourseId}
-                          className="theme-compact-field"
-                        >
-                          <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
-                          {historyAssignments.map((assignment) => (
-                            <option key={assignment.id} value={assignment.id}>{assignment.name}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    {filteredHistory.length === 0 ? (
-                      <div className="px-5 py-8 text-sm text-slate-500">No assessments match these filters.</div>
-                    ) : (
-                      <>
-                        <div className="divide-y divide-slate-100">
-                          {paginatedHistory.map((job) => (
-                            <Link
-                              key={job.id}
-                              href={`/ai-detector/results/${job.id}`}
-                              className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
-                            >
-                              <div>
-                                <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
-                                <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'}</div>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(job.summary?.highest_ai_probability || 0)}`}>
-                                  {Math.round((job.summary?.highest_ai_probability || 0) * 100)}% highest risk
-                                </span>
-                                <ArrowRight size={16} className="text-slate-400" />
-                              </div>
-                            </Link>
-                          ))}
-                        </div>
-                        {totalHistoryPages > 1 && (
-                          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <span>Rows per page</span>
-                              <select
-                                value={historyPageSize}
-                                onChange={(event) => {
-                                  setHistoryPageSize(Number(event.target.value));
-                                  setHistoryPage(1);
-                                }}
-                                className="theme-compact-field h-8 w-auto"
+                <div className="flex items-center gap-2 text-slate-400">
+                  <CalendarClock size={18} />
+                  <ChevronDown size={16} className={`transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
+              {historyExpanded && (
+                <div className="border-t border-slate-100">
+                  {history.length === 0 ? (
+                    <div className="px-5 py-8 text-sm text-slate-500">No prior assessments recorded.</div>
+                  ) : (
+                    <>
+                      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2">
+                        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                          Filter by course
+                          <select
+                            value={historyCourseId}
+                            onChange={(event) => {
+                              setHistoryCourseId(event.target.value);
+                              setHistoryAssignmentId('');
+                              setHistoryPage(1);
+                            }}
+                            className="theme-compact-field"
+                          >
+                            <option value="">All courses</option>
+                            {courses.map((course) => (
+                              <option key={course.id} value={course.id}>
+                                {course.code ? `${course.code} – ` : ''}{course.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                          Filter by assignment
+                          <select
+                            value={historyAssignmentId}
+                            onChange={(event) => {
+                              setHistoryAssignmentId(event.target.value);
+                              setHistoryPage(1);
+                            }}
+                            disabled={!historyCourseId}
+                            className="theme-compact-field"
+                          >
+                            <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
+                            {historyAssignments.map((assignment) => (
+                              <option key={assignment.id} value={assignment.id}>{assignment.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      {filteredHistory.length === 0 ? (
+                        <div className="px-5 py-8 text-sm text-slate-500">No assessments match these filters.</div>
+                      ) : (
+                        <>
+                          <div className="divide-y divide-slate-100">
+                            {paginatedHistory.map((job) => (
+                              <Link
+                                key={job.id}
+                                href={`/ai-detector/results/${job.id}`}
+                                className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
                               >
-                                {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
-                              </select>
-                              <span className="ml-2 text-xs text-slate-500">Page {safeHistoryPage} of {totalHistoryPages}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={safeHistoryPage <= 1}
-                                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                                aria-label="Previous page"
-                                className="theme-icon-button"
-                              >
-                                <ChevronLeft size={15} />
-                              </button>
-                              {historyPageNumbers.map((num, i) => num === '…' ? (
-                                <span key={`gap-${i}`} className="px-1 text-xs text-slate-400">…</span>
-                              ) : (
-                                <button
-                                  key={num}
-                                  type="button"
-                                  onClick={() => setHistoryPage(Number(num))}
-                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${safeHistoryPage === num ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                                >
-                                  {num}
-                                </button>
-                              ))}
-                              <button
-                                type="button"
-                                disabled={safeHistoryPage >= totalHistoryPages}
-                                onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
-                                aria-label="Next page"
-                                className="theme-icon-button"
-                              >
-                                <ChevronRight size={15} />
-                              </button>
-                            </div>
+                                <div>
+                                  <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                                  <div className="mt-1 text-xs text-slate-500">{job.course_name || 'Course'}</div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(job.summary?.highest_ai_probability || 0)}`}>
+                                    {Math.round((job.summary?.highest_ai_probability || 0) * 100)}% highest risk
+                                  </span>
+                                  <ArrowRight size={16} className="text-slate-400" />
+                                </div>
+                              </Link>
+                            ))}
                           </div>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </section>
+                          {totalHistoryPages > 1 && (
+                            <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <span>Rows per page</span>
+                                <select
+                                  value={historyPageSize}
+                                  onChange={(event) => {
+                                    setHistoryPageSize(Number(event.target.value));
+                                    setHistoryPage(1);
+                                  }}
+                                  className="theme-compact-field h-8 w-auto"
+                                >
+                                  {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+                                </select>
+                                <span className="ml-2 text-xs text-slate-500">Page {safeHistoryPage} of {totalHistoryPages}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={safeHistoryPage <= 1}
+                                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                                  aria-label="Previous page"
+                                  className="theme-icon-button"
+                                >
+                                  <ChevronLeft size={15} />
+                                </button>
+                                {historyPageNumbers.map((num, i) => num === '…' ? (
+                                  <span key={`gap-${i}`} className="px-1 text-xs text-slate-400">…</span>
+                                ) : (
+                                  <button
+                                    key={num}
+                                    type="button"
+                                    onClick={() => setHistoryPage(Number(num))}
+                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${safeHistoryPage === num ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                  >
+                                    {num}
+                                  </button>
+                                ))}
+                                <button
+                                  type="button"
+                                  disabled={safeHistoryPage >= totalHistoryPages}
+                                  onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                                  aria-label="Next page"
+                                  className="theme-icon-button"
+                                >
+                                  <ChevronRight size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
         </div>
       </div>
