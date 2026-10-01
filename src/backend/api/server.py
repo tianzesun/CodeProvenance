@@ -5528,7 +5528,10 @@ async def login(request: Request):
 
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
-    _validate_password_input(password)
+    # Password strength is enforced where passwords are *set* (bootstrap-admin,
+    # create-user, reset-password). Checking it here would lock out any account
+    # whose password predates a policy change: the hash comparison below is the
+    # only check that matters for an existing credential.
 
     user_data = await run_in_threadpool(_login_sync, email, password)
     # Need to fetch user again for cookie issuance since we now return serialized data
