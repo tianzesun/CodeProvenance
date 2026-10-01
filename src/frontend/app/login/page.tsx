@@ -13,6 +13,7 @@ import {
   Loader2,
   ArrowLeft,
   Rocket,
+  KeyRound,
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/components/AuthProvider';
@@ -126,6 +127,11 @@ export default function LoginPage() {
   const [nextPath, setNextPath] = useState('/');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  // Sign-in method chosen on this page. SSO is UI-only for now: picking it
+  // swaps the password form for an email prompt, and no session is issued
+  // until an identity provider is connected.
+  const [loginMethod, setLoginMethod] = useState<'password' | 'sso'>('password');
+  const [ssoNotice, setSsoNotice] = useState('');
 
   // Treat "status still loading" as sign-in so returning professors never see
   // the bootstrap form flash before /api/auth/status resolves.
@@ -277,6 +283,44 @@ export default function LoginPage() {
     }
   };
 
+  /**
+   * Collect the email for a single-sign-on attempt.
+   *
+   * SSO is UI-only for now: this is where a real flow would hand the address
+   * to ``POST /api/auth/sso/start``, resolve the domain's identity provider
+   * and redirect the browser to it. Until one is connected, say so plainly
+   * instead of pretending the hand-off happened.
+   */
+  const handleSsoSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    setFormError('');
+    const emailValidationError = validateEmail(email.trim());
+    if (emailValidationError) {
+      setEmailError(emailValidationError);
+      return;
+    }
+
+    setSsoNotice(
+      'Single sign-on isn’t configured for this workspace yet — no identity provider is connected. Use your email and password to sign in for now.'
+    );
+  };
+
+  /** Leave the SSO prompt and restore the password form. */
+  const handleBackToPassword = () => {
+    setLoginMethod('password');
+    setSsoNotice('');
+    setFormError('');
+    setEmailError('');
+  };
+
+  /** Swap the password form's email prompt for the SSO one. */
+  const handleChooseSso = () => {
+    setLoginMethod('sso');
+    setSsoNotice('');
+    setEmailError('');
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl lg:grid-cols-[1fr_520px]">
@@ -334,7 +378,11 @@ export default function LoginPage() {
 
             <div className="mb-8">
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                <LockKeyhole size={20} aria-hidden="true" />
+                {loginMethod === 'sso' && showLogin ? (
+                  <KeyRound size={20} aria-hidden="true" />
+                ) : (
+                  <LockKeyhole size={20} aria-hidden="true" />
+                )}
               </div>
 <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
                 {showForgotPassword
@@ -342,7 +390,9 @@ export default function LoginPage() {
                     ? 'Check your email'
                     : 'Reset password'
                   : showLogin
-                    ? 'Professor Sign-In'
+                    ? loginMethod === 'sso'
+                      ? 'Sign in with SSO'
+                      : 'Professor Sign-In'
                     : 'Create Administrator Account'}
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -351,7 +401,9 @@ export default function LoginPage() {
                     ? 'If the account exists, password reset instructions have been sent.'
                     : 'Enter your email address and we will send reset instructions.'
                                       : showLogin
-                    ? 'Sign in with your account to continue to this workspace.'
+                    ? loginMethod === 'sso'
+                      ? 'Enter your institution email to continue to your organization’s identity provider.'
+                      : 'Sign in with your account to continue to this workspace.'
                     : 'Set up the first administrator account for this workspace.'}
               </p>
             </div>
@@ -445,6 +497,72 @@ export default function LoginPage() {
                   </button>
                 </form>
               )
+            ) : loginMethod === 'sso' && showLogin ? (
+              <form className="space-y-5" onSubmit={handleSsoSubmit} noValidate>
+                <div className="space-y-2">
+                  <label htmlFor="sso-email" className="block text-sm font-medium text-slate-700">
+                    Email address
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="sso-email"
+                      type="email"
+                      value={email}
+                      onChange={(event) => handleEmailChange(event.target.value)}
+                      aria-invalid={emailError ? true : undefined}
+                      aria-describedby={emailError ? 'sso-email-error' : undefined}
+                      autoComplete="email"
+                      placeholder="name@institution.edu"
+                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                        }`}
+                    />
+                    {email && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
+                        {emailError ? (
+                          <XCircle size={16} className="text-red-500" />
+                        ) : (
+                          <CheckCircle size={16} className="text-emerald-600" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {emailError && (
+                    <p id="sso-email-error" role="alert" className="text-xs text-red-600">
+                      {emailError}
+                    </p>
+                  )}
+                </div>
+
+                {ssoNotice && (
+                  <div
+                    role="status"
+                    className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                  >
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
+                    <span>{ssoNotice}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || submitting}
+                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                  Continue with SSO
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBackToPassword}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Back to sign in
+                </button>
+              </form>
             ) : (
               <form className="space-y-5" onSubmit={handleSubmit} noValidate>
                                 {!showLogin && (
@@ -630,6 +748,22 @@ export default function LoginPage() {
                     or
                   </span>
                 </div>
+
+                {showLogin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleChooseSso}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <KeyRound size={16} aria-hidden="true" />
+                      Continue with SSO
+                    </button>
+                    <p className="text-center text-xs leading-relaxed text-slate-500">
+                      Sign in through your institution’s identity provider.
+                    </p>
+                  </>
+                )}
 
                 <button
                   type="button"
