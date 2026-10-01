@@ -69,12 +69,14 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
   strict: 0.64,
 };
 
-// 4 main categories - each shows all sections on one page
+// 4 main categories - each shows all sections on one page.
+// `accent` colours the sliding tab pill so the category you are in is obvious.
 const MAIN_TABS = [
   {
     id: 'detection',
     label: 'Detection Settings',
     icon: FolderTree,
+    accent: '#2563eb',
     description:
       'Keep the default profile for everyday use. IntegrityDesk detects assignment shape, calibrates thresholds, and suppresses common false positives automatically.',
   },
@@ -82,6 +84,7 @@ const MAIN_TABS = [
     id: 'intelligence',
     label: 'AI & Evidence',
     icon: Brain,
+    accent: '#7c3aed',
     description:
       'Configure AI-generated code detection, embedding models, and the evidence sources used to support each finding.',
   },
@@ -89,6 +92,7 @@ const MAIN_TABS = [
     id: 'workflow',
     label: 'Review & Workflow',
     icon: Workflow,
+    accent: '#059669',
     description:
       'Set how aggressively submissions are flagged, how starter code and prior terms are handled, and how much review load to surface.',
   },
@@ -96,6 +100,7 @@ const MAIN_TABS = [
     id: 'system',
     label: 'System Settings',
     icon: Server,
+    accent: '#d97706',
     description:
       'Manage integration credentials, webhooks, email delivery, storage limits, and audit logging for this workspace.',
   },
@@ -421,7 +426,7 @@ export default function SettingsPage() {
   if (authLoading || !settings) {
     return (
       <DashboardLayout requiredRole="admin">
-        <div className="flex h-64 items-center justify-center px-4 py-8 text-slate-500">Loading settings...</div>
+        <div className="flex h-64 items-center justify-center px-4 py-8 text-slate-500 dark:text-slate-400">Loading settings...</div>
       </DashboardLayout>
     );
   }
@@ -454,13 +459,18 @@ export default function SettingsPage() {
         {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
 
         {/* Main Tab Navigation */}
-        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Settings Categories</div>
-        <div className="relative flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm mb-6" ref={tabListRef}>
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Settings Categories</div>
+        <div className="relative flex flex-wrap gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 shadow-sm mb-6" ref={tabListRef}>
           {indicator && (
             <span
               aria-hidden="true"
-              className="settings-tab-indicator absolute top-2 bottom-2 left-0 rounded-lg bg-blue-600 shadow-lg shadow-blue-500/15"
-              style={{ transform: `translateX(${indicator.x}px)`, width: indicator.width }}
+              className="settings-tab-indicator absolute top-2 bottom-2 left-0 rounded-xl shadow-lg"
+              style={{
+                transform: `translateX(${indicator.x}px)`,
+                width: indicator.width,
+                backgroundColor: activeTabInfo?.accent ?? '#2563eb',
+                boxShadow: `0 10px 24px -12px ${activeTabInfo?.accent ?? '#2563eb'}`,
+              }}
             />
           )}
           {MAIN_TABS.map((tab) => (
@@ -470,16 +480,18 @@ export default function SettingsPage() {
               ref={(node) => { tabButtonRefs.current[tab.id] = node; }}
               onClick={() => setActiveTab(tab.id)}
               aria-current={activeTab === tab.id ? 'page' : undefined}
-              // Until the sliding pill has been measured it is not rendered, so
-              // the active tab carries its own background. Without this the
-              // active label was white text on a white card and looked missing
-              // on first paint; the pill then only refines the styling.
-              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 ${activeTab === tab.id
-                ? indicator
-                  ? 'text-white'
-                  : 'bg-blue-600 text-white shadow-lg shadow-blue-500/15'
-                : 'text-slate-600 hover:bg-slate-50'
+              // The active tab always carries its own colour: before the pill
+              // is measured it is the whole highlight, afterwards it simply
+              // matches the pill sliding underneath it.
+              className={`relative inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-colors duration-200 ${activeTab === tab.id
+                ? 'text-white shadow-lg'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                 }`}
+              style={
+                activeTab === tab.id
+                  ? { backgroundColor: tab.accent, boxShadow: `0 10px 24px -12px ${tab.accent}` }
+                  : undefined
+              }
             >
               <tab.icon size={16} />
               {tab.label}
@@ -494,12 +506,14 @@ export default function SettingsPage() {
           {activeTab === 'detection' && (
             <div className="space-y-6">
               {/* Default Threshold card - professor-friendly */}
-              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <div className="flex items-start gap-3">
-                  <Target size={20} className="mt-0.5 shrink-0 text-slate-600" />
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+                    <Target size={18} />
+                  </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950">Default Similarity Threshold</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Default Similarity Threshold</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Sets the minimum score for flagging a pair as suspicious. The Sensitivity preset (Review &amp; Workflow) sets this automatically; use the slider to fine-tune. Higher cutoff = fewer flags; lower = catches more but increases false positives.
                     </p>
                   </div>
@@ -516,15 +530,15 @@ export default function SettingsPage() {
                       className="flex-1 accent-blue-600"
                     />
                     <div className="min-w-[5rem] text-right">
-                      <span className="text-2xl font-bold text-blue-600">{((settings.default_threshold ?? 0.82) * 100).toFixed(0)}%</span>
-                      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Cutoff</div>
+                      <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{((settings.default_threshold ?? 0.82) * 100).toFixed(0)}%</span>
+                      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">Cutoff</div>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(settings.default_threshold ?? 0.82) >= 0.8 ? 'bg-red-100 text-red-700' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(settings.default_threshold ?? 0.82) >= 0.8 ? 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-blue-100 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'}`}>
                       {(settings.default_threshold ?? 0.82) >= 0.8 ? 'Conservative' : (settings.default_threshold ?? 0.82) >= 0.7 ? 'Balanced' : 'Strict'}
                     </span>
-                    <span className="text-xs text-slate-500 leading-6">This is the default for new jobs. Can be overridden per-job.</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400 leading-6">This is the default for new jobs. Can be overridden per-job.</span>
                   </div>
                 </div>
               </section>
@@ -541,7 +555,7 @@ export default function SettingsPage() {
                   <TextInput label="Max Files Per Job" type="number" value={settings.max_files_per_job} onChange={(value) => updateSetting('max_files_per_job', Number(value))} />
                   <TextInput label="Processing Batch Size" type="number" value={settings.batch_size} onChange={(value) => updateSetting('batch_size', Number(value))} />
                 </div>
-                <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                <div className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-xs leading-5 text-slate-600 dark:text-slate-300">
                   <strong className="font-semibold">Tip:</strong> For large classes (&gt;100 students), increase batch size to 50-100 for faster processing. Reduce max file size if submissions contain large data files or binaries.
                 </div>
               </Accordion>
@@ -552,12 +566,14 @@ export default function SettingsPage() {
           {activeTab === 'intelligence' && (
             <div className="space-y-6">
               {/* AI Providers Summary */}
-              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <div className="flex items-start gap-3">
-                  <Bot size={20} className="mt-0.5 shrink-0 text-slate-600" />
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+                    <Bot size={18} />
+                  </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950">AI Provider Integration</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">AI Provider Integration</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Connect AI services for enhanced detection capabilities - AI-assisted rewrite analysis, code explanation generation, and evidence summarization.
                     </p>
                   </div>
@@ -574,10 +590,10 @@ export default function SettingsPage() {
                         onClick={() => setSelectedProvider(spec.key)}
                         className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isActive
                           ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700 hover:text-slate-900 dark:hover:text-white'
                           }`}
                       >
-                        <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : isActive ? 'bg-white/50' : 'bg-slate-300'}`} />
+                        <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : isActive ? 'bg-white/50' : 'bg-slate-300 dark:bg-slate-600'}`} />
                         {spec.label}
                       </button>
                     );
@@ -585,16 +601,16 @@ export default function SettingsPage() {
                 </div>
 
                 {activeSpec && (
-                  <div className="mt-4 rounded-xl border border-slate-200 p-4">
+                  <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <div className={`h-2.5 w-2.5 rounded-full ${configuredMap[activeSpec.key] ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className="text-sm font-semibold text-slate-900">{activeSpec.label}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${configuredMap[activeSpec.key] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                        <div className={`h-2.5 w-2.5 rounded-full ${configuredMap[activeSpec.key] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white">{activeSpec.label}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${configuredMap[activeSpec.key] ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                           {configuredMap[activeSpec.key] ? 'Connected' : 'Not configured'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3 text-xs font-medium text-blue-600">
+                      <div className="flex items-center gap-3 text-xs font-medium text-blue-600 dark:text-blue-400">
                         {activeSpec.key_url && (
                           <a href={activeSpec.key_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
                             Get API key <ExternalLink size={12} />
@@ -617,7 +633,7 @@ export default function SettingsPage() {
                           onChange={(value) => setProviderKey(activeProvider, value)}
                         />
                       ) : (
-                        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                        <div className="rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-xs text-slate-500 dark:text-slate-400">
                           {activeSpec.label} does not require an API key (for example a locally hosted endpoint).
                         </div>
                       )}
@@ -629,12 +645,12 @@ export default function SettingsPage() {
                           onChange={(value) => setProviderBaseUrl(activeProvider, value)}
                         />
                         <div>
-                          <label className="mb-1.5 block text-xs font-semibold text-slate-600">Model</label>
+                          <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Model</label>
                           <div className="flex gap-2">
                             <select
                               value={overridesMap[activeProvider] ?? ''}
                               onChange={(event) => setProviderModel(activeProvider, event.target.value)}
-                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                             >
                               <option value="">Auto — always the newest recommended model</option>
                               {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model: any) => model.id === overridesMap[activeProvider]) && (
@@ -651,14 +667,14 @@ export default function SettingsPage() {
                               disabled={modelsLoading[activeProvider]}
                               onClick={() => loadModels(activeProvider, true)}
                               title="Refresh the model list from the vendor"
-                              className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                              className="rounded-lg border border-slate-200 dark:border-slate-800 p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-50"
                             >
                               <RefreshCw size={14} className={modelsLoading[activeProvider] ? 'animate-spin' : ''} />
                             </button>
                           </div>
                         </div>
                       </div>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         {modelsLoading[activeProvider]
                           ? 'Loading models\u2026'
                           : `${(modelOptions[activeProvider] || []).length} models available`}
@@ -669,36 +685,36 @@ export default function SettingsPage() {
                             : ''}
                       </p>
                       {modelMessage[activeProvider] && (
-                        <div className="text-xs text-slate-500">{modelMessage[activeProvider]}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{modelMessage[activeProvider]}</div>
                       )}
                       <button
                         type="button"
                         disabled={providerTest[activeProvider]?.testing}
                         onClick={() => testProvider(activeProvider)}
-                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-50"
                       >
                         {providerTest[activeProvider]?.testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                         {providerTest[activeProvider]?.testing ? 'Testing\u2026' : 'Test Connection'}
                       </button>
                       {providerTest[activeProvider]?.message && (
-                        <div className={`text-xs ${providerTest[activeProvider].ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <div className={`text-xs ${providerTest[activeProvider].ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                           {providerTest[activeProvider].message}
                         </div>
                       )}
                     </div>
                     {activeSpec.note && (
-                      <p className="mt-3 text-xs leading-5 text-slate-500">{activeSpec.note}</p>
+                      <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">{activeSpec.note}</p>
                     )}
                   </div>
                 )}
                 {/* Default + fallback provider routing */}
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-600">Default provider</label>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Default provider</label>
                     <select
                       value={String((settings as any)?.llm_provider || 'openai')}
                       onChange={(event) => updateSetting('llm_provider', event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       {providers.length === 0 && <option value="openai">OpenAI</option>}
                       {providers.map((spec: any) => (
@@ -707,11 +723,11 @@ export default function SettingsPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-600">Fallback provider</label>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Fallback provider</label>
                     <select
                       value={String((settings as any)?.llm_fallback_provider || '')}
                       onChange={(event) => updateSetting('llm_fallback_provider', event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       <option value="">None</option>
                       {providers.map((spec: any) => (
@@ -720,7 +736,7 @@ export default function SettingsPage() {
                     </select>
                   </div>
                 </div>
-                <div className="mt-3 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-700">
+                <div className="mt-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
                   <strong className="font-semibold">Note:</strong> API keys are stored encrypted and never exposed to the frontend. Leave the field blank to keep an already-configured key.
                 </div>
               </section>
@@ -733,22 +749,22 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, publicSources: !prev.publicSources }))}
               >
                 <div className="space-y-4">
-                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                     <input
                       type="checkbox"
                       checked={Boolean(settings.source_scan_enabled)}
                       onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-blue-600 dark:text-blue-400"
                     />
                     <span>
-                      <span className="block text-sm font-semibold text-slate-950">Enable public source scanning</span>
-                      <span className="mt-1 block text-sm leading-6 text-slate-500">When enabled, each submission is compared against configured public code repositories and URLs.</span>
+                      <span className="block text-sm font-semibold text-slate-950 dark:text-white">Enable public source scanning</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">When enabled, each submission is compared against configured public code repositories and URLs.</span>
                     </span>
                   </label>
 
                   {settings.source_scan_enabled && (
                     <>
-                      <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+                      <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-800 dark:text-blue-300">
                         <span className="font-semibold">Status:</span> Public scanning is active. Add URLs below for repositories to scan.
                         {settings.source_scan_sites?.length > 0 && (
                           <span className="block mt-1">Currently tracking <strong>{settings.source_scan_sites.length}</strong> source{settings.source_scan_sites.length !== 1 ? 's' : ''}.</span>
@@ -764,7 +780,7 @@ export default function SettingsPage() {
                   )}
 
                   {!settings.source_scan_enabled && (
-                    <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm text-slate-500 dark:text-slate-400">
                       Enable the toggle above to configure public source URLs.
                     </div>
                   )}
@@ -779,12 +795,12 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, legacyTools: !prev.legacyTools }))}
               >
                 <div className="space-y-3">
-                  <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                     MOSS (Measure Of Software Similarity) is a legacy tool from Stanford. It provides an additional cross-reference for large classes.
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className={`h-2.5 w-2.5 rounded-full ${settings.moss_user_id_configured ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    <span className={`text-xs font-semibold ${settings.moss_user_id_configured ? 'text-emerald-700' : 'text-slate-500'}`}>
+                    <div className={`h-2.5 w-2.5 rounded-full ${settings.moss_user_id_configured ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                    <span className={`text-xs font-semibold ${settings.moss_user_id_configured ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
                       {settings.moss_user_id_configured ? 'MOSS configured' : 'MOSS not configured'}
                     </span>
                   </div>
@@ -804,10 +820,10 @@ export default function SettingsPage() {
                     ['gptzero_api_key', 'GPTZero', 'GPTZero estimates AI-generation probability and returns per-sentence scores.'],
                     ['grammarly_api_key', 'Grammarly', 'Grammarly adds tone, grammar, and writing-assistance signals for textual submissions.'],
                   ] as [string, string, string][]).map(([key, name, help]) => (
-                    <div key={key} className="rounded-xl border border-slate-200 p-4">
+                    <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                       <div className="flex items-center gap-3">
-                        <div className={`h-2.5 w-2.5 rounded-full ${settings[`${key}_configured`] ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className={`text-xs font-semibold ${settings[`${key}_configured`] ? 'text-emerald-700' : 'text-slate-500'}`}>
+                        <div className={`h-2.5 w-2.5 rounded-full ${settings[`${key}_configured`] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                        <span className={`text-xs font-semibold ${settings[`${key}_configured`] ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
                           {settings[`${key}_configured`] ? `${name} configured` : `${name} not configured`}
                         </span>
                       </div>
@@ -820,10 +836,10 @@ export default function SettingsPage() {
                           onChange={(value) => updateSetting(key, value)}
                         />
                       </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-500">{help}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{help}</p>
                     </div>
                   ))}
-                  <div className="rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-700">
+                  <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
                     <strong className="font-semibold">Note:</strong> Keys are stored server-side and never returned to the browser. Leave a field blank to keep an already-configured key.
                   </div>
                 </div>
@@ -845,7 +861,7 @@ export default function SettingsPage() {
                   value={profile.sensitivity}
                   onChange={updateSensitivity}
                 />
-                <div className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
+                <div className="mt-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-300">
                   <span className="font-semibold">Preset cutoff: </span>
                   {profile.sensitivity === 'conservative' && '\u226584% similarity - best for formal investigations'}
                   {profile.sensitivity === 'balanced' && '\u226575% similarity - recommended default'}
@@ -866,7 +882,7 @@ export default function SettingsPage() {
                   value={profile.starter_code_handling}
                   onChange={(value) => updateProfile('starter_code_handling', value)}
                 />
-                <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
                   {profile.starter_code_handling === 'ignore_starter_code' && 'Starter code is completely excluded from all comparisons. Best for large shared codebases.'}
                   {profile.starter_code_handling === 'student_written_only' && 'Only the student-written portions are compared. Shared starter code segments are discounted. Recommended default.'}
                   {profile.starter_code_handling === 'include_starter_code' && 'Full submission including starter code is compared. May increase false positives from template code.'}
@@ -885,7 +901,7 @@ export default function SettingsPage() {
                   value={profile.previous_term_matching}
                   onChange={(value) => updateProfile('previous_term_matching', value)}
                 />
-                <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
                   {profile.previous_term_matching === 'off' && 'No cross-term comparison will be performed. Past submissions are ignored.'}
                   {profile.previous_term_matching === 'same_course_only' && 'Compares against submissions from the same course in previous terms only. Recommended default.'}
                   {profile.previous_term_matching === 'all_historical_courses' && 'Compares against all historical submissions across all courses. Most comprehensive but may increase review volume.'}
@@ -904,7 +920,7 @@ export default function SettingsPage() {
                   value={profile.ai_rewrite_detection}
                   onChange={(value) => updateProfile('ai_rewrite_detection', value)}
                 />
-                <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
                   {profile.ai_rewrite_detection === 'off' && 'AI-assisted rewrite detection is disabled. Only direct similarity is checked.'}
                   {profile.ai_rewrite_detection === 'balanced' && 'Detects obvious AI rewrites while keeping false positives low. Recommended default.'}
                   {profile.ai_rewrite_detection === 'aggressive' && 'Maximum detection sensitivity for AI rewrites. Uses AST/CFG analysis to catch paraphrased logic. May increase false positives.'}
@@ -926,17 +942,17 @@ export default function SettingsPage() {
               </Accordion>
 
               {/* External Source Scan checkbox - same setting as Public Source Scanning */}
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
                     checked={Boolean(settings.source_scan_enabled)}
                     onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-emerald-600 dark:text-emerald-400"
                   />
                   <span>
-                    <span className="block text-sm font-semibold text-slate-950">Enable external / public source scan</span>
-                    <span className="mt-1 block text-sm leading-6 text-slate-500">Scan configured GitHub repos and websites (from AI &amp; Evidence section) when running checks. Syncs with the Public Source Scanning toggle.</span>
+                    <span className="block text-sm font-semibold text-slate-950 dark:text-white">Enable external / public source scan</span>
+                    <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">Scan configured GitHub repos and websites (from AI &amp; Evidence section) when running checks. Syncs with the Public Source Scanning toggle.</span>
                   </span>
                 </label>
               </div>
@@ -944,39 +960,39 @@ export default function SettingsPage() {
               {/* Applied Profile Summary + Policy Details */}
               <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
                 <div className="space-y-6">
-                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="text-sm font-semibold text-slate-950">Active Profile Summary</div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">{applied.recommendation}</p>
-                    <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm font-medium text-slate-950">
+                  <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Active Profile Summary</div>
+                    <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{applied.recommendation}</p>
+                    <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm font-medium text-slate-950 dark:text-white">
                       {applied.summary}
                     </div>
 
                     {/* What this means for you */}
-                    <div className="mt-5 space-y-2 border-t border-slate-100 pt-4">
+                    <div className="mt-5 space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
                       <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                          <span className="text-xs font-semibold text-slate-500">Flag threshold</span>
-                          <div className="font-semibold text-slate-900">{(applied.threshold * 100)?.toFixed(0) || '-'}% similar</div>
+                        <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Flag threshold</span>
+                          <div className="font-semibold text-slate-900 dark:text-white">{(applied.threshold * 100)?.toFixed(0) || '-'}% similar</div>
                         </div>
-                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                          <span className="text-xs font-semibold text-slate-500">Reviews shown</span>
-                          <div className="font-semibold text-slate-900">{applied.result_limit ?? 'All'}</div>
+                        <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reviews shown</span>
+                          <div className="font-semibold text-slate-900 dark:text-white">{applied.result_limit ?? 'All'}</div>
                         </div>
                       </div>
                     </div>
                   </section>
 
                   {applied.warnings?.length > 0 && (
-                    <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+                    <section className="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 text-sm text-amber-800 dark:text-amber-300">
                       {applied.warnings.map((warning: string) => <div key={warning}>{warning}</div>)}
                     </section>
                   )}
                 </div>
 
                 <aside className="space-y-6">
-                  <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+                  <section className="rounded-xl border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 p-5">
                     <div className="text-sm font-semibold text-blue-950">System handles automatically</div>
-                    <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800">
+                    <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
                       <div>{'\u2022'} Starter code is excluded from comparisons</div>
                       <div>{'\u2022'} Previous-term submissions are matched when available</div>
                       <div>{'\u2022'} Runtime behavior and identical wrong answers are compared</div>
@@ -984,32 +1000,32 @@ export default function SettingsPage() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="text-sm font-semibold text-slate-950">Profile Quick Stats</div>
+                  <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Profile Quick Stats</div>
                     <div className="mt-3 space-y-3 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Sensitivity</span>
-                        <span className="font-semibold text-slate-900">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">Sensitivity</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">AI Rewrite Detection</span>
-                        <span className="font-semibold text-slate-900">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">AI Rewrite Detection</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Starter Code</span>
-                        <span className="font-semibold text-slate-900 text-right max-w-[180px]">{profile.starter_code_handling?.replace(/_/g, ' ') || 'Student-written only'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">Starter Code</span>
+                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{profile.starter_code_handling?.replace(/_/g, ' ') || 'Student-written only'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Previous Terms</span>
-                        <span className="font-semibold text-slate-900 text-right max-w-[180px]">{profile.previous_term_matching?.replace(/_/g, ' ') || 'Same course only'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">Previous Terms</span>
+                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{profile.previous_term_matching?.replace(/_/g, ' ') || 'Same course only'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Results Per Job</span>
-                        <span className="font-semibold text-slate-900">{profile.result_volume?.replace(/_/g, ' ').replace('top ', 'Top ') || 'Top 25'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">Results Per Job</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{profile.result_volume?.replace(/_/g, ' ').replace('top ', 'Top ') || 'Top 25'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600">External Scan</span>
-                        <span className={`font-semibold ${settings.source_scan_enabled ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        <span className="text-slate-600 dark:text-slate-300">External Scan</span>
+                        <span className={`font-semibold ${settings.source_scan_enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
                           {settings.source_scan_enabled ? 'Enabled' : 'Disabled'}
                         </span>
                       </div>
@@ -1024,43 +1040,45 @@ export default function SettingsPage() {
           {activeTab === 'system' && (
             <div className="space-y-6">
               {/* Database & System Health Card */}
-              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <div className="flex items-start gap-3">
-                  <Database size={20} className="mt-0.5 shrink-0 text-slate-600" />
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+                    <Database size={18} />
+                  </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950">Database & System Health</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">Current connection status and system information.</p>
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Database & System Health</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Current connection status and system information.</p>
                   </div>
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Database</div>
+                  <div className="rounded-lg border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Database</div>
                     <div className="mt-1 flex items-center gap-2">
                       <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
                       <span className="text-sm font-medium text-emerald-900">Connected</span>
                     </div>
-                    <div className="mt-1 text-xs text-emerald-600">Neon PostgreSQL</div>
+                    <div className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">Neon PostgreSQL</div>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Default Threshold</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">{(Number(settings.default_threshold || 0.82) * 100).toFixed(0)}%</div>
-                    <div className="mt-1 text-xs text-slate-500">Similarity cutoff</div>
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Default Threshold</div>
+                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{(Number(settings.default_threshold || 0.82) * 100).toFixed(0)}%</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Similarity cutoff</div>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Debug Mode</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Debug Mode</div>
+                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                       {settings.debug_mode ? (
-                        <span className="text-amber-600">Enabled</span>
+                        <span className="text-amber-600 dark:text-amber-400">Enabled</span>
                       ) : (
-                        <span className="text-slate-600">Disabled</span>
+                        <span className="text-slate-600 dark:text-slate-300">Disabled</span>
                       )}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">Verbose logging</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verbose logging</div>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Embedding Runtime</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900 capitalize">{settings.embedding_runtime?.replace(/_/g, ' ') || 'Local'}</div>
-                    <div className="mt-1 text-xs text-slate-500">{settings.embedding_model || 'UniXcoder'}</div>
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Embedding Runtime</div>
+                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white capitalize">{settings.embedding_runtime?.replace(/_/g, ' ') || 'Local'}</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{settings.embedding_model || 'UniXcoder'}</div>
                   </div>
                 </div>
               </section>
@@ -1099,7 +1117,7 @@ export default function SettingsPage() {
                   </div>
 
                   {settings.email_backend === 'smtp' && (
-                    <div className="space-y-4 rounded-xl border border-slate-200 p-4">
+                    <div className="space-y-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <TextInput label="SMTP host" value={(settings.email_host as string) || ''} placeholder="smtp.your-university.edu" onChange={(value) => updateSetting('email_host', value)} />
                         <TextInput label="SMTP port" type="number" value={(settings.email_port as number) ?? 587} onChange={(value) => updateSetting('email_port', Number(value))} />
@@ -1111,15 +1129,15 @@ export default function SettingsPage() {
                           type="checkbox"
                           checked={Boolean(settings.email_use_tls ?? true)}
                           onChange={(event) => updateSetting('email_use_tls', event.target.checked)}
-                          className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                          className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-blue-600 dark:text-blue-400"
                         />
-                        <span className="text-sm leading-6 text-slate-600">Use STARTTLS when connecting to the SMTP server.</span>
+                        <span className="text-sm leading-6 text-slate-600 dark:text-slate-300">Use STARTTLS when connecting to the SMTP server.</span>
                       </label>
                     </div>
                   )}
 
                   {settings.email_backend === 'sendgrid' && (
-                    <div className="rounded-xl border border-slate-200 p-4">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                       <TextInput
                         label="SendGrid API key"
                         type="password"
@@ -1131,7 +1149,7 @@ export default function SettingsPage() {
                   )}
 
                   {settings.email_backend === 'console' && (
-                    <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                       Console mode writes messages to the server log instead of sending them. Choose SMTP or SendGrid for real delivery.
                     </div>
                   )}
@@ -1146,11 +1164,11 @@ export default function SettingsPage() {
                       {testingEmail ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
                       {testingEmail ? 'Sending...' : 'Send test email'}
                     </button>
-                    <span className="text-xs text-slate-500">Save your changes first — the test uses the configuration already stored on the server.</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Save your changes first — the test uses the configuration already stored on the server.</span>
                   </div>
 
                   {testEmailResult && (
-                    <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${testEmailResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                    <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${testEmailResult.ok ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'}`}>
                       {testEmailResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
                       <span>{testEmailResult.message}</span>
                     </div>
@@ -1169,7 +1187,7 @@ export default function SettingsPage() {
                   <SelectInput label="Audit Log Level" value={settings.audit_log_level || 'INFO'} options={[['DEBUG', 'Debug'], ['INFO', 'Info'], ['WARNING', 'Warning'], ['ERROR', 'Error']]} onChange={(value) => updateSetting('audit_log_level', value)} />
                   <TextInput label="Audit Retention (days)" type="number" value={settings.audit_retention_days ?? 365} onChange={(value) => updateSetting('audit_retention_days', Number(value))} />
                 </div>
-                <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                   Audit logs older than the retention period may be automatically pruned. Keep a minimum of 90 days for compliance.
                 </div>
               </Accordion>
@@ -1197,13 +1215,13 @@ export default function SettingsPage() {
                   <div className="mt-4 space-y-2">
                     {validationResult.issues.length > 0 ? (
                       validationResult.issues.map((issue: string, i: number) => (
-                        <div key={i} className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                        <div key={i} className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
                           <XCircle size={16} className="mt-0.5 shrink-0" />
                           <span>{issue}</span>
                         </div>
                       ))
                     ) : (
-                      <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                      <div className="flex items-start gap-2 rounded-lg border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300">
                         <CheckCircle size={16} className="mt-0.5 shrink-0" />
                         <span>Configuration looks healthy. No issues detected.</span>
                       </div>
@@ -1213,14 +1231,14 @@ export default function SettingsPage() {
               </Accordion>
 
               {/* Improve accuracy from past reviews */}
-              <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+              <section className="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 shadow-sm">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
                       <Activity size={16} />
                       Improve accuracy from past reviews
                     </div>
-                    <p className="mt-1 text-sm leading-6 text-amber-700">
+                    <p className="mt-1 text-sm leading-6 text-amber-700 dark:text-amber-300">
                       Use your past confirmed cases to fine-tune flagging for this course. Recommended only after you have reviewed at least 10 pairs.
                     </p>
                   </div>
@@ -1238,7 +1256,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => setShowCalibrateConfirm(false)}
-                        className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                        className="rounded-lg border border-amber-300 bg-white dark:bg-slate-950 px-4 py-2 text-sm font-semibold text-amber-800 dark:text-amber-300 transition hover:bg-amber-100 dark:hover:bg-amber-500/15"
                       >
                         Cancel
                       </button>
@@ -1260,7 +1278,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => setAccordions(prev => ({ ...prev, embeddingAdvanced: !prev.embeddingAdvanced }))}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                className="flex w-full items-center justify-between rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <span className="flex items-center gap-2">
                   <Zap size={16} />
@@ -1271,7 +1289,7 @@ export default function SettingsPage() {
 
               {accordions.embeddingAdvanced && (
                 <div className="space-y-4">
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <div className="rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                     These settings control how the system processes and compares code submissions. Changes take effect immediately.
                   </div>
                   <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1294,25 +1312,25 @@ export default function SettingsPage() {
 
 function Accordion({ title, description, isOpen, onToggle, children }: { title: string; description?: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-xl"
+        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-2xl"
       >
         <div>
-          <div className="text-lg font-semibold text-slate-950">{title}</div>
+          <div className="text-lg font-semibold text-slate-950 dark:text-white">{title}</div>
           {description && (
-            <div className="mt-1 text-sm leading-6 text-slate-600">{description}</div>
+            <div className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</div>
           )}
         </div>
         <ChevronDown
           size={20}
-          className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-blue-600' : ''}`}
+          className={`text-slate-400 dark:text-slate-500 transition-transform ${isOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''}`}
         />
       </button>
       {isOpen && (
-        <div className="border-t border-slate-200 px-5 pb-5 pt-4 transition-all duration-200">
+        <div className="border-t border-slate-200 dark:border-slate-800 px-5 pb-5 pt-4 transition-all duration-200">
           {children}
         </div>
       )}
@@ -1322,12 +1340,16 @@ function Accordion({ title, description, isOpen, onToggle, children }: { title: 
 
 function SettingsGroup({ title, description, children, icon: Icon }: { title: string; description: string; children: React.ReactNode; icon?: React.ElementType }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
       <div className="flex items-start gap-3">
-        {Icon && <Icon size={20} className="mt-0.5 shrink-0 text-slate-600" />}
+        {Icon && (
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <Icon size={18} />
+          </span>
+        )}
         <div className="flex-1">
-          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+          <h2 className="text-lg font-semibold text-slate-950 dark:text-white">{title}</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>
         </div>
       </div>
       <div className="mt-4">{children}</div>
@@ -1343,7 +1365,7 @@ function SegmentedOptions({ options, value, onChange }: { options: { id: string;
           key={option.id}
           type="button"
           onClick={() => onChange(option.id)}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
             }`}
         >
           {option.label}
@@ -1356,13 +1378,13 @@ function SegmentedOptions({ options, value, onChange }: { options: { id: string;
 function TextInput({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; placeholder?: string }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
       <input
         type={type}
         value={value ?? ''}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+        className="mt-1 h-11 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-300 dark:focus:border-blue-500 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-500/20"
       />
     </label>
   );
@@ -1371,13 +1393,13 @@ function TextInput({ label, value, onChange, type = 'text', placeholder = '' }: 
 function TextAreaInput({ label, value, onChange, placeholder = '' }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
       <textarea
         value={value ?? ''}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         rows={5}
-        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-3 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-300 dark:focus:border-blue-500 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-500/20"
       />
     </label>
   );
@@ -1386,11 +1408,11 @@ function TextAreaInput({ label, value, onChange, placeholder = '' }: { label: st
 function SelectInput({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (value: string) => void }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
       <select
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+        className="mt-1 h-11 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-300 dark:focus:border-blue-500 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-500/20"
       >
         {options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
       </select>
@@ -1400,8 +1422,8 @@ function SelectInput({ label, value, options, onChange }: { label: string; value
 
 function Notice({ children, tone, icon: Icon }: { children: React.ReactNode; tone: 'red' | 'green'; icon: React.ElementType }) {
   const className = tone === 'red'
-    ? 'border-red-200 bg-red-50 text-red-700'
-    : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    ? 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'
+    : 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
   return (
     <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${className}`}>
       <Icon size={16} className="mt-0.5 shrink-0" />

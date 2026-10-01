@@ -70,6 +70,28 @@ function formatTimestamp(value: string | null | undefined): string {
   }).format(date);
 }
 
+/** Compact "3h ago" style label; the absolute timestamp stays in the title attribute. */
+function formatRelativeTime(value: string | null | undefined): string {
+  if (!value) {
+    return 'Awaiting upload';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const abs = Math.abs(diffSeconds);
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+  if (abs < 60) return rtf.format(diffSeconds, 'second');
+  if (abs < 3600) return rtf.format(Math.round(diffSeconds / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(diffSeconds / 3600), 'hour');
+  if (abs < 2592000) return rtf.format(Math.round(diffSeconds / 86400), 'day');
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+}
+
 function formatPercent(value: number): string {
   return `${Math.round((value || 0) * 100)}%`;
 }
@@ -512,47 +534,73 @@ export default function Home() {
             </div>
           ) : (
             <div className="space-y-3 px-6 pb-6">
-              {recentJobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="theme-card-muted rounded-[22px] px-4 py-4 transition hover:-translate-y-0.5"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="font-medium text-[var(--text-primary)]">{getAssignmentTitle(job)}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-                        {getReferenceLabel(job) && <span>{getReferenceLabel(job)}</span>}
-                        <span>{job.file_count || 0} files</span>
-                        <span>{formatTimestamp(job.created_at)}</span>
+              {recentJobs.map((job) => {
+                const flaggedPairs = (job.summary as { suspicious_pairs?: number } | undefined)?.suspicious_pairs ?? 0;
+                const statusTile =
+                  job.status === 'completed'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : job.status === 'failed'
+                      ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400';
+
+                return (
+                  <div
+                    key={job.id}
+                    className="theme-card-muted rounded-[22px] px-4 py-4 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)]"
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex min-w-0 items-center gap-4">
+                        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${statusTile}`}>
+                          {job.status === 'completed' ? (
+                            <FileSearch size={18} />
+                          ) : job.status === 'failed' ? (
+                            <AlertTriangle size={18} />
+                          ) : (
+                            <Loader2 size={18} className="animate-spin" />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-medium text-[var(--text-primary)]">{getAssignmentTitle(job)}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                            {getReferenceLabel(job) && <span>{getReferenceLabel(job)}</span>}
+                            <span>{job.file_count || 0} files</span>
+                            <span title={formatTimestamp(job.created_at)}>{formatRelativeTime(job.created_at)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 pl-[60px] lg:pl-0">
+                        {job.status === 'completed' && flaggedPairs > 0 && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                            {flaggedPairs} flagged
+                          </span>
+                        )}
+                        <StatusBadge status={job.status} />
+                        {job.status === 'completed' && <ReviewBadge status={getReviewStatus(job)} />}
+                        {job.status === 'completed' ? (
+                          <Link
+                            href={`/results/${job.id}`}
+                            className="theme-link inline-flex items-center gap-1 text-sm font-medium"
+                          >
+                            Open
+                            <ArrowRight size={15} />
+                          </Link>
+                        ) : (
+                          <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                            <Loader2 size={14} className="animate-spin" />
+                            Running
+                          </span>
+                        )}
                       </div>
                     </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <StatusBadge status={job.status} />
-                      {job.status === 'completed' && <ReviewBadge status={getReviewStatus(job)} />}
-                      {job.status === 'completed' ? (
-                        <Link
-                          href={`/results/${job.id}`}
-                          className="theme-link inline-flex items-center gap-1 text-sm font-medium"
-                        >
-                          Open
-                          <ArrowRight size={15} />
-                        </Link>
-                      ) : (
-                        <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                          <Loader2 size={14} className="animate-spin" />
-                          Running
-                        </span>
-                      )}
-                    </div>
+                    {job.review_notes && (
+                      <div className="mt-3 pl-[60px] text-xs leading-5 text-[var(--text-secondary)]">
+                        {truncateText(job.review_notes, 96)}
+                      </div>
+                    )}
                   </div>
-                  {job.review_notes && (
-                    <div className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">
-                      {truncateText(job.review_notes, 96)}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -599,31 +647,32 @@ export default function Home() {
               <>
                 {/* Summary row */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
-                    <div className="text-2xl font-bold text-amber-600">{workload.pending}</div>
+                  <div className="rounded-[20px] border border-amber-500/15 bg-amber-500/[0.08] px-4 py-3">
+                    <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{workload.pending}</div>
                     <div className="mt-0.5 text-xs text-[var(--text-muted)]">Unreviewed</div>
                   </div>
-                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
-                    <div className="text-2xl font-bold text-blue-600">{workload.inProgress}</div>
+                  <div className="rounded-[20px] border border-blue-500/15 bg-blue-500/[0.08] px-4 py-3">
+                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{workload.inProgress}</div>
                     <div className="mt-0.5 text-xs text-[var(--text-muted)]">In progress</div>
                   </div>
-                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
-                    <div className="text-2xl font-bold text-red-600">{workload.escalated}</div>
+                  <div className="rounded-[20px] border border-red-500/15 bg-red-500/[0.08] px-4 py-3">
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{workload.escalated}</div>
                     <div className="mt-0.5 text-xs text-[var(--text-muted)]">Escalated</div>
                   </div>
-                  <div className="theme-card-muted rounded-[20px] px-4 py-3">
-                    <div className="text-2xl font-bold text-emerald-600">{workload.confirmed}</div>
+                  <div className="rounded-[20px] border border-emerald-500/15 bg-emerald-500/[0.08] px-4 py-3">
+                    <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{workload.confirmed}</div>
                     <div className="mt-0.5 text-xs text-[var(--text-muted)]">Confirmed</div>
                   </div>
                 </div>
 
                 {/* Flagged pairs summary */}
                 {workload.flaggedPairs > 0 && (
-                  <div className="theme-card-muted rounded-[20px] px-4 py-3 flex items-center justify-between">
-                    <span className="text-sm text-[var(--text-secondary)]">
+                  <div className="flex items-center justify-between rounded-[20px] border border-amber-500/20 bg-amber-500/[0.08] px-4 py-3">
+                    <span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <AlertTriangle size={14} className="text-amber-500" />
                       Flagged pairs awaiting review
                     </span>
-                    <span className="font-mono text-sm font-semibold text-amber-600">
+                    <span className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
                       {workload.flaggedPairs}
                     </span>
                   </div>
@@ -852,12 +901,53 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-wrap gap-3 lg:gap-4">
-                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
-                    {runningCount > 0 ? `${runningCount} check${runningCount === 1 ? '' : 's'} in progress` : 'No checks running'}
-                  </span>
-                  <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--text-secondary)]">
-                    {jobs.length} total check{jobs.length === 1 ? '' : 's'}
-                  </span>
+                  <Link
+                    href="/history"
+                    className="inline-flex items-center gap-2.5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm text-[var(--text-secondary)] transition hover:-translate-y-0.5 hover:border-blue-500/30"
+                    title="Open the check history"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                      {runningCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                    </span>
+                    <span>
+                      {runningCount > 0 ? (
+                        <>
+                          <span className="font-semibold text-[var(--text-primary)]">{runningCount}</span>{' '}
+                          check{runningCount === 1 ? '' : 's'} in progress
+                        </>
+                      ) : (
+                        'No checks running'
+                      )}
+                    </span>
+                  </Link>
+
+                  <Link
+                    href="/history"
+                    className="inline-flex items-center gap-2.5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm text-[var(--text-secondary)] transition hover:-translate-y-0.5 hover:border-blue-500/30"
+                    title="Open the check history"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-500/10 text-[var(--text-muted)]">
+                      <ClipboardCheck size={14} />
+                    </span>
+                    <span>
+                      <span className="font-semibold text-[var(--text-primary)]">{jobs.length}</span>{' '}
+                      total check{jobs.length === 1 ? '' : 's'}
+                    </span>
+                  </Link>
+
+                  <Link
+                    href="/assignments"
+                    className="inline-flex items-center gap-2.5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm text-[var(--text-secondary)] transition hover:-translate-y-0.5 hover:border-amber-500/40"
+                    title="Open assignments awaiting review"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                      <AlertTriangle size={14} />
+                    </span>
+                    <span>
+                      <span className="font-semibold text-[var(--text-primary)]">{workload.flaggedPairs}</span>{' '}
+                      flagged pair{workload.flaggedPairs === 1 ? '' : 's'} to review
+                    </span>
+                  </Link>
                 </div>
               </div>
 
