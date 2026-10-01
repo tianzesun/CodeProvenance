@@ -5,6 +5,7 @@ import {
   ButtonLink,
   Card,
   CardHeader,
+  FilterChip,
   PageHeader,
   StatCard,
   TableBody,
@@ -14,7 +15,6 @@ import { apiClient } from '@/lib/apiClient';
 import {
   CheckCircle2,
   FileUp,
-  Filter,
   Inbox,
   ShieldAlert,
   Users,
@@ -132,6 +132,24 @@ function buildJobRow(j: RawJob): JobRow {
 const FILTERS = ['All', 'High Risk', 'Medium', 'Cleared', 'Unreviewed'] as const;
 type Filter = (typeof FILTERS)[number];
 
+const FILTER_TONES: Record<Filter, 'neutral' | 'negative' | 'warning'> = {
+  All: 'neutral',
+  'High Risk': 'negative',
+  Medium: 'warning',
+  Cleared: 'neutral',
+  Unreviewed: 'neutral',
+};
+
+/** Single source of truth for what each filter selects. */
+function matchesFilter(job: JobRow, filter: Filter): boolean {
+  if (filter === 'High Risk') return job.maxSimilarity >= 0.75;
+  if (filter === 'Medium')
+    return job.maxSimilarity >= 0.45 && job.maxSimilarity < 0.75;
+  if (filter === 'Cleared') return job.maxSimilarity < 0.45;
+  if (filter === 'Unreviewed') return job.reviewStatus === 'unreviewed';
+  return true;
+}
+
 export default function AssignmentsPage() {
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const [jobs, setJobs] = useState<JobRow[]>([]);
@@ -175,15 +193,18 @@ export default function AssignmentsPage() {
     [jobs]
   );
 
-  const rows = useMemo(() => {
-    if (activeFilter === 'High Risk') return jobs.filter((j) => j.maxSimilarity >= 0.75);
-    if (activeFilter === 'Medium')
-      return jobs.filter((j) => j.maxSimilarity >= 0.45 && j.maxSimilarity < 0.75);
-    if (activeFilter === 'Cleared') return jobs.filter((j) => j.maxSimilarity < 0.45);
-    if (activeFilter === 'Unreviewed')
-      return jobs.filter((j) => j.reviewStatus === 'unreviewed');
-    return jobs;
-  }, [jobs, activeFilter]);
+  const rows = useMemo(
+    () => jobs.filter((job) => matchesFilter(job, activeFilter)),
+    [jobs, activeFilter]
+  );
+
+  const filterCounts = useMemo(() => {
+    const counts = {} as Record<Filter, number>;
+    for (const filter of FILTERS) {
+      counts[filter] = jobs.filter((job) => matchesFilter(job, filter)).length;
+    }
+    return counts;
+  }, [jobs]);
 
   return (
     <DashboardLayout>
@@ -239,18 +260,14 @@ export default function AssignmentsPage() {
             action={
               <div className="flex flex-wrap gap-2">
                 {FILTERS.map((f) => (
-                  <button
+                  <FilterChip
                     key={f}
-                    type="button"
+                    label={f}
+                    count={filterCounts[f]}
+                    tone={FILTER_TONES[f]}
+                    active={activeFilter === f}
                     onClick={() => setActiveFilter(f)}
-                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${activeFilter === f
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                      }`}
-                  >
-                    <Filter size={14} />
-                    {f}
-                  </button>
+                  />
                 ))}
               </div>
             }

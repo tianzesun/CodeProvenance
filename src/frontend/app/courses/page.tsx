@@ -2,7 +2,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
+import { Card, CardHeader, Modal, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermLabel, buildTermOptions, courseTermLabel, type Term } from '@/lib/terms';
 import { BookOpen, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
@@ -37,6 +37,11 @@ const ASSIGNMENT_TYPES = [
 type AssignmentForm = { name: string; assignment_type: string; due_at: string };
 const EMPTY_ASSIGNMENT: AssignmentForm = { name: '', assignment_type: 'programming', due_at: '' };
 
+/** A delete waiting for confirmation in the designed dialog (never a native confirm()). */
+type PendingDelete =
+  | { kind: 'course'; id: string; label: string; assignmentCount: number }
+  | { kind: 'assignment'; id: string; label: string };
+
 export default function CoursesPage() {
   // Course maintenance (create / edit / delete) belongs to admins and lives in
   // Administration → Users & courses; admins are redirected off this page.
@@ -61,6 +66,8 @@ export default function CoursesPage() {
   const [assignmentCourseId, setAssignmentCourseId] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(EMPTY_ASSIGNMENT);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchTerms = useCallback(async () => {
     try {
@@ -114,10 +121,8 @@ export default function CoursesPage() {
     finally { setSaving(false); }
   };
 
-  const deleteCourse = async (id: string) => {
-    if (!confirm('Delete this course and all its assignments?')) return;
-    try { await apiClient.delete(`/api/courses/${id}`); if (expandedId === id) setExpandedId(null); await fetchCourses(); }
-    catch (error) { setError(errorMessage(error, 'Failed to delete course.')); }
+  const deleteCourse = (id: string, label: string, assignmentCount: number) => {
+    setPendingDelete({ kind: 'course', id, label, assignmentCount });
   };
 
   const toggleExpand = async (cid: string) => {
@@ -128,10 +133,33 @@ export default function CoursesPage() {
     finally { setAssignmentsLoading(false); }
   };
 
-  const deleteAssignment = async (aid: string) => {
-    if (!confirm('Delete this assignment?')) return;
-    try { await apiClient.delete(`/api/assignments/${aid}`); setAssignments((p) => p.filter((a) => a.id !== aid)); await fetchCourses(); }
-    catch (error) { setError(errorMessage(error, 'Failed to delete assignment.')); }
+  const deleteAssignment = (id: string, label: string) => {
+    setPendingDelete({ kind: 'assignment', id, label });
+  };
+
+  /** Runs the delete the confirmation dialog was opened for. */
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    setDeleting(true);
+    try {
+      if (target.kind === 'course') {
+        await apiClient.delete(`/api/courses/${target.id}`);
+        if (expandedId === target.id) setExpandedId(null);
+      } else {
+        await apiClient.delete(`/api/assignments/${target.id}`);
+        setAssignments((prev) => prev.filter((a) => a.id !== target.id));
+      }
+      await fetchCourses();
+    } catch (error) {
+      setError(errorMessage(
+        error,
+        target.kind === 'course' ? 'Failed to delete course.' : 'Failed to delete assignment.'
+      ));
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
   };
 
   const openAssignmentForm = (cid: string) => {
@@ -179,6 +207,12 @@ export default function CoursesPage() {
     const q = search.toLowerCase();
     return c.name.toLowerCase().includes(q) || (c.code || '').toLowerCase().includes(q) || (c.department || '').toLowerCase().includes(q) || courseTermLabel(c).toLowerCase().includes(q);
   });
+
+  const deleteWarning = !pendingDelete
+    ? ''
+    : pendingDelete.kind === 'course'
+      ? `This removes the course and its ${pendingDelete.assignmentCount} assignment${pendingDelete.assignmentCount === 1 ? '' : 's'}. Check history and cases keep their evidence — the delete is refused while any still reference them.`
+      : 'This removes the assignment from its course. Existing checks and cases keep their evidence — the delete is refused while any still reference it.';
 
   return (
     <DashboardLayout>
@@ -274,9 +308,48 @@ export default function CoursesPage() {
           <div className="divide-y divide-slate-100">
             {loading ? <div className="px-5 py-12 text-center text-sm text-slate-500">Loading courses…</div>
             : filtered.length === 0 && (Boolean(search) || termFilter !== 'all') ? <NoMatches />
-            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} canManageCourses={canManageCourses} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}{canManageCourses ? <AddCourseCard onAdd={openCreate} /> : filtered.length === 0 ? <CoursesReadOnlyHint /> : null}</>}
+            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} canManageCourses={canManageCourses} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id, c.name, c.assignment_count)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}{canManageCourses ? <AddCourseCard onAdd={openCreate} /> : filtered.length === 0 ? <CoursesReadOnlyHint /> : null}</>}
           </div>
         </Card>
+
+        <Modal
+          open={pendingDelete !== null}
+          title={pendingDelete?.kind === 'course' ? 'Delete course' : 'Delete assignment'}
+          onClose={() => setPendingDelete(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPendingDelete(null)}
+                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </>
+          }
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+              <Trash2 size={18} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                {pendingDelete?.label}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                {deleteWarning}
+              </p>
+            </div>
+          </div>
+        </Modal>
       </div>
     </DashboardLayout>
   );
@@ -339,7 +412,7 @@ function NoMatches() {
 
 function CourseRow({ course: c, canManageCourses, expanded, assignments, assignmentsLoading, onEdit, onDelete, onToggle, onDeleteAssignment, showAssignmentForm, assignmentForm, assignmentSaving, onAssignmentFormChange, onOpenAssignmentForm, onCloseAssignmentForm, onSaveAssignment }: {
   course: Course; canManageCourses: boolean; expanded: boolean; assignments: Assignment[]; assignmentsLoading: boolean;
-  onEdit: () => void; onDelete: () => void; onToggle: () => void; onDeleteAssignment: (id: string) => void;
+  onEdit: () => void; onDelete: () => void; onToggle: () => void; onDeleteAssignment: (id: string, label: string) => void;
   showAssignmentForm: boolean; assignmentForm: AssignmentForm; assignmentSaving: boolean;
   onAssignmentFormChange: (form: AssignmentForm) => void;
   onOpenAssignmentForm: () => void; onCloseAssignmentForm: () => void; onSaveAssignment: () => void;
@@ -440,7 +513,7 @@ function CourseRow({ course: c, canManageCourses, expanded, assignments, assignm
             <div key={a.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-slate-800">{a.name}</div><div className="text-xs text-slate-500">{a.assignment_type}</div></div>
               <StatusBadge status={a.assignment_type} />
-              <button type="button" onClick={() => onDeleteAssignment(a.id)} aria-label={`Delete ${a.name}`} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
+              <button type="button" onClick={() => onDeleteAssignment(a.id, a.name)} aria-label={`Delete ${a.name}`} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
             </div>
           ))}</div>}
         </div>

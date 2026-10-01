@@ -941,22 +941,6 @@ export default function SettingsPage() {
                 />
               </Accordion>
 
-              {/* External Source Scan checkbox - same setting as Public Source Scanning */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(settings.source_scan_enabled)}
-                    onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-emerald-600 dark:text-emerald-400"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-slate-950 dark:text-white">Enable external / public source scan</span>
-                    <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">Scan configured GitHub repos and websites (from AI &amp; Evidence section) when running checks. Syncs with the Public Source Scanning toggle.</span>
-                  </span>
-                </label>
-              </div>
-
               {/* Applied Profile Summary + Policy Details */}
               <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
                 <div className="space-y-6">
