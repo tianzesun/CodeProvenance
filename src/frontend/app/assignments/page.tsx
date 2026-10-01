@@ -253,25 +253,27 @@ export default function AssignmentsPage() {
         </section>
 
         {/* Table */}
-        <Card>
-          <CardHeader
-            title="Checks ranked by highest similarity"
-            description="Real scores from the analysis pipeline — click View to inspect pairs, evidence signals, and code diffs."
-            action={
-              <div className="flex flex-wrap gap-2">
-                {FILTERS.map((f) => (
-                  <FilterChip
-                    key={f}
-                    label={f}
-                    count={filterCounts[f]}
-                    tone={FILTER_TONES[f]}
-                    active={activeFilter === f}
-                    onClick={() => setActiveFilter(f)}
-                  />
-                ))}
-              </div>
-            }
-          />
+        <Card className="overflow-hidden">
+          <div className="px-6 pt-6 pb-5 lg:px-7 lg:pt-7">
+            <CardHeader
+              title="Checks ranked by highest similarity"
+              description="Real scores from the analysis pipeline — click View to inspect pairs, evidence signals, and code diffs."
+              action={
+                <div className="flex flex-wrap gap-2">
+                  {FILTERS.map((f) => (
+                    <FilterChip
+                      key={f}
+                      label={f}
+                      count={filterCounts[f]}
+                      tone={FILTER_TONES[f]}
+                      active={activeFilter === f}
+                      onClick={() => setActiveFilter(f)}
+                    />
+                  ))}
+                </div>
+              }
+            />
+          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">

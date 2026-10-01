@@ -225,7 +225,7 @@ export default function CompareCasePage() {
 
         {/* ── Risk + confidence ───────────────────────────────────────────────── */}
         <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Card className="flex flex-col gap-6">
+          <Card>
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-500">Risk Summary</div>
@@ -247,7 +247,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="flex h-full flex-col gap-4">
+          <Card className="h-full gap-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
               <ShieldCheck size={17} className="text-blue-600" />
               Confidence Basis
@@ -263,7 +263,7 @@ export default function CompareCasePage() {
         </section>
 
         {/* ── Why flagged ─────────────────────────────────────────────────────── */}
-        <Card className="flex flex-col gap-6">
+        <Card>
           <CardHeader
             title="Why This Case Was Flagged"
             description="Plain-language evidence for instructor review."
@@ -285,7 +285,7 @@ export default function CompareCasePage() {
         </Card>
 
         {/* ── Compare code ────────────────────────────────────────────────────── */}
-        <Card className="flex flex-col gap-6">
+        <Card>
           <CardHeader
             title="Compare Code"
             description="Matching regions are highlighted. Starter code is greyed out and excluded from the risk summary."
@@ -334,7 +334,7 @@ export default function CompareCasePage() {
 
         {/* ── History / context / actions ─────────────────────────────────────── */}
         <section className="grid items-start gap-6 lg:grid-cols-3">
-          <Card className="flex h-full flex-col gap-5">
+          <Card className="h-full gap-5">
             <CardHeader title="Previous History" description="Historical context, not a standalone conclusion." />
             <div className="flex flex-col gap-4">
               <EvidenceRow
@@ -350,7 +350,7 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="flex h-full flex-col gap-5">
+          <Card className="h-full gap-5">
             <CardHeader title="Context Notes" description="False-positive controls applied before ranking." />
             <div className="flex flex-col gap-4">
               {[
@@ -363,9 +363,9 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="space-y-5">
+          <Card className="gap-5">
             <CardHeader title="Decision Actions" description="Keep the review outcome simple and auditable." />
-            <div className="space-y-5">
+            <div className="flex flex-col gap-5">
               {/* Assign Reviewer */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">Assign Reviewer</label>
@@ -453,9 +453,9 @@ export default function CompareCasePage() {
         </section>
 
         {/* ── Notes ───────────────────────────────────────────────────────────── */}
-        <Card className="space-y-5">
+        <Card className="gap-5">
           <CardHeader title="Notes" description="Reviewer notes are kept with the case audit trail." />
-          <div className="space-y-5">
+          <div className="flex flex-col gap-5">
             {/* Existing Comments */}
             <div className="space-y-3 max-h-60 overflow-y-auto">
               {comments && comments.length > 0 ? (

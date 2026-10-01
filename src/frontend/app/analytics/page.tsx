@@ -263,13 +263,11 @@ export default function AnalyticsPage() {
                     description="Distribution of flagged submissions per active course."
                     action={null}
                   />
-                  <div className="p-5">
-                    <ChartWithData
-                      data={casesByCourse}
-                      empty="No cases recorded yet by course."
-                      render={(chartData) => <CourseCasesChart data={chartData} />}
-                    />
-                  </div>
+                  <ChartWithData
+                    data={casesByCourse}
+                    empty="No cases recorded yet by course."
+                    render={(chartData) => <CourseCasesChart data={chartData} />}
+                  />
                 </Card>
 
                 <Card>
@@ -278,13 +276,11 @@ export default function AnalyticsPage() {
                     description="High and medium risk case movement across recent terms."
                     action={null}
                   />
-                  <div className="p-5">
-                    <ChartWithData
-                      data={semesterRisk}
-                      empty="No term-by-term risk data yet."
-                      render={(chartData) => <SemesterRiskChart data={chartData} />}
-                    />
-                  </div>
+                  <ChartWithData
+                    data={semesterRisk}
+                    empty="No term-by-term risk data yet."
+                    render={(chartData) => <SemesterRiskChart data={chartData} />}
+                  />
                 </Card>
               </div>
             </div>
@@ -304,13 +300,11 @@ export default function AnalyticsPage() {
                     description="Prior-warning and confirmed repeat-pattern distribution."
                     action={null}
                   />
-                  <div className="p-5">
-                    <ChartWithData
-                      data={repeatOffenders}
-                      empty="No case-repeat history yet."
-                      render={(chartData) => <CompactBarChart data={chartData} />}
-                    />
-                  </div>
+                  <ChartWithData
+                    data={repeatOffenders}
+                    empty="No case-repeat history yet."
+                    render={(chartData) => <CompactBarChart data={chartData} />}
+                  />
                 </Card>
 
                 <Card>
@@ -319,13 +313,11 @@ export default function AnalyticsPage() {
                     description="Teaching-team review load from AI-assisted submissions, by month."
                     action={null}
                   />
-                  <div className="p-5">
-                    <ChartWithData
-                      data={data?.suspicion_trend}
-                      empty="No suspicion-trend data yet."
-                      render={(chartData) => <SuspiciousTrendChart data={chartData} />}
-                    />
-                  </div>
+                  <ChartWithData
+                    data={data?.suspicion_trend}
+                    empty="No suspicion-trend data yet."
+                    render={(chartData) => <SuspiciousTrendChart data={chartData} />}
+                  />
                 </Card>
               </div>
             </div>

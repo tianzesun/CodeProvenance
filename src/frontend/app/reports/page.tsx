@@ -400,14 +400,16 @@ export default function ReportsPage() {
 
         {/* ── Recent exports ──────────────────────────────────────────────────── */}
         <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <CardHeader
-            title="Recent exports"
-            description="Files generated in this session, kept in the browser for re-download."
-            action={null}
-          />
+          <div className="px-6 pt-6 pb-5 lg:px-7 lg:pt-7">
+            <CardHeader
+              title="Recent exports"
+              description="Files generated in this session, kept in the browser for re-download."
+              action={null}
+            />
+          </div>
 
           {recentExports.length === 0 ? (
-            <div className="px-5 py-14 text-center">
+            <div className="px-6 py-14 text-center lg:px-7">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-900">
                 <Download size={20} className="text-slate-400 dark:text-slate-600" />
               </div>
@@ -427,7 +429,7 @@ export default function ReportsPage() {
           )}
 
           {/* Footer */}
-          <div className="border-t border-slate-200 px-5 py-3 dark:border-slate-800">
+          <div className="border-t border-slate-200 px-6 py-3.5 dark:border-slate-800 lg:px-7">
             <p className="text-xs text-slate-400 dark:text-slate-600">
               Generated on demand from the current case data. Refresh the page to start a new session.
             </p>

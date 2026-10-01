@@ -286,10 +286,25 @@ export function PageHeader({ eyebrow, title, description, action, eyebrowStyle =
 }
 
 export function Card({ children, className = '' }: CardProps) {
+  // Default card body rhythm: generous padding + vertical gap so a bare
+  // <Card><CardHeader />body</Card> never renders as zero-margin blocks.
+  // Callers that need flush / edge-to-edge layouts (tables, media) opt out by
+  // passing an explicit `p-0`; callers that already own their spacing opt out
+  // with any `p-*` / `px-*` / `py-*` utility or `overflow-hidden`. An explicit
+  // `gap-*` / `space-*` / `divide-*` also suppresses the default gap, so the
+  // card never ends up double-spaced.
+  const hasPaddingOverride = /(^|\s)(p-0|p-\[|p-[0-9]|overflow-hidden|px-|py-|ps-|pe-|pt-|pb-|pl-|pr-)/.test(
+    ` ${className} `
+  );
+  const hasGapOverride = /(^|\s)(gap-|space-[xy]-|divide-[xy]-|overflow-hidden)/.test(
+    ` ${className} `
+  );
   return (
     <motion.section
       {...fadeUp}
-      className={`theme-card-strong rounded-[24px] p-6 shadow-sm lg:p-7 ${className}`}
+      className={`theme-card-strong rounded-[24px] shadow-sm ${hasPaddingOverride ? '' : 'p-6 lg:p-7'} ${
+        hasGapOverride ? '' : 'flex flex-col gap-6'
+      } ${className}`}
     >
       {children}
     </motion.section>
@@ -297,8 +312,10 @@ export function Card({ children, className = '' }: CardProps) {
 }
 
 export function CardHeader({ title, description, action }: CardHeaderProps) {
+  // Spacing above/below the header is owned by the parent `Card` (or the
+  // consuming layout), so the header only draws its own divider.
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between dark:border-slate-800">
+    <div className="flex flex-col gap-3 border-b border-slate-200 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         <h2 className="theme-section-title text-lg">{title}</h2>
         {description && (
@@ -320,7 +337,7 @@ export function StatCard({ label, value, detail, icon: Icon, tone = 'slate' }: S
   };
 
   return (
-    <Card className="p-5">
+    <Card>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</div>

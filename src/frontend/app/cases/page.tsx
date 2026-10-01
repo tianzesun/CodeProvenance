@@ -282,31 +282,33 @@ export default function CasesQueuePage() {
           ))}
         </div>
 
-        <Card>
-          <CardHeader
-            title="Queue"
-            description="Sorted by risk and unreviewed status."
-            action={
-              <div className="flex items-center gap-3 text-sm text-slate-500">
-                <span>
-                  Showing{' '}
-                  <strong className="font-semibold text-slate-900">
-                    {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
-                  </strong>{' '}
-                  of <strong className="font-semibold text-slate-900">{sorted.length}</strong>{' '}
-                  {sorted.length === 1 ? 'case' : 'cases'}
-                  {search || activeStatus !== 'ALL' ? (
-                    <span className="text-slate-400"> (filtered)</span>
-                  ) : null}
-                </span>
-              </div>
-            }
-          />
+        <Card className="overflow-hidden">
+          <div className="px-6 pt-6 lg:px-7 lg:pt-7">
+            <CardHeader
+              title="Queue"
+              description="Sorted by risk and unreviewed status."
+              action={
+                <div className="flex items-center gap-3 text-sm text-slate-500">
+                  <span>
+                    Showing{' '}
+                    <strong className="font-semibold text-slate-900">
+                      {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
+                    </strong>{' '}
+                    of <strong className="font-semibold text-slate-900">{sorted.length}</strong>{' '}
+                    {sorted.length === 1 ? 'case' : 'cases'}
+                    {search || activeStatus !== 'ALL' ? (
+                      <span className="text-slate-400"> (filtered)</span>
+                    ) : null}
+                  </span>
+                </div>
+              }
+            />
+          </div>
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="px-5 py-8 text-sm text-slate-500">Loading cases...</div>
+              <div className="px-6 py-8 text-sm text-slate-500 lg:px-7">Loading cases...</div>
             ) : sorted.length === 0 ? (
-              <div className="flex flex-col items-center px-5 py-12 text-center">
+              <div className="flex flex-col items-center px-6 py-12 text-center lg:px-7">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
                   <Inbox size={20} />
                 </div>
@@ -373,7 +375,7 @@ export default function CasesQueuePage() {
 
           {/* Pagination footer */}
           {!loading && sorted.length > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-3.5 sm:flex-row sm:items-center sm:justify-between lg:px-7">
               <div className="flex items-center gap-2 text-xs text-slate-500">
                 <span>Rows per page</span>
                 <select
