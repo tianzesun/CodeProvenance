@@ -1,18 +1,20 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { PageHeader } from '@/components/saas/SaaSPrimitives';
+import { Modal, PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import { AxiosError } from 'axios';
 import {
   AlertCircle,
+  CheckCircle2,
   ClipboardList,
   FileText,
   Loader2,
   Play,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -212,6 +214,14 @@ export default function FprValidationPage() {
 
   // === Persistence (database-backed) ===
   const [savedRuns, setSavedRuns] = useState<FprRunSummary[]>([]);
+  // Designed dialogs replace the native prompt()/confirm()/alert() this
+  // tool used to open, so feedback stays inside the page.
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [runName, setRunName] = useState('');
+  const [savingRun, setSavingRun] = useState(false);
+  const [pendingDeleteRun, setPendingDeleteRun] = useState<FprRunSummary | null>(null);
+  const [deletingRun, setDeletingRun] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const loadFprHistory = async () => {
     try {
@@ -227,24 +237,33 @@ export default function FprValidationPage() {
     loadFprHistory();
   }, []);
 
+  const openSaveModal = () => {
+    setRunName(`FPR Run - ${new Date().toLocaleDateString()}`);
+    setNotice('');
+    setSaveModalOpen(true);
+  };
+
   const saveCurrentRun = async () => {
-    if (!result) return;
+    const name = runName.trim();
+    if (!result || !name) return;
 
-    const name = prompt('Name for this FPR validation run:', `FPR Run - ${new Date().toLocaleDateString()}`);
-    if (!name) return;
-
+    setSavingRun(true);
+    setError('');
     try {
       await apiClient.post('/api/fpr-validation-runs', {
         name,
         result,
         notes: '', // can be extended later
       });
-      alert('Run saved successfully.');
+      setNotice(`Saved “${name}”.`);
+      setSaveModalOpen(false);
       await loadFprHistory(); // refresh list
     } catch (err: unknown) {
       console.error(err);
       const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      alert('Failed to save run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
+      setError('Failed to save run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
+    } finally {
+      setSavingRun(false);
     }
   };
 
@@ -256,19 +275,25 @@ export default function FprValidationPage() {
       setError('');
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      alert('Failed to load run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
+      setError('Failed to load run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
     }
   };
 
-  const deleteSavedRun = async (id: string) => {
-    if (!confirm('Delete this saved FPR validation run?')) return;
+  const deleteSavedRun = async () => {
+    const pending = pendingDeleteRun;
+    if (!pending) return;
 
+    setDeletingRun(true);
+    setError('');
     try {
-      await apiClient.delete(`/api/fpr-validation-runs/${id}`);
+      await apiClient.delete(`/api/fpr-validation-runs/${pending.id}`);
+      setPendingDeleteRun(null);
       await loadFprHistory();
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { detail?: string; message?: string } } };
-      alert('Failed to delete run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
+      setError('Failed to delete run: ' + (axiosError?.response?.data?.detail || axiosError?.response?.data?.message || (err as Error)?.message || 'Unknown error'));
+    } finally {
+      setDeletingRun(false);
     }
   };
 
@@ -311,6 +336,7 @@ export default function FprValidationPage() {
     setFiles([]);
     setResult(null);
     setError('');
+    setNotice('');
   };
 
   const chartData = result?.fpr_table.map(row => ({
@@ -456,7 +482,7 @@ export default function FprValidationPage() {
 
             {result && (
               <button
-                onClick={saveCurrentRun}
+                onClick={openSaveModal}
                 className="flex items-center gap-2 px-5 py-3 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded-xl hover:bg-emerald-100 font-medium"
               >
                 Save this run
@@ -483,6 +509,11 @@ export default function FprValidationPage() {
           {error && (
             <div className="mt-4 flex items-center gap-2 text-red-600 text-sm">
               <AlertCircle size={16} /> {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-4 flex items-center gap-2 text-emerald-700 text-sm">
+              <CheckCircle2 size={16} /> {notice}
             </div>
           )}
         </div>
@@ -513,7 +544,7 @@ export default function FprValidationPage() {
                       Load
                     </button>
                     <button
-                      onClick={() => deleteSavedRun(run.id)}
+                      onClick={() => setPendingDeleteRun(run)}
                       className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50"
                     >
                       Delete
@@ -727,6 +758,87 @@ export default function FprValidationPage() {
             </div>
           </div>
         )}
+
+        {/* Save run: name the run instead of the old native prompt() */}
+        <Modal
+          open={saveModalOpen}
+          title="Save this validation run"
+          description="Saved runs stay in the history list so you can revisit a threshold later."
+          onClose={() => setSaveModalOpen(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setSaveModalOpen(false)}
+                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveCurrentRun}
+                disabled={!runName.trim() || savingRun}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {savingRun ? 'Saving…' : 'Save run'}
+              </button>
+            </>
+          }
+        >
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+            Run name
+            <input
+              value={runName}
+              onChange={(e) => setRunName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveCurrentRun();
+              }}
+              autoFocus
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+            />
+          </label>
+        </Modal>
+
+        {/* Delete run: designed confirmation instead of the old native confirm() */}
+        <Modal
+          open={pendingDeleteRun !== null}
+          title="Delete saved run"
+          onClose={() => setPendingDeleteRun(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPendingDeleteRun(null)}
+                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deleteSavedRun}
+                disabled={deletingRun}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+              >
+                {deletingRun ? 'Deleting…' : 'Delete'}
+              </button>
+            </>
+          }
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+              <Trash2 size={18} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                {pendingDeleteRun?.name}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                The saved threshold table is removed from your history. Re-running the
+                analysis on the same files is unaffected.
+              </p>
+            </div>
+          </div>
+        </Modal>
       </div>
     </DashboardLayout>
   );

@@ -1080,6 +1080,13 @@ export default function AdminPage() {
   // term assignment per course: courseId → selected term_id in dropdown
   const [selectedTermForCourse, setSelectedTermForCourse] = useState<Record<string, string>>({});
   const [assigningTermForCourse, setAssigningTermForCourse] = useState<string | null>(null);
+  // Removal waits for the designed confirmation dialog — never a native confirm().
+  const [pendingInstructorRemoval, setPendingInstructorRemoval] = useState<{
+    courseId: string;
+    userId: string;
+    name: string;
+  } | null>(null);
+  const [removingInstructor, setRemovingInstructor] = useState(false);
   const [activeTab, setActiveTab] = useState<'users' | 'courses' | 'terms'>('users');
   const [courseQuery, setCourseQuery] = useState('');
   const [courseTermFilter, setCourseTermFilter] = useState('all');
@@ -1638,15 +1645,24 @@ export default function AdminPage() {
     }
   };
 
-  const removeInstructor = async (courseId: string, userId: string, instructorName: string) => {
-    if (!confirm(`Remove ${instructorName} from this course?`)) return;
+  const removeInstructor = (courseId: string, userId: string, instructorName: string) => {
+    setPendingInstructorRemoval({ courseId, userId, name: instructorName });
+  };
+
+  const confirmRemoveInstructor = async () => {
+    const pending = pendingInstructorRemoval;
+    if (!pending) return;
+    setRemovingInstructor(true);
     try {
       await apiClient.delete('/api/admin/course-instructors', {
-        data: { course_id: courseId, user_id: userId },
+        data: { course_id: pending.courseId, user_id: pending.userId },
       });
       await loadCoursesWithInstructors();
+      setPendingInstructorRemoval(null);
     } catch (error) {
       setPageError(getErrorMessage(error));
+    } finally {
+      setRemovingInstructor(false);
     }
   };
 
@@ -2754,6 +2770,46 @@ export default function AdminPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={pendingInstructorRemoval !== null}
+        title="Remove instructor"
+        onClose={() => setPendingInstructorRemoval(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setPendingInstructorRemoval(null)}
+              className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmRemoveInstructor}
+              disabled={removingInstructor}
+              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+            >
+              {removingInstructor ? 'Removing…' : 'Remove'}
+            </button>
+          </>
+        }
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+            <Trash2 size={18} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+              {pendingInstructorRemoval?.name}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              They will no longer see this course or its assignments. You can assign them
+              again at any time.
+            </p>
+          </div>
+        </div>
       </Modal>
 
       <Modal
