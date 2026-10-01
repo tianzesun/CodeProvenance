@@ -8,6 +8,7 @@ import {
   Card,
   CardHeader,
   RiskBadge,
+  StatusBadge,
 } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -165,39 +166,66 @@ export default function CompareCasePage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container space-y-6 lg:space-y-8">
-        <section className="rounded-2xl border border-slate-200 bg-white px-6 py-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="text-sm font-medium text-slate-500">
-                Assignment: {assignmentDisplay.course} {assignmentDisplay.title}
-              </div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                Instructor Review Case
-              </h1>
-              <div className="mt-4 flex items-center gap-4 text-sm">
-                <div className="text-slate-600">
-                  <span className="font-medium text-slate-500">Status:</span> {caseData?.status || 'OPEN'}
+      <div className="theme-page-container flex flex-col gap-6 lg:gap-8">
+        {/* ── Header ──────────────────────────────────────────────────────────── */}
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          {/* Breadcrumb + status row */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-100 bg-slate-50/70 px-6 py-3.5 lg:px-8">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Cases
+            </span>
+            <span aria-hidden="true" className="text-slate-300">
+              /
+            </span>
+            <span className="font-mono text-xs text-slate-500">{caseData?.id.slice(0, 8)}</span>
+            <span className="ml-auto flex flex-wrap items-center gap-2">
+              <StatusBadge status={caseData?.status || 'OPEN'} />
+              <RiskBadge
+                value={PRIORITY_RISK[caseData?.priority || 'MEDIUM'] || 72}
+                label={`${caseData?.priority || 'MEDIUM'} priority`}
+              />
+            </span>
+          </div>
+
+          <div className="px-6 py-6 lg:px-8 lg:py-7">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
+                  Instructor Review Case
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  {assignmentDisplay.course} · {assignmentDisplay.title}
+                </p>
+                <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600">
+                  <span>
+                    <span className="font-medium text-slate-500">Reviewer: </span>
+                    {caseData?.investigator?.name || 'Unassigned'}
+                  </span>
+                  <span aria-hidden="true" className="hidden h-4 w-px bg-slate-200 sm:block" />
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock3 size={14} className="text-slate-400" />
+                    {comments?.length || 0} reviewer notes
+                  </span>
                 </div>
-                <div className="text-slate-600">
-                  <span className="font-medium text-slate-500">Assignee:</span> {caseData?.investigator?.name || 'Unassigned'}
-                </div>
               </div>
-              <div className="mt-6 grid gap-4 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
-                <HeaderMetric value={totalSubmissions.toLocaleString()} label="submissions analyzed" />
-                <HeaderMetric value={casesNeedingReview} label="cases need instructor review" />
-                <HeaderMetric value={analysesCompleted.toLocaleString()} label="analyses completed" />
-                <HeaderMetric value={caseData?.priority || 'MEDIUM'} label="queue priority" />
+              <div className="flex max-w-sm items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                <AlertTriangle size={16} className="mt-1 shrink-0" />
+                Similarity does not by itself imply misconduct. Instructor review is required.
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-              Similarity does not by itself imply misconduct. Instructor review is required.
-            </div>
+
+            <dl className="mt-6 grid grid-cols-2 gap-4 text-sm text-slate-600 xl:grid-cols-4">
+              <HeaderMetric value={totalSubmissions.toLocaleString()} label="Submissions analyzed" />
+              <HeaderMetric value={casesNeedingReview} label="Cases need instructor review" />
+              <HeaderMetric value={analysesCompleted.toLocaleString()} label="Analyses completed" />
+              <HeaderMetric value={caseData?.priority || 'MEDIUM'} label="Queue priority" />
+            </dl>
           </div>
         </section>
 
+        {/* ── Risk + confidence ───────────────────────────────────────────────── */}
         <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Card>
+          <Card className="flex flex-col gap-6">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-500">Risk Summary</div>
@@ -212,30 +240,30 @@ export default function CompareCasePage() {
               <RiskBadge value={PRIORITY_RISK[caseData?.priority || 'MEDIUM'] || 72} label="High Risk" />
             </div>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               <RiskMetric label="Overall Risk" value="High" tone="red" />
               <RiskMetric label="Confidence" value={`${Math.round(caseData?.confidence || 0)}%`} tone="slate" />
               <RiskMetric label="Review Time" value="~2 min" tone="blue" />
             </div>
           </Card>
 
-          <Card>
+          <Card className="flex h-full flex-col gap-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
               <ShieldCheck size={17} className="text-blue-600" />
               Confidence Basis
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
+            <p className="text-sm leading-6 text-slate-600">
               Confidence derived from 4 independent signals after starter code and common
               assignment patterns were excluded.
             </p>
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
               Similar code structure detected between student submissions.
             </div>
           </Card>
         </section>
 
         {/* ── Why flagged ─────────────────────────────────────────────────────── */}
-        <Card className="space-y-5">
+        <Card className="flex flex-col gap-6">
           <CardHeader
             title="Why This Case Was Flagged"
             description="Plain-language evidence for instructor review."
@@ -257,7 +285,7 @@ export default function CompareCasePage() {
         </Card>
 
         {/* ── Compare code ────────────────────────────────────────────────────── */}
-        <Card className="space-y-5">
+        <Card className="flex flex-col gap-6">
           <CardHeader
             title="Compare Code"
             description="Matching regions are highlighted. Starter code is greyed out and excluded from the risk summary."
@@ -306,9 +334,9 @@ export default function CompareCasePage() {
 
         {/* ── History / context / actions ─────────────────────────────────────── */}
         <section className="grid items-start gap-6 lg:grid-cols-3">
-          <Card className="space-y-5">
+          <Card className="flex h-full flex-col gap-5">
             <CardHeader title="Previous History" description="Historical context, not a standalone conclusion." />
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
               <EvidenceRow
                 icon={History}
                 title="Similar to Winter 2025 submission set."
@@ -322,9 +350,9 @@ export default function CompareCasePage() {
             </div>
           </Card>
 
-          <Card className="space-y-5">
+          <Card className="flex h-full flex-col gap-5">
             <CardHeader title="Context Notes" description="False-positive controls applied before ranking." />
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
               {[
                 'Starter template overlap excluded.',
                 'Instructor-provided tests and LMS packaging files ignored.',
