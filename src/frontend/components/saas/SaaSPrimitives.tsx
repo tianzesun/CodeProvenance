@@ -92,10 +92,10 @@ interface FilterChipProps {
 
 export function FilterChip({ active, label, count, onClick, tone = 'neutral' }: FilterChipProps) {
   const activeTone = tone === 'negative'
-    ? 'border-red-200 bg-red-50 text-red-700'
+    ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/25 dark:bg-red-500/15 dark:text-red-300'
     : tone === 'warning'
-      ? 'border-amber-200 bg-amber-50 text-amber-700'
-      : 'border-slate-900 bg-slate-900 text-white';
+      ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-300'
+      : 'border-slate-900 bg-slate-900 text-white dark:border-blue-500/40 dark:bg-blue-600';
   return (
     <button
       type="button"

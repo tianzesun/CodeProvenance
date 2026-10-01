@@ -2,13 +2,11 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import {
-  Card,
-  CardHeader,
   EmptyState,
   ErrorState,
   FilterChip,
   LoadingState,
-  StatusBadge,
+  PageHeader,
   TableBody,
   TableHeader,
   TableRow,
@@ -19,13 +17,29 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Ban,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Download,
-  Inbox,
+  Clock,
+  Eye,
+  FileCode2,
+  FileDown,
+  FileSearch,
+  FileSpreadsheet,
+  FileText,
+  MoreHorizontal,
+  RefreshCw,
+  ScrollText,
   Search,
+  Shield,
+  ShieldCheck,
+  Upload,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ElementType } from 'react';
+import { createPortal } from 'react-dom';
 
 type JobStatus = 'COMPLETED' | 'PROCESSING' | 'FAILED' | 'ALL';
 
@@ -64,14 +78,82 @@ const STATUS_TABS: { key: JobStatus; label: string }[] = [
   { key: 'FAILED', label: 'Failed' },
 ];
 
-const STATUS_ORDER: Record<string, number> = {
-  completed: 0,
-  processing: 1,
-  analyzing: 2,
-  failed: 3,
+const PAGE_SIZES = [10, 25, 50];
+
+/** Status → chip styling. Kept local so job states get real colours instead of the generic badge. */
+const STATUS_STYLES: Record<string, { label: string; className: string; dot: string }> = {
+  completed: {
+    label: 'Completed',
+    className: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    dot: 'bg-emerald-500',
+  },
+  processing: {
+    label: 'Processing',
+    className: 'border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+    dot: 'bg-blue-500 animate-pulse',
+  },
+  analyzing: {
+    label: 'Analyzing',
+    className: 'border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+    dot: 'bg-blue-500 animate-pulse',
+  },
+  failed: {
+    label: 'Failed',
+    className: 'border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400',
+    dot: 'bg-red-500',
+  },
 };
 
-const PAGE_SIZES = [10, 25, 50];
+/** Review state → chip styling, including the icon shown next to the label. */
+const REVIEW_STYLES: Record<string, { label: string; className: string; Icon: ElementType }> = {
+  confirmed: {
+    label: 'Confirmed',
+    className: 'border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400',
+    Icon: CheckCircle2,
+  },
+  escalated: {
+    label: 'Escalated',
+    className: 'border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-400',
+    Icon: ArrowUp,
+  },
+  needs_review: {
+    label: 'Needs review',
+    className: 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    Icon: Eye,
+  },
+  dismissed: {
+    label: 'Dismissed',
+    className: 'border-slate-500/20 bg-slate-500/10 text-slate-600 dark:text-slate-300',
+    Icon: Ban,
+  },
+  unreviewed: {
+    label: 'Unreviewed',
+    className: 'border-slate-500/15 bg-slate-500/[0.07] text-slate-500 dark:text-slate-400',
+    Icon: Clock,
+  },
+};
+
+/** Tinted initials tile so rows are easy to tell apart at a glance. */
+const TILE_TONES = [
+  'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
+  'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+];
+
+function tileTone(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return TILE_TONES[hash % TILE_TONES.length];
+}
+
+function initials(name: string): string {
+  const letters = name.replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/).slice(0, 2);
+  if (letters.length === 0 || !letters[0]) return '??';
+  return letters.map((part) => part[0]?.toUpperCase() ?? '').join('');
+}
 
 function matchesSearch(job: JobItem, query: string): boolean {
   if (!query) return true;
@@ -85,9 +167,274 @@ function normalizeStatus(status?: string): string {
   return String(status || '').toLowerCase();
 }
 
+function StatusChip({ status }: { status: string }) {
+  const key = normalizeStatus(status);
+  const meta =
+    STATUS_STYLES[key] ||
+    ({
+      label: key ? key.charAt(0).toUpperCase() + key.slice(1) : 'Unknown',
+      className: 'border-slate-500/15 bg-slate-500/[0.07] text-slate-600 dark:text-slate-300',
+      dot: 'bg-slate-400',
+    } as const);
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.className}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+      {meta.label}
+    </span>
+  );
+}
+
+function ReviewChip({ status }: { status: string }) {
+  const meta = REVIEW_STYLES[status] || REVIEW_STYLES.unreviewed;
+  const { Icon } = meta;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.className}`}
+    >
+      <Icon size={11} />
+      {meta.label}
+    </span>
+  );
+}
+
+/**
+ * Export dropdown. The menu is portalled to <body> with fixed positioning
+ * because the table lives in a horizontally scrollable, overflow-hidden card —
+ * an absolutely positioned menu inside it would be clipped on the last row.
+ */
+function ExportMenu({ job }: { job: JobItem }) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      // The menu is portalled to <body>, so it is not inside containerRef —
+      // without this check it unmounts on mousedown, before the link's click
+      // event fires, and the download never starts.
+      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    // The menu is anchored to viewport coordinates, so any layout change could
+    // leave it floating over unrelated content — closing beats re-anchoring.
+    function handleDismiss() {
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', handleDismiss);
+    window.addEventListener('scroll', handleDismiss, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('resize', handleDismiss);
+      window.removeEventListener('scroll', handleDismiss, { capture: true });
+    };
+  }, [open]);
+
+  const items: {
+    label: string;
+    href: string;
+    Icon: ElementType;
+    accent?: boolean;
+    divider?: boolean;
+  }[] = [
+    { label: 'HTML report', href: `/report/${job.id}/download`, Icon: FileText },
+    { label: 'PDF report', href: `/report/${job.id}/download-pdf`, Icon: FileDown },
+    { label: 'Committee report', href: `/report/${job.id}/committee`, Icon: ScrollText },
+    { label: 'JSON data', href: `/report/${job.id}/download-json`, Icon: FileCode2 },
+    { label: 'CSV data', href: `/report/${job.id}/download-csv`, Icon: FileSpreadsheet },
+    {
+      label: 'Integrity assessment (HTML)',
+      href: `/api/reports/integrity-assessment/${job.id}?format=html`,
+      Icon: Shield,
+      accent: true,
+      divider: true,
+    },
+    {
+      label: 'Integrity assessment (PDF)',
+      href: `/api/reports/integrity-assessment/${job.id}?format=pdf`,
+      Icon: ShieldCheck,
+      accent: true,
+    },
+  ];
+
+  const MENU_WIDTH = 256;
+  const GAP = 8;
+  const MIN_HEIGHT = 220;
+
+  let menuStyle: CSSProperties | undefined;
+  if (anchor && mounted) {
+    const left = Math.min(
+      Math.max(GAP, anchor.right - MENU_WIDTH),
+      Math.max(GAP, window.innerWidth - MENU_WIDTH - GAP)
+    );
+    const spaceBelow = window.innerHeight - anchor.bottom - GAP;
+    menuStyle =
+      spaceBelow >= MIN_HEIGHT
+        ? { position: 'fixed', top: anchor.bottom + GAP, left, width: MENU_WIDTH, maxHeight: spaceBelow }
+        : {
+            position: 'fixed',
+            bottom: window.innerHeight - anchor.top + GAP,
+            left,
+            width: MENU_WIDTH,
+            maxHeight: Math.max(160, anchor.top - GAP * 2),
+          };
+  }
+
+  const menu =
+    open && anchor && mounted ? (
+      <div
+        ref={menuRef}
+        style={menuStyle}
+        className="overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-800 dark:bg-slate-950"
+      >
+        <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+          Export &amp; reports
+        </div>
+        {items.map((item) => (
+          <div key={item.label}>
+            {item.divider && (
+              <div className="my-1 border-t border-slate-200 dark:border-slate-800" />
+            )}
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={close}
+              className={`flex items-center gap-2.5 px-4 py-2 text-sm transition hover:bg-slate-50 dark:hover:bg-slate-900 ${
+                item.accent
+                  ? 'font-semibold text-blue-700 dark:text-blue-300'
+                  : 'text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <item.Icon
+                size={14}
+                className={item.accent ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}
+              />
+              <span className="truncate">{item.label}</span>
+            </a>
+          </div>
+        ))}
+      </div>
+    ) : null;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        ref={buttonRef}
+        onClick={() => {
+          const rect = buttonRef.current?.getBoundingClientRect();
+          if (rect) setAnchor(rect);
+          setOpen((value) => !value);
+        }}
+        aria-label="Export options"
+        aria-expanded={open}
+        className={`inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200 ${
+          open ? 'bg-slate-50 text-slate-700 dark:bg-slate-900 dark:text-slate-200' : ''
+        }`}
+      >
+        <MoreHorizontal size={16} />
+      </button>
+
+      {mounted && createPortal(menu, document.body)}
+    </div>
+  );
+}
+
+/** Primary "open" action, shared by the desktop row and the mobile card. */
+function OpenLink({ job }: { job: JobItem }) {
+  return (
+    <Link
+      href={`/results/${job.id}`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500/40 dark:hover:text-blue-300"
+    >
+      Open
+      <FileSearch size={13} />
+    </Link>
+  );
+}
+
+/** Compact row used on small screens, mirroring the desktop table's information. */
+function HistoryCard({ job }: { job: JobItem }) {
+  return (
+    <div className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${tileTone(
+              job.assignmentName + job.courseName
+            )}`}
+          >
+            {initials(job.assignmentName)}
+          </span>
+          <div className="min-w-0">
+            <Link
+              href={`/results/${job.id}`}
+              className="block truncate text-sm font-semibold text-[var(--text-primary)]"
+            >
+              {job.assignmentName}
+            </Link>
+            <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">{job.courseName}</div>
+          </div>
+        </div>
+        <ExportMenu job={job} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <StatusChip status={job.status} />
+        <ReviewChip status={job.reviewStatus} />
+        {job.highSimilarityCount > 0 && (
+          <span className="inline-flex items-center rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-700 dark:text-red-400">
+            {job.highSimilarityCount} high-risk
+          </span>
+        )}
+        {job.persistenceWarning && (
+          <span title={job.persistenceWarning}>
+            <AlertTriangle size={14} className="text-amber-500" />
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1.5" title={formatAbsolute(job.createdAt)}>
+          <Clock size={12} />
+          {formatDate(job.createdAt)} · {formatClock(job.createdAt)}
+        </span>
+        <span>
+          {job.totalSubmissions} submission{job.totalSubmissions === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <OpenLink job={job} />
+      </div>
+    </div>
+  );
+}
+
 export default function HistoryPage() {
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [activeStatus, setActiveStatus] = useState<JobStatus>('ALL');
@@ -96,9 +443,6 @@ export default function HistoryPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -136,15 +480,14 @@ export default function HistoryPage() {
     return () => clearInterval(interval);
   }, [fetchJobs]);
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpenDropdown(null);
-      }
+  const refreshNow = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchJobs();
+    } finally {
+      setRefreshing(false);
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [fetchJobs]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<JobStatus, number> = {
@@ -208,13 +551,14 @@ export default function HistoryPage() {
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * pageSize;
   const visible = sorted.slice(pageStart, pageStart + pageSize);
+  const hasActiveFilters = Boolean(search.trim()) || activeStatus !== 'ALL';
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortKey(key);
-      setSortDir(key === 'date' ? 'desc' : 'desc');
+      setSortDir('desc');
     }
     setPage(1);
   };
@@ -229,26 +573,31 @@ export default function HistoryPage() {
     setPage(1);
   };
 
+  const clearFilters = () => {
+    setSearch('');
+    setActiveStatus('ALL');
+    setPage(1);
+  };
+
   const renderSortIcon = (column: SortKey) => {
-    if (sortKey !== column) return <ArrowUpDown size={13} className="text-slate-400" />;
+    if (sortKey !== column) return <ArrowUpDown size={13} className="text-slate-400 dark:text-slate-500" />;
     return sortDir === 'asc' ? (
-      <ArrowUp size={13} className="text-blue-600" />
+      <ArrowUp size={13} className="text-blue-600 dark:text-blue-400" />
     ) : (
-      <ArrowDown size={13} className="text-blue-600" />
+      <ArrowDown size={13} className="text-blue-600 dark:text-blue-400" />
     );
   };
 
-  const renderSortableTh = (
-    column: SortKey,
-    label: string,
-    className = ''
-  ) => (
-    <th className={`px-5 py-3 text-left ${className}`}>
+  const renderSortableTh = (column: SortKey, label: string, align: 'left' | 'right' = 'left') => (
+    <th className={`px-5 py-3 ${align === 'right' ? 'text-right' : 'text-left'}`} aria-sort={sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
       <button
         type="button"
         onClick={() => handleSort(column)}
-        className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide transition ${sortKey === column ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'
-          }`}
+        className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition ${
+          sortKey === column
+            ? 'text-[var(--text-primary)]'
+            : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+        }`}
       >
         {label}
         {renderSortIcon(column)}
@@ -258,208 +607,232 @@ export default function HistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
+      <div className="theme-page-container space-y-6">
         {error && <ErrorState message={error} onRetry={fetchJobs} />}
 
-        <Card>
-          <CardHeader
-            title="Plagiarism Check History"
-            description="All similarity checks sorted by date."
-            action={
-              <div className="flex flex-wrap items-center gap-4">
-                <label className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 lg:w-80">
-                  <Search size={16} />
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    placeholder="Search by assignment, course, or ID"
-                    className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none"
-                    aria-label="Search history"
-                  />
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {STATUS_TABS.map((tab) => (
-                    <FilterChip
-                      key={tab.key}
-                      active={activeStatus === tab.key}
-                      label={tab.label}
-                      count={statusCounts[tab.key]}
-                      onClick={() => handleStatusTab(tab.key)}
-                    />
-                  ))}
-                </div>
-                <span className="text-sm text-slate-500">
-                  Showing{' '}
-                  <strong className="font-semibold text-slate-900">
-                    {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
-                  </strong>{' '}
-                  of <strong className="font-semibold text-slate-900">{sorted.length}</strong>{' '}
-                  {sorted.length === 1 ? 'check' : 'checks'}
-                  {search || activeStatus !== 'ALL' ? (
-                    <span className="text-slate-400"> (filtered)</span>
-                  ) : null}
-                </span>
-              </div>
-            }
-          />
-          <div className="overflow-x-auto">
-            {loading ? (
-              <LoadingState label="Loading history…" />
-            ) : sorted.length === 0 ? (
-              <EmptyState
-                title="No checks found"
-                description={jobs.length === 0
-                  ? 'Run a plagiarism check to see results here.'
-                  : 'No checks match the current filters or search.'}
+        <PageHeader
+          eyebrow="History"
+          title="Plagiarism check history"
+          description="Every similarity check with its review state, high-risk count, and one-click exports."
+          eyebrowStyle="badge"
+          action={
+            <Link
+              href="/upload"
+              className="theme-button-primary inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition hover:-translate-y-0.5"
+            >
+              <Upload size={16} />
+              New check
+            </Link>
+          }
+        />
+
+        {/* Toolbar: status filters on the left, search + result count on the right */}
+        <div className="theme-card-strong flex flex-col gap-4 rounded-[24px] px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            {STATUS_TABS.map((tab) => (
+              <FilterChip
+                key={tab.key}
+                active={activeStatus === tab.key}
+                label={tab.label}
+                count={statusCounts[tab.key]}
+                onClick={() => handleStatusTab(tab.key)}
+                tone={tab.key === 'FAILED' ? 'negative' : tab.key === 'PROCESSING' ? 'warning' : 'neutral'}
               />
-            ) : (
-              <table className="w-full min-w-[900px]">
-                <TableHeader>
-                  <tr>
-                    {renderSortableTh('date', 'Date')}
-                    {renderSortableTh('name', 'Name')}
-                    {renderSortableTh('submissions', 'Submissions')}
-                    {renderSortableTh('highRisk', 'High-Risk')}
-                    <th className="theme-table-header px-5 py-3 text-left">
-                      Review
-                    </th>
-                    <th className="theme-table-header px-5 py-3 text-left">
-                      Status
-                    </th>
-                    <th className="theme-table-header px-5 py-3 text-right">
-                      Actions
-                    </th>
-                  </tr>
-                </TableHeader>
-                <TableBody>
-                  {visible.map((job) => (
-                    <TableRow key={job.id}>
-                      <td className="px-5 py-4 text-xs text-slate-500">
-                        {formatDate(job.createdAt)}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="text-sm font-semibold text-slate-950">
-                          {job.assignmentName}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">{job.courseName}</div>
-                      </td>
-                      <td className="px-5 py-4 text-sm font-medium text-slate-700">
-                        {job.totalSubmissions}
-                      </td>
-                      <td className="px-5 py-4">
-                        {job.highSimilarityCount > 0 ? (
-                          <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-100">
-                            {job.highSimilarityCount}
-                          </span>
-                        ) : (
-                          <span className="text-sm text-slate-400">0</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${job.reviewStatus === 'confirmed' ? 'bg-red-50 text-red-700 ring-1 ring-red-100' :
-                            job.reviewStatus === 'escalated' ? 'bg-purple-50 text-purple-700 ring-1 ring-purple-100' :
-                              job.reviewStatus === 'needs_review' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-100' :
-                                job.reviewStatus === 'dismissed' ? 'bg-slate-100 text-slate-500' :
-                                  'bg-slate-100 text-slate-400'
-                          }`}>
-                          {job.reviewStatus === 'confirmed' ? 'Confirmed' :
-                            job.reviewStatus === 'escalated' ? 'Escalated' :
-                              job.reviewStatus === 'needs_review' ? 'Needs review' :
-                                job.reviewStatus === 'dismissed' ? 'Dismissed' :
-                                  'Unreviewed'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={job.status} />
-                          {job.persistenceWarning && (
-                            <span title={job.persistenceWarning}>
-                              <AlertTriangle size={14} className="text-amber-500" />
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <a
-                            href={`/results/${job.id}`}
-                            className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-                          >
-                            View
-                          </a>
-                          <div className="relative" ref={openDropdown === job.id ? dropdownRef : undefined}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setOpenDropdown((prev) =>
-                                  prev === job.id ? null : job.id
-                                )
-                              }
-                              className="inline-flex items-center justify-center rounded-md border border-slate-200 p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
-                              aria-label="Download options"
-                            >
-                              <Download size={14} />
-                            </button>
-                            {openDropdown === job.id && (
-                              <div className="absolute right-0 z-20 mt-1 w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                                <a
-                                  href={`/report/${job.id}/download`}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                                  onClick={() => setOpenDropdown(null)}
-                                >
-                                  <Download size={13} />
-                                  HTML Report
-                                </a>
-                                <a
-                                  href={`/report/${job.id}/download-json`}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                                  onClick={() => setOpenDropdown(null)}
-                                >
-                                  <Download size={13} />
-                                  JSON Data
-                                </a>
-                                <a
-                                  href={`/report/${job.id}/committee`}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={() => setOpenDropdown(null)}
-                                >
-                                  <Download size={13} />
-                                  Committee Report
-                                </a>
-                                <a
-                                  href={`/report/${job.id}/download-pdf`}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                                  onClick={() => setOpenDropdown(null)}
-                                >
-                                  <Download size={13} />
-                                  PDF Report
-                                </a>
-                                <a
-                                  href={`/report/${job.id}/download-csv`}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                                  onClick={() => setOpenDropdown(null)}
-                                >
-                                  <Download size={13} />
-                                  CSV Data
-                                </a>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </table>
+            ))}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
+              >
+                Clear filters
+              </button>
             )}
           </div>
 
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm text-[var(--text-muted)]">
+              Showing{' '}
+              <strong className="font-semibold text-[var(--text-primary)]">
+                {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
+              </strong>{' '}
+              of <strong className="font-semibold text-[var(--text-primary)]">{sorted.length}</strong>{' '}
+              {sorted.length === 1 ? 'check' : 'checks'}
+            </span>
+
+            <button
+              type="button"
+              onClick={refreshNow}
+              title="Refresh now (also refreshes every 30 seconds)"
+              aria-label="Refresh history"
+              className="theme-icon-button"
+            >
+              <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+
+            <label className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-[var(--text-muted)] shadow-sm transition focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-blue-500 dark:focus-within:ring-blue-500/20 lg:w-80">
+              <Search size={16} />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder="Search assignment, course, or ID"
+                className="w-full bg-transparent text-[var(--text-primary)] placeholder:text-slate-400 focus:outline-none dark:placeholder:text-slate-500"
+                aria-label="Search history"
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Results */}
+        <div className="theme-card-strong overflow-hidden rounded-[24px] shadow-sm">
+          {loading ? (
+            <div className="p-5">
+              <LoadingState label="Loading history…" />
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="p-5">
+              {jobs.length === 0 ? (
+                <EmptyState
+                  title="No checks yet"
+                  description="Run a plagiarism check to see it here with its review state and exports."
+                  href="/upload"
+                  action="Run a check"
+                />
+              ) : (
+                <div className="theme-card-muted rounded-[20px] px-5 py-10 text-center">
+                  <div className="theme-section-title text-base">No checks match your filters</div>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--text-muted)]">
+                    Nothing matches {search.trim() ? `“${search.trim()}”` : 'the current status filter'}
+                    {activeStatus !== 'ALL' ? ` in ${STATUS_TABS.find((t) => t.key === activeStatus)?.label}` : ''}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Desktop table */}
+              <div className="hidden overflow-x-auto lg:block">
+                <table className="w-full min-w-[940px]">
+                  <TableHeader>
+                    <tr>
+                      {renderSortableTh('date', 'Date')}
+                      {renderSortableTh('name', 'Check')}
+                      {renderSortableTh('submissions', 'Submissions', 'right')}
+                      {renderSortableTh('highRisk', 'High-risk', 'right')}
+                      <th className="px-5 py-3 text-left">Review</th>
+                      <th className="px-5 py-3 text-left">Status</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
+                    </tr>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((job) => (
+                      <TableRow key={job.id}>
+                        <td className="px-5 py-4 align-top">
+                          <div
+                            className="text-sm font-semibold text-[var(--text-primary)]"
+                            title={formatAbsolute(job.createdAt)}
+                          >
+                            {formatDate(job.createdAt)}
+                          </div>
+                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {formatClock(job.createdAt)}
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 align-top">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${tileTone(
+                                job.assignmentName + job.courseName
+                              )}`}
+                            >
+                              {initials(job.assignmentName)}
+                            </span>
+                            <div className="min-w-0">
+                              <Link
+                                href={`/results/${job.id}`}
+                                className="block truncate text-sm font-semibold text-[var(--text-primary)] hover:text-blue-600 dark:hover:text-blue-400"
+                                title={job.assignmentName}
+                              >
+                                {job.assignmentName}
+                              </Link>
+                              <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                                <span className="truncate">{job.courseName}</span>
+                                <span className="hidden shrink-0 font-mono opacity-70 xl:inline">
+                                  {job.id.slice(0, 8)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 text-right align-top">
+                          <div className="text-sm font-semibold text-[var(--text-primary)]">
+                            {job.totalSubmissions}
+                          </div>
+                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">submissions</div>
+                        </td>
+
+                        <td className="px-5 py-4 text-right align-top">
+                          {job.highSimilarityCount > 0 ? (
+                            <span
+                              className="inline-flex items-center rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-700 dark:text-red-400"
+                              title={`${job.highSimilarityCount} pair(s) above the high-similarity threshold`}
+                            >
+                              {job.highSimilarityCount}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-slate-400 dark:text-slate-600">—</span>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4 align-top">
+                          <ReviewChip status={job.reviewStatus} />
+                        </td>
+
+                        <td className="px-5 py-4 align-top">
+                          <div className="flex items-center gap-2">
+                            <StatusChip status={job.status} />
+                            {job.persistenceWarning && (
+                              <span title={job.persistenceWarning}>
+                                <AlertTriangle size={14} className="text-amber-500" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 align-top">
+                          <div className="flex items-center justify-end gap-2">
+                            <OpenLink job={job} />
+                            <ExportMenu job={job} />
+                          </div>
+                        </td>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </table>
+              </div>
+
+              {/* Mobile cards */}
+              <div className="divide-y divide-[color:var(--border)] lg:hidden">
+                {visible.map((job) => (
+                  <HistoryCard key={job.id} job={job} />
+                ))}
+              </div>
+            </>
+          )}
+
           {!loading && sorted.length > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex flex-col gap-3 border-t border-[color:var(--border)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>Rows per page</span>
                 <select
                   value={pageSize}
@@ -497,10 +870,12 @@ export default function HistoryPage() {
                       key={num}
                       type="button"
                       onClick={() => setPage(Number(num))}
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${safePage === num
-                        ? 'bg-slate-900 text-white'
-                        : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
+                      aria-current={safePage === num ? 'page' : undefined}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition ${
+                        safePage === num
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/25'
+                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
+                      }`}
                     >
                       {num}
                     </button>
@@ -518,7 +893,7 @@ export default function HistoryPage() {
               </div>
             </div>
           )}
-        </Card>
+        </div>
       </div>
     </DashboardLayout>
   );
@@ -534,6 +909,25 @@ function formatDate(value?: string): string {
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+}
+
+/** Time of day shown under the relative date so two checks on the same day stay apart. */
+function formatClock(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
+}
+
+/** Full timestamp for tooltips. */
+function formatAbsolute(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function pageNumbers(current: number, total: number): (number | '…')[] {
