@@ -155,8 +155,30 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
         "/api/auth/me-api-key",
+        # Guest demo login. The endpoint itself is public; everything a guest
+        # then does still goes through the authenticated middleware with the
+        # short-lived cookie it returns.
+        "/api/auth/guest",
     }
 )
+
+# Writes a guest demo session may make: the demo flow itself (uploading), plus
+# its own session lifecycle. Every other method is rejected for guests, so no
+# review, setting, course or case can ever be persisted on their behalf.
+GUEST_WRITE_EXEMPT_PATHS = frozenset(
+    {
+        "/api/upload",
+        "/api/upload-zip",
+        "/api/auth/guest",
+        "/api/auth/refresh",
+        "/api/auth/logout",
+    }
+)
+
+#: Reply given to a guest session that tries to make a durable change. Shared
+#: by the middleware write guard and the endpoint-level checks so the two can
+#: never drift apart.
+GUEST_WRITE_DENIED_DETAIL = "Guest sessions cannot save results. Sign in to continue."
 
 # Compute-heavy endpoints (uploads, AI review, benchmarking). These require a
 # dashboard session or an API key; deployments that intentionally want the old
@@ -4021,6 +4043,12 @@ def _persist_job(job_id: str) -> None:
     # cached per-user listings.
     _JOB_LIST_CACHE.clear()
 
+    if normalized.get("guest"):
+        # Guest jobs are deliberately ephemeral: skipping the metadata write
+        # keeps them out of job recovery on restart, so a demo run can never
+        # resurface in a workspace listing or be read back from disk.
+        return
+
     metadata_path = _job_metadata_path(job_id)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
@@ -4033,6 +4061,10 @@ def _persist_ai_detection_results(job_id: str, ai_detection: dict[str, Any]) -> 
     so the caller can handle the error appropriately.
     """
     if not ai_detection or not job_id:
+        return
+    if _jobs.get(job_id, {}).get("guest"):
+        # Guest demo results are report-only by design (no Job row exists for
+        # them to satisfy the FK), so there is nothing to catalogue.
         return
     with SessionLocal() as db:
         existing = (
@@ -4288,6 +4320,11 @@ def _persist_report_record(
 ) -> None:
     """Create a Report row in the database for a generated report file."""
     from pathlib import Path as PathLib
+
+    if _jobs.get(job_id, {}).get("guest"):
+        # Guest demo reports exist as files only, for the download buttons
+        # during the session; they are swept with it and never catalogued.
+        return
 
     p = PathLib(file_path)
     file_size = p.stat().st_size if p.exists() else None
@@ -5542,6 +5579,33 @@ async def login(request: Request):
     return response
 
 
+@app.post("/api/auth/guest")
+async def login_guest():
+    """Issue a short-lived guest demo session.
+
+    The guest gets a real session cookie so the whole check flow (upload, poll,
+    results, report) authorizes normally, but the principal it authenticates as
+    owns no workspace: its jobs are flagged in memory only, are never written
+    to the database, and are swept together with the session.
+
+    Returns:
+        The synthetic guest user payload plus the session cookie.
+
+    Raises:
+        HTTPException: 403 when guest login is disabled by configuration.
+    """
+    if not settings.GUEST_LOGIN_ENABLED:
+        raise HTTPException(status_code=403, detail="Guest login is disabled")
+
+    subject = f"guest-{uuid.uuid4().hex}"
+    response = JSONResponse(content={"user": _guest_principal(subject)})
+    _issue_guest_cookie(response, subject)
+    # Start the expiry sweeper only once somebody actually opens a guest
+    # session, so importing this module never spawns a thread.
+    _ensure_guest_sweeper()
+    return response
+
+
 @app.post("/api/auth/logout")
 async def logout():
     response = JSONResponse(content={"status": "ok"})
@@ -5558,6 +5622,12 @@ async def auth_me(request: Request):
 async def refresh_session(request: Request):
     """Refresh the session by extending the cookie expiration."""
     user = _authenticate_request(request)
+    if _is_guest_principal(user):
+        # Guests have no ``User`` row to reload: re-issue the short-lived demo
+        # cookie instead, which re-arms the same TTL.
+        response = JSONResponse(content={"user": user})
+        _issue_guest_cookie(response, user["id"])
+        return response
     user_obj = await run_in_threadpool(_get_user_by_id, user["id"])
     if not user_obj:
         raise HTTPException(status_code=401, detail="User not found")
@@ -7066,11 +7136,23 @@ async def upload_files(
 ):
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
+    if _is_guest_principal(current_user):
+        # A guest demo session must not spend the deployment's GitHub / Stack
+        # Overflow quota on anonymous requests. This override outranks the
+        # tenant and assignment settings, so forcing it here sticks.
+        source_scan_enabled = False
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "source_scan_enabled_override": source_scan_enabled,
         "status": "processing",
         "progress": _new_job_progress(),
+        # Ownership is stamped at creation, not only when the background
+        # analysis rebuilds this dict: the UI polls the job the instant the
+        # upload returns, and that first poll must already pass the access
+        # check instead of racing a job that is not yet attributable to anyone.
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        **_guest_job_flags(current_user),
     }
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -7145,6 +7227,9 @@ async def upload_zip(
 ):
     # Allow unauthenticated uploads for plagiarism checker
     current_user = getattr(request.state, "user", None)
+    if _is_guest_principal(current_user):
+        # See upload_files: a demo session never spends external API quota.
+        source_scan_enabled = False
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(
             status_code=400, content={"error": "Please upload a .zip file"}
@@ -7155,6 +7240,13 @@ async def upload_zip(
         "source_scan_enabled_override": source_scan_enabled,
         "status": "processing",
         "progress": _new_job_progress(),
+        # Ownership is stamped at creation, not only when the background
+        # analysis rebuilds this dict: the UI polls the job the instant the
+        # upload returns, and that first poll must already pass the access
+        # check instead of racing a job that is not yet attributable to anyone.
+        "owner_user_id": current_user.get("id") if current_user else None,
+        "tenant_id": current_user.get("tenant_id") if current_user else None,
+        **_guest_job_flags(current_user),
     }
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -7372,6 +7464,7 @@ async def detect_ai_generated_code(
     _job_report_dir(job_id).mkdir(parents=True, exist_ok=True)
     _jobs[job_id] = {
         "id": job_id,
+        **_guest_job_flags(current_user),
         "job_type": "ai_detector",
         "course_name": resolved_course_name,
         "course_id": resolved_course_id,
@@ -8018,8 +8111,12 @@ async def _run_analysis(
     # Preserve the per-submission source-scan override set by the upload
     # endpoint. `_jobs[job_id]` is fully rebuilt below, so capture it first.
     _source_scan_override = _jobs.get(job_id, {}).get("source_scan_enabled_override")
+    # Guest flags are set by the upload endpoint and must survive this rebuild,
+    # otherwise the job would quietly become a persisted, workspace-less job.
+    _guest_flags = _guest_job_flags(current_user)
     _jobs[job_id] = {
         "id": job_id,
+        **_guest_flags,
         "course_name": course_name or "Unnamed Course",
         "assignment_name": assignment_name or "Unnamed Assignment",
         "assignment_id": assignment_id,
@@ -8162,7 +8259,12 @@ async def _run_analysis(
         # (non-fatal; file-based storage remains primary for now)
         try:
             with SessionLocal() as db:
-                if not db.query(Job).filter(Job.id == job_id).first():
+                if _jobs[job_id].get("guest"):
+                    # Guest demo jobs never touch the database: no Job row, no
+                    # Submission rows, and no fallback into the default
+                    # workspace — so a demo run cannot be saved anywhere.
+                    logger.debug("Guest job %s kept ephemeral — no DB writes", job_id)
+                elif not db.query(Job).filter(Job.id == job_id).first():
                     tenant_id = _jobs[job_id].get("tenant_id")
                     if not tenant_id:
                         fallback = db.query(Tenant).first()
@@ -8475,48 +8577,61 @@ async def _run_analysis(
         _update_job_status_in_db(job_id, "completed")
 
         # Persist SimilarityResult rows to DB (non-fatal; file-based storage is primary)
-        try:
-            with SessionLocal() as db:
-                for r in results:
-                    external_ev = _external_evidence_for_pair(
-                        r.file_a, r.file_b, external_tool_results
-                    )
-                    mb = getattr(r, "matching_blocks", None) or getattr(
-                        r, "features", {}
-                    ).get("matching_blocks", [])
-                    conf = getattr(r, "confidence", None) or getattr(
-                        r, "confidence_level", None
-                    )
-
-                    a_name, b_name = sorted([r.file_a, r.file_b])
-
-                    db.add(
-                        SimilarityResult(
-                            id=str(uuid.uuid4()),
-                            job_id=job_id,
-                            submission_a_id=a_name,
-                            submission_b_id=b_name,
-                            similarity_score=r.score,
-                            confidence_level=conf,
-                            confidence_lower=getattr(r, "confidence_lower", None),
-                            confidence_upper=getattr(r, "confidence_upper", None),
-                            matching_blocks=mb if isinstance(mb, (list, dict)) else [],
-                            excluded_matches=getattr(r, "excluded_matches", None) or {},
-                            algorithm_scores={
-                                **dict(getattr(r, "features", {})),
-                                "external_evidence": external_ev or {},
-                                "contributions": dict(getattr(r, "contributions", {})),
-                            },
-                            created_at=datetime.now(),
-                        )
-                    )
-                db.commit()
-        except SQLAlchemyError as e:
-            logger.warning(
-                "SimilarityResult DB persistence skipped for %s (non-fatal): %s",
-                job_id,
-                e,
+        if _jobs[job_id].get("guest"):
+            # A guest run owns no `jobs` row for these rows to reference — and
+            # results must not be saved at all — so skip before the insert is
+            # attempted instead of failing the foreign key on every demo run.
+            logger.debug(
+                "Guest job %s kept ephemeral — no SimilarityResult rows", job_id
             )
+        else:
+            try:
+                with SessionLocal() as db:
+                    for r in results:
+                        external_ev = _external_evidence_for_pair(
+                            r.file_a, r.file_b, external_tool_results
+                        )
+                        mb = getattr(r, "matching_blocks", None) or getattr(
+                            r, "features", {}
+                        ).get("matching_blocks", [])
+                        conf = getattr(r, "confidence", None) or getattr(
+                            r, "confidence_level", None
+                        )
+
+                        a_name, b_name = sorted([r.file_a, r.file_b])
+
+                        db.add(
+                            SimilarityResult(
+                                id=str(uuid.uuid4()),
+                                job_id=job_id,
+                                submission_a_id=a_name,
+                                submission_b_id=b_name,
+                                similarity_score=r.score,
+                                confidence_level=conf,
+                                confidence_lower=getattr(r, "confidence_lower", None),
+                                confidence_upper=getattr(r, "confidence_upper", None),
+                                matching_blocks=(
+                                    mb if isinstance(mb, (list, dict)) else []
+                                ),
+                                excluded_matches=getattr(r, "excluded_matches", None)
+                                or {},
+                                algorithm_scores={
+                                    **dict(getattr(r, "features", {})),
+                                    "external_evidence": external_ev or {},
+                                    "contributions": dict(
+                                        getattr(r, "contributions", {})
+                                    ),
+                                },
+                                created_at=datetime.now(),
+                            )
+                        )
+                    db.commit()
+            except SQLAlchemyError as e:
+                logger.warning(
+                    "SimilarityResult DB persistence skipped for %s (non-fatal): %s",
+                    job_id,
+                    e,
+                )
 
         try:
             _update_job_status_in_db(job_id, "completed")
@@ -8627,7 +8742,10 @@ def _run_analysis_background(
 
 @app.get("/api/jobs")
 async def list_jobs(request: Request):
-    current_user = _require_current_user(request)
+    # Listing falls through to "no tenant filter" for a tenant-less principal,
+    # which would hand a guest every workspace's jobs — and guest scope is the
+    # check flow only, so history is out of reach by design anyway.
+    current_user = _require_non_guest(request)
     return JSONResponse(content={"jobs": _list_all_jobs(current_user)})
 
 
@@ -8831,6 +8949,8 @@ async def download_dossier_pdf(job_id: str, request: Request):
 
 @app.patch("/api/job/{job_id}/review")
 async def update_job_review(job_id: str, request: Request):
+    # Review dispositions are durable decisions; a demo session records none.
+    _require_non_guest(request)
     job = _require_job_access(job_id, request)
 
     payload = await request.json()
@@ -9247,6 +9367,12 @@ async def get_courses(request: Request) -> dict[str, Any]:
         except Exception:
             return {"courses": []}
 
+        if _is_guest_principal(current_user):
+            # A guest owns no workspace, and its id is not a UUID the shared
+            # visibility policy could compare against — return before that
+            # query reaches the database at all.
+            return {"courses": []}
+
         with SessionLocal() as db:
             visible_ids = academic_access.visible_course_id_query(db, current_user)
             courses = (
@@ -9319,6 +9445,11 @@ async def get_assignments(
         try:
             current_user = _require_current_user(request, admin_only=False)
         except Exception:
+            return {"assignments": []}
+
+        if _is_guest_principal(current_user):
+            # Same as /api/courses: no workspace, no UUID to match on — an
+            # empty list is the correct answer, reached without a query.
             return {"assignments": []}
 
         with SessionLocal() as db:
@@ -12967,6 +13098,176 @@ def _clear_auth_cookie(response: Response) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Guest demo sessions
+# ---------------------------------------------------------------------------
+# A guest session is a real, server-signed cookie so the whole authenticated
+# surface (upload -> poll -> results -> report) works exactly as it does for a
+# professor. What makes it a *demo* is everything around it: the principal owns
+# no workspace, its jobs are never written to the database, and both the
+# session and the results it produced are swept when the session expires.
+
+_GUEST_SWEEPER_STARTED = False
+_GUEST_SWEEPER_LOCK = threading.Lock()
+
+
+def _is_guest_principal(user: dict[str, Any] | None) -> bool:
+    """Return True when the authenticated principal is a guest demo session."""
+    return bool(user and user.get("is_guest"))
+
+
+def _guest_job_flags(user: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the job fields that mark an upload as an ephemeral guest job.
+
+    Empty for everyone else, so a normal upload's job dict is untouched.
+
+    Args:
+        user: The authenticated principal, or ``None``.
+
+    Returns:
+        ``guest`` (bool) and ``guest_expires_at`` (unix time) for guest
+        sessions, otherwise an empty dict.
+    """
+    if not _is_guest_principal(user):
+        return {}
+    return {
+        "guest": True,
+        "guest_expires_at": time.time() + _guest_session_minutes() * 60,
+    }
+
+
+def _guest_principal(subject: str) -> dict[str, Any]:
+    """Build the synthetic user payload for a guest demo session.
+
+    Deliberately carries no ``tenant_id``: every listing, course query and
+    settings lookup filters by workspace, so a tenant-less principal resolves
+    to "nothing shared" instead of to another tenant's data.
+    """
+    return {
+        "id": subject,
+        "email": "",
+        "full_name": "Guest",
+        "role": "guest",
+        "tenant_id": None,
+        "tenant_name": None,
+        "organization_id": None,
+        "is_active": True,
+        "suspended": False,
+        "is_guest": True,
+        "last_login_at": None,
+        "created_at": None,
+    }
+
+
+def _guest_session_minutes() -> int:
+    """Return the guest session lifetime in minutes, clamped to a sane range."""
+    try:
+        minutes = int(settings.GUEST_SESSION_MINUTES)
+    except (TypeError, ValueError):
+        return 30
+    return max(1, minutes)
+
+
+def _create_guest_token(subject: str) -> str:
+    """Mint the signed guest session token.
+
+    Signed with the same ``AUTH_JWT_SECRET`` as user sessions so
+    ``_authenticate_request`` can decode it, but marked ``guest`` so the
+    database lookup for a ``User`` row is skipped entirely.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": subject,
+        "role": "guest",
+        "tenant_id": None,
+        "guest": True,
+        "exp": now + timedelta(minutes=_guest_session_minutes()),
+        "iat": now,
+    }
+    return jwt.encode(payload, _ensure_auth_secret(), algorithm="HS256")
+
+
+def _issue_guest_cookie(response: Response, subject: str) -> None:
+    """Set the guest session cookie using the guest (not the user) lifetime."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=_create_guest_token(subject),
+        max_age=_guest_session_minutes() * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.AUTH_COOKIE_SECURE,
+        path="/",
+    )
+
+
+def _sweep_expired_guest_jobs(now: float | None = None) -> int:
+    """Delete guest jobs whose session TTL has elapsed.
+
+    A guest job's entire footprint is its in-memory entry plus the directories
+    written under ``uploads/<id>`` and ``reports/<id>``. Removing both is what
+    makes "results are not saved" true on disk as well as in the database.
+
+    Args:
+        now: Optional Unix timestamp to test against, for deterministic tests.
+
+    Returns:
+        The number of guest jobs removed.
+    """
+    current = time.time() if now is None else now
+    removed = 0
+
+    for job_id, job in list(_jobs.items()):
+        if not job.get("guest"):
+            continue
+
+        try:
+            expires_at = float(job.get("guest_expires_at") or 0)
+        except (TypeError, ValueError):
+            expires_at = 0.0
+
+        if expires_at > current:
+            continue
+
+        _jobs.pop(job_id, None)
+        shutil.rmtree(UPLOADS_DIR / job_id, ignore_errors=True)
+        shutil.rmtree(_job_report_dir(job_id), ignore_errors=True)
+        removed += 1
+
+    if removed:
+        _JOB_LIST_CACHE.clear()
+        logger.info("Swept %d expired guest job(s)", removed)
+
+    return removed
+
+
+def _guest_sweeper_loop() -> None:
+    """Background loop that expires guest jobs (daemon thread)."""
+    while True:
+        time.sleep(30)
+        try:
+            _sweep_expired_guest_jobs()
+        except Exception:
+            logger.exception("Guest job sweeper error")
+
+
+def _ensure_guest_sweeper() -> None:
+    """Start the guest-job sweeper once, on first use (idempotent).
+
+    Started lazily rather than at import time so importing this module in the
+    test suite never spawns a thread.
+    """
+    global _GUEST_SWEEPER_STARTED
+
+    with _GUEST_SWEEPER_LOCK:
+        if _GUEST_SWEEPER_STARTED:
+            return
+        _GUEST_SWEEPER_STARTED = True
+
+    threading.Thread(
+        target=_guest_sweeper_loop, name="guest-job-sweeper", daemon=True
+    ).start()
+
+
 def _generate_tenant_name(full_name: str, email: str) -> str:
     base = full_name.strip() or email.split("@", 1)[0]
     return f"{base} Workspace"
@@ -13024,6 +13325,16 @@ def _authenticate_request(request: Request) -> dict[str, Any]:
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
+    # Guest demo sessions never touch the User table: the token itself carries
+    # everything the request needs, and the principal it maps to owns no
+    # workspace (see ``_guest_principal``).
+    if payload.get("guest"):
+        if not settings.GUEST_LOGIN_ENABLED:
+            raise HTTPException(status_code=401, detail="Guest login is disabled")
+        if not user_id.startswith("guest-"):
+            raise HTTPException(status_code=401, detail="Invalid session payload")
+        return _guest_principal(user_id)
+
     with SessionLocal() as db:
         user = db.scalar(
             select(User).options(joinedload(User.tenant)).where(User.id == user_id)
@@ -13044,6 +13355,27 @@ def _require_current_user(request: Request, admin_only: bool = False) -> dict[st
     return user
 
 
+def _require_non_guest(request: Request) -> dict[str, Any]:
+    """Return the principal, rejecting guest demo sessions.
+
+    Used by endpoints that *write* durable state (review dispositions) or that
+    list across a whole workspace — the two things a demo session must never do.
+
+    Args:
+        request: The incoming request with ``request.state.user`` populated.
+
+    Returns:
+        The authenticated principal.
+
+    Raises:
+        HTTPException: 403 when the principal is a guest demo session.
+    """
+    user = _require_current_user(request)
+    if _is_guest_principal(user):
+        raise HTTPException(status_code=403, detail=GUEST_WRITE_DENIED_DETAIL)
+    return user
+
+
 def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
     # Deny access if no user is authenticated (except for guest jobs)
     if user is None:
@@ -13052,6 +13384,14 @@ def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool
         # default workspace), so ownership, not tenancy, marks a guest job.
         owner_user_id = str(job.get("owner_user_id") or "")
         return not owner_user_id
+
+    if _is_guest_principal(user):
+        # A guest demo session may only reach jobs it created itself: flagged
+        # ``guest``, belonging to no workspace. Every other job — including
+        # those of other guests — stays invisible, so a leaked job id is useless.
+        if not job.get("guest"):
+            return False
+        return str(job.get("owner_user_id") or "") == str(user.get("id") or "")
 
     if user.get("role") == "admin":
         return True
@@ -13100,6 +13440,20 @@ async def dashboard_auth_middleware(request: Request, call_next):
     request.state.user_id = user["id"]
     request.state.user_role = user["role"]
     request.state.tenant_id = user.get("tenant_id")
+
+    # A guest demo session saves nothing: it may read its own results and
+    # upload files, but no other write (review, setting, course, case) can be
+    # attributed to a session that has no workspace behind it.
+    if (
+        _is_guest_principal(user)
+        and request.method not in ("GET", "HEAD")
+        and path not in GUEST_WRITE_EXEMPT_PATHS
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": GUEST_WRITE_DENIED_DETAIL},
+        )
+
     if user.get("role") != "api":
         # API-key principals have no dashboard user; tenant runtime settings
         # are loaded for interactive sessions only.
@@ -16383,6 +16737,7 @@ def _cleanup_expired_jobs():
 @app.get("/api/reports/integrity-assessment/{job_id}")
 async def get_integrity_assessment_report(
     job_id: str,
+    request: Request,
     format: str = Query("html", description="Output format: html, pdf, or json"),
 ):
     """Generate a Dean/Chair-grade Integrity Assessment Report.
@@ -16402,7 +16757,7 @@ async def get_integrity_assessment_report(
         render_integrity_report_html,
     )
 
-    job_data = _get_job(job_id)
+    job_data = _require_job_access(job_id, request)
     if job_data is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 

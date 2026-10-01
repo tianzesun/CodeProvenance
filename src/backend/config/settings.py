@@ -97,6 +97,15 @@ class AppSettings(BaseSettings):
     #: accident with a single stray variable.
     ALLOW_DEV_API_KEYS: bool = False
 
+    # Guest demo sessions ("Try the checker without an account").
+    #: Expose POST /api/auth/guest on the login page. A guest session is a
+    #: short-lived cookie that owns no workspace: guest jobs are never written
+    #: to the database and are swept from memory/disk when the session expires.
+    #: Set to false on deployments that must not offer anonymous compute.
+    GUEST_LOGIN_ENABLED: bool = True
+    #: Lifetime of a guest session and of the results it produced.
+    GUEST_SESSION_MINUTES: int = 30
+
     # External plagiarism services
     MOSS_USER_ID: str | None = None
 

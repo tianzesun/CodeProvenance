@@ -12,6 +12,7 @@ import {
   XCircle,
   Loader2,
   ArrowLeft,
+  Rocket,
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/components/AuthProvider';
@@ -106,7 +107,7 @@ function validateEmail(email: string): string | null {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, loading, bootstrapped, login, bootstrapAdmin } = useAuth();
+  const { user, loading, bootstrapped, login, guestLogin, bootstrapAdmin } = useAuth();
 
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -121,6 +122,7 @@ export default function LoginPage() {
   const [formError, setFormError] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState('/');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
@@ -142,7 +144,9 @@ export default function LoginPage() {
   useEffect(() => {
     // Add a small delay to prevent immediate redirects during authentication resolution
     const timer = setTimeout(() => {
-      if (!loading && user) {
+      // Guests are bounced back to the sign-in form rather than away from it:
+      // they reached /login to upgrade the demo session into a real account.
+      if (!loading && user && user.role !== 'guest') {
         router.replace(nextPath);
       }
     }, 200); // 200ms delay
@@ -249,6 +253,28 @@ export default function LoginPage() {
     setFormError('');
     setEmailError('');
     setPasswordError('');
+  };
+
+  /**
+   * Start a guest demo session and land on the checker.
+   *
+   * ``nextPath`` is set before the session starts so the sign-in redirect
+   * (which fires once ``user`` resolves) also goes to ``/upload``: a guest has
+   * no dashboard to land on.
+   */
+  const handleGuestLogin = async () => {
+    setFormError('');
+    setGuestSubmitting(true);
+    try {
+      setNextPath('/upload');
+      await guestLogin();
+      router.replace('/upload');
+    } catch (error) {
+      setNextPath('/');
+      setFormError(getErrorMessage(error));
+    } finally {
+      setGuestSubmitting(false);
+    }
   };
 
   return (
@@ -597,6 +623,31 @@ export default function LoginPage() {
                       ? 'Sign in'
                       : 'Create administrator account'}
                 </button>
+
+                <div className="relative py-1" aria-hidden="true">
+                  <span className="block w-full border-t border-slate-200" />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    or
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGuestLogin}
+                  disabled={loading || guestSubmitting}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {guestSubmitting ? (
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Rocket size={16} aria-hidden="true" />
+                  )}
+                  {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
+                </button>
+                <p className="text-center text-xs leading-relaxed text-slate-500">
+                  Run a full check without an account. Guest results are never saved — they
+                  disappear when the demo session ends.
+                </p>
 
                 {!showLogin && (
                   <button

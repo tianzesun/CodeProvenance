@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 
 /** Roles a nav item can be visible to. Mirrors ``AuthRole`` in AuthProvider. */
-export type NavRole = 'admin' | 'professor';
+export type NavRole = 'admin' | 'professor' | 'guest';
 
 export interface NavItem {
   /** Route to link to. */
@@ -97,7 +97,8 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/upload',
         label: 'Plagiarism Checker',
         icon: PlusCircle,
-        roles: ['professor', 'admin'],
+        // The guest demo session lands here and never leaves the check flow.
+        roles: ['professor', 'admin', 'guest'],
         primary: true,
       },
       {
@@ -228,11 +229,20 @@ export const NAV_GROUPS: NavGroup[] = [
  *
  * ``DashboardLayout`` uses this to gate navigation instead of maintaining a
  * separate hand-written allowlist that drifts out of sync with the sidebar.
+ *
+ * A guest demo session is the one role whose routes are not simply "everything
+ * in ``NAV_GROUPS``": it drops ``/`` (the dashboard is a workspace summary a
+ * demo has no workspace behind) and adds ``/results`` (reached by drilling in
+ * from a completed check, never from the rail). Every other adjustment stays
+ * expressed through ``roles`` on the nav items themselves.
  */
 export function routesForRole(role: NavRole | undefined): string[] {
   if (!role) return [];
+
+  const isGuest = role === 'guest';
   return [
-    '/',
+    ...(isGuest ? [] : ['/']),
+    ...(isGuest ? ['/results'] : []),
     ...NAV_GROUPS.flatMap((group) =>
       group.items
         .filter((item) => item.roles.includes(role))
@@ -274,6 +284,15 @@ export default function Sidebar() {
     ...group,
     items: group.items.filter((item) => role && item.roles.includes(role)),
   })).filter((group) => group.items.length > 0);
+
+  // Sidebar footer descriptor: a guest session is labelled for what it is so
+  // nobody mistakes a demo run for a saved workspace.
+  const roleLabel =
+    user?.role === 'admin'
+      ? 'Administrator'
+      : user?.role === 'guest'
+        ? 'Guest demo · not saved'
+        : 'Professor';
 
   const handleLogout = async () => {
     if (loggingOut) return; // Prevent multiple logout attempts
@@ -403,7 +422,7 @@ export default function Sidebar() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{user?.full_name || 'Workspace'}</div>
                     <div className="text-xs text-[var(--text-muted)]">
-                      {user?.role === 'admin' ? 'Administrator' : 'Professor'}{user?.tenant_name ? ` · ${user.tenant_name}` : ''}
+                      {roleLabel}{user?.tenant_name ? ` · ${user.tenant_name}` : ''}
                     </div>
                   </div>
                   <button

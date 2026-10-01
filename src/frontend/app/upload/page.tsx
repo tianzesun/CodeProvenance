@@ -28,6 +28,9 @@ import type { LucideIcon } from 'lucide-react';
 
 const API = '';
 const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
+/** Course/assignment labels a guest demo run files itself under. */
+const GUEST_COURSE_LABEL = 'Guest demo';
+const GUEST_ASSIGNMENT_LABEL = 'Guest demo check';
 const UPLOAD_ENGINE_OPTIONS = [
   { key: 'token', label: 'Token' },
   { key: 'ast', label: 'AST' },
@@ -202,6 +205,9 @@ function describeProgress(progress: UploadJobProgress) {
 export default function UploadPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  // A guest demo session owns no workspace: its run is not filed under a
+  // course, so the picker stays hidden and the review starts without one.
+  const isGuest = user?.role === 'guest';
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -501,7 +507,7 @@ export default function UploadPage() {
 
   const handleSubmit = async () => {
     setError('');
-    if (!selectedCourseId || !selectedAssignmentId) {
+    if (!isGuest && (!selectedCourseId || !selectedAssignmentId)) {
       setError('Select a course and assignment before starting the review.');
       return;
     }
@@ -516,14 +522,16 @@ export default function UploadPage() {
     starterFiles.forEach((f) => fd.append('starter_files', f));
     const chosenCourse = courses.find((c) => c.id === selectedCourseId);
     const chosenAssignment = assignments.find((a) => a.id === selectedAssignmentId);
-    if (!chosenCourse || !chosenAssignment) {
+    if (!isGuest && (!chosenCourse || !chosenAssignment)) {
       setError('Select a course and assignment before starting the review.');
       setUploading(false);
       return;
     }
-    fd.append('course_name', chosenCourse.name);
-    fd.append('assignment_name', chosenAssignment.name);
-    fd.append('assignment_id', chosenAssignment.id);
+    // A guest run files itself under a demo label instead of a course it has
+    // no access to; signed-in reviews keep their real course and assignment.
+    fd.append('course_name', chosenCourse?.name ?? GUEST_COURSE_LABEL);
+    fd.append('assignment_name', chosenAssignment?.name ?? GUEST_ASSIGNMENT_LABEL);
+    if (chosenAssignment) fd.append('assignment_id', chosenAssignment.id);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
     fd.append('engine_weights', JSON.stringify(engineWeights));
@@ -692,133 +700,137 @@ export default function UploadPage() {
             </div>
           )}
 
-          {/* Course & Assignment Picker */}
-          <div className="rounded-2xl bg-white p-5" style={cardShadow}>
-            <div className="flex items-center gap-2 mb-4">
-              <BookOpen size={15} className="text-slate-500" />
-              <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
+          {/* Course & Assignment Picker — omitted for the guest demo, which
+              has no workspace to file a run under (and no Courses page to
+              create one on). */}
+          {!isGuest && (
+            <div className="rounded-2xl bg-white p-5" style={cardShadow}>
+              <div className="flex items-center gap-2 mb-4">
+                <BookOpen size={15} className="text-slate-500" />
+                <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
 
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {/* Course select — options are read from the database */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500">Course</label>
-                <select
-                  value={selectedCourseId}
-                  onChange={(e) => { setSelectedCourseId(e.target.value); setSelectedAssignmentId(''); }}
-                  disabled={coursesLoading}
-                  className="theme-field"
-                >
-                  <option value="">
-                    {coursesLoading
-                      ? 'Loading courses…'
-                      : coursesError
-                        ? 'Courses unavailable'
-                        : courses.length > 0
-                          ? 'Select course…'
-                          : user ? 'No courses yet' : 'Sign in to see courses'}
-                  </option>
-                  {courses.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code ? `${c.code} – ` : ''}{c.name}
-                      {typeof c.assignment_count === 'number' ? ` (${c.assignment_count} assignment${c.assignment_count === 1 ? '' : 's'})` : ''}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {/* Course select — options are read from the database */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500">Course</label>
+                  <select
+                    value={selectedCourseId}
+                    onChange={(e) => { setSelectedCourseId(e.target.value); setSelectedAssignmentId(''); }}
+                    disabled={coursesLoading}
+                    className="theme-field"
+                  >
+                    <option value="">
+                      {coursesLoading
+                        ? 'Loading courses…'
+                        : coursesError
+                          ? 'Courses unavailable'
+                          : courses.length > 0
+                            ? 'Select course…'
+                            : user ? 'No courses yet' : 'Sign in to see courses'}
                     </option>
-                  ))}
-                </select>
-                {coursesError && (
-                  <button type="button" onClick={() => { fetchCourses(); }} className="text-left text-xs text-blue-600 hover:underline">
-                    Couldn&apos;t load courses — retry
-                  </button>
-                )}
-                {!coursesLoading && !coursesError && courses.length === 0 && (
-                  <span className="text-xs text-slate-400">
-                    {user ? 'Create a course on the Courses page first.' : 'Sign in to load your courses.'}
-                  </span>
-                )}
-              </div>
-
-              {/* Assignment select — filled from the selected course */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500">Assignment</label>
-                <select
-                  value={selectedAssignmentId}
-                  onChange={(e) => setSelectedAssignmentId(e.target.value)}
-                  disabled={!selectedCourseId || assignmentsLoading}
-                  className="theme-field"
-                >
-                  <option value="">
-                    {!selectedCourseId
-                      ? 'Choose a course first…'
-                      : assignmentsLoading
-                        ? 'Loading assignments…'
-                        : assignments.length > 0
-                          ? 'Select assignment…'
-                          : 'No assignments yet'}
-                  </option>
-                  {assignments.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Recommended scan engine — appears once a course and assignment are
-                chosen, so the professor can confirm the detection strategy
-                before uploading rather than after. */}
-            {recommendedMode?.matched && recommendedMode.mode_id && (
-              <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3.5">
-                <div className="flex flex-wrap items-start gap-3">
-                  <SearchCheck size={15} className="mt-0.5 shrink-0 text-blue-600" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="text-sm font-semibold text-slate-900">
-                        Recommended scan engine
-                      </span>
-                      <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                        {recommendedMode.mode_name}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs leading-5 text-slate-600">
-                      {selectedAssignment?.name} is stored as{' '}
-                      <span className="font-medium">
-                        {selectedAssignment?.assignment_type?.replace(/_/g, ' ') ?? 'programming'}
-                      </span>
-                      , so this detection strategy and its engine weighting were selected
-                      automatically.
-                    </p>
-                    {recommendedMode.top_engines.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                          Key engines
-                        </span>
-                        {recommendedMode.top_engines.map((engine) => (
-                          <span
-                            key={engine.key}
-                            className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-blue-200"
-                          >
-                            {ENGINE_LABELS[engine.key] ?? engine.key}
-                            <span className="ml-1 text-slate-400">
-                              {Math.round(engine.weight * 100)}%
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const details = document.getElementById('advanced-detection');
-                        if (details instanceof HTMLDetailsElement) details.open = true;
-                      }}
-                      className="mt-2 text-xs font-medium text-blue-700 hover:underline"
-                    >
-                      Change engine weights →
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code ? `${c.code} – ` : ''}{c.name}
+                        {typeof c.assignment_count === 'number' ? ` (${c.assignment_count} assignment${c.assignment_count === 1 ? '' : 's'})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {coursesError && (
+                    <button type="button" onClick={() => { fetchCourses(); }} className="text-left text-xs text-blue-600 hover:underline">
+                      Couldn&apos;t load courses — retry
                     </button>
-                  </div>
+                  )}
+                  {!coursesLoading && !coursesError && courses.length === 0 && (
+                    <span className="text-xs text-slate-400">
+                      {user ? 'Create a course on the Courses page first.' : 'Sign in to load your courses.'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Assignment select — filled from the selected course */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500">Assignment</label>
+                  <select
+                    value={selectedAssignmentId}
+                    onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                    disabled={!selectedCourseId || assignmentsLoading}
+                    className="theme-field"
+                  >
+                    <option value="">
+                      {!selectedCourseId
+                        ? 'Choose a course first…'
+                        : assignmentsLoading
+                          ? 'Loading assignments…'
+                          : assignments.length > 0
+                            ? 'Select assignment…'
+                            : 'No assignments yet'}
+                    </option>
+                    {assignments.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* Recommended scan engine — appears once a course and assignment are
+                  chosen, so the professor can confirm the detection strategy
+                  before uploading rather than after. */}
+              {recommendedMode?.matched && recommendedMode.mode_id && (
+                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3.5">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <SearchCheck size={15} className="mt-0.5 shrink-0 text-blue-600" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-sm font-semibold text-slate-900">
+                          Recommended scan engine
+                        </span>
+                        <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                          {recommendedMode.mode_name}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                        {selectedAssignment?.name} is stored as{' '}
+                        <span className="font-medium">
+                          {selectedAssignment?.assignment_type?.replace(/_/g, ' ') ?? 'programming'}
+                        </span>
+                        , so this detection strategy and its engine weighting were selected
+                        automatically.
+                      </p>
+                      {recommendedMode.top_engines.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                            Key engines
+                          </span>
+                          {recommendedMode.top_engines.map((engine) => (
+                            <span
+                              key={engine.key}
+                              className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-blue-200"
+                            >
+                              {ENGINE_LABELS[engine.key] ?? engine.key}
+                              <span className="ml-1 text-slate-400">
+                                {Math.round(engine.weight * 100)}%
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const details = document.getElementById('advanced-detection');
+                          if (details instanceof HTMLDetailsElement) details.open = true;
+                        }}
+                        className="mt-2 text-xs font-medium text-blue-700 hover:underline"
+                      >
+                        Change engine weights →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">

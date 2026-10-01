@@ -1,19 +1,46 @@
 'use client';
 
 import { ReactNode, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import SmoothScroll from './SmoothScroll';
 import { useAuth } from '@/components/AuthProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import Sidebar, { canRoleAccessPath, type NavRole } from '@/components/Sidebar';
 import SkeletonLoader from '@/components/SkeletonLoader';
-import { SunMedium, MoonStar } from 'lucide-react';
+import { Info, SunMedium, MoonStar } from 'lucide-react';
 
 // Routes deliberately closed to admins. Course maintenance lives in
 // Administration → Users & courses, so an admin arriving at the Teaching
 // "Courses & Assignments" page (bookmark, stale link) is sent to their own
 // workspace instead of managing courses from two places.
 const ADMIN_EXCLUDED_PATHS = ['/courses'];
+
+/**
+ * Persistent reminder that the current session is a demo.
+ *
+ * Rendered above every page a guest reaches so nobody mistakes an unsaved run
+ * for a stored one, with the upgrade path to a real account one click away.
+ */
+function GuestSessionBanner() {
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+      <span className="flex items-start gap-2">
+        <Info size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+        <span>
+          <strong className="font-semibold">Guest demo.</strong> You can run a full check, but
+          nothing is saved — results and decisions disappear when the session ends.
+        </span>
+      </span>
+      <Link
+        href="/login"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-400/70 bg-white/70 px-3 py-1.5 text-xs font-semibold transition hover:bg-white dark:border-amber-500/40 dark:bg-transparent dark:hover:bg-amber-500/20"
+      >
+        Sign in to save results
+      </Link>
+    </div>
+  );
+}
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -46,8 +73,18 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
     return DETAIL_ROUTE_PREFIXES.some((prefix) => path.startsWith(`${prefix}/`));
   };
 
+  // Guests are demo sessions: they may run a check and read its results, and
+  // nothing else. Derived from the same nav config as the rail, so the visible
+  // links and the gate cannot drift apart.
+  const isGuestRouteAllowed = (path: string | null): boolean =>
+    Boolean(path) && canRoleAccessPath('guest', path);
+
+  const guestBlocked = Boolean(
+    user && user.role === 'guest' && !isGuestRouteAllowed(pathname),
+  );
+
   const professorBlocked = Boolean(
-    user && user.role !== 'admin' && !isProfessorRouteAllowed(pathname),
+    user && user.role !== 'admin' && user.role !== 'guest' && !isProfessorRouteAllowed(pathname),
   );
 
   const adminBlocked = Boolean(
@@ -79,7 +116,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
       if (requiredRole === 'admin' && user.role !== 'admin') {
         if (lastRedirectRef.current !== redirectKey) {
           lastRedirectRef.current = redirectKey;
-          router.replace('/');
+          router.replace(user.role === 'guest' ? '/upload' : '/');
         }
         return;
       }
@@ -94,10 +131,21 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
         return;
       }
 
+      // Guests stay inside the demo: any other route (dashboard, history,
+      // courses, admin) goes back to the checker. Checked before the
+      // professor rule because a guest's allowed set is a strict subset.
+      if (user.role === 'guest' && !isGuestRouteAllowed(pathname)) {
+        if (lastRedirectRef.current !== redirectKey) {
+          lastRedirectRef.current = redirectKey;
+          router.replace('/upload');
+        }
+        return;
+      }
+
       // Professors are limited to the academic workflow (plagiarism check +
       // AI review + courses/assignments). Redirect them away from Engine/R&D
       // and Manage pages if they navigate there directly.
-      if (user.role !== 'admin' && !isProfessorRouteAllowed(pathname)) {
+      if (user.role !== 'admin' && user.role !== 'guest' && !isProfessorRouteAllowed(pathname)) {
         if (lastRedirectRef.current !== redirectKey) {
           lastRedirectRef.current = redirectKey;
           router.replace('/');
@@ -112,7 +160,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   }, [bootstrapped, loading, pathname, requiredRole, requireAuth, router, user]);
 
   // Show loading only if auth is required
-  if (requireAuth && (loading || !bootstrapped || !user || professorBlocked || adminBlocked || (requiredRole === 'admin' && user.role !== 'admin'))) {
+  if (requireAuth && (loading || !bootstrapped || !user || professorBlocked || adminBlocked || guestBlocked || (requiredRole === 'admin' && user.role !== 'admin'))) {
     return (
       <div className="theme-shell min-h-screen bg-[var(--background)]">
         <SkeletonLoader variant="page" />
@@ -142,6 +190,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
 
         <main id="main-content" className="dashboard-main relative z-10 min-h-screen pt-6 pb-16 lg:pt-8 lg:pb-20 flex min-w-0 flex-col transition-all duration-300 ease-out">
           <div className="flex-grow">
+            {user?.role === 'guest' && <GuestSessionBanner />}
             {children}
           </div>
         </main>

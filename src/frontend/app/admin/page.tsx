@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { AuthRole, AuthUser, useAuth } from '@/components/AuthProvider';
+import { AuthRole, AuthUser, ProvisionableRole, useAuth } from '@/components/AuthProvider';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermOptions, courseTermLabel } from '@/lib/terms';
 import { Modal } from '@/components/saas/SaaSPrimitives';
@@ -80,6 +80,9 @@ function relativeTime(value: string | null): string | null {
 const AVATAR_TONES: Record<AuthRole, string> = {
   admin: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
   professor: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300',
+  // Guest sessions never appear in the users table, but the tone keeps the
+  // record exhaustive if one ever renders.
+  guest: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
 };
 
 /** Initials avatar used across the users table and course cards. */
@@ -1111,7 +1114,7 @@ export default function AdminPage() {
     full_name: '',
     email: '',
     password: '',
-    role: 'professor' as AuthRole,
+    role: 'professor' as ProvisionableRole,
     tenant_name: '',
   });
   const [showCourseModal, setShowCourseModal] = useState(false);
@@ -3170,7 +3173,7 @@ export default function AdminPage() {
                     <div className="relative">
                       <select
                         value={form.role}
-                        onChange={(e) => setForm((c) => ({ ...c, role: e.target.value as AuthRole }))}
+                        onChange={(e) => setForm((c) => ({ ...c, role: e.target.value as ProvisionableRole }))}
                         className={selectClass}
                       >
                         <option value="professor">Professor</option>

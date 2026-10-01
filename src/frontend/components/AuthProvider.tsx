@@ -12,7 +12,7 @@ import {
 
 import { apiClient, installAuthInterceptors } from '@/lib/apiClient';
 
-export type AuthRole = 'admin' | 'professor';
+export type AuthRole = 'admin' | 'professor' | 'guest';
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 
 export interface AuthUser {
@@ -26,13 +26,18 @@ export interface AuthUser {
   suspended: boolean;
   last_login_at: string | null;
   created_at: string | null;
+  /** True for the short-lived demo session: owns no workspace, saves nothing. */
+  is_guest?: boolean;
 }
+
+/** Roles an administrator may create. Guests are sessions, not accounts. */
+export type ProvisionableRole = 'admin' | 'professor';
 
 interface CreateUserInput {
   email: string;
   full_name: string;
   password: string;
-  role: AuthRole;
+  role: ProvisionableRole;
   tenant_name?: string;
 }
 
@@ -50,6 +55,12 @@ interface AuthContextValue {
   bootstrapped: boolean;
   refreshSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  /**
+   * Start a guest demo session: the server issues a short-lived cookie that
+   * owns no workspace, so the check flow works end to end without an account
+   * and without persisting anything.
+   */
+  guestLogin: () => Promise<void>;
   bootstrapAdmin: (payload: BootstrapAdminInput) => Promise<void>;
   logout: () => Promise<void>;
   listUsers: () => Promise<AuthUser[]>;
@@ -161,6 +172,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const guestLogin = useCallback(async () => {
+    const res = await apiClient.post('/api/auth/guest');
+    const nextUser = res.data?.user ?? null;
+
+    if (!nextUser) {
+      throw new Error('Guest login is unavailable');
+    }
+
+    setBootstrapped(true);
+    setUser(nextUser);
+    setStatus('authenticated');
+
+    // Mirrors login(): stored only as a render hint, never as proof of
+    // identity — startup still validates against /api/auth/me, which starts
+    // returning 401 as soon as the short-lived guest cookie lapses.
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('integritydesk_auth_user', JSON.stringify(nextUser));
+    }
+  }, []);
+
   const bootstrapAdmin = useCallback(async (payload: BootstrapAdminInput) => {
     const res = await apiClient.post('/api/auth/bootstrap-admin', payload);
     const nextUser = res.data?.user ?? null;
@@ -203,6 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       bootstrapped,
       refreshSession,
       login,
+      guestLogin,
       bootstrapAdmin,
       logout,
       listUsers,
@@ -215,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       bootstrapped,
       refreshSession,
       login,
+      guestLogin,
       bootstrapAdmin,
       logout,
       listUsers,
@@ -239,6 +272,7 @@ export function useAuth() {
         bootstrapped: false,
         refreshSession: async () => {},
         login: async () => {},
+        guestLogin: async () => {},
         bootstrapAdmin: async () => {},
         logout: async () => {},
         listUsers: async () => [],

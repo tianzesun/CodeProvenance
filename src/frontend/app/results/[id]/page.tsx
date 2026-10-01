@@ -398,6 +398,10 @@ export default function ResultsPage() {
   const { id } = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  // A guest demo session can read this run but never record a verdict on it:
+  // the review PATCH is rejected server-side, so the controls stay read-only
+  // here rather than showing an optimistic status that was never saved.
+  const isGuest = user?.role === 'guest';
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const syncingRef = useRef(false);
@@ -710,12 +714,16 @@ export default function ResultsPage() {
               </div>
             </div>
 
-            {/* Page-level navigation CTA — top-right, aligned with identity */}
-            <div className="shrink-0 sm:pt-1">
-              <ButtonLink href={`/dossier/${id}`} variant="secondary">
-                Evidence Dossier &amp; Viva Questions
-              </ButtonLink>
-            </div>
+            {/* Page-level navigation CTA — top-right, aligned with identity.
+                Omitted for the guest demo: /dossier is outside the demo's
+                route set, so the link would only bounce back to the checker. */}
+            {!isGuest && (
+              <div className="shrink-0 sm:pt-1">
+                <ButtonLink href={`/dossier/${id}`} variant="secondary">
+                  Evidence Dossier &amp; Viva Questions
+                </ButtonLink>
+              </div>
+            )}
           </div>
 
           {/* Row 2: metrics strip */}
@@ -885,7 +893,12 @@ export default function ResultsPage() {
                           <td className="px-4 py-3">
                             <select
                               value={status}
-                              disabled={saving}
+                              disabled={saving || isGuest}
+                              title={
+                                isGuest
+                                  ? 'Guest demo sessions cannot record verdicts.'
+                                  : undefined
+                              }
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) => updatePairStatus(row, e.target.value)}
                               className={`cursor-pointer rounded-full border-0 px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:opacity-50 ${statusTone}`}
