@@ -212,8 +212,7 @@ export default function EvidenceDossierPage() {
             </h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Job {dossier.job_id} · {dossier.students.length} student
-              {dossier.students.length === 1 ? '' : 's'} · one fused view of AI detection,
-              peer similarity and public-source matches.
+              {dossier.students.length === 1 ? '' : 's'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -376,7 +375,7 @@ export default function EvidenceDossierPage() {
                           [student.student]: { ...draft, outcome: e.target.value },
                         }))
                       }
-                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                       aria-label={`Viva outcome for ${student.student}`}
                     >
                       <option value="">Record viva outcome…</option>
@@ -395,7 +394,7 @@ export default function EvidenceDossierPage() {
                         }))
                       }
                       placeholder="Interview notes (optional)"
-                      className="min-w-[12rem] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                      className="min-w-[12rem] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                     />
                     <button
                       onClick={() => saveOutcome(student, draft)}
