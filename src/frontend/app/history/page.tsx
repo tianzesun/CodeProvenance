@@ -232,20 +232,26 @@ function ExportMenu({ job }: { job: JobItem }) {
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false);
     }
-    // The menu is anchored to viewport coordinates, so any layout change could
-    // leave it floating over unrelated content — closing beats re-anchoring.
-    function handleDismiss() {
-      setOpen(false);
+    // The menu is anchored to viewport coordinates, so scrolling has to move it
+    // with its button rather than drop it — Lenis fires scroll events for tiny
+    // trackpad deltas, which made a close-on-scroll menu vanish on touch.
+    function reanchor() {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect || rect.bottom < 0 || rect.top > window.innerHeight) {
+        setOpen(false);
+        return;
+      }
+      setAnchor(rect);
     }
     document.addEventListener('mousedown', handleOutside);
     document.addEventListener('keydown', handleKey);
-    window.addEventListener('resize', handleDismiss);
-    window.addEventListener('scroll', handleDismiss, { capture: true, passive: true });
+    window.addEventListener('resize', reanchor);
+    window.addEventListener('scroll', reanchor, { capture: true, passive: true });
     return () => {
       document.removeEventListener('mousedown', handleOutside);
       document.removeEventListener('keydown', handleKey);
-      window.removeEventListener('resize', handleDismiss);
-      window.removeEventListener('scroll', handleDismiss, { capture: true });
+      window.removeEventListener('resize', reanchor);
+      window.removeEventListener('scroll', reanchor, { capture: true });
     };
   }, [open]);
 
@@ -597,12 +603,21 @@ export default function HistoryPage() {
     );
   };
 
-  const renderSortableTh = (column: SortKey, label: string, align: 'left' | 'right' = 'left') => (
-    <th className={`px-5 py-3 ${align === 'right' ? 'text-right' : 'text-left'}`} aria-sort={sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
+  const renderSortableTh = (
+    column: SortKey,
+    label: string,
+    align: 'left' | 'right' = 'left',
+    width?: string
+  ) => (
+    <th
+      className={`px-4 py-3 ${align === 'right' ? 'text-right' : 'text-left'}`}
+      style={width ? { width } : undefined}
+      aria-sort={sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+    >
       <button
         type="button"
         onClick={() => handleSort(column)}
-        className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition ${
+        className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.08em] transition ${
           sortKey === column
             ? 'text-[var(--text-primary)]'
             : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
@@ -635,62 +650,66 @@ export default function HistoryPage() {
           }
         />
 
-        {/* Toolbar: status filters on the left, search + result count on the right */}
-        <div className="theme-card-strong flex flex-col gap-4 rounded-[24px] px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            {STATUS_TABS.map((tab) => (
-              <FilterChip
-                key={tab.key}
-                active={activeStatus === tab.key}
-                label={tab.label}
-                count={statusCounts[tab.key]}
-                onClick={() => handleStatusTab(tab.key)}
-                tone={tab.key === 'FAILED' ? 'negative' : tab.key === 'PROCESSING' ? 'warning' : 'neutral'}
-              />
-            ))}
-            {hasActiveFilters && (
+        {/* Toolbar: filters + count on the first row, search on the second so
+            neither line wraps unpredictably at intermediate widths. */}
+        <div className="theme-card-strong rounded-[24px] px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {STATUS_TABS.map((tab) => (
+                <FilterChip
+                  key={tab.key}
+                  active={activeStatus === tab.key}
+                  label={tab.label}
+                  count={statusCounts[tab.key]}
+                  onClick={() => handleStatusTab(tab.key)}
+                  tone={tab.key === 'FAILED' ? 'negative' : tab.key === 'PROCESSING' ? 'warning' : 'neutral'}
+                />
+              ))}
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-[var(--text-muted)]">
+                Showing{' '}
+                <strong className="font-semibold text-[var(--text-primary)]">
+                  {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
+                </strong>{' '}
+                of{' '}
+                <strong className="font-semibold text-[var(--text-primary)]">{sorted.length}</strong>{' '}
+                {sorted.length === 1 ? 'check' : 'checks'}
+              </span>
+
               <button
                 type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-semibold text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
+                onClick={refreshNow}
+                title="Refresh now (also refreshes every 30 seconds)"
+                aria-label="Refresh history"
+                className="theme-icon-button"
               >
-                Clear filters
+                <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
               </button>
-            )}
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm text-[var(--text-muted)]">
-              Showing{' '}
-              <strong className="font-semibold text-[var(--text-primary)]">
-                {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
-              </strong>{' '}
-              of <strong className="font-semibold text-[var(--text-primary)]">{sorted.length}</strong>{' '}
-              {sorted.length === 1 ? 'check' : 'checks'}
-            </span>
-
-            <button
-              type="button"
-              onClick={refreshNow}
-              title="Refresh now (also refreshes every 30 seconds)"
-              aria-label="Refresh history"
-              className="theme-icon-button"
-            >
-              <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-            </button>
-
-            <label className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-[var(--text-muted)] shadow-sm transition focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-blue-500 dark:focus-within:ring-blue-500/20 lg:w-80">
-              <Search size={16} />
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search assignment, course, or ID"
-                className="w-full bg-transparent text-[var(--text-primary)] placeholder:text-slate-400 focus:outline-none dark:placeholder:text-slate-500"
-                aria-label="Search history"
-              />
-            </label>
-          </div>
+          <label className="mt-3 flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-[var(--text-muted)] shadow-sm transition focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-blue-500 dark:focus-within:ring-blue-500/20 sm:max-w-md">
+            <Search size={16} />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search assignment, course, or ID"
+              className="w-full bg-transparent text-[var(--text-primary)] placeholder:text-slate-400 focus:outline-none dark:placeholder:text-slate-500"
+              aria-label="Search history"
+            />
+          </label>
         </div>
 
         {/* Results */}
@@ -729,22 +748,28 @@ export default function HistoryPage() {
             <>
               {/* Desktop table */}
               <div className="hidden overflow-x-auto xl:block">
-                <table className="w-full min-w-[900px]">
+                <table className="w-full min-w-[880px] table-fixed">
                   <TableHeader>
                     <tr>
-                      {renderSortableTh('date', 'Date')}
+                      {renderSortableTh('date', 'Date', 'left', '100px')}
                       {renderSortableTh('name', 'Check')}
-                      {renderSortableTh('submissions', 'Submissions', 'right')}
-                      {renderSortableTh('highRisk', 'High-risk', 'right')}
-                      <th className="px-5 py-3 text-left">Review</th>
-                      <th className="px-5 py-3 text-left">Status</th>
-                      <th className="px-5 py-3 text-right">Actions</th>
+                      {renderSortableTh('submissions', 'Submissions', 'right', '110px')}
+                      {renderSortableTh('highRisk', 'High-risk', 'right', '95px')}
+                      <th className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '130px' }}>
+                        Review
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '125px' }}>
+                        Status
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-3 text-right" style={{ width: '118px' }}>
+                        Actions
+                      </th>
                     </tr>
                   </TableHeader>
                   <TableBody>
                     {visible.map((job) => (
                       <TableRow key={job.id}>
-                        <td className="px-5 py-4 align-top">
+                        <td className="px-4 py-4 align-top">
                           <div
                             className="text-sm font-semibold text-[var(--text-primary)]"
                             title={formatAbsolute(job.createdAt)}
@@ -756,7 +781,7 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        <td className="px-5 py-4 align-top">
+                        <td className="px-4 py-4 align-top">
                           <div className="flex items-center gap-3">
                             <span
                               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${tileTone(
@@ -768,7 +793,7 @@ export default function HistoryPage() {
                             <div className="min-w-0">
                               <Link
                                 href={`/results/${job.id}`}
-                                className="block truncate text-sm font-semibold text-[var(--text-primary)] hover:text-blue-600 dark:hover:text-blue-400"
+                                className="block break-words text-sm font-semibold leading-5 text-[var(--text-primary)] hover:text-blue-600 dark:hover:text-blue-400"
                                 title={job.assignmentName}
                               >
                                 {job.assignmentName}
@@ -783,14 +808,13 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        <td className="px-5 py-4 text-right align-top">
+                        <td className="px-4 py-4 text-right align-top">
                           <div className="text-sm font-semibold text-[var(--text-primary)]">
                             {job.totalSubmissions}
                           </div>
-                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">submissions</div>
                         </td>
 
-                        <td className="px-5 py-4 text-right align-top">
+                        <td className="px-4 py-4 text-right align-top">
                           {job.highSimilarityCount > 0 ? (
                             <span
                               className="inline-flex items-center rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-700 dark:text-red-400"
@@ -803,11 +827,11 @@ export default function HistoryPage() {
                           )}
                         </td>
 
-                        <td className="px-5 py-4 align-top">
+                        <td className="px-4 py-4 align-top">
                           <ReviewChip status={job.reviewStatus} />
                         </td>
 
-                        <td className="px-5 py-4 align-top">
+                        <td className="px-4 py-4 align-top">
                           <div className="flex items-center gap-2">
                             <StatusChip status={job.status} />
                             {job.persistenceWarning && (
@@ -818,7 +842,7 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        <td className="px-5 py-4 align-top">
+                        <td className="px-4 py-4 align-top">
                           <div className="flex items-center justify-end gap-2">
                             <OpenLink job={job} />
                             <ExportMenu job={job} />
