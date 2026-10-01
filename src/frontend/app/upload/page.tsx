@@ -111,21 +111,22 @@ const ASSIGNMENT_TYPE_OPTIONS = [
   },
 ];
 
-const EXT_COLORS: Record<string, { bg: string; text: string }> = {
-  py: { bg: '#dbeafe', text: '#1d4ed8' },
-  java: { bg: '#ffedd5', text: '#c2410c' },
-  js: { bg: '#fef9c3', text: '#a16207' },
-  ts: { bg: '#dbeafe', text: '#1e40af' },
-  c: { bg: '#ede9fe', text: '#6d28d9' },
-  cpp: { bg: '#ede9fe', text: '#6d28d9' },
-  h: { bg: '#ede9fe', text: '#6d28d9' },
-  go: { bg: '#cffafe', text: '#0e7490' },
-  rs: { bg: '#fee2e2', text: '#b91c1c' },
-  rb: { bg: '#fce7f3', text: '#be185d' },
-  php: { bg: '#e0e7ff', text: '#4338ca' },
-  cs: { bg: '#d1fae5', text: '#065f46' },
-  kt: { bg: '#fce7f3', text: '#be185d' },
-  swift: { bg: '#ffedd5', text: '#c2410c' },
+/** File-extension chips: light tint by default, tinted dark surface in dark mode. */
+const EXT_COLORS: Record<string, string> = {
+  py: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300',
+  java: 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
+  js: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-300',
+  ts: 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300',
+  c: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+  cpp: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+  h: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+  go: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300',
+  rs: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300',
+  rb: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-300',
+  php: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300',
+  cs: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300',
+  kt: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-300',
+  swift: 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
 };
 
 type AssignmentMode = {
@@ -145,9 +146,10 @@ function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
   return fallback;
 }
 
+/** Tailwind classes for the extension chip shown beside each selected file. */
 function getExtColor(filename: string) {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
-  return EXT_COLORS[ext] || { bg: '#f1f5f9', text: '#475569' };
+  return EXT_COLORS[ext] || 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300';
 }
 function getExt(filename: string) {
   return (filename.split('.').pop() || 'FILE').toUpperCase();
@@ -159,10 +161,7 @@ function formatSize(bytes: number) {
 }
 
 const cardShadow = { boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04)' };
-const btnShadow = { boxShadow: '0 1px 2px rgba(37,99,235,0.2), 0 4px 14px rgba(37,99,235,0.28)' };
 const dotGrid = { backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' };
-const blueBg = { background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' };
-const blueCardBg = { background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', border: '1px solid #bfdbfe' };
 type UploadProgressStage = { stage: string; label: string };
 
 type UploadJobProgress = {
@@ -833,13 +832,12 @@ export default function UploadPage() {
               >
                 {/* Dot-grid bg — only visible in empty state */}
                 {files.length === 0 && (
-                  <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
+                  <div className="absolute inset-0 pointer-events-none dark:invisible" style={{ ...dotGrid, opacity: 0.5 }} />
                 )}
 
                 {/* Drag ring */}
                 {isDragOver && (
-                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
-                    style={{ boxShadow: 'inset 0 0 0 2px #3b82f6', background: 'rgba(239,246,255,0.5)' }} />
+                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl bg-blue-50/60 ring-2 ring-inset ring-blue-500 dark:bg-blue-500/10" />
                 )}
 
                 {files.length === 0 ? (
@@ -849,16 +847,15 @@ export default function UploadPage() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <div
-                      className="w-[72px] h-[72px] rounded-[20px] flex items-center justify-center mb-5 transition-all duration-300"
-                      style={{
-                        background: isDragOver ? '#dbeafe' : '#f8fafc',
-                        boxShadow: isDragOver
-                          ? '0 0 0 10px rgba(59,130,246,0.08), 0 1px 3px rgba(0,0,0,0.06)'
-                          : '0 0 0 10px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
-                        transform: isDragOver ? 'scale(1.08)' : 'scale(1)',
-                      }}
+                      className={`w-[72px] h-[72px] rounded-[20px] flex items-center justify-center mb-5 transition-all duration-300 shadow-sm ring-[10px] ${isDragOver
+                          ? 'scale-[1.08] bg-blue-100 ring-blue-500/10 dark:bg-blue-500/20 dark:ring-blue-500/25'
+                          : 'bg-slate-50 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700/80'
+                        }`}
                     >
-                      <UploadIcon size={28} style={{ color: isDragOver ? '#3b82f6' : '#94a3b8', transition: 'color 0.2s' }} />
+                      <UploadIcon
+                        size={28}
+                        className={`transition-colors ${isDragOver ? 'text-blue-600' : 'text-slate-400'}`}
+                      />
                     </div>
                     <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
                       {isDragOver ? 'Release to upload' : 'Drag files here'}
@@ -870,8 +867,7 @@ export default function UploadPage() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                        className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
-                        style={{ borderColor: '#e2e8f0', color: '#475569', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-all duration-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
                       >
                         <FileUp size={13} />Browse files
                       </button>
@@ -887,21 +883,21 @@ export default function UploadPage() {
                       <div className="flex items-center gap-2.5">
                         {zipFile ? (
                           <>
-                            <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: '#fef3c7' }}>
-                              <FolderArchive size={11} style={{ color: '#d97706' }} />
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center bg-amber-100">
+                              <FolderArchive size={11} className="text-amber-600" />
                             </div>
                             <span className="text-sm font-semibold text-slate-700">ZIP Archive</span>
                           </>
                         ) : (
                           <>
-                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#2563eb' }}>
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white bg-blue-600">
                               {selectedFiles.length}
                             </span>
                             <span className="text-sm font-semibold text-slate-700">
                               {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'} selected
                             </span>
                             {files.length < 2 && (
-                              <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ background: '#fef3c7', color: '#b45309' }}>
+                              <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                                 Need 2+
                               </span>
                             )}
@@ -920,14 +916,13 @@ export default function UploadPage() {
 
                     <div className="grid gap-1.5 max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                       {zipFile ? (
-                        <div className="flex items-center gap-3 rounded-xl px-4 py-3.5"
-                          style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#fef3c7' }}>
-                            <FolderArchive size={15} style={{ color: '#d97706' }} />
+                        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-100">
+                            <FolderArchive size={15} className="text-amber-600" />
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-slate-800 truncate">{zipFile.name}</p>
-                            <p className="text-xs font-medium" style={{ color: '#b45309' }}>{formatSize(zipFile.size)}</p>
+                            <p className="text-xs font-medium text-amber-700">{formatSize(zipFile.size)}</p>
                           </div>
                         </div>
                       ) : (
@@ -936,23 +931,17 @@ export default function UploadPage() {
                           return (
                             <div
                               key={i}
-                              className="flex items-center gap-3 rounded-xl border px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200"
-                              style={{ borderColor: '#f1f5f9', background: '#f8fafc' }}
-                              onMouseEnter={(e) => { e.currentTarget.style.background = '#ffffff'; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                              className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
                             >
-                              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
-                                style={{ background: c.bg, color: c.text }}>
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
                                 {getExt(f.name)}
                               </div>
                               <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
                               <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}
-                                className="opacity-0 group-hover/row:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50"
-                                style={{ color: '#cbd5e1' }}
-                                onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.color = '#cbd5e1'; }}
+                                aria-label={`Remove ${f.name}`}
+                                className="w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50 text-slate-300 hover:text-red-500"
                               >
                                 <X size={12} />
                               </button>
@@ -978,7 +967,7 @@ export default function UploadPage() {
                 <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
                   <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
                   <p className="text-sm text-red-700 flex-1">{error}</p>
-                  <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+                  <button onClick={() => setError('')} aria-label="Dismiss error" className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
                 </div>
               )}
               {hasMixedZipSelection && (
@@ -999,13 +988,12 @@ export default function UploadPage() {
               >
                 {/* Dot-grid bg */}
                 {starterFiles.length === 0 && (
-                  <div className="absolute inset-0 pointer-events-none" style={{ ...dotGrid, opacity: 0.5 }} />
+                  <div className="absolute inset-0 pointer-events-none dark:invisible" style={{ ...dotGrid, opacity: 0.5 }} />
                 )}
 
                 {/* Drag ring */}
                 {isStarterDragOver && (
-                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl"
-                    style={{ boxShadow: 'inset 0 0 0 2px #10b981', background: 'rgba(239,246,255,0.5)' }} />
+                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl bg-emerald-50/60 ring-2 ring-inset ring-emerald-500 dark:bg-emerald-500/10" />
                 )}
 
                 {starterFiles.length === 0 ? (
@@ -1015,16 +1003,15 @@ export default function UploadPage() {
                     onClick={() => starterFileInputRef.current?.click()}
                   >
                     <div
-                      className="w-[60px] h-[60px] rounded-[16px] flex items-center justify-center mb-4 transition-all duration-300"
-                      style={{
-                        background: isStarterDragOver ? '#d1fae5' : '#f8fafc',
-                        boxShadow: isStarterDragOver
-                          ? '0 0 0 8px rgba(16,185,129,0.08), 0 1px 3px rgba(0,0,0,0.06)'
-                          : '0 0 0 8px #f1f5f9, 0 1px 3px rgba(0,0,0,0.06)',
-                        transform: isStarterDragOver ? 'scale(1.05)' : 'scale(1)',
-                      }}
+                      className={`w-[60px] h-[60px] rounded-[16px] flex items-center justify-center mb-4 transition-all duration-300 shadow-sm ring-[8px] ${isStarterDragOver
+                          ? 'scale-[1.05] bg-emerald-100 ring-emerald-500/10 dark:bg-emerald-500/20 dark:ring-emerald-500/25'
+                          : 'bg-slate-50 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700/80'
+                        }`}
                     >
-                      <Layers3 size={24} style={{ color: isStarterDragOver ? '#10b981' : '#94a3b8', transition: 'color 0.2s' }} />
+                      <Layers3
+                        size={24}
+                        className={`transition-colors ${isStarterDragOver ? 'text-emerald-600' : 'text-slate-400'}`}
+                      />
                     </div>
                     <h3 className="text-sm font-semibold text-slate-800 mb-1">
                       {isStarterDragOver ? 'Release to upload starter code' : 'Starter Code (Optional)'}
@@ -1035,8 +1022,7 @@ export default function UploadPage() {
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); starterFileInputRef.current?.click(); }}
-                      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-200 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-600"
-                      style={{ borderColor: '#e2e8f0', color: '#475569' }}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
                     >
                       <FileUp size={11} />Browse files
                     </button>
@@ -1049,7 +1035,7 @@ export default function UploadPage() {
                   <div className="px-5 pt-5 pb-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2.5">
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#10b981' }}>
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white bg-emerald-500">
                           {starterFiles.length}
                         </span>
                         <span className="text-sm font-semibold text-slate-700">
@@ -1072,23 +1058,17 @@ export default function UploadPage() {
                         return (
                           <div
                             key={i}
-                            className="flex items-center gap-3 rounded-xl border px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200"
-                            style={{ borderColor: '#f1f5f9', background: '#f8fafc' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffffff'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                            className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
                           >
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
-                              style={{ background: c.bg, color: c.text }}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
                               {getExt(f.name)}
                             </div>
                             <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
                             <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
                             <button
                               onClick={(e) => { e.stopPropagation(); setStarterFiles(starterFiles.filter((_, j) => j !== i)); }}
-                              className="opacity-0 group-hover/row:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50"
-                              style={{ color: '#cbd5e1' }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171'; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.color = '#cbd5e1'; }}
+                              aria-label={`Remove ${f.name}`}
+                              className="w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50 text-slate-300 hover:text-red-500"
                             >
                               <X size={12} />
                             </button>
@@ -1113,7 +1093,7 @@ export default function UploadPage() {
                 <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
                   <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
                   <p className="text-sm text-red-700 flex-1">{error}</p>
-                  <button onClick={() => setError('')} className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+                  <button onClick={() => setError('')} aria-label="Dismiss error" className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
                 </div>
               )}
             </div>
@@ -1163,13 +1143,13 @@ export default function UploadPage() {
                 <div className="p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
-                        <Layers3 size={13} style={{ color: '#64748b' }} />
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-100">
+                        <Layers3 size={13} className="text-slate-500" />
                       </div>
                       <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
                     </div>
                     {selectedAssignmentMode?.version && (
-                      <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5" style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+                      <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5 bg-slate-100 text-slate-400">
                         v{selectedAssignmentMode.version}
                       </span>
                     )}
@@ -1196,10 +1176,9 @@ export default function UploadPage() {
                   )}
 
                   {selectedAssignmentMode?.warnings?.length ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-xl px-3.5 py-3"
-                      style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
-                      <AlertCircle size={13} style={{ color: '#f59e0b' }} className="mt-0.5 shrink-0" />
-                      <p className="text-xs leading-relaxed" style={{ color: '#92400e' }}>{selectedAssignmentMode.warnings[0]}</p>
+                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3">
+                      <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                      <p className="text-xs leading-relaxed text-amber-800">{selectedAssignmentMode.warnings[0]}</p>
                     </div>
                   ) : null}
 
@@ -1211,8 +1190,8 @@ export default function UploadPage() {
                 <div className="p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#f1f5f9' }}>
-                        <SearchCheck size={13} style={{ color: '#64748b' }} />
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-100">
+                        <SearchCheck size={13} className="text-slate-500" />
                       </div>
                       <span className="text-sm font-semibold text-slate-800">Similarity Engine Weights</span>
                     </div>
@@ -1237,13 +1216,18 @@ export default function UploadPage() {
                       return (
                         <div
                           key={engine.key}
-                          className="w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200"
-                          style={{ borderColor: weight > 0 ? '#bfdbfe' : '#f1f5f9', background: weight > 0 ? '#eff6ff' : '#f8fafc' }}
+                          className={`w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200 ${weight > 0
+                              ? 'border-blue-200 bg-blue-50'
+                              : 'border-slate-100 bg-slate-50'
+                            }`}
                         >
-                          <div className="w-4 h-4 rounded flex items-center justify-center border-2 shrink-0"
-                            style={{ borderColor: weight > 0 ? '#2563eb' : '#cbd5e1', background: weight > 0 ? '#2563eb' : 'white' }}>
+                          <div className={`w-4 h-4 rounded flex items-center justify-center border-2 shrink-0 ${weight > 0
+                              ? 'border-blue-600 bg-blue-600'
+                              : 'border-slate-300 bg-white'
+                            }`}
+                          >
                           </div>
-                          <p className="text-sm font-semibold flex-1" style={{ color: weight > 0 ? '#1d4ed8' : '#374151' }}>{engine.label}</p>
+                          <p className={`text-sm font-semibold flex-1 ${weight > 0 ? 'text-blue-700' : 'text-slate-700'}`}>{engine.label}</p>
                           <div className="flex items-center gap-2 w-48">
                             <input
                               type="range"
@@ -1276,32 +1260,20 @@ export default function UploadPage() {
             </div>
           </details>
 
-          {/* Ready Banner */}
+          {/* Ready Banner: status only — the header holds the single Analyze CTA */}
           {canRunCheck && (
-            <div className="mt-4 rounded-2xl flex items-center justify-between px-5 py-4" style={blueCardBg}>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#dbeafe' }}>
-                  <Zap size={14} style={{ color: '#2563eb' }} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: '#1e3a5f' }}>
-                    {zipFile ? '1 archive' : `${selectedFiles.length} files`} ready to analyze
-                  </p>
-                  <p className="text-xs" style={{ color: '#60a5fa' }}>
-                    Auto profile · starter code removal · previous-term matching when available
-                  </p>
-                </div>
+            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-blue-100">
+                <Zap size={14} className="text-blue-600" />
               </div>
-              <button
-                onClick={handleSubmit}
-                disabled={uploading}
-                className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-all duration-200 disabled:opacity-60"
-                style={{ ...blueBg, ...btnShadow }}
-              >
-                {uploading
-                  ? <><Loader2 size={14} className="animate-spin" />Analyzing…</>
-                  : <><Zap size={14} />Analyze Assignment<ArrowRight size={13} className="opacity-70" /></>}
-              </button>
+              <div>
+                <p className="text-sm font-semibold text-blue-900">
+                  {zipFile ? '1 archive' : `${selectedFiles.length} files`} ready to analyze
+                </p>
+                <p className="text-xs text-blue-600">
+                  Auto profile · starter code removal · previous-term matching when available
+                </p>
+              </div>
             </div>
           )}
 
