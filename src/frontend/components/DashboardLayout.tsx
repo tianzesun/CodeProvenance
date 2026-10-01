@@ -9,6 +9,12 @@ import Sidebar, { canRoleAccessPath, type NavRole } from '@/components/Sidebar';
 import SkeletonLoader from '@/components/SkeletonLoader';
 import { SunMedium, MoonStar } from 'lucide-react';
 
+// Routes deliberately closed to admins. Course maintenance lives in
+// Administration → Users & courses, so an admin arriving at the Teaching
+// "Courses & Assignments" page (bookmark, stale link) is sent to their own
+// workspace instead of managing courses from two places.
+const ADMIN_EXCLUDED_PATHS = ['/courses'];
+
 interface DashboardLayoutProps {
   children: ReactNode;
   requiredRole?: 'admin' | 'professor';
@@ -44,6 +50,10 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
     user && user.role !== 'admin' && !isProfessorRouteAllowed(pathname),
   );
 
+  const adminBlocked = Boolean(
+    user && user.role === 'admin' && ADMIN_EXCLUDED_PATHS.includes(pathname),
+  );
+
   useEffect(() => {
     if (loading) {
       return;
@@ -74,6 +84,16 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
         return;
       }
 
+      // Admins maintain courses in Administration → Users & courses; bounce
+      // them off the professor's Teaching page before it flashes content.
+      if (user.role === 'admin' && ADMIN_EXCLUDED_PATHS.includes(pathname)) {
+        if (lastRedirectRef.current !== redirectKey) {
+          lastRedirectRef.current = redirectKey;
+          router.replace('/admin');
+        }
+        return;
+      }
+
       // Professors are limited to the academic workflow (plagiarism check +
       // AI review + courses/assignments). Redirect them away from Engine/R&D
       // and Manage pages if they navigate there directly.
@@ -92,7 +112,7 @@ export default function DashboardLayout({ children, requiredRole, requireAuth = 
   }, [bootstrapped, loading, pathname, requiredRole, requireAuth, router, user]);
 
   // Show loading only if auth is required
-  if (requireAuth && (loading || !bootstrapped || !user || professorBlocked || (requiredRole === 'admin' && user.role !== 'admin'))) {
+  if (requireAuth && (loading || !bootstrapped || !user || professorBlocked || adminBlocked || (requiredRole === 'admin' && user.role !== 'admin'))) {
     return (
       <div className="theme-shell min-h-screen bg-[var(--background)]">
         <SkeletonLoader variant="page" />

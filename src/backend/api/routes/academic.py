@@ -17,8 +17,10 @@ from src.backend.config.database import get_db
 from src.backend.models.database import (
     Assignment,
     AssignmentVersion,
+    Case,
     Course,
     Enrollment,
+    Job,
     Organization,
     Student,
     Term,
@@ -719,8 +721,13 @@ async def create_course_for_org(
     request: Request,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
-    """Create a new course in the current user's organization."""
+    """Create a new course in the current user's organization.
+
+    Course maintenance (create/update/delete) is admin-only; professors
+    keep the read endpoints and the assignment routes they maintain.
+    """
     user = getattr(request.state, "user", {}) or {}
     org_id = user.get("organization_id")
     if not org_id:
@@ -762,9 +769,9 @@ async def update_course_by_id(
     course_id: str,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_admin),
 ):
-    """Update a course by ID."""
+    """Update a course by ID (admin-only, like the rest of course maintenance)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -795,16 +802,66 @@ async def update_course_by_id(
     }
 
 
+def _history_attachments(db: Session, assignment_ids: list[str]) -> tuple[int, int]:
+    """Count check-history rows and cases still pointing at ``assignment_ids``.
+
+    ``jobs.assignment_id`` and ``cases.assignment_id`` are nullable foreign
+    keys with no ON DELETE rule, so deleting an assignment (or a course that
+    owns one) while they point at it surfaces as an opaque 500 from the driver.
+    Evidence wins over structure: callers get the counts back and decide the
+    message instead of orphaning history silently.
+    """
+    if not assignment_ids:
+        return 0, 0
+    jobs = db.query(func.count(Job.id)).filter(Job.assignment_id.in_(assignment_ids)).scalar() or 0
+    cases = (
+        db.query(func.count(Case.id)).filter(Case.assignment_id.in_(assignment_ids)).scalar() or 0
+    )
+    return jobs, cases
+
+
+def _attachment_detail(jobs: int, cases: int) -> str:
+    """Build the 409 detail naming which evidence blocks the deletion."""
+    parts = []
+    if jobs:
+        parts.append(f"{jobs} check{'s' if jobs != 1 else ''}")
+    if cases:
+        parts.append(f"{cases} case{'s' if cases != 1 else ''}")
+    return (
+        "still has "
+        + " and ".join(parts)
+        + " attached. Check history and cases are kept, so remove those first."
+    )
+
+
 @router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_course_by_id(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_admin),
 ):
-    """Delete a course by ID."""
+    """Delete a course by ID (admin-only), taking its assignments with it.
+
+    ``assignments.course_id`` has no ON DELETE rule, so the course's own
+    assignments are removed first (their versions cascade) — which is what the
+    confirmation copy has always promised. An assignment carrying check history
+    or a case is not silently orphaned: the whole delete is refused with 409
+    naming the evidence that has to be cleared first.
+    """
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+    assignments = db.query(Assignment).filter(Assignment.course_id == course.id).all()
+    if assignments:
+        jobs, cases = _history_attachments(db, [a.id for a in assignments])
+        if jobs or cases:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This course's assignments " + _attachment_detail(jobs, cases),
+            )
+        db.query(Assignment).filter(Assignment.course_id == course.id).delete(
+            synchronize_session=False
+        )
     db.delete(course)
     db.commit()
 
@@ -919,10 +976,20 @@ async def delete_assignment_by_id(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
-    """Delete an assignment by ID."""
+    """Delete an assignment by ID.
+
+    Check history and cases attached to the assignment block the delete with
+    409 (see :func:`_history_attachments`) instead of failing at the driver.
+    """
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
+    jobs, cases = _history_attachments(db, [assignment.id])
+    if jobs or cases:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This assignment " + _attachment_detail(jobs, cases),
+        )
     db.delete(assignment)
     db.commit()
 

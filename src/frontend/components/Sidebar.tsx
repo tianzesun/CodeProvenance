@@ -128,7 +128,10 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/courses',
         label: 'Courses & Assignments',
         icon: BookOpen,
-        roles: ['professor', 'admin'],
+        // Professor workspace: course CRUD itself is admin-only and lives in
+        // Administration → Users & courses, so admins are kept out of this
+        // item entirely (DashboardLayout redirects them to /admin).
+        roles: ['professor'],
         primary: true,
       },
     ],

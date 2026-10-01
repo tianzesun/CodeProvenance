@@ -267,6 +267,7 @@ interface CourseWithInstructors {
   year?: number | null;
   term_id?: string | null;
   department?: string | null;
+  description?: string | null;
   organization_name?: string;
   instructors: CourseInstructor[];
   assignment_count?: number;
@@ -274,6 +275,11 @@ interface CourseWithInstructors {
 }
 
 type ImportRowStatus = 'created' | 'preview' | 'skipped' | 'error';
+
+/** Assignments reported by the admin payload, falling back to the loaded list. */
+function courseAssignmentCount(course: CourseWithInstructors): number {
+  return course.assignment_count ?? course.assignments?.length ?? 0;
+}
 
 interface ImportRowResult {
   row: number;
@@ -724,7 +730,7 @@ function TermCard({
     courses.flatMap((course) => course.instructors.map((instructor) => instructor.id)),
   ).size;
   const assignmentCount = courses.reduce(
-    (sum, course) => sum + (course.assignment_count ?? course.assignments?.length ?? 0),
+    (sum, course) => sum + courseAssignmentCount(course),
     0,
   );
   const courseCount = term.course_count ?? courses.length;
@@ -1104,6 +1110,10 @@ export default function AdminPage() {
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [courseSaving, setCourseSaving] = useState(false);
   const [courseError, setCourseError] = useState('');
+  // Course create vs edit, plus the pending delete confirmation.
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [courseToDelete, setCourseToDelete] = useState<CourseWithInstructors | null>(null);
+  const [courseDeleting, setCourseDeleting] = useState(false);
   const [courseForm, setCourseForm] = useState({
     name: '',
     code: '',
@@ -1111,6 +1121,7 @@ export default function AdminPage() {
     year: String(new Date().getFullYear()),
     department: '',
     description: '',
+    term_id: '',
   });
 
   // ── Data loading ─────────────────────────────────────────────────────────────
@@ -1276,6 +1287,7 @@ export default function AdminPage() {
 
   const openCourseModal = () => {
     setCourseError('');
+    setEditingCourseId(null);
     setCourseForm({
       name: '',
       code: '',
@@ -1283,6 +1295,27 @@ export default function AdminPage() {
       year: String(new Date().getFullYear()),
       department: '',
       description: '',
+      term_id: '',
+    });
+    setShowCourseModal(true);
+  };
+
+  /**
+   * Prefill the course modal for an edit. ``term_id`` is carried through so a
+   * registry link survives the PUT — omitting it would unlink the term, because
+   * the endpoint mirrors term/year from the registry whenever one is present.
+   */
+  const openEditCourse = (course: CourseWithInstructors) => {
+    setCourseError('');
+    setEditingCourseId(course.id);
+    setCourseForm({
+      name: course.name,
+      code: course.code ?? '',
+      term: course.term || 'Fall',
+      year: course.year ? String(course.year) : String(new Date().getFullYear()),
+      department: course.department ?? '',
+      description: course.description ?? '',
+      term_id: course.term_id ?? '',
     });
     setShowCourseModal(true);
   };
@@ -1290,34 +1323,64 @@ export default function AdminPage() {
   const closeCourseModal = () => {
     if (courseSaving) return;
     setShowCourseModal(false);
+    setEditingCourseId(null);
     setTimeout(() => courseButtonRef.current?.focus(), 0);
   };
 
-  const handleCreateCourse = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSaveCourse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCourseError('');
     if (!courseForm.name.trim()) {
       setCourseError('Course name is required.');
       return;
     }
+    const wasEditing = Boolean(editingCourseId);
     setCourseSaving(true);
     try {
-      await apiClient.post('/api/courses', {
+      const payload = {
         name: courseForm.name.trim(),
         code: courseForm.code.trim() || null,
         term: courseForm.term.trim() || null,
         year: courseForm.year ? Number(courseForm.year) : null,
         department: courseForm.department.trim() || null,
         description: courseForm.description.trim() || null,
-      });
+        term_id: courseForm.term_id || null,
+      };
+      if (editingCourseId) {
+        await apiClient.put(`/api/courses/${editingCourseId}`, payload);
+      } else {
+        await apiClient.post('/api/courses', payload);
+      }
       await loadCoursesWithInstructors();
       setShowCourseModal(false);
-      setSuccessMessage('Course created successfully.');
+      setEditingCourseId(null);
+      setSuccessMessage(wasEditing ? 'Course updated successfully.' : 'Course created successfully.');
       setTimeout(() => courseButtonRef.current?.focus(), 0);
     } catch (error) {
       setCourseError(getErrorMessage(error));
     } finally {
       setCourseSaving(false);
+    }
+  };
+
+  // ── Course deletion ───────────────────────────────────────────────────────────
+
+  const confirmDeleteCourse = async () => {
+    if (!courseToDelete) return;
+    setCourseDeleting(true);
+    setPageError('');
+    try {
+      await apiClient.delete(`/api/courses/${courseToDelete.id}`);
+      setCourseToDelete(null);
+      await loadCoursesWithInstructors();
+      setSuccessMessage(`“${courseToDelete.name}” deleted.`);
+    } catch (error) {
+      // Courses that still own assignments come back as 409 with an
+      // actionable message — surface it instead of a generic failure.
+      setCourseToDelete(null);
+      setPageError(getErrorMessage(error));
+    } finally {
+      setCourseDeleting(false);
     }
   };
 
@@ -1597,6 +1660,7 @@ export default function AdminPage() {
         name: course.name,
         code: course.code ?? null,
         department: course.department ?? null,
+        description: course.description ?? null,
         term_id: termId || null,   // empty string → unlink
       });
       await loadCoursesWithInstructors();
@@ -2121,7 +2185,8 @@ export default function AdminPage() {
                   Courses &amp; assignments
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Manage course access and see which assignments belong to each course.
+                  Create, edit, and delete courses, assign professors and terms, and review the
+                  assignments each course owns.
                 </p>
               </div>
 
@@ -2210,7 +2275,7 @@ export default function AdminPage() {
                   const currentInstructorIds = course.instructors.map((i) => i.id);
                   const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
                   const isAssigning = assigningCourse === course.id;
-                  const assignmentCount = course.assignment_count ?? course.assignments?.length ?? 0;
+                  const assignmentCount = courseAssignmentCount(course);
                   const isAssignmentsOpen = expandedCourseIds.has(course.id);
                   const accent = courseAccent(course.department || course.code || course.name);
                   const linkedTerm = course.term
@@ -2241,9 +2306,31 @@ export default function AdminPage() {
                               </span>
                             )}
                           </div>
-                          <h3 className="mt-2 text-lg font-semibold leading-6 tracking-tight text-slate-900 dark:text-white">
-                            {course.name}
-                          </h3>
+                          <div className="mt-2 flex items-start justify-between gap-3">
+                            <h3 className="min-w-0 text-lg font-semibold leading-6 tracking-tight text-slate-900 dark:text-white">
+                              {course.name}
+                            </h3>
+                            {/* Course maintenance lives here: professors keep
+                                assignments, admins keep the course itself. */}
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEditCourse(course)}
+                                aria-label={`Edit ${course.name}`}
+                                className="rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                              >
+                                <Pencil size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCourseToDelete(course)}
+                                aria-label={`Delete ${course.name}`}
+                                className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
                           <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                             <span className={`font-semibold ${accent.text}`}>{linkedTerm}</span>
                             <span aria-hidden>·</span>
@@ -2560,11 +2647,15 @@ export default function AdminPage() {
 
       <Modal
         open={showCourseModal}
-        title="Create a new course"
-        description="Add a course to your organization. You can assign instructors and create assignments after it is created."
+        title={editingCourseId ? 'Edit course' : 'Create a new course'}
+        description={
+          editingCourseId
+            ? 'Update the course details. Instructors, term links, and assignments are managed on the course card.'
+            : 'Add a course to your organization. You can assign instructors and create assignments after it is created.'
+        }
         onClose={closeCourseModal}
       >
-        <form onSubmit={handleCreateCourse} className="space-y-4">
+        <form onSubmit={handleSaveCourse} className="space-y-4">
           {courseError && (
             <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -2600,13 +2691,23 @@ export default function AdminPage() {
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Term">
+            <Field
+              label="Term"
+              hint={editingCourseId && courseForm.term_id ? 'Set by the registry term' : undefined}
+            >
               <div className="relative">
                 <select
                   value={courseForm.term}
                   onChange={(e) => setCourseForm((c) => ({ ...c, term: e.target.value }))}
+                  disabled={Boolean(courseForm.term_id)}
                   className={selectClass}
                 >
+                  {/* A registry-linked course takes its season from the term, so
+                      the text field is read-only; a legacy season outside the
+                      four options still has to stay selectable. */}
+                  {courseForm.term && !TERM_NAMES.includes(courseForm.term) && (
+                    <option>{courseForm.term}</option>
+                  )}
                   <option>Fall</option>
                   <option>Winter</option>
                   <option>Spring</option>
@@ -2615,13 +2716,17 @@ export default function AdminPage() {
                 <ChevronDown size={14} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" />
               </div>
             </Field>
-            <Field label="Year">
+            <Field
+              label="Year"
+              hint={editingCourseId && courseForm.term_id ? 'Set by the registry term' : undefined}
+            >
               <input
                 type="number"
                 min="1900"
                 max="2200"
                 value={courseForm.year}
                 onChange={(e) => setCourseForm((c) => ({ ...c, year: e.target.value }))}
+                disabled={Boolean(courseForm.term_id)}
                 className={inputClass}
               />
             </Field>
@@ -2650,7 +2755,9 @@ export default function AdminPage() {
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
             >
               {courseSaving && <Loader2 size={15} className="animate-spin" />}
-              {courseSaving ? 'Creating…' : 'Create course'}
+              {courseSaving
+                ? editingCourseId ? 'Saving…' : 'Creating…'
+                : editingCourseId ? 'Save changes' : 'Create course'}
             </button>
           </div>
         </form>
@@ -2837,6 +2944,98 @@ export default function AdminPage() {
               >
                 <Trash2 size={14} />
                 Remove term
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete course confirmation modal ───────────────────────────────────── */}
+      {courseToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-course-title"
+          onClick={() => {
+            if (!courseDeleting) setCourseToDelete(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white shadow-2xl dark:bg-slate-950 ring-1 ring-slate-200 dark:ring-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start gap-4 px-6 pt-6 pb-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/15">
+                <Trash2 size={20} className="text-red-600 dark:text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3
+                  id="delete-course-title"
+                  className="text-base font-semibold text-slate-900 dark:text-white"
+                >
+                  Delete course?
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  <strong className="font-semibold text-slate-700 dark:text-slate-300">
+                    {courseToDelete.name}
+                  </strong>{' '}
+                  and its {courseAssignmentCount(courseToDelete)} assignment
+                  {courseAssignmentCount(courseToDelete) === 1 ? '' : 's'} will be permanently
+                  deleted.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCourseToDelete(null)}
+                disabled={courseDeleting}
+                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+                aria-label="Cancel"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Evidence that is kept is evidence that blocks the delete */}
+            {courseAssignmentCount(courseToDelete) > 0 && (
+              <div className="mx-6 mb-2 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  Check history and integrity cases are <strong>kept</strong>, not deleted. If any
+                  of these assignments has them attached, the deletion is refused instead.
+                </p>
+              </div>
+            )}
+
+            {/* Info note */}
+            <p className="px-6 pb-4 text-xs text-slate-400 dark:text-slate-500">
+              Enrollments and instructor links for this course are removed with it. This cannot be
+              undone.
+            </p>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCourseToDelete(null)}
+                disabled={courseDeleting}
+                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteCourse}
+                disabled={courseDeleting}
+                className="h-10 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70"
+              >
+                {courseDeleting ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
+                {courseDeleting ? 'Deleting…' : 'Delete course'}
               </button>
             </div>
           </div>

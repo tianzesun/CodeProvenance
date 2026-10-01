@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { Card, CardHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermLabel, buildTermOptions, courseTermLabel, type Term } from '@/lib/terms';
@@ -11,6 +12,15 @@ type Assignment = { id: string; name: string; term: string | null; assignment_ty
 type Course = { id: string; name: string; code: string | null; term: string | null; year: number | null; term_id: string | null; department: string | null; assignment_count: number };
 type Form = { name: string; code: string; term: string; year: string; department: string; description: string; term_id: string };
 const EMPTY: Form = { name: '', code: '', term: '', year: '', department: 'Computer Science', description: '', term_id: '' };
+
+/**
+ * Prefer the API's own reason when an action is refused — a 409 explains which
+ * check history blocks a delete — falling back to a fixed message.
+ */
+function errorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === 'string' && detail ? detail : fallback;
+}
 
 /** Assignment types selectable when creating an assignment. */
 const ASSIGNMENT_TYPES = [
@@ -28,6 +38,13 @@ type AssignmentForm = { name: string; assignment_type: string; due_at: string };
 const EMPTY_ASSIGNMENT: AssignmentForm = { name: '', assignment_type: 'programming', due_at: '' };
 
 export default function CoursesPage() {
+  // Course maintenance (create / edit / delete) belongs to admins and lives in
+  // Administration → Users & courses; admins are redirected off this page.
+  // What remains here for professors is browsing courses and maintaining the
+  // assignments inside them.
+  const { user } = useAuth();
+  const canManageCourses = user?.role === 'admin';
+
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,14 +110,14 @@ export default function CoursesPage() {
       const p = { name: form.name.trim(), code: form.code.trim() || null, term_id: form.term_id || null, term: form.term.trim() || null, year: form.year ? Number(form.year) : null, department: form.department.trim() || null, description: form.description.trim() || null };
       if (editingId) await apiClient.put(`/api/courses/${editingId}`, p); else await apiClient.post('/api/courses', p);
       closeForm(); await fetchCourses();
-    } catch { setError('Failed to save course.'); }
+    } catch (error) { setError(errorMessage(error, 'Failed to save course.')); }
     finally { setSaving(false); }
   };
 
   const deleteCourse = async (id: string) => {
     if (!confirm('Delete this course and all its assignments?')) return;
     try { await apiClient.delete(`/api/courses/${id}`); if (expandedId === id) setExpandedId(null); await fetchCourses(); }
-    catch { setError('Failed to delete course.'); }
+    catch (error) { setError(errorMessage(error, 'Failed to delete course.')); }
   };
 
   const toggleExpand = async (cid: string) => {
@@ -114,7 +131,7 @@ export default function CoursesPage() {
   const deleteAssignment = async (aid: string) => {
     if (!confirm('Delete this assignment?')) return;
     try { await apiClient.delete(`/api/assignments/${aid}`); setAssignments((p) => p.filter((a) => a.id !== aid)); await fetchCourses(); }
-    catch { setError('Failed to delete assignment.'); }
+    catch (error) { setError(errorMessage(error, 'Failed to delete assignment.')); }
   };
 
   const openAssignmentForm = (cid: string) => {
@@ -143,7 +160,7 @@ export default function CoursesPage() {
       const r = await apiClient.get('/api/assignments', { params: { course_id: cid } });
       setAssignments((r.data?.assignments || r.data || []) as Assignment[]);
       await fetchCourses();
-    } catch { setError('Failed to create assignment.'); }
+    } catch (error) { setError(errorMessage(error, 'Failed to create assignment.')); }
     finally { setAssignmentSaving(false); }
   };
 
@@ -168,7 +185,11 @@ export default function CoursesPage() {
       <div className="theme-page-container">
         {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
         <Card>
-          <CardHeader title="Courses" description="Manage your courses and assignments." action={
+          <CardHeader title="Courses" description={
+            canManageCourses
+              ? 'Manage your courses and their assignments.'
+              : 'Your courses and their assignments. Course details are maintained by an administrator.'
+          } action={
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 shadow-sm lg:w-72">
                 <Search size={15} />
@@ -253,7 +274,7 @@ export default function CoursesPage() {
           <div className="divide-y divide-slate-100">
             {loading ? <div className="px-5 py-12 text-center text-sm text-slate-500">Loading courses…</div>
             : filtered.length === 0 && (Boolean(search) || termFilter !== 'all') ? <NoMatches />
-            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}<AddCourseCard onAdd={openCreate} /></>}
+            : <>{filtered.map((c) => <CourseRow key={c.id} course={c} canManageCourses={canManageCourses} expanded={expandedId === c.id} assignments={assignments} assignmentsLoading={assignmentsLoading} onEdit={() => openEdit(c)} onDelete={() => deleteCourse(c.id)} onToggle={() => toggleExpand(c.id)} onDeleteAssignment={deleteAssignment} showAssignmentForm={assignmentCourseId === c.id} assignmentForm={assignmentForm} assignmentSaving={assignmentSaving} onAssignmentFormChange={setAssignmentForm} onOpenAssignmentForm={() => openAssignmentForm(c.id)} onCloseAssignmentForm={closeAssignmentForm} onSaveAssignment={() => saveAssignment(c.id)} />)}{canManageCourses ? <AddCourseCard onAdd={openCreate} /> : filtered.length === 0 ? <CoursesReadOnlyHint /> : null}</>}
           </div>
         </Card>
       </div>
@@ -287,6 +308,25 @@ function AddCourseCard({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+/**
+ * Stands in for the "Add course" card when the viewer may not create courses.
+ * It keeps the empty state actionable instead of silently blank.
+ */
+function CoursesReadOnlyHint() {
+  return (
+    <div className="flex flex-col items-center px-5 py-14 text-center">
+      <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400">
+        <BookOpen size={30} strokeWidth={2} aria-hidden="true" />
+      </span>
+      <span className="mt-3 text-sm font-semibold text-slate-600">No courses yet</span>
+      <span className="mt-1 max-w-sm text-xs leading-5 text-slate-400">
+        An administrator creates and maintains courses. Once a course exists you can add
+        and remove its assignments from here.
+      </span>
+    </div>
+  );
+}
+
 function NoMatches() {
   return (
     <div className="flex flex-col items-center px-5 py-16 text-center">
@@ -297,8 +337,8 @@ function NoMatches() {
   );
 }
 
-function CourseRow({ course: c, expanded, assignments, assignmentsLoading, onEdit, onDelete, onToggle, onDeleteAssignment, showAssignmentForm, assignmentForm, assignmentSaving, onAssignmentFormChange, onOpenAssignmentForm, onCloseAssignmentForm, onSaveAssignment }: {
-  course: Course; expanded: boolean; assignments: Assignment[]; assignmentsLoading: boolean;
+function CourseRow({ course: c, canManageCourses, expanded, assignments, assignmentsLoading, onEdit, onDelete, onToggle, onDeleteAssignment, showAssignmentForm, assignmentForm, assignmentSaving, onAssignmentFormChange, onOpenAssignmentForm, onCloseAssignmentForm, onSaveAssignment }: {
+  course: Course; canManageCourses: boolean; expanded: boolean; assignments: Assignment[]; assignmentsLoading: boolean;
   onEdit: () => void; onDelete: () => void; onToggle: () => void; onDeleteAssignment: (id: string) => void;
   showAssignmentForm: boolean; assignmentForm: AssignmentForm; assignmentSaving: boolean;
   onAssignmentFormChange: (form: AssignmentForm) => void;
@@ -313,8 +353,12 @@ function CourseRow({ course: c, expanded, assignments, assignmentsLoading, onEdi
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">{c.department && <span>{c.department}</span>}<span>{c.department ? '· ' : ''}{c.assignment_count ?? 0} {c.assignment_count === 1 ? 'assignment' : 'assignments'}</span></div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button type="button" onClick={onEdit} aria-label={`Edit ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Pencil size={15} /></button>
-          <button type="button" onClick={onDelete} aria-label={`Delete ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+          {canManageCourses && (
+            <>
+              <button type="button" onClick={onEdit} aria-label={`Edit ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Pencil size={15} /></button>
+              <button type="button" onClick={onDelete} aria-label={`Delete ${c.name}`} className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+            </>
+          )}
           <button type="button" onClick={onToggle} aria-label="Toggle" className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><ChevronRight size={15} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} /></button>
         </div>
       </div>
