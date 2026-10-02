@@ -155,18 +155,23 @@ async def forgot_password(
     request: ForgotPasswordRequest, db: Session = Depends(get_db)
 ):
     """Request password reset."""
+    # Mirror how every other path stores addresses (register, create-user and
+    # login all normalize), otherwise `Prof@Uni.EDU` fails the lookup and the
+    # user is told an email is coming that was never sent.
+    email = request.email.strip().lower()
+
     # Rate limit: max 1 request per email per cooldown period
     now = time.time()
-    last_request = _forgot_password_rate_limit.get(request.email)
+    last_request = _forgot_password_rate_limit.get(email)
     if last_request and (now - last_request) < ForgotPassword_COOLDOWN_SECONDS:
         # Always return success to avoid email enumeration
         return {
             "message": "If an account with this email exists, a password reset link has been sent."
         }
 
-    _forgot_password_rate_limit[request.email] = now
+    _forgot_password_rate_limit[email] = now
 
-    user = db.query(User).filter(User.email == request.email).first()
+    user = db.query(User).filter(User.email == email).first()
 
     # Always return success for security (don't reveal if email exists)
     if not user:

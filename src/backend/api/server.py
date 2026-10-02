@@ -5508,12 +5508,11 @@ def _login_sync(email, password):
             _record_login_failure(email)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
-            pending_verification = (
-                user.verify_token
-                and user.verify_token_expires
-                and user.verify_token_expires > datetime.now(timezone.utc)
-            )
-            if pending_verification:
+            # A row still carrying a verification token was registered but
+            # never redeemed its link — whatever the token's age, the remedy
+            # is the same and "disabled" would blame the wrong thing. (The
+            # expiry only decides whether the emailed link still works.)
+            if user.verify_token:
                 # The password was correct; the account only waits on its
                 # inbox. That is not an auth failure, so no attempt is
                 # recorded and no lockout can shadow a verification.

@@ -41,8 +41,19 @@ function calculatePasswordStrength(password: string): { score: number; label: st
 }
 
 function validatePassword(password: string): string | null {
-  if (password.length < 8) {
-    return 'Password must be at least 8 characters long.';
+  // Mirror of the server's policy (validate_password_strength): the page
+  // must not accept a password the API will reject after submit.
+  if (password.length < 12) {
+    return 'Password must be at least 12 characters long.';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must contain at least one uppercase letter.';
+  }
+  if (!/[a-z]/.test(password)) {
+    return 'Password must contain at least one lowercase letter.';
+  }
+  if (!/[0-9]/.test(password)) {
+    return 'Password must contain at least one number.';
   }
   return null;
 }
@@ -157,7 +168,7 @@ function ResetPasswordContent() {
                       ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
                       : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
                   }`}
-                  placeholder="At least 8 characters"
+                  placeholder="At least 12 characters"
                 />
                 <button
                   type="button"
@@ -187,13 +198,13 @@ function ResetPasswordContent() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-400">
-                    {password.length}/8 min
+                    {password.length}/12 min
                   </p>
                 </div>
               )}
               {!password && (
                 <p className="mt-2 text-xs text-slate-400">
-                  Use at least 8 characters with mixed case, numbers, and symbols.
+                  Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
                 </p>
               )}
             </div>
