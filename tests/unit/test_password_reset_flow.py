@@ -38,7 +38,11 @@ def _unique_email() -> str:
 def _create_active_user(email: str, password: str = ORIGINAL_PASSWORD) -> str:
     """Insert an active account and return its tenant id for cleanup."""
     with SessionLocal() as db:
-        tenant = Tenant(name=f"{email} Workspace", api_key_hash="test-hash")
+        # Unique per test: api_key_hash is a UNIQUE column, so a leftover row
+        # from a killed run must never collide with the next test's tenant.
+        tenant = Tenant(
+            name=f"{email} Workspace", api_key_hash=f"test-hash-{uuid.uuid4().hex}"
+        )
         db.add(tenant)
         db.flush()
         db.add(
