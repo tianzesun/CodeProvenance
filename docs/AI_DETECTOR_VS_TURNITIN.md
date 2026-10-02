@@ -29,6 +29,39 @@ published false-positive targets (its own docs claim <1% FP on papers ≥20% AI;
 independent studies put real-world FP at 5–20%). It is treated as a screening
 signal, not an accusation.
 
+## Verification pass (2026-09-28): double-checked against Turnitin's public facts
+
+Re-verified against public sources before repeating any comparison claim:
+
+1. **Score bands and the "*%" convention are Turnitin's, and we match them.**
+   Turnitin reports AI writing as 0% / 1–19% (displayed as `*%`, exact value
+   withheld) / 20–49% / 50–79% / 80–100%. Our report's bands follow the same
+   ranges; our colors are a green→red severity ramp rather than Turnitin's
+   palette. Contract pinned in `tests/unit/test_ai_report_score_bands.py`.
+2. **Turnitin's AI detector explicitly does not cover our task.** Turnitin's
+   AI Writing Report file requirements: minimum 300 words *prose*, languages
+   English/Spanish/Japanese, and "AI detection is currently most reliable for
+   English prose. Non-prose formats (e.g., poetry, code, lists, tables) may
+   not be accurately analyzed." (Turnitin requirements as published by
+   institutions — e.g. UTRGV KB "Similarity Report & AI Report File
+   Requirements", Sep 2025.) **On AI-generated *code* Turnitin disclaims
+   accuracy; IntegrityDesk is code-native** (tree-sitter AST, token statistics,
+   phrase-level LLM fingerprints, line-level evidence, case loop).
+3. **Turnitin's own false-positive record is contested.** Launch claim: <1%
+   document-level FP (Chechitelli, May 2023). By June 2023 Turnitin declined
+   to disclose the revised document-level FP rate after early scrutiny (Inside
+   Higher Ed, 2023-06-01). Vanderbilt disabled Turnitin AI detection outright
+   in Aug 2023 over FP risk and non-native-English bias (at 1% FP, ~750 of its
+   75,000 papers/yr would be misflagged). ESL bias in AI detectors documented
+   by Stanford HAI (2023).
+4. **Where Turnitin still leads — do not claim otherwise:** prose coverage,
+   scale (16,000+ institutions), and years of published validation. We do not
+   do prose detection at all, and our code-side accuracy (safe-blend AUC 0.591
+   grouped holdout) is honest, modest, and single-dataset — see the gaps
+   below. The defensible claims are **domain coverage (code, where Turnitin
+   says it is unreliable), per-signal explainability, and measured,
+   published false-positive rates** — not raw detection accuracy parity.
+
 ## Capability matrix
 
 Legend: **LIVE** = on in default production config · **DISABLED** = built but
@@ -51,7 +84,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 | 12 | Language coverage (detection) | **PARTIAL** | prose: English + others | — | Frontend advertises `.kt`/`.swift`; signals are Python-weighted (AST extractor tuned for Python; other languages fall back to generic signals). **2026-08-14:** tree-sitter AST now parses all advertised languages (Python/Java/C/C++/C#/JS/TS/Go/Rust); fixed TypeScript loader resolving `language_typescript` (was silently falling back to lexical). Kotlin/Swift remain lexical-only (bindings not installed). |
 | 13 | Non-native-English / L2 caveat handling | MISSING (n/a, code) | **LIVE** (documented L2 limitation) | BEST | For code the analogue is "non-expert student style"; not modeled. |
 | 14 | Adversarial / obfuscation resistance testing | **MISSING** | partial | par | No test suite for paraphrasing/refactoring/comment-stripping attacks on our detector. |
-| 15 | Published false-positive-rate targets | **PARTIAL** (measured, doc-published) | **LIVE** (<1% claimed at ≥20% AI; independent: 5–20%) | par | Human-code FP now measured and published honestly (`docs/HUMAN_FP_BASELINE.md`): 21% of novice student Python flags at the 0.70 high band, 0% on community code. Not yet surfaced inside the product UI. |
+| 15 | Published false-positive-rate targets | **LIVE** (measured + in-product) | **LIVE** (<1% claimed at ≥20% AI at launch; revised rate later withheld; independent estimates 5–20%) | par | Human-code FP measured and surfaced in-product (accuracy page, results banner, dossier) since the 2026-09-21 recalibration: **2.3%** of novice student Python flags at the 0.70 high band (9.8% at 0.40), 0% on community code — `docs/HUMAN_FP_BASELINE.md`. |
 | 16 | External holdout beyond one dataset | **DISABLED** | **LIVE** | par | We rely on AIGCodeSet (single dataset, competitive-programming style). FPR validation UI exists (`/tools/fpr-validation`). |
 | 17 | Score-as-signal framing (not proof) | **LIVE** | **LIVE** | BEST | Both explicitly tell users not to treat scores as sole basis for action. |
 | 18 | Binoculars / open detection SOTA | MISSING (not installed) | n/a | optional | Not installed in `requirements.txt`. |
@@ -86,13 +119,17 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
    (2026-08-14):** the upload page now qualifies that Kotlin/Swift get lexical +
    statistical signals only (no AST-structure signal) and treats those results
    as review indicators.
-7. **Measured student-code FP is high (2026-08-22).** Running the live
-   safe-blend over 174 real novice student Python submissions (Kaggle corpus)
-   flags **21% at the 0.70 high band and 47% at the 0.40 medium band**
-   (`docs/HUMAN_FP_BASELINE.md`) — while community/expert human code scores
-   0% FP. The weakness is concentrated on exactly the production input
-   distribution. Threshold/banding decisions now have a live number to answer
-   to; the labelled institutional holdout remains the decisive measurement.
+7. **Measured student-code FP was high, now largely fixed (2026-09-21).**
+   The first baseline (2026-08-22) ran the live safe-blend over 174 real
+   novice student Python submissions and flagged **21% at the 0.70 high band
+   and 47% at the 0.40 medium band**, while community/expert human code
+   scored 0% FP. Four targeted fixes (removing the "well-commented code"
+   fingerprint, per-family saturation caps, finite-sample entropy
+   correction, low-confidence capping) cut this to **2.3% at ≥0.70, 3.4% at
+   ≥0.50, 9.8% at ≥0.40** on the same corpus, controls unchanged —
+   `docs/HUMAN_FP_BASELINE.md` § Recalibration. The in-product artifact
+   (`human_fp_baseline.json`) now serves the recalibrated numbers. The
+   labelled institutional holdout remains the decisive measurement.
 
 ## What we did about this (this work item)
 

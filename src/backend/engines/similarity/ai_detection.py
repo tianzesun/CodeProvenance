@@ -7,7 +7,7 @@ Detection signals:
 1. N-gram perplexity  — LLM output has lower token-level entropy
 2. Burstiness         — Human code has more variation in line complexity
 3. Stylometry         — Comment formality, generic naming, type-hint density
-4. Pattern library    — 40+ LLM-specific regex fingerprints
+4. Pattern library    — 19 phrase-level LLM regex fingerprints (3 families)
 5. Structural entropy — AST-level uniformity (Python only)
 6. Vocabulary richness — TTR and hapax legomena ratio
 7. Whitespace rhythm  — LLMs produce very regular indentation patterns

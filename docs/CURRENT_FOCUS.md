@@ -29,8 +29,9 @@ as its UI.
 - **Learned fusion** is the production primary score (LOGO AUC 0.865 on 1371 pairs,
   artifact retrained 2026-08-22); training runner lives at
   `src/backend/benchmark/runners/learned_fusion_training_runner.py`
-- **Human-code FP baseline measured & published in-product**: 21% of real novice
-  student Python flags at the 0.70 high band, 47% at 0.40 medium; 0% on
+- **Human-code FP baseline measured & published in-product**: after the
+  2026-09-21 recalibration, **2.3%** of real novice student Python flags at the
+  0.70 high band (9.8% at 0.40 medium; was 21%/47% pre-fix); 0% on
   community/expert code. See `docs/HUMAN_FP_BASELINE.md` — surfaced on the
   accuracy page, results banner, and dossier evidence details.
 - **E2E verified on a from-scratch stack** (fresh Postgres → full alembic chain →

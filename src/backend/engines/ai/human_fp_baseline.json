@@ -1,19 +1,18 @@
 {
-  "measured_at": "2026-08-22T16:15:32",
-  "method": "scripts/measure_human_fp.py — production AIDetectionOrchestrator (safe-blend) over known-human corpora",
+  "measured_at": "2026-09-21",
+  "method": "scripts/measure_human_fp.py - production AIDetectionOrchestrator (safe-blend) over known-human corpora; post-recalibration rerun (see docs/HUMAN_FP_BASELINE.md)",
   "reference_doc": "docs/HUMAN_FP_BASELINE.md",
-  "raw_report": "reports/human_fp/human_fp_report_20260822_161532.json",
+  "raw_report": "docs/HUMAN_FP_BASELINE.md (section: Recalibration 2026-09-21)",
+  "supersedes": "pre-recalibration run 2026-08-22 (FP@0.70 21.3% -> 2.3%)",
   "corpora": {
     "kaggle_student_code": {
       "description": "Real novice student Python submissions (Kaggle corpus)",
       "count": 174,
-      "mean": 0.4387,
-      "median": 0.373,
-      "p90": 0.761,
-      "max": 0.812,
-      "fp_at_0.40": 0.4713,
-      "fp_at_0.50": 0.3908,
-      "fp_at_0.70": 0.2126
+      "mean": 0.277,
+      "max": 0.762,
+      "fp_at_0.40": 0.098,
+      "fp_at_0.50": 0.034,
+      "fp_at_0.70": 0.023
     },
     "ir_plag_originals": {
       "description": "Human student Java originals (IR-Plag cases)",
@@ -33,10 +32,11 @@
   "caveats": [
     "Kaggle corpus is human by dataset construction, not per-file ground truth",
     "Single corpus, Python-only; IR-Plag originals are Java and few (n=7)",
-    "Binoculars layer absent (falls back to heuristics, same as default deployment)"
+    "Binoculars layer absent (falls back to heuristics, same as default deployment)",
+    "Post-recalibration figures (2026-09-21) documented in docs/HUMAN_FP_BASELINE.md; control corpora unaffected (0% FP at every band)"
   ],
   "band_caveats": {
-    "high": "On real student code, ~21% of human submissions score in this band (>= 0.70)",
-    "medium": "On real student code, ~47% of human submissions score in this band (>= 0.40)"
+    "high": "On real student code, ~2% of human submissions score in this band (>= 0.70)",
+    "medium": "On real student code, ~10% of human submissions score in this band (>= 0.40)"
   }
 }
