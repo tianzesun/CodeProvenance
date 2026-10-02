@@ -834,8 +834,13 @@ async def create_course_for_org(
     request: Request,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(require_course_write),
 ):
-    """Create a new course in the current user's organization."""
+    """Create a new course in the current user's organization.
+
+    Course maintenance (create/update/delete) is admin-only; professors
+    keep the read endpoints and the assignment routes they maintain.
+    """
     user = getattr(request.state, "user", {}) or {}
     org_id = user.get("organization_id")
     if not org_id:
@@ -877,10 +882,19 @@ async def update_course_by_id(
     course_id: str,
     course_data: CourseCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_course_write),
 ):
-    """Update a course by ID."""
-    course = db.query(Course).filter(Course.id == course_id).first()
+    """Update a course by ID (admin-only, scoped to the caller's org)."""
+    org_id = current_user.get("organization_id")
+    if not org_id:
+        raise HTTPException(
+            status_code=400, detail="No organization associated with user"
+        )
+    course = (
+        db.query(Course)
+        .filter(Course.id == course_id, Course.organization_id == org_id)
+        .first()
+    )
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     term_id, term_name, year = resolve_course_term(
@@ -946,10 +960,19 @@ def _attachment_detail(jobs: int, cases: int) -> str:
 async def delete_course_by_id(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    current_user: dict = Depends(require_course_write),
 ):
-    """Delete a course by ID."""
-    course = db.query(Course).filter(Course.id == course_id).first()
+    """Delete a course by ID (admin-only, scoped to the caller's org)."""
+    org_id = current_user.get("organization_id")
+    if not org_id:
+        raise HTTPException(
+            status_code=400, detail="No organization associated with user"
+        )
+    course = (
+        db.query(Course)
+        .filter(Course.id == course_id, Course.organization_id == org_id)
+        .first()
+    )
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     assignments = db.query(Assignment).filter(Assignment.course_id == course.id).all()
