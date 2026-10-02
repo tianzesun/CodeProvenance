@@ -6,9 +6,16 @@ false-positive baseline in ``docs/HUMAN_FP_BASELINE.md`` /
 ``human_fp_baseline.json``.
 """
 
+import inspect
 import json
 from pathlib import Path
 
+from src.backend.engines.ai.signals import (
+    _ALL_LLM_PATTERNS as _PIPELINE_PATTERNS,
+)
+from src.backend.engines.ai.signals import (
+    compute_pattern_library_signal as _PIPELINE_PATTERN_SIGNAL,
+)
 from src.backend.engines.similarity.ai_detection import _ALL_LLM_PATTERNS
 from src.backend.infrastructure.ai_report_generator import (
     build_ai_originality_report_html,
@@ -91,3 +98,15 @@ class TestBaselineArtifactMatchesDoc:
             corpus = data["corpora"][name]
             assert corpus["fp_at_0.40"] == 0.0
             assert corpus["fp_at_0.70"] == 0.0
+
+
+class TestLiveEngineClaims:
+    """Fingerprint counts stated in live engine docstrings match the code."""
+
+    def test_pattern_library_docstring_matches_library_size(self) -> None:
+        """signals.compute_pattern_library_signal documents its real count."""
+        assert len(_PIPELINE_PATTERNS) == 21
+        doc = inspect.getdoc(_PIPELINE_PATTERN_SIGNAL) or ""
+        assert f"{len(_PIPELINE_PATTERNS)} curated regex fingerprints" in doc
+        # The pre-recalibration "40+" claim must not resurface in live code.
+        assert "40+" not in doc

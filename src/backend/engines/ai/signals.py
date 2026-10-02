@@ -318,12 +318,12 @@ _ALL_LLM_PATTERNS = (
 def compute_pattern_library_signal(code: str) -> float:
     """Compute pattern library signal (LLM fingerprints).
 
-    Counts matches against 40+ curated regex fingerprints that are
+    Counts matches against 21 curated regex fingerprints that are
     characteristic of LLM-generated code. Normalized by code length
     to prevent bias toward longer files.
 
     Algorithm:
-    1. Define 40+ LLM-specific regex patterns
+    1. Define 21 LLM-specific regex patterns
     2. Count total matches: match_count = Σ(pattern.findall(code))
     3. Normalize by code length: density = match_count / max(1, total_lines)
     4. Map to score: score = max(0.0, min(1.0, density * 5.0))
