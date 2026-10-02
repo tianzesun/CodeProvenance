@@ -31,6 +31,9 @@ const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
 /** Course/assignment labels a guest demo run files itself under. */
 const GUEST_COURSE_LABEL = 'Guest demo';
 const GUEST_ASSIGNMENT_LABEL = 'Guest demo check';
+// Course & assignment are optional for signed-in reviewers; a run filed
+// without them says so honestly instead of claiming a course it never had.
+const UNTAGGED_LABEL = 'Unassigned';
 const UPLOAD_ENGINE_OPTIONS = [
   { key: 'token', label: 'Token' },
   { key: 'ast', label: 'AST' },
@@ -507,10 +510,6 @@ export default function UploadPage() {
 
   const handleSubmit = async () => {
     setError('');
-    if (!isGuest && (!selectedCourseId || !selectedAssignmentId)) {
-      setError('Select a course and assignment before starting the review.');
-      return;
-    }
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
     setUploading(true);
@@ -522,15 +521,17 @@ export default function UploadPage() {
     starterFiles.forEach((f) => fd.append('starter_files', f));
     const chosenCourse = courses.find((c) => c.id === selectedCourseId);
     const chosenAssignment = assignments.find((a) => a.id === selectedAssignmentId);
-    if (!isGuest && (!chosenCourse || !chosenAssignment)) {
-      setError('Select a course and assignment before starting the review.');
-      setUploading(false);
-      return;
-    }
     // A guest run files itself under a demo label instead of a course it has
-    // no access to; signed-in reviews keep their real course and assignment.
-    fd.append('course_name', chosenCourse?.name ?? GUEST_COURSE_LABEL);
-    fd.append('assignment_name', chosenAssignment?.name ?? GUEST_ASSIGNMENT_LABEL);
+    // no access to; signed-in reviews keep the chosen course/assignment, or
+    // "Unassigned" when the optional picker was skipped.
+    fd.append(
+      'course_name',
+      chosenCourse?.name ?? (isGuest ? GUEST_COURSE_LABEL : UNTAGGED_LABEL),
+    );
+    fd.append(
+      'assignment_name',
+      chosenAssignment?.name ?? (isGuest ? GUEST_ASSIGNMENT_LABEL : UNTAGGED_LABEL),
+    );
     if (chosenAssignment) fd.append('assignment_id', chosenAssignment.id);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
@@ -708,7 +709,9 @@ export default function UploadPage() {
               <div className="flex items-center gap-2 mb-4">
                 <BookOpen size={15} className="text-slate-500" />
                 <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
-
+                <span className="ml-auto rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                  Optional
+                </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {/* Course select — options are read from the database */}
