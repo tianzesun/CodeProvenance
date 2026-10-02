@@ -83,6 +83,11 @@ class User(Base):
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
     reset_token = Column(String(255), nullable=True)
     reset_token_expires = Column(TIMESTAMP(timezone=True), nullable=True)
+    #: Email-verification token for self-registered accounts. The account
+    #: stays ``is_active=False`` until this token is redeemed, so the inbox
+    #: is proven before the credential ever works.
+    verify_token = Column(String(255), nullable=True)
+    verify_token_expires = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(
         TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")

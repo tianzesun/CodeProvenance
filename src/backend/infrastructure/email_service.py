@@ -174,6 +174,49 @@ class EmailService:
         return await EmailService._deliver(email, subject, html_body, text_body)
 
     @staticmethod
+    async def send_verification_email(email: str, verify_url: str) -> bool:
+        """Send an account verification email to a newly registered user.
+
+        Args:
+            email: User's email address
+            verify_url: Email-verification URL with token
+
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        subject = "Verify Your Email - IntegrityDesk"
+        html_body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1a1a2e;">Confirm your email address</h2>
+            <p>Welcome to IntegrityDesk! Click the button below to verify your
+               email address and activate your account:</p>
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="{verify_url}"
+                   style="background-color: #4361ee; color: white; padding: 12px 24px;
+                          text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    Verify Email
+                </a>
+            </p>
+            <p style="color: #666; font-size: 14px;">This link will expire in 24 hours.</p>
+            <p style="color: #666; font-size: 14px;">
+                If you didn't create an account, please ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+            <p style="color: #999; font-size: 12px;">
+                IntegrityDesk - Academic Integrity Platform
+            </p>
+        </div>
+        """
+        text_body = (
+            f"Verify Your Email\n\n"
+            f"Welcome to IntegrityDesk! Verify your email address here: {verify_url}\n\n"
+            f"This link will expire in 24 hours.\n"
+            f"If you didn't create an account, please ignore this email."
+        )
+
+        return await EmailService._deliver(email, subject, html_body, text_body)
+
+    @staticmethod
     def _send_via_console(to_email: str, subject: str, body: str) -> bool:
         """Log the email to console (development mode)."""
         logger.warning(

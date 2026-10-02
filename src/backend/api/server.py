@@ -154,6 +154,10 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/bootstrap-admin",
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
+        # Self-registration: no session exists yet when these run, and the
+        # account only activates through the link emailed to the address.
+        "/api/auth/register",
+        "/api/auth/verify-email",
         "/api/auth/me-api-key",
         # Guest demo login. The endpoint itself is public; everything a guest
         # then does still goes through the authenticated middleware with the
@@ -5504,10 +5508,31 @@ def _login_sync(email, password):
             _record_login_failure(email)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
+            pending_verification = (
+                user.verify_token
+                and user.verify_token_expires
+                and user.verify_token_expires > datetime.now(timezone.utc)
+            )
+            if pending_verification:
+                # The password was correct; the account only waits on its
+                # inbox. That is not an auth failure, so no attempt is
+                # recorded and no lockout can shadow a verification.
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Your email address hasn't been verified yet. Check your "
+                        "inbox for the verification link, or register again to "
+                        "have it resent."
+                    ),
+                )
             _record_login_failure(email)
             raise HTTPException(status_code=403, detail="Your account is disabled")
 
         _clear_login_attempts(email)
+        if user.verify_token is not None:
+            # First successful sign-in consumes the verification token.
+            user.verify_token = None
+            user.verify_token_expires = None
         user.last_login_at = datetime.utcnow()
         db.add(user)
         db.commit()
@@ -5580,6 +5605,134 @@ async def login(request: Request):
     response = JSONResponse(content={"user": user_data})
     _issue_auth_cookie(response, user)
     return response
+
+
+# Rate limiting for self-registration: email -> last request timestamp. One
+# verification mail per address per cooldown keeps the public endpoint from
+# being used to bombard an inbox.
+_REGISTER_RATE_LIMIT: dict[str, float] = {}
+_REGISTER_COOLDOWN_SECONDS = 60
+
+#: Answer for every accepted registration. It neither confirms nor denies
+#: whether a pending address is already registered, so retrying after a lost
+#: email and probing for existing accounts look identical from outside.
+_REGISTER_MAIL_SENT_MESSAGE = (
+    "Check your inbox for a verification link to finish creating your account."
+)
+
+# Deliberately loose: shape only. Deliverability is what actually proves the
+# address, so this gate just rejects obvious typos before any work happens.
+_REGISTER_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@app.post("/api/auth/register")
+async def register(request: Request):
+    """Self-service registration for a new professor account.
+
+    The account is created inactive with its own workspace; only the link
+    emailed to the address flips ``is_active``. An address that already has
+    an active account answers 409 (behind the cooldown), while a pending one
+    simply gets a fresh link — so registering again is the natural recovery
+    after a lost or expired email. Role is never taken from the payload: a
+    self-registered account is a professor, and admins promote from the
+    admin UI.
+    """
+    payload = await request.json()
+    email = _normalize_email(str(payload.get("email") or ""))
+    full_name = str(payload.get("full_name") or "").strip()
+    password = str(payload.get("password") or "")
+
+    if not _REGISTER_EMAIL_PATTERN.match(email):
+        raise HTTPException(status_code=400, detail="A valid email address is required")
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required")
+    _validate_password_input(password)
+
+    now = time.time()
+    last_request = _REGISTER_RATE_LIMIT.get(email)
+    if last_request and (now - last_request) < _REGISTER_COOLDOWN_SECONDS:
+        return JSONResponse(
+            status_code=200, content={"message": _REGISTER_MAIL_SENT_MESSAGE}
+        )
+    _REGISTER_RATE_LIMIT[email] = now
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    with SessionLocal() as db:
+        existing = db.query(User).filter(User.email == email).first()
+        if existing and existing.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists. Sign in instead.",
+            )
+        if existing:
+            # Pending from an earlier attempt: refresh the link and let the
+            # latest typed password win — access still needs the inbox.
+            existing.password_hash = _hash_password(password)
+            existing.verify_token = token
+            existing.verify_token_expires = expires_at
+            db.add(existing)
+        else:
+            tenant = _create_tenant(db, _generate_tenant_name(full_name, email))
+            db.add(
+                User(
+                    tenant_id=tenant.id,
+                    email=email,
+                    full_name=full_name,
+                    password_hash=_hash_password(password),
+                    role="professor",
+                    is_active=False,
+                    verify_token=token,
+                    verify_token_expires=expires_at,
+                )
+            )
+        db.commit()
+
+    from src.backend.infrastructure.email_service import EmailService
+
+    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={token}"
+    await EmailService.send_verification_email(email, verify_url)
+
+    return JSONResponse(
+        status_code=200, content={"message": _REGISTER_MAIL_SENT_MESSAGE}
+    )
+
+
+@app.post("/api/auth/verify-email")
+async def verify_email(request: Request):
+    """Redeem the emailed verification link and activate the account.
+
+    An already-active account answers success too, so a mail scanner that
+    pre-fetches the link cannot burn it: the token is not consumed until the
+    first successful login clears it.
+    """
+    payload = await request.json()
+    token = str(payload.get("token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Verification token is required")
+
+    with SessionLocal() as db:
+        user = (
+            db.query(User)
+            .filter(
+                User.verify_token == token,
+                User.verify_token_expires > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+        if not user:
+            raise HTTPException(
+                status_code=400, detail="Invalid or expired verification link"
+            )
+        if not user.is_active:
+            user.is_active = True
+            db.add(user)
+            db.commit()
+
+    return JSONResponse(
+        status_code=200, content={"message": "Email verified. You can sign in now."}
+    )
 
 
 @app.post("/api/auth/guest")

@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Rocket,
   KeyRound,
+  UserPlus,
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/components/AuthProvider';
@@ -99,6 +100,20 @@ function calculatePasswordStrength(password: string): {
   };
 }
 
+/**
+ * Mirror of the server's password policy for self-registration
+ * (``validate_password_strength``): 12+ characters with upper- and
+ * lowercase letters and a number. Checking here keeps the failure next to
+ * the field instead of arriving as a server error after submit.
+ */
+function validateNewPassword(password: string): string | null {
+  if (password.length < 12) return 'Password must be at least 12 characters long.';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter.';
+  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter.';
+  if (!/[0-9]/.test(password)) return 'Password must contain at least one number.';
+  return null;
+}
+
 function validateEmail(email: string): string | null {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!email) return null;
@@ -129,9 +144,15 @@ export default function LoginPage() {
   const [resetEmailSent, setResetEmailSent] = useState(false);
   // Sign-in method chosen on this page. SSO is UI-only for now: picking it
   // swaps the password form for an email prompt, and no session is issued
-  // until an identity provider is connected.
-  const [loginMethod, setLoginMethod] = useState<'password' | 'sso'>('password');
+  // until an identity provider is connected. "register" opens the
+  // self-signup form, which ends in a "check your inbox" card rather than a
+  // session — the account stays locked until the emailed link is redeemed.
+  const [loginMethod, setLoginMethod] = useState<'password' | 'sso' | 'register'>('password');
   const [ssoNotice, setSsoNotice] = useState('');
+  const [registerEmailSent, setRegisterEmailSent] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [resendNotice, setResendNotice] = useState('');
 
   // Treat "status still loading" as sign-in so returning professors never see
   // the bootstrap form flash before /api/auth/status resolves.
@@ -306,12 +327,18 @@ export default function LoginPage() {
     );
   };
 
-  /** Leave the SSO prompt and restore the password form. */
+  /** Leave the SSO/register prompts and restore the password form. */
   const handleBackToPassword = () => {
     setLoginMethod('password');
     setSsoNotice('');
+    setRegisterEmailSent(false);
+    setResendNotice('');
     setFormError('');
     setEmailError('');
+    setPasswordError('');
+    setConfirmPasswordError('');
+    setPassword('');
+    setConfirmPassword('');
   };
 
   /** Swap the password form's email prompt for the SSO one. */
@@ -319,6 +346,99 @@ export default function LoginPage() {
     setLoginMethod('sso');
     setSsoNotice('');
     setEmailError('');
+  };
+
+  /** Open the self-registration form. */
+  const handleChooseRegister = () => {
+    setLoginMethod('register');
+    setRegisterEmailSent(false);
+    setResendNotice('');
+    setFormError('');
+    setEmailError('');
+    setPasswordError('');
+    setConfirmPasswordError('');
+  };
+
+  /**
+   * Submit a self-signup.
+   *
+   * Success never signs the user in: the server creates an inactive
+   * professor account in its own workspace and emails a verification link,
+   * so the form switches to the "check your inbox" card.
+   */
+  const handleRegisterSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    setFormError('');
+    setEmailError('');
+    setPasswordError('');
+    setConfirmPasswordError('');
+
+    const trimmedEmail = email.trim();
+    const trimmedFullName = fullName.trim();
+
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      return;
+    }
+    const emailValidationError = validateEmail(trimmedEmail);
+    if (emailValidationError) {
+      setEmailError(emailValidationError);
+      return;
+    }
+    if (!trimmedFullName) {
+      setFormError('Full name is required.');
+      return;
+    }
+    const passwordValidationError = validateNewPassword(password);
+    if (passwordValidationError) {
+      setPasswordError(passwordValidationError);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setConfirmPasswordError('Passwords do not match.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await apiClient.post('/api/auth/register', {
+        email: trimmedEmail,
+        full_name: trimmedFullName,
+        password,
+      });
+      setRegisterEmailSent(true);
+      setResendNotice('');
+    } catch (error) {
+      setFormError(getErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /**
+   * Ask the server to mail the verification link again.
+   *
+   * Re-registering with the same details is the resend path: the server
+   * rotates the token and answers the same generic message, so the button
+   * works whether or not the first email ever arrived.
+   */
+  const handleResendVerification = async () => {
+    setFormError('');
+    setResendNotice('');
+    setSubmitting(true);
+    try {
+      await apiClient.post('/api/auth/register', {
+        email: email.trim(),
+        full_name: fullName.trim(),
+        password,
+      });
+      setResendNotice('Verification email sent again.');
+    } catch (error) {
+      setFormError(getErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -339,12 +459,18 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                                    {showLogin ? 'Academic Workspace Sign-In' : 'Initialize Institutional Workspace'}
+                                    {!showLogin
+                    ? 'Initialize Institutional Workspace'
+                    : loginMethod === 'register'
+                      ? 'Create Your Account'
+                      : 'Academic Workspace Sign-In'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
-                                    {showLogin
-                    ? 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'
-                    : 'Create the first administrator account and configure the workspace for your institution.'}
+                                    {!showLogin
+                    ? 'Create the first administrator account and configure the workspace for your institution.'
+                    : loginMethod === 'register'
+                      ? 'Set up your workspace in minutes and start checking submissions for academic integrity.'
+                      : 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'}
                 </p>
               </div>
             </div>
@@ -378,7 +504,9 @@ export default function LoginPage() {
 
             <div className="mb-8">
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                {loginMethod === 'sso' && showLogin ? (
+                {loginMethod === 'register' && showLogin ? (
+                  <UserPlus size={20} aria-hidden="true" />
+                ) : loginMethod === 'sso' && showLogin ? (
                   <KeyRound size={20} aria-hidden="true" />
                 ) : (
                   <LockKeyhole size={20} aria-hidden="true" />
@@ -392,7 +520,11 @@ export default function LoginPage() {
                   : showLogin
                     ? loginMethod === 'sso'
                       ? 'Sign in with SSO'
-                      : 'Sign-In'
+                      : loginMethod === 'register'
+                        ? registerEmailSent
+                          ? 'Check your email'
+                          : 'Create Account'
+                        : 'Sign-In'
                     : 'Create Administrator Account'}
               </h2>
 {(showForgotPassword || !showLogin) && (
@@ -561,6 +693,248 @@ export default function LoginPage() {
                   Back to sign in
                 </button>
               </form>
+            ) : loginMethod === 'register' && showLogin ? (
+              registerEmailSent ? (
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          Verification email sent
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          We sent a verification link to <strong>{email.trim()}</strong>. Open it
+                          to activate your account.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {resendNotice && (
+                    <div
+                      role="status"
+                      className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                    >
+                      {resendNotice}
+                    </div>
+                  )}
+
+                  {formError && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={loading || submitting}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                    Resend verification email
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBackToPassword}
+                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition"
+                  >
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back to sign in
+                  </button>
+                </div>
+              ) : (
+                <form className="space-y-5" onSubmit={handleRegisterSubmit} noValidate>
+                  <div className="space-y-2">
+                    <label htmlFor="register-name" className="block text-sm font-medium text-slate-700">
+                      Full name
+                    </label>
+                    <input
+                      id="register-name"
+                      value={fullName}
+                      onChange={(event) => {
+                        setFullName(event.target.value);
+                        if (formError) setFormError('');
+                      }}
+                      autoComplete="name"
+                      placeholder="Professor Ada Lovelace"
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="register-email" className="block text-sm font-medium text-slate-700">
+                      Email address
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="register-email"
+                        type="email"
+                        value={email}
+                        onChange={(event) => handleEmailChange(event.target.value)}
+                        aria-invalid={emailError ? true : undefined}
+                        aria-describedby={emailError ? 'register-email-error' : undefined}
+                        autoComplete="email"
+                        placeholder="name@institution.edu"
+                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                          }`}
+                      />
+                      {email && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
+                          {emailError ? (
+                            <XCircle size={16} className="text-red-500" />
+                          ) : (
+                            <CheckCircle size={16} className="text-emerald-600" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {emailError && (
+                      <p id="register-email-error" role="alert" className="text-xs text-red-600">
+                        {emailError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="register-password" className="block text-sm font-medium text-slate-700">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="register-password"
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(event) => handlePasswordChange(event.target.value)}
+                        aria-invalid={passwordError ? true : undefined}
+                        aria-describedby={passwordError ? 'register-password-error' : undefined}
+                        autoComplete="new-password"
+                        placeholder="Create a password"
+                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${passwordError
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                          }`}
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        {showPassword ? (
+                          <EyeOff size={18} aria-hidden="true" />
+                        ) : (
+                          <Eye size={18} aria-hidden="true" />
+                        )}
+                      </button>
+                    </div>
+
+                    {password && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className={`text-sm font-medium ${passwordStrength.tone}`}>
+                            Password strength: {passwordStrength.label}
+                          </span>
+                          <span className="text-xs text-slate-500">{password.length} characters</span>
+                        </div>
+                        <div className="flex gap-1" aria-hidden="true">
+                          {[1, 2, 3, 4, 5, 6].map((level) => (
+                            <div
+                              key={level}
+                              className={`h-2 flex-1 rounded-full ${level <= passwordStrength.score ? passwordStrength.bar : 'bg-slate-200'
+                                }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!password && (
+                      <p className="text-xs text-slate-500">
+                        Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
+                      </p>
+                    )}
+
+                    {passwordError && (
+                      <p id="register-password-error" role="alert" className="text-xs text-red-600">
+                        {passwordError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="register-confirm" className="block text-sm font-medium text-slate-700">
+                      Confirm password
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="register-confirm"
+                        type={showPassword ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(event) => {
+                          setConfirmPassword(event.target.value);
+                          if (confirmPasswordError) setConfirmPasswordError('');
+                        }}
+                        aria-invalid={confirmPasswordError ? true : undefined}
+                        aria-describedby={confirmPasswordError ? 'register-confirm-error' : undefined}
+                        autoComplete="new-password"
+                        placeholder="Repeat the password"
+                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${confirmPasswordError
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+                          }`}
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        {showPassword ? (
+                          <EyeOff size={18} aria-hidden="true" />
+                        ) : (
+                          <Eye size={18} aria-hidden="true" />
+                        )}
+                      </button>
+                    </div>
+                    {confirmPasswordError && (
+                      <p id="register-confirm-error" role="alert" className="text-xs text-red-600">
+                        {confirmPasswordError}
+                      </p>
+                    )}
+                  </div>
+
+                  {formError && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loading || submitting}
+                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                    {submitting ? 'Creating account…' : 'Create account'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBackToPassword}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back to sign in
+                  </button>
+                </form>
+              )
             ) : (
               <form className="space-y-5" onSubmit={handleSubmit} noValidate>
                                 {!showLogin && (
@@ -771,6 +1145,19 @@ export default function LoginPage() {
                   )}
                   {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
                 </button>
+
+                {showLogin && (
+                  <p className="text-center text-sm text-slate-500">
+                    Don’t have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={handleChooseRegister}
+                      className="font-semibold text-slate-900 underline-offset-4 transition hover:underline"
+                    >
+                      Create one
+                    </button>
+                  </p>
+                )}
 
                 {!showLogin && (
                   <button
