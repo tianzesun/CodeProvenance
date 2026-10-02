@@ -52,13 +52,6 @@ function sanitizeNextPath(value: string | null): string {
   }
 }
 
-function validatePasswordInput(password: string): string | null {
-  if (password.length < 8) {
-    return 'Password must be at least 8 characters long.';
-  }
-  return null;
-}
-
 function calculatePasswordStrength(password: string): {
   score: number;
   label: string;
@@ -101,10 +94,11 @@ function calculatePasswordStrength(password: string): {
 }
 
 /**
- * Mirror of the server's password policy for self-registration
- * (``validate_password_strength``): 12+ characters with upper- and
- * lowercase letters and a number. Checking here keeps the failure next to
- * the field instead of arriving as a server error after submit.
+ * Mirror of the server's password policy (``validate_password_strength``)
+ * wherever a password is set - bootstrap-admin, self-registration, reset:
+ * 12+ characters with upper- and lowercase letters and a number. Checking
+ * here keeps the failure next to the field instead of arriving as a server
+ * error after submit.
  */
 function validateNewPassword(password: string): string | null {
   if (password.length < 12) return 'Password must be at least 12 characters long.';
@@ -130,7 +124,6 @@ export default function LoginPage() {
   const [tenantName, setTenantName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [forceSignIn, setForceSignIn] = useState(false);
 
   const [emailError, setEmailError] = useState('');
@@ -183,7 +176,14 @@ export default function LoginPage() {
 
   const handleEmailChange = (value: string) => {
     setEmail(value);
-    setEmailError(validateEmail(value.trim()) || '');
+    // A brand-new error waits for blur or submit so the field never turns
+    // red mid-word; once it is red, keep revalidating so fixing the address
+    // clears it as the user types.
+    if (emailError) setEmailError(validateEmail(value.trim()) || '');
+  };
+
+  const handleEmailBlur = () => {
+    setEmailError(validateEmail(email.trim()) || '');
   };
 
   const handlePasswordChange = (value: string) => {
@@ -202,6 +202,11 @@ export default function LoginPage() {
     const trimmedFullName = fullName.trim();
     const trimmedTenantName = tenantName.trim();
 
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      return;
+    }
+
     const emailValidationError = validateEmail(trimmedEmail);
     if (emailValidationError) {
       setEmailError(emailValidationError);
@@ -219,7 +224,7 @@ export default function LoginPage() {
         return;
       }
 
-      const validatedPasswordError = validatePasswordInput(password);
+      const validatedPasswordError = validateNewPassword(password);
       if (validatedPasswordError) {
         setPasswordError(validatedPasswordError);
         return;
@@ -255,6 +260,11 @@ export default function LoginPage() {
     setEmailError('');
 
     const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      return;
+    }
+
     const emailValidationError = validateEmail(trimmedEmail);
 
     if (emailValidationError) {
@@ -316,7 +326,12 @@ export default function LoginPage() {
     event.preventDefault();
 
     setFormError('');
-    const emailValidationError = validateEmail(email.trim());
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      return;
+    }
+    const emailValidationError = validateEmail(trimmedEmail);
     if (emailValidationError) {
       setEmailError(emailValidationError);
       return;
@@ -575,7 +590,7 @@ export default function LoginPage() {
                         id="forgot-email"
                         type="email"
                         value={email}
-                        onChange={(event) => handleEmailChange(event.target.value)}
+                        onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
                         aria-invalid={emailError ? true : undefined}
                         aria-describedby={emailError ? 'forgot-email-error' : undefined}
                         autoComplete="email"
@@ -589,9 +604,9 @@ export default function LoginPage() {
                         <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
                           {emailError ? (
                             <XCircle size={16} className="text-red-500" />
-                          ) : (
+                          ) : validateEmail(email.trim()) === null ? (
                             <CheckCircle size={16} className="text-emerald-600" />
-                          )}
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -638,7 +653,7 @@ export default function LoginPage() {
                       id="sso-email"
                       type="email"
                       value={email}
-                      onChange={(event) => handleEmailChange(event.target.value)}
+                      onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
                       aria-invalid={emailError ? true : undefined}
                       aria-describedby={emailError ? 'sso-email-error' : undefined}
                       autoComplete="email"
@@ -652,9 +667,9 @@ export default function LoginPage() {
                       <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
                         {emailError ? (
                           <XCircle size={16} className="text-red-500" />
-                        ) : (
+                        ) : validateEmail(email.trim()) === null ? (
                           <CheckCircle size={16} className="text-emerald-600" />
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -774,7 +789,7 @@ export default function LoginPage() {
                         id="register-email"
                         type="email"
                         value={email}
-                        onChange={(event) => handleEmailChange(event.target.value)}
+                        onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
                         aria-invalid={emailError ? true : undefined}
                         aria-describedby={emailError ? 'register-email-error' : undefined}
                         autoComplete="email"
@@ -788,9 +803,9 @@ export default function LoginPage() {
                         <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
                           {emailError ? (
                             <XCircle size={16} className="text-red-500" />
-                          ) : (
+                          ) : validateEmail(email.trim()) === null ? (
                             <CheckCircle size={16} className="text-emerald-600" />
-                          )}
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -978,7 +993,7 @@ export default function LoginPage() {
                       id="email"
                       type="email"
                       value={email}
-                      onChange={(event) => handleEmailChange(event.target.value)}
+                      onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
                       aria-invalid={emailError ? true : undefined}
                       aria-describedby={emailError ? 'login-email-error' : undefined}
                       autoComplete="email"
@@ -992,9 +1007,9 @@ export default function LoginPage() {
                       <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
                         {emailError ? (
                           <XCircle size={16} className="text-red-500" />
-                        ) : (
+                        ) : validateEmail(email.trim()) === null ? (
                           <CheckCircle size={16} className="text-emerald-600" />
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -1060,7 +1075,7 @@ export default function LoginPage() {
 
                                     {!showLogin && !password && (
                     <p className="text-xs text-slate-500">
-                      Use at least 8 characters with upper/lowercase letters, a number, and a symbol.
+                      Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
                     </p>
                   )}
 
@@ -1072,18 +1087,7 @@ export default function LoginPage() {
                 </div>
 
                                 {showLogin && (
-                  <div className="flex items-center justify-between gap-4">
-                    <label htmlFor="rememberMe" className="flex items-center gap-3 text-sm text-slate-600">
-                      <input
-                        id="rememberMe"
-                        type="checkbox"
-                        checked={rememberMe}
-                        onChange={(event) => setRememberMe(event.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                      />
-                      <span>Remember me</span>
-                    </label>
-
+                  <div className="flex items-center justify-end">
                     <button
                       type="button"
                       onClick={() => setShowForgotPassword(true)}
