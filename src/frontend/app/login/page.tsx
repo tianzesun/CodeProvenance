@@ -392,20 +392,18 @@ export default function LoginPage() {
                   : showLogin
                     ? loginMethod === 'sso'
                       ? 'Sign in with SSO'
-                      : 'Professor Sign-In'
+                      : 'Sign-In'
                     : 'Create Administrator Account'}
               </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                {showForgotPassword
-                  ? resetEmailSent
-                    ? 'If the account exists, password reset instructions have been sent.'
-                    : 'Enter your email address and we will send reset instructions.'
-                                      : showLogin
-                    ? loginMethod === 'sso'
-                      ? 'Enter your institution email to continue to your organization’s identity provider.'
-                      : 'Sign in with your account to continue to this workspace.'
+{(showForgotPassword || !showLogin) && (
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {showForgotPassword
+                    ? resetEmailSent
+                      ? 'If the account exists, password reset instructions have been sent.'
+                      : 'Enter your email address and we will send reset instructions.'
                     : 'Set up the first administrator account for this workspace.'}
-              </p>
+                </p>
+              )}
             </div>
 
             {showForgotPassword ? (
@@ -750,19 +748,14 @@ export default function LoginPage() {
                 </div>
 
                 {showLogin && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleChooseSso}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                    >
-                      <KeyRound size={16} aria-hidden="true" />
-                      Continue with SSO
-                    </button>
-                    <p className="text-center text-xs leading-relaxed text-slate-500">
-                      Sign in through your institution’s identity provider.
-                    </p>
-                  </>
+                  <button
+                    type="button"
+                    onClick={handleChooseSso}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <KeyRound size={16} aria-hidden="true" />
+                    Continue with SSO
+                  </button>
                 )}
 
                 <button
@@ -778,10 +771,6 @@ export default function LoginPage() {
                   )}
                   {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
                 </button>
-                <p className="text-center text-xs leading-relaxed text-slate-500">
-                  Run a full check without an account. Guest results are never saved — they
-                  disappear when the demo session ends.
-                </p>
 
                 {!showLogin && (
                   <button
