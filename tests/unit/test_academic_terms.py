@@ -404,6 +404,27 @@ def test_analytics_endpoint_scopes_cases_to_visible_courses() -> None:
     assert "CaseResultLink.case_id.in_" in source
 
 
+def test_analytics_endpoint_counts_assignmentless_cases() -> None:
+    """Cases without an assignment still count, scoped to the caller's org.
+
+    ``POST /api/cases`` allows ``assignment_id`` to be omitted and
+    ``GET /api/cases`` lists those rows organization-wide; the overview
+    previously filtered with ``Case.assignment_id.in_(...)``, which SQL
+    three-valued logic never matches for NULL — so the dashboard silently
+    undercounted against My Cases. The extra branch must stay NULL-only:
+    widening it to every org case would re-open the professor course scope.
+    """
+    import inspect
+
+    from src.backend.api.server import get_analytics_overview
+
+    source = inspect.getsource(get_analytics_overview)
+    assert "Case.assignment_id.is_(None)" in source
+    assert "Case.organization_id ==" in source
+    # "Unassigned" is a bucket for orphaned cases, not a course offering.
+    assert 'label != "Unassigned"' in source
+
+
 def test_analytics_course_labels_include_term() -> None:
     """Course labels disambiguate same-code offerings by term.
 

@@ -21,7 +21,6 @@ import {
   AlertTriangle,
   BarChart3,
   Bot,
-  Loader2,
   Repeat,
   ShieldAlert,
   TrendingUp,

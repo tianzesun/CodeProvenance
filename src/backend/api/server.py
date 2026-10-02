@@ -7952,11 +7952,21 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
             )
             # Cases carry their own organization_id; intersect with the visible
             # assignment set so a stale or cross-org case cannot leak through.
-            cases = (
-                db.query(Case)
-                .filter(Case.assignment_id.in_([a.id for a in assignments]))
-                .all()
+            # POST /api/cases permits omitting assignment_id, and such a row
+            # has no assignment for the visibility join above: GET /api/cases
+            # lists it organization-wide, so the overview must count it too or
+            # the dashboard undercounts against My Cases. Only NULL-assignment
+            # rows take this branch — a case tied to a course the caller cannot
+            # see stays invisible.
+            scope = Case.assignment_id.in_([a.id for a in assignments])
+            org_id = current_user.get("organization_id") or current_user.get(
+                "tenant_id"
             )
+            if org_id:
+                scope = scope | (
+                    (Case.assignment_id.is_(None)) & (Case.organization_id == org_id)
+                )
+            cases = db.query(Case).filter(scope).all()
         else:
             assignments, cases = [], []
 
@@ -8048,7 +8058,10 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
         # ── Derived KPI / insight values ───────────────────────────────────
         total_cases = len(cases)
         high_priority = sum(1 for c in cases if c.priority in ("HIGH", "URGENT"))
-        courses_affected = len(by_course)
+        # "Unassigned" groups orphaned cases; it is a bucket, not a course.
+        courses_affected = len(
+            [label for label in by_course if label != "Unassigned"]
+        )
         repeat_cases = (
             repeat_buckets["Prior warning"] + repeat_buckets["Repeat pattern"]
         )
