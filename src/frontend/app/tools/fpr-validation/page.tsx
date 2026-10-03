@@ -246,11 +246,11 @@ function generateFprReportHtml(result: FprResult, runName: string): string {
         <title>Real-World FPR Validation Report</title>
         <style>
           body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; line-height: 1.5; color: #222; }
-          h1 { color: #065f46; margin-bottom: 4px; }
-          h2 { color: #065f46; border-bottom: 2px solid #d1fae5; padding-bottom: 4px; margin-top: 28px; }
+          h1 { color: #0f172a; margin-bottom: 4px; }
+          h2 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 28px; }
           table { border-collapse: collapse; width: 100%; margin: 12px 0; }
           th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
-          th { background: #d1fae5; }
+          th { background: #f8fafc; color: #64748b; }
           .rec { margin-bottom: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; }
           .section { margin-bottom: 24px; }
           .footer { font-size: 11px; color: #666; margin-top: 40px; border-top: 1px solid #eee; padding-top: 12px; }
@@ -327,6 +327,8 @@ export default function FprValidationPage() {
   // === Persistence (database-backed) ===
   const [savedRuns, setSavedRuns] = useState<FprRunSummary[]>([]);
   const [historyError, setHistoryError] = useState('');
+  // The list loads on mount; without this it just popped in late with no feedback.
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [loadingRunId, setLoadingRunId] = useState('');
   // Designed dialogs replace the native prompt()/confirm()/alert() this tool used to open.
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -343,6 +345,7 @@ export default function FprValidationPage() {
   const [fprView, setFprView] = useState<'all' | 'fine-tuning'>('fine-tuning');
 
   const loadFprHistory = useCallback(async (signal?: AbortSignal) => {
+    setHistoryLoading(true);
     try {
       const res = await apiClient.get('/api/fpr-validation-runs', { signal });
       setSavedRuns(Array.isArray(res.data?.runs) ? res.data.runs : []);
@@ -351,6 +354,8 @@ export default function FprValidationPage() {
       if (signal?.aborted) return;
       // This used to be a console.error, so a failed load looked like "no saved runs".
       setHistoryError(describeError(err, 'Couldn’t load your saved runs.'));
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -582,7 +587,7 @@ export default function FprValidationPage() {
             <button
               type="button"
               onClick={reset}
-              className="theme-button-secondary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition"
+              className="theme-button-secondary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
             >
               Reset
             </button>
@@ -672,7 +677,7 @@ export default function FprValidationPage() {
                 <button
                   type="button"
                   onClick={reset}
-                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:text-slate-400 dark:hover:text-slate-200"
                 >
                   Clear all
                 </button>
@@ -704,7 +709,7 @@ export default function FprValidationPage() {
                           setResult(null);
                         }
                       }}
-                      className="ml-2 rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-slate-800 dark:hover:text-red-400"
+                      className="ml-2 rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:hover:bg-slate-800 dark:hover:text-red-400"
                       aria-label={`Remove ${file.name}`}
                     >
                       <X size={16} aria-hidden="true" />
@@ -730,7 +735,7 @@ export default function FprValidationPage() {
               <button
                 type="button"
                 onClick={() => abortRef.current?.abort()}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Loader2 className="animate-spin" size={16} aria-hidden="true" />
                 Analyzing… Cancel
@@ -741,7 +746,7 @@ export default function FprValidationPage() {
               <button
                 type="button"
                 onClick={openSaveModal}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Save this run
               </button>
@@ -751,7 +756,7 @@ export default function FprValidationPage() {
               <button
                 type="button"
                 onClick={printReport}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Printer size={16} aria-hidden="true" />
                 {/* It opens the browser's print dialog (choose "Save as PDF"); it doesn't download a PDF. */}
@@ -791,10 +796,19 @@ export default function FprValidationPage() {
             <button
               type="button"
               onClick={() => loadFprHistory()}
-              className="ml-auto inline-flex h-9 shrink-0 items-center rounded-xl border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:border-red-500/30 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-500/10"
+              className="ml-auto inline-flex h-9 shrink-0 items-center rounded-xl border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-red-500/30 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-500/10"
             >
               Retry
             </button>
+          </div>
+        )}
+        {historyLoading && !historyError && savedRuns.length === 0 && (
+          <div
+            role="status"
+            className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+          >
+            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+            Loading saved runs…
           </div>
         )}
         {savedRuns.length > 0 && (
@@ -829,9 +843,9 @@ export default function FprValidationPage() {
                       onClick={() => loadSavedRun(run)}
                       disabled={Boolean(loadingRunId)}
                       aria-label={`Load ${run.name}`}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-50"
                     >
-                      {loadingRunId === run.id && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                      {loadingRunId === run.id && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
                       {loadingRunId === run.id ? 'Loading…' : 'Load'}
                     </button>
                     <button
@@ -841,7 +855,7 @@ export default function FprValidationPage() {
                         setPendingDeleteRun(run);
                       }}
                       aria-label={`Delete ${run.name}`}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-500/30 dark:bg-slate-950 dark:text-red-400 dark:hover:bg-red-500/10"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-red-500/30 dark:bg-slate-950 dark:text-red-400 dark:hover:bg-red-500/10"
                     >
                       Delete
                     </button>
@@ -853,15 +867,15 @@ export default function FprValidationPage() {
         )}
 
         {result && (
-          <div className="mt-8 space-y-6">
+          <div className="space-y-6">
             {activeRunName && (
-              <p className="text-sm text-emerald-800">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 Showing saved run: <strong>{activeRunName}</strong>
               </p>
             )}
 
             {result.num_submissions < RECOMMENDED_MIN_SUBMISSIONS && (
-              <p role="note" className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <p role="note" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
                 This run used {result.num_submissions} submission{result.num_submissions === 1 ? '' : 's'}. Rates measured on fewer than{' '}
                 {RECOMMENDED_MIN_SUBMISSIONS} are noisy, so treat the thresholds below as a rough guide, not a setting to apply as-is.
@@ -876,16 +890,21 @@ export default function FprValidationPage() {
                 { label: 'Mean Similarity', value: `${(result.mean_score * 100).toFixed(1)}%` },
                 { label: 'Max Similarity', value: `${(result.max_score * 100).toFixed(1)}%` },
               ].map((stat) => (
-                <div key={stat.label} className="bg-white border border-emerald-200 rounded-2xl p-5">
-                  <div className="text-xs text-emerald-700 font-medium uppercase tracking-wide">{stat.label}</div>
-                  <div className="text-3xl font-bold text-emerald-900 mt-2">{stat.value}</div>
+                <div
+                  key={stat.label}
+                  className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-950"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                    {stat.label}
+                  </div>
+                  <div className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">{stat.value}</div>
                 </div>
               ))}
             </div>
 
             {/* FPR Curve */}
-            <div className="bg-white border border-emerald-200 rounded-2xl p-6">
-              <h2 className="font-semibold mb-4">False Positive Rate Curve</h2>
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-950">
+              <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">False Positive Rate Curve</h2>
               <div className="h-72" role="img" aria-label={chartSummary}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
@@ -908,32 +927,36 @@ export default function FprValidationPage() {
                     <ReferenceArea
                       x1={ZONE_MIN}
                       x2={ZONE_MAX}
-                      fill="#10b981"
+                      fill="#2563eb"
                       fillOpacity={0.08}
-                      stroke="#10b981"
+                      stroke="#2563eb"
                       strokeOpacity={0.3}
                     />
 
-                    <Line type="monotone" dataKey="fpr" stroke="#10b981" strokeWidth={3} />
+                    <Line type="monotone" dataKey="fpr" stroke="#2563eb" strokeWidth={3} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
             {/* Detailed Table with Fine-tuning Zone Focus (default) */}
-            <div className="bg-white border border-emerald-200 rounded-2xl overflow-hidden">
-              <div className="px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-semibold text-emerald-800">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                   False Positive Rate at Different Thresholds
                 </h2>
 
                 {/* View toggle - defaults to Fine-tuning Zone */}
-                <div role="group" aria-label="Threshold range" className="flex rounded-lg border border-emerald-200 bg-emerald-50 p-0.5 text-sm">
+                <div
+                  role="group"
+                  aria-label="Threshold range"
+                  className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm dark:border-slate-800 dark:bg-slate-900"
+                >
                   <button
                     type="button"
                     aria-pressed={fprView === 'fine-tuning'}
                     onClick={() => setFprView('fine-tuning')}
-                    className={`px-3 py-1 rounded-md transition ${fprView === 'fine-tuning' ? 'bg-white shadow text-emerald-700 font-medium' : 'text-emerald-600 hover:bg-emerald-100'}`}
+                    className={`rounded-md px-3 py-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 ${fprView === 'fine-tuning' ? 'bg-white font-medium text-blue-600 shadow dark:bg-slate-950 dark:text-blue-400' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
                   >
                     Fine-tuning Zone (0.65–0.78)
                   </button>
@@ -941,7 +964,7 @@ export default function FprValidationPage() {
                     type="button"
                     aria-pressed={fprView === 'all'}
                     onClick={() => setFprView('all')}
-                    className={`px-3 py-1 rounded-md transition ${fprView === 'all' ? 'bg-white shadow text-emerald-700 font-medium' : 'text-emerald-600 hover:bg-emerald-100'}`}
+                    className={`rounded-md px-3 py-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 ${fprView === 'all' ? 'bg-white font-medium text-blue-600 shadow dark:bg-slate-950 dark:text-blue-400' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
                   >
                     All Thresholds
                   </button>
@@ -958,7 +981,7 @@ export default function FprValidationPage() {
                   <>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-emerald-50 text-emerald-700">
+                        <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
                           <tr>
                             <th scope="col" className="text-left px-6 py-3">Threshold</th>
                             <th scope="col" className="text-left px-6 py-3">FPR</th>
@@ -966,7 +989,7 @@ export default function FprValidationPage() {
                             <th scope="col" className="text-left px-6 py-3">Assessment</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                           {tableRows.map((row) => {
                             const isDenseZone = row.threshold >= ZONE_MIN && row.threshold <= ZONE_MAX;
                             // "Recommended" used to be the lowest-FPR row in the zone. FPR only falls as the
@@ -977,23 +1000,23 @@ export default function FprValidationPage() {
                             return (
                               <tr
                                 key={row.threshold}
-                                className={`hover:bg-emerald-50/50 ${isDenseZone ? 'bg-emerald-50/70' : ''} ${rec ? 'ring-1 ring-emerald-400' : ''}`}
+                                className={`hover:bg-slate-50 dark:hover:bg-slate-900/50 ${isDenseZone ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''} ${rec ? 'ring-1 ring-blue-400' : ''}`}
                               >
                                 <td className="px-6 py-3 font-mono">
                                   {pctInt(row.threshold)}
                                   {isDenseZone && (
-                                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-200 text-emerald-800 rounded">
+                                    <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                                       Fine-tuning zone
                                     </span>
                                   )}
                                   {rec && (
-                                    <span className="ml-2 px-2 py-0.5 text-[10px] font-bold bg-emerald-600 text-white rounded">
+                                    <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-semibold text-white">
                                       {rec.title || 'Recommended'}
                                     </span>
                                   )}
                                 </td>
                                 <td className="px-6 py-3 font-semibold">{row.fpr_percent.toFixed(2)}%</td>
-                                <td className="px-6 py-3 text-slate-600">{row.flagged_pairs} / {result.num_pairs}</td>
+                                <td className="px-6 py-3 text-slate-600 dark:text-slate-400">{row.flagged_pairs} / {result.num_pairs}</td>
                                 <td className="px-6 py-3">
                                   <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${fprBadgeClass(row.fpr)}`}>
                                     {row.label}
@@ -1007,7 +1030,7 @@ export default function FprValidationPage() {
                     </div>
 
                     {showZoneOnly && (
-                      <div className="px-6 py-2 text-xs text-emerald-700 border-t bg-emerald-50">
+                      <div className="border-t border-slate-200 bg-slate-50 px-6 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-400">
                         Focused on the fine-tuning zone (0.65–0.78), lowest threshold first. A higher threshold lowers the false
                         positive rate but also misses more genuine similarity, so rows are only tagged where the analysis
                         recommended them. Switch to &quot;All Thresholds&quot; for the complete view.
@@ -1020,19 +1043,19 @@ export default function FprValidationPage() {
 
             {/* Score distribution (previously only in the printed report) */}
             {result.score_histogram.length > 0 && (
-              <div className="bg-white border border-emerald-200 rounded-2xl p-6">
-                <h2 className="font-semibold text-emerald-800 mb-1">Similarity score distribution</h2>
-                <p className="mb-4 text-xs text-emerald-700">
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-950">
+                <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">Similarity score distribution</h2>
+                <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
                   Pairs per similarity range. More pairs in the low ranges means cleaner data with fewer near-misses.
                 </p>
                 <div className="space-y-2">
                   {result.score_histogram.map((bin) => (
                     <div key={bin.bin} className="flex items-center gap-3 text-sm">
-                      <span className="w-24 shrink-0 font-mono text-emerald-800">{bin.bin}</span>
-                      <div className="h-3 flex-1 overflow-hidden rounded-full bg-emerald-50" aria-hidden="true">
-                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(bin.count / histogramMax) * 100}%` }} />
+                      <span className="w-24 shrink-0 font-mono text-slate-600 dark:text-slate-300">{bin.bin}</span>
+                      <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" aria-hidden="true">
+                        <div className="h-full rounded-full bg-blue-600" style={{ width: `${(bin.count / histogramMax) * 100}%` }} />
                       </div>
-                      <span className="w-12 shrink-0 text-right tabular-nums text-emerald-900">{bin.count}</span>
+                      <span className="w-12 shrink-0 text-right tabular-nums text-slate-900 dark:text-white">{bin.count}</span>
                     </div>
                   ))}
                 </div>
@@ -1040,50 +1063,50 @@ export default function FprValidationPage() {
             )}
 
             {/* Sophisticated Recommendations */}
-            <div className="bg-white border border-emerald-200 rounded-2xl p-6">
-              <h2 className="font-semibold text-emerald-800 mb-4 text-lg">Recommended Thresholds</h2>
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-950">
+              <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">Recommended Thresholds</h2>
 
               {result.recommendations.length > 0 ? (
                 <div className="space-y-4">
                   {result.recommendations.map((rec, idx) => (
-                    <div key={`${rec.type}-${idx}`} className={`p-4 rounded-xl border ${
-                      rec.type === 'balanced' ? 'border-emerald-300 bg-emerald-50' :
-                      rec.type === 'very_safe' ? 'border-blue-300 bg-blue-50' :
-                      'border-amber-300 bg-amber-50'
+                    <div key={`${rec.type}-${idx}`} className={`rounded-2xl border p-4 ${
+                      rec.type === 'balanced' ? 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900' :
+                      rec.type === 'very_safe' ? 'border-blue-300 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10' :
+                      'border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
                     }`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <span className="font-semibold text-lg">{rec.title}</span>
-                          <span className="ml-3 text-sm font-mono bg-white px-2 py-0.5 rounded border">
+                          <span className="ml-3 rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
                             {pctInt(rec.threshold)} threshold
                           </span>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm text-slate-600">FPR on your data</div>
-                          <div className="text-xl font-bold text-emerald-700">{rec.fpr.toFixed(1)}%</div>
+                          <div className="text-sm text-slate-600 dark:text-slate-400">FPR on your data</div>
+                          <div className="text-xl font-bold text-slate-900 dark:text-white">{rec.fpr.toFixed(1)}%</div>
                         </div>
                       </div>
-                      <p className="mt-2 text-sm text-slate-700">{rec.advice}</p>
+                      <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{rec.advice}</p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-emerald-700">{result.recommendation}</p>
+                <p className="text-slate-600 dark:text-slate-400">{result.recommendation}</p>
               )}
 
               {/* Overall Assessment */}
               {result.overall_assessment && (
-                <div className="mt-5 pt-5 border-t">
-                  <div className="font-medium text-emerald-800 mb-1">Corpus Assessment</div>
-                  <p className="text-sm text-emerald-700">{result.overall_assessment}</p>
+                <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+                  <div className="mb-1 font-medium text-slate-900 dark:text-white">Corpus Assessment</div>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{result.overall_assessment}</p>
                 </div>
               )}
 
               {/* Actionable Suggestions */}
               {result.suggested_actions.length > 0 && (
-                <div className="mt-5 pt-5 border-t">
-                  <div className="font-medium text-emerald-800 mb-2">Suggested Actions</div>
-                  <ul className="list-disc list-inside text-sm text-emerald-700 space-y-1">
+                <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+                  <div className="mb-2 font-medium text-slate-900 dark:text-white">Suggested Actions</div>
+                  <ul className="list-inside list-disc space-y-1 text-sm text-slate-600 dark:text-slate-400">
                     {result.suggested_actions.map((action, i) => (
                       <li key={i}>{action}</li>
                     ))}
@@ -1106,7 +1129,7 @@ export default function FprValidationPage() {
                 type="button"
                 onClick={closeSaveModal}
                 disabled={savingRun}
-                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -1114,7 +1137,7 @@ export default function FprValidationPage() {
                 type="button"
                 onClick={saveCurrentRun}
                 disabled={!runName.trim() || savingRun}
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
               >
                 {savingRun ? 'Saving…' : 'Save run'}
               </button>
@@ -1123,7 +1146,7 @@ export default function FprValidationPage() {
         >
           <div className="space-y-4">
             {saveError && (
-              <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p role="alert" className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
                 <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
                 {saveError}
               </p>
@@ -1168,7 +1191,7 @@ export default function FprValidationPage() {
                 type="button"
                 onClick={() => setPendingDeleteRun(null)}
                 disabled={deletingRun}
-                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -1176,7 +1199,7 @@ export default function FprValidationPage() {
                 type="button"
                 onClick={deleteSavedRun}
                 disabled={deletingRun}
-                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-60"
               >
                 {deletingRun ? 'Deleting…' : 'Delete'}
               </button>
@@ -1196,7 +1219,7 @@ export default function FprValidationPage() {
                 analysis on the same files is unaffected.
               </p>
               {deleteError && (
-                <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
                   {deleteError}
                 </p>
               )}
