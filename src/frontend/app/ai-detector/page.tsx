@@ -314,77 +314,97 @@ export default function AIDetectorPage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
-        <div className="space-y-8">
-          <section className="theme-card-strong rounded-[30px] overflow-hidden">
-            <div className="theme-section-line px-6 py-5 lg:px-7">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
-                    <Shield size={13} aria-hidden="true" />
-                    Academic Integrity Assessment
-                  </div>
-                  <div>
-                    <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                      AI-Generated Code Review
-                    </h1>
-                    <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                      Upload student submissions for automated assistance analysis. Scores are review indicators, not proof.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  {uploading && (
-                    <button
-                      type="button"
-                      onClick={() => uploadAbortRef.current?.abort()}
-                      className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-5 py-4 text-sm font-semibold"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={runDetection}
-                    disabled={!canRun}
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
-                  >
-                    {uploading ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" />Analyzing...</> : <><Bot size={16} aria-hidden="true" />Run Assessment<ArrowRight size={15} aria-hidden="true" /></>}
-                  </button>
-                </div>
-              </div>
+      <div className="theme-page-container space-y-6">
+        <PageHeader
+          eyebrow="AI Detector"
+          eyebrowStyle="badge"
+          title="AI-Generated Code Review"
+          description="Upload student submissions for automated assistance analysis. Scores are review indicators, not proof."
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              {uploading && (
+                <button
+                  type="button"
+                  onClick={() => uploadAbortRef.current?.abort()}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={runDetection}
+                disabled={!canRun}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Bot size={16} aria-hidden="true" />
+                    Run Assessment
+                    <ArrowRight size={15} aria-hidden="true" />
+                  </>
+                )}
+              </button>
             </div>
-          </section>
+          }
+        />
 
-          <p role="note" className="flex items-start gap-2 text-sm text-slate-600">
-            <Info size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
-            <span>
-              AI-detection scores can be wrong in both directions, and they are least reliable for short submissions, simple
-              exercises and writers who are still learning. Treat a high score as a reason to talk to the student, never as
-              a finding on its own.
-            </span>
-          </p>
+        <p
+          role="note"
+          className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+        >
+          <Info size={16} className="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
+          <span>
+            AI-detection scores can be wrong in both directions, and they are least reliable for short submissions, simple
+            exercises and writers who are still learning. Treat a high score as a reason to talk to the student, never as
+            a finding on its own.
+          </span>
+        </p>
 
-          {/* Course & Assignment — hidden for the guest demo: it owns no
-              workspace, so there is nothing to associate an assessment with. */}
-          {!isGuest && (
-            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-800">
-                Course &amp; Assignment
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">Optional</span>
+        {/* Course & Assignment — hidden for the guest demo: it owns no
+            workspace, so there is nothing to associate an assessment with. */}
+        {!isGuest && (
+          <section className="rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Course &amp; Assignment</h2>
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                  Optional
+                </span>
               </div>
-              <p className="mb-4 text-xs text-slate-500">Associate this assessment with a course and assignment for better organization (optional)</p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Associate this assessment with a course and assignment for better organization (optional)
+              </p>
+            </div>
+            <div className="p-5">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="ai-course" className="text-xs font-semibold uppercase tracking-wider text-slate-500">Course</label>
-                  <select id="ai-course" value={selectedCourseId} onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }} disabled={coursesLoading} className="theme-field">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="ai-course" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Course</label>
+                  <select
+                    id="ai-course"
+                    value={selectedCourseId}
+                    onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }}
+                    disabled={coursesLoading}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                  >
                     <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
                     {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
                   </select>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="ai-assignment" className="text-xs font-semibold uppercase tracking-wider text-slate-500">Assignment</label>
-                  <select id="ai-assignment" value={selectedAssignmentId} onChange={(event) => setSelectedAssignmentId(event.target.value)} disabled={!selectedCourseId || assignmentsLoading} className="theme-field disabled:text-slate-400">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="ai-assignment" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Assignment</label>
+                  <select
+                    id="ai-assignment"
+                    value={selectedAssignmentId}
+                    onChange={(event) => setSelectedAssignmentId(event.target.value)}
+                    disabled={!selectedCourseId || assignmentsLoading}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                  >
                     <option value="">{!selectedCourseId ? 'None (choose course first if needed)' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
                     {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
                   </select>
@@ -392,63 +412,66 @@ export default function AIDetectorPage() {
               </div>
               {/* A course without an assignment was silently ignored; now it says so. */}
               {selectedCourseId && !selectedAssignmentId && !assignmentsLoading && (
-                <p role="status" className="mt-3 text-xs text-amber-700">
+                <p role="status" className="mt-3 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
                   Choose an assignment as well to file this assessment under the course. With only a course selected it is saved as a standalone assessment.
                 </p>
               )}
-            </section>
-          )}
+            </div>
+          </section>
+        )}
 
-          <section
-            onDragEnter={() => { dragDepth.current += 1; setIsDragging(true); }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={() => {
-              // dragleave also fires when crossing a child element, which made the highlight flicker.
-              dragDepth.current = Math.max(0, dragDepth.current - 1);
-              if (dragDepth.current === 0) setIsDragging(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              dragDepth.current = 0;
-              setIsDragging(false);
-              addFiles(event.dataTransfer.files);
-            }}
-            className={`rounded-2xl bg-white shadow-sm ring-1 transition ${isDragging ? 'ring-2 ring-blue-500' : 'ring-slate-200'}`}
-          >
-            {files.length === 0 ? (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex w-full flex-col items-center justify-center px-8 py-20 text-center"
-              >
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                  <Upload size={26} aria-hidden="true" />
-                </div>
-                <div className="mt-5 text-base font-semibold text-slate-900">{isDragging ? 'Release to add files' : 'Upload student code submissions'}</div>
-                <div className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Accept source files (.py, .java, .cpp, etc.) or compressed archives for batch analysis. Drag files here or select them.
-                </div>
-                <span className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-                  <FileUp size={14} aria-hidden="true" />
-                  Select files
-                </span>
-              </button>
+        <section
+          onDragEnter={() => { dragDepth.current += 1; setIsDragging(true); }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => {
+            // dragleave also fires when crossing a child element, which made the highlight flicker.
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setIsDragging(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            dragDepth.current = 0;
+            setIsDragging(false);
+            addFiles(event.dataTransfer.files);
+          }}
+          className={`rounded-[28px] border bg-white shadow-sm transition dark:bg-slate-950 ${isDragging ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-slate-200 dark:border-slate-800'}`}
+        >
+          {files.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full flex-col items-center justify-center px-8 py-20 text-center"
+            >
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                <Upload size={22} aria-hidden="true" />
+              </div>
+              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+                {isDragging ? 'Release to add files' : 'Upload student code submissions'}
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Accept source files (.py, .java, .cpp, etc.) or compressed archives for batch analysis. Drag files here or select them.
+              </p>
+              <span className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                <FileUp size={14} aria-hidden="true" />
+                Select files
+              </span>
+            </button>
             ) : (
               <div className="p-5">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-slate-900">{files.length} submission{files.length === 1 ? '' : 's'} ready for review</div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-white">{files.length} submission{files.length === 1 ? '' : 's'} ready for review</div>
                   <div className="flex items-center gap-3">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-blue-600">Add more</button>
-                    <button type="button" onClick={() => { setFiles([]); setFileNotice(''); }} className="text-sm font-semibold text-slate-500 hover:text-slate-700">Clear</button>
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">Add more</button>
+                    <button type="button" onClick={() => { setFiles([]); setFileNotice(''); }} className="text-sm font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear</button>
                   </div>
                 </div>
                 <div className="mt-4 grid gap-2">
                   {files.map((file, index) => (
-                    <div key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                      <FileUp size={15} className="text-slate-400" aria-hidden="true" />
-                      <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700" title={file.name}>{file.name}</div>
-                      <div className="text-xs text-slate-500">{formatSize(file.size)}</div>
-                      <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} className="text-slate-400 hover:text-red-500">
+                    <div key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                      <FileUp size={15} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
+                      <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-300" title={file.name}>{file.name}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{formatSize(file.size)}</div>
+                      <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400">
                         <X size={14} aria-hidden="true" />
                       </button>
                     </div>
@@ -469,27 +492,28 @@ export default function AIDetectorPage() {
               }}
             />
           </section>
-          {fileNotice && (
-            <p role="status" className="flex items-start gap-2 text-sm text-amber-700">
-              <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
-              {fileNotice}
-            </p>
-          )}
-          {error && <ErrorState message={error} />}
+        {fileNotice && (
+          <p role="status" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+            <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            {fileNotice}
+          </p>
+        )}
+        {error && <ErrorState message={error} onRetry={() => runDetection()} />}
 
-          {/* Assessment History — hidden for guests: the workspace listing
-              they would read is denied to them, so it is always empty. */}
-          {!isGuest && (
-            <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        {/* Assessment History — hidden for guests: the workspace listing
+            they would read is denied to them, so it is always empty. */}
+        {!isGuest && (
+          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               <button
                 type="button"
                 onClick={() => setHistoryExpanded((expanded) => !expanded)}
                 aria-expanded={historyExpanded}
-                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50"
+                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-900"
               >
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Assessment History</div>
-                  <div className="mt-1 text-xs text-slate-500">
+                <span className="min-w-0">
+                  <span className="block">Assessment History</span>
+                  <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
                     {historyExpanded
                       ? 'Previous analyses retained for institutional review.'
                       : historyLoading
@@ -497,29 +521,45 @@ export default function AIDetectorPage() {
                         : historyError
                           ? 'Previous assessments couldn’t be loaded — click to retry'
                           : `${history.length} previous assessment${history.length === 1 ? '' : 's'} — click to view`}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-slate-400">
+                  </span>
+                </span>
+                <span className="flex items-center gap-2 text-slate-400 dark:text-slate-500">
                   <CalendarClock size={18} aria-hidden="true" />
                   <ChevronDown size={16} aria-hidden="true" className={`transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
-                </div>
+                </span>
               </button>
-              {historyExpanded && (
-                <div className="border-t border-slate-100">
-                  {historyError ? (
-                    <div role="alert" className="flex items-center gap-3 px-5 py-6 text-sm text-red-700">
-                      <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
-                      <span className="flex-1">{historyError}</span>
-                      <button type="button" onClick={() => loadHistory()} className="font-semibold underline underline-offset-2">Retry</button>
-                    </div>
-                  ) : historyLoading ? (
-                    <div role="status" className="px-5 py-8 text-sm text-slate-500">Loading…</div>
-                  ) : history.length === 0 ? (
-                    <div className="px-5 py-8 text-sm text-slate-500">No prior assessments recorded.</div>
-                  ) : (
-                    <>
-                      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2">
-                        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            </h2>
+            {historyExpanded && (
+            <div className="border-t border-slate-100 dark:border-slate-800">
+              {historyError ? (
+                <div role="alert" className="mx-4 my-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span className="flex-1">{historyError}</span>
+                  <button type="button" onClick={() => loadHistory()} className="font-semibold underline underline-offset-2">Retry</button>
+                </div>
+              ) : historyLoading ? (
+                <div role="status" aria-label="Loading previous assessments" className="px-5 py-6">
+                  <div className="space-y-3" aria-hidden="true">
+                    <div className="h-4 w-44 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-3 w-64 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-4 w-36 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-3 w-52 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                </div>
+              ) : history.length === 0 ? (
+                <div className="px-5 py-16 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <CalendarClock size={22} aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No prior assessments recorded</h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Assessments you run appear here with their highest AI score and a link to the full report.
+                  </p>
+                </div>
+              ) : (
+                <>
+                      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-900/60">
+                        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                           Filter by course
                           <select
                             value={historyCourseId}
@@ -528,7 +568,7 @@ export default function AIDetectorPage() {
                               setHistoryAssignmentId('');
                               setHistoryPage(1);
                             }}
-                            className="theme-compact-field"
+                            className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                           >
                             <option value="">All courses</option>
                             {courses.map((course) => (
@@ -538,7 +578,7 @@ export default function AIDetectorPage() {
                             ))}
                           </select>
                         </label>
-                        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                           Filter by assignment
                           <select
                             value={historyAssignmentId}
@@ -547,7 +587,7 @@ export default function AIDetectorPage() {
                               setHistoryPage(1);
                             }}
                             disabled={!historyCourseId}
-                            className="theme-compact-field"
+                            className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:disabled:text-slate-500"
                           >
                             <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
                             {historyAssignments.map((assignment) => (
@@ -557,10 +597,18 @@ export default function AIDetectorPage() {
                         </label>
                       </div>
                       {filteredHistory.length === 0 ? (
-                        <div className="px-5 py-8 text-sm text-slate-500">No assessments match these filters.</div>
+                        <div className="px-5 py-16 text-center">
+                          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            <Search size={22} aria-hidden="true" />
+                          </div>
+                          <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No assessments match these filters</h3>
+                          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                            Try a different course or assignment filter to widen the results.
+                          </p>
+                        </div>
                       ) : (
                         <>
-                          <ul className="divide-y divide-slate-100">
+                          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                             {paginatedHistory.map((job) => {
                               const score = Number(job.summary?.highest_ai_probability) || 0;
                               const when = formatDate(job.created_at);
@@ -568,12 +616,12 @@ export default function AIDetectorPage() {
                                 <li key={job.id}>
                                   <Link
                                     href={`/ai-detector/results/${encodeURIComponent(job.id)}`}
-                                    className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1fr_auto] md:items-center"
+                                    className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 dark:hover:bg-slate-900 md:grid-cols-[1fr_auto] md:items-center"
                                   >
                                     <div>
-                                      <div className="font-medium text-slate-900">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                                      <div className="font-medium text-slate-900 dark:text-white">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
                                       {/* "Course" was shown for a standalone assessment, which read like a course name. */}
-                                      <div className="mt-1 text-xs text-slate-500">
+                                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                         {job.course_name || 'Standalone assessment'}
                                         {when ? ` · ${when}` : ''}
                                       </div>
@@ -583,7 +631,7 @@ export default function AIDetectorPage() {
                                       <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(score)}`}>
                                         {Math.round(score * 100)}% highest AI score
                                       </span>
-                                      <ArrowRight size={16} className="text-slate-400" aria-hidden="true" />
+                                      <ArrowRight size={16} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
                                     </div>
                                   </Link>
                                 </li>
