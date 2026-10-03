@@ -11,6 +11,23 @@ echo "Starting backend server with updated code..."
 cd /home/tsun/Documents/CodeProvenance
 source venv/bin/activate
 
+# Export .env.local into the process environment.
+#
+# AppSettings reads this file itself, but some flags are read straight from
+# os.environ (e.g. BINOCULARS_ENABLED in engines/ai/binoculars_detector.py).
+# Without this loop, restarting via this script would ignore them and re-enable
+# the memory-hungry model load. Mirrors the loader in scripts/start.sh.
+ENV_FILE="$(pwd)/src/backend/.env.local"
+if [ -f "$ENV_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in
+            ''|\#*) continue ;;
+        esac
+        export "$line"
+    done < "$ENV_FILE"
+fi
+
 # Start backend server
 uvicorn src.backend.api.server:app --host 127.0.0.1 --port 8000 --log-level warning &
 
