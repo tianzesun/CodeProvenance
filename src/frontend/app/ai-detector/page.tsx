@@ -456,42 +456,42 @@ export default function AIDetectorPage() {
                 Select files
               </span>
             </button>
-            ) : (
-              <div className="p-5">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-white">{files.length} submission{files.length === 1 ? '' : 's'} ready for review</div>
-                  <div className="flex items-center gap-3">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">Add more</button>
-                    <button type="button" onClick={() => { setFiles([]); setFileNotice(''); }} className="text-sm font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear</button>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-2">
-                  {files.map((file, index) => (
-                    <div key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                      <FileUp size={15} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
-                      <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-300" title={file.name}>{file.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{formatSize(file.size)}</div>
-                      <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400">
-                        <X size={14} aria-hidden="true" />
-                      </button>
-                    </div>
-                  ))}
+          ) : (
+            <div className="p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">{files.length} submission{files.length === 1 ? '' : 's'} ready for review</div>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">Add more</button>
+                  <button type="button" onClick={() => { setFiles([]); setFileNotice(''); }} className="text-sm font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear</button>
                 </div>
               </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ACCEPT}
-              className="hidden"
-              onChange={(event) => {
-                addFiles(event.target.files);
-                // Lets the same file be chosen again after it has been removed.
-                event.target.value = '';
-              }}
-            />
-          </section>
+              <div className="mt-4 grid gap-2">
+                {files.map((file, index) => (
+                  <div key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                    <FileUp size={15} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
+                    <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-300" title={file.name}>{file.name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{formatSize(file.size)}</div>
+                    <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400">
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            className="hidden"
+            onChange={(event) => {
+              addFiles(event.target.files);
+              // Lets the same file be chosen again after it has been removed.
+              event.target.value = '';
+            }}
+          />
+        </section>
         {fileNotice && (
           <p role="status" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
             <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -530,179 +530,177 @@ export default function AIDetectorPage() {
               </button>
             </h2>
             {historyExpanded && (
-            <div className="border-t border-slate-100 dark:border-slate-800">
-              {historyError ? (
-                <div role="alert" className="mx-4 my-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                  <span className="flex-1">{historyError}</span>
-                  <button type="button" onClick={() => loadHistory()} className="font-semibold underline underline-offset-2">Retry</button>
-                </div>
-              ) : historyLoading ? (
-                <div role="status" aria-label="Loading previous assessments" className="px-5 py-6">
-                  <div className="space-y-3" aria-hidden="true">
-                    <div className="h-4 w-44 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                    <div className="h-3 w-64 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                    <div className="h-4 w-36 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                    <div className="h-3 w-52 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+              <div className="border-t border-slate-100 dark:border-slate-800">
+                {historyError ? (
+                  <div role="alert" className="mx-4 my-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span className="flex-1">{historyError}</span>
+                    <button type="button" onClick={() => loadHistory()} className="font-semibold underline underline-offset-2">Retry</button>
                   </div>
-                </div>
-              ) : history.length === 0 ? (
-                <div className="px-5 py-16 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                    <CalendarClock size={22} aria-hidden="true" />
+                ) : historyLoading ? (
+                  <div role="status" aria-label="Loading previous assessments" className="px-5 py-6">
+                    <div className="space-y-3" aria-hidden="true">
+                      <div className="h-4 w-44 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                      <div className="h-3 w-64 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                      <div className="h-4 w-36 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                      <div className="h-3 w-52 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                    </div>
                   </div>
-                  <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No prior assessments recorded</h3>
-                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    Assessments you run appear here with their highest AI score and a link to the full report.
-                  </p>
-                </div>
-              ) : (
-                <>
-                      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-900/60">
-                        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                          Filter by course
-                          <select
-                            value={historyCourseId}
-                            onChange={(event) => {
-                              setHistoryCourseId(event.target.value);
-                              setHistoryAssignmentId('');
-                              setHistoryPage(1);
-                            }}
-                            className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
-                          >
-                            <option value="">All courses</option>
-                            {courses.map((course) => (
-                              <option key={course.id} value={course.id}>
-                                {course.code ? `${course.code} – ` : ''}{course.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                          Filter by assignment
-                          <select
-                            value={historyAssignmentId}
-                            onChange={(event) => {
-                              setHistoryAssignmentId(event.target.value);
-                              setHistoryPage(1);
-                            }}
-                            disabled={!historyCourseId}
-                            className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:disabled:text-slate-500"
-                          >
-                            <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
-                            {historyAssignments.map((assignment) => (
-                              <option key={assignment.id} value={assignment.id}>{assignment.name}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      {filteredHistory.length === 0 ? (
-                        <div className="px-5 py-16 text-center">
-                          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                            <Search size={22} aria-hidden="true" />
-                          </div>
-                          <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No assessments match these filters</h3>
-                          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                            Try a different course or assignment filter to widen the results.
-                          </p>
+                ) : history.length === 0 ? (
+                  <div className="px-5 py-16 text-center">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                      <CalendarClock size={22} aria-hidden="true" />
+                    </div>
+                    <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No prior assessments recorded</h3>
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      Assessments you run appear here with their highest AI score and a link to the full report.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-900/60">
+                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        Filter by course
+                        <select
+                          value={historyCourseId}
+                          onChange={(event) => {
+                            setHistoryCourseId(event.target.value);
+                            setHistoryAssignmentId('');
+                            setHistoryPage(1);
+                          }}
+                          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                        >
+                          <option value="">All courses</option>
+                          {courses.map((course) => (
+                            <option key={course.id} value={course.id}>
+                              {course.code ? `${course.code} – ` : ''}{course.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        Filter by assignment
+                        <select
+                          value={historyAssignmentId}
+                          onChange={(event) => {
+                            setHistoryAssignmentId(event.target.value);
+                            setHistoryPage(1);
+                          }}
+                          disabled={!historyCourseId}
+                          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:disabled:text-slate-500"
+                        >
+                          <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
+                          {historyAssignments.map((assignment) => (
+                            <option key={assignment.id} value={assignment.id}>{assignment.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {filteredHistory.length === 0 ? (
+                      <div className="px-5 py-16 text-center">
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <Search size={22} aria-hidden="true" />
                         </div>
-                      ) : (
-                        <>
-                          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {paginatedHistory.map((job) => {
-                              const score = Number(job.summary?.highest_ai_probability) || 0;
-                              const when = formatDate(job.created_at);
-                              return (
-                                <li key={job.id}>
-                                  <Link
-                                    href={`/ai-detector/results/${encodeURIComponent(job.id)}`}
-                                    className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 dark:hover:bg-slate-900 md:grid-cols-[1fr_auto] md:items-center"
-                                  >
-                                    <div>
-                                      <div className="font-medium text-slate-900 dark:text-white">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
-                                      {/* "Course" was shown for a standalone assessment, which read like a course name. */}
-                                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                        {job.course_name || 'Standalone assessment'}
-                                        {when ? ` · ${when}` : ''}
-                                      </div>
+                        <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No assessments match these filters</h3>
+                        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          Try a different course or assignment filter to widen the results.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {paginatedHistory.map((job) => {
+                            const score = Number(job.summary?.highest_ai_probability) || 0;
+                            const when = formatDate(job.created_at);
+                            return (
+                              <li key={job.id}>
+                                <Link
+                                  href={`/ai-detector/results/${encodeURIComponent(job.id)}`}
+                                  className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 dark:hover:bg-slate-900 md:grid-cols-[1fr_auto] md:items-center"
+                                >
+                                  <div>
+                                    <div className="font-medium text-slate-900 dark:text-white">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                                    {/* "Course" was shown for a standalone assessment, which read like a course name. */}
+                                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                      {job.course_name || 'Standalone assessment'}
+                                      {when ? ` · ${when}` : ''}
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                      {/* A detection score isn't a misconduct risk, so the chip no longer says "risk". */}
-                                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(score)}`}>
-                                        {Math.round(score * 100)}% highest AI score
-                                      </span>
-                                      <ArrowRight size={16} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
-                                    </div>
-                                  </Link>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                          {totalHistoryPages > 1 && (
-                            <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <label htmlFor="ai-history-page-size">Rows per page</label>
-                                <select
-                                  id="ai-history-page-size"
-                                  value={historyPageSize}
-                                  onChange={(event) => {
-                                    setHistoryPageSize(Number(event.target.value));
-                                    setHistoryPage(1);
-                                  }}
-                                  className="theme-compact-field h-8 w-auto"
-                                >
-                                  {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
-                                </select>
-                                <span className="ml-2 text-xs text-slate-500">Page {safeHistoryPage} of {totalHistoryPages}</span>
-                              </div>
-                              <nav aria-label="Pagination" className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  disabled={safeHistoryPage <= 1}
-                                  // Based on the visible page: after the list shrank, the stored page could exceed it
-                                  // and "Previous" appeared to do nothing.
-                                  onClick={() => setHistoryPage(Math.max(1, safeHistoryPage - 1))}
-                                  aria-label="Previous page"
-                                  className="theme-icon-button"
-                                >
-                                  <ChevronLeft size={15} aria-hidden="true" />
-                                </button>
-                                {historyPageNumbers.map((num, i) => num === '…' ? (
-                                  <span key={`gap-${i}`} className="px-1 text-xs text-slate-400" aria-hidden="true">…</span>
-                                ) : (
-                                  <button
-                                    key={num}
-                                    type="button"
-                                    onClick={() => setHistoryPage(Number(num))}
-                                    aria-label={`Page ${num}`}
-                                    aria-current={safeHistoryPage === num ? 'page' : undefined}
-                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${safeHistoryPage === num ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                                  >
-                                    {num}
-                                  </button>
-                                ))}
-                                <button
-                                  type="button"
-                                  disabled={safeHistoryPage >= totalHistoryPages}
-                                  onClick={() => setHistoryPage(Math.min(totalHistoryPages, safeHistoryPage + 1))}
-                                  aria-label="Next page"
-                                  className="theme-icon-button"
-                                >
-                                  <ChevronRight size={15} aria-hidden="true" />
-                                </button>
-                              </nav>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    {/* A detection score isn't a misconduct risk, so the chip no longer says "risk". */}
+                                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(score)}`}>
+                                      {Math.round(score * 100)}% highest AI score
+                                    </span>
+                                    <ArrowRight size={16} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
+                                  </div>
+                                </Link>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        {totalHistoryPages > 1 && (
+                          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                              <label htmlFor="ai-history-page-size">Rows per page</label>
+                              <select
+                                id="ai-history-page-size"
+                                value={historyPageSize}
+                                onChange={(event) => {
+                                  setHistoryPageSize(Number(event.target.value));
+                                  setHistoryPage(1);
+                                }}
+                                className="h-8 w-auto rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                              >
+                                {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+                              </select>
+                              <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">Page {safeHistoryPage} of {totalHistoryPages}</span>
                             </div>
-                          )}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-
-        </div>
+                            <nav aria-label="Pagination" className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={safeHistoryPage <= 1}
+                                // Based on the visible page: after the list shrank, the stored page could exceed it
+                                // and "Previous" appeared to do nothing.
+                                onClick={() => setHistoryPage(Math.max(1, safeHistoryPage - 1))}
+                                aria-label="Previous page"
+                                className="theme-icon-button"
+                              >
+                                <ChevronLeft size={15} aria-hidden="true" />
+                              </button>
+                              {historyPageNumbers.map((num, i) => num === '…' ? (
+                                <span key={`gap-${i}`} className="px-1 text-xs text-slate-400 dark:text-slate-500" aria-hidden="true">…</span>
+                              ) : (
+                                <button
+                                  key={num}
+                                  type="button"
+                                  onClick={() => setHistoryPage(Number(num))}
+                                  aria-label={`Page ${num}`}
+                                  aria-current={safeHistoryPage === num ? 'page' : undefined}
+                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition ${safeHistoryPage === num ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/25' : 'border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'}`}
+                                >
+                                  {num}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                disabled={safeHistoryPage >= totalHistoryPages}
+                                onClick={() => setHistoryPage(Math.min(totalHistoryPages, safeHistoryPage + 1))}
+                                aria-label="Next page"
+                                className="theme-icon-button"
+                              >
+                                <ChevronRight size={15} aria-hidden="true" />
+                              </button>
+                            </nav>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </DashboardLayout>
   );
