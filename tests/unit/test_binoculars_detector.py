@@ -8,7 +8,7 @@ broken probability mapping.
 """
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 
@@ -28,7 +28,6 @@ class TestBinocularsDetector:
         mock_bino = MagicMock()
         # 0.60 is below the low-FPR threshold (0.8536), i.e. clearly AI.
         mock_bino.compute_score.return_value = 0.60
-        mock_bino.predict.return_value = "MOST_LIKELY_AI"
         detector._bino = mock_bino
         detector._available = True
 
@@ -39,9 +38,29 @@ class TestBinocularsDetector:
         result = detector.analyze(long_code, language="python")
 
         assert result["available"] is True
-        assert result["label"] == "MOST_LIKELY_AI"
+        assert result["label"] == "Most likely AI-generated"
         assert 0.8 < result["ai_probability"] <= 1.0
         assert result["confidence"] >= 0.6
+        # The label must be derived from the score: predict() re-runs the full
+        # double-model inference and must never be called.
+        mock_bino.predict.assert_not_called()
+        mock_bino.compute_score.assert_called_once()
+
+    def test_label_follows_the_loaded_instance_threshold(self):
+        """Label banding mirrors ``np.where(score < threshold, AI, human)``."""
+        detector = BinocularsDetector()
+        mock_bino = MagicMock()
+        mock_bino.threshold = 0.9
+        mock_bino.compute_score.return_value = 0.87
+        detector._bino = mock_bino
+        detector._available = True
+
+        code = "def f(x):\n    return x * 2\n" * 8
+        assert detector.analyze(code)["label"] == "Most likely AI-generated"
+
+        mock_bino.compute_score.return_value = 0.92
+        assert detector.analyze(code)["label"] == "Most likely human-generated"
+        mock_bino.predict.assert_not_called()
 
     def test_human_like_score(self):
         detector = BinocularsDetector()
@@ -51,7 +70,6 @@ class TestBinocularsDetector:
         # (0.9015). The previous fixture used 0.72, which Binoculars actually
         # classifies as AI-generated, so it asserted the wrong outcome.
         mock_bino.compute_score.return_value = 0.95
-        mock_bino.predict.return_value = "MOST_LIKELY_HUMAN"
         detector._bino = mock_bino
         detector._available = True
 
@@ -63,6 +81,7 @@ class TestBinocularsDetector:
 
         assert result["available"] is True
         assert result["ai_probability"] < 0.2
+        assert result["label"] == "Most likely human-generated"
 
     def test_ai_score_reaches_the_medium_risk_band(self):
         """A confident-AI score must be able to cross the 0.40 medium band.
@@ -73,7 +92,6 @@ class TestBinocularsDetector:
         detector = BinocularsDetector()
         mock_bino = MagicMock()
         mock_bino.compute_score.return_value = 0.75
-        mock_bino.predict.return_value = "MOST_LIKELY_AI"
         detector._bino = mock_bino
         detector._available = True
 
@@ -122,6 +140,7 @@ def test_disabled_by_env_does_not_load_models() -> None:
         else:
             os.environ["BINOCULARS_ENABLED"] = previous
 
+
 def test_configured_pair_defaults_to_a_cpu_sized_model() -> None:
     """The default pair must not be the multi-GB Falcon checkpoints.
 
@@ -159,3 +178,97 @@ def test_model_pair_is_configurable_via_environment() -> None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_loaded_pair_is_cached_across_detectors() -> None:
+    """One process loads the model pair once; later detectors reuse it.
+
+    Regression: every job constructed a fresh detector, so each AI run
+    reloaded two ~0.5B checkpoints — jobs sat at "processing" for minutes
+    on tiny files. The pair must be shared, not reloaded per instance.
+    """
+    import sys
+    import types
+
+    from src.backend.engines.ai import binoculars_detector as module
+
+    construct_calls = {"count": 0}
+
+    class FakeBinoculars:
+        """Stands in for the real package; records constructor calls."""
+
+        def __init__(self, **kwargs):
+            construct_calls["count"] += 1
+            self.threshold = module.BINOCULARS_FPR_THRESHOLD
+
+        def compute_score(self, code):
+            return 0.60
+
+    fake_package = types.ModuleType("binoculars")
+    fake_package.Binoculars = FakeBinoculars
+
+    previous_enabled = os.environ.get("BINOCULARS_ENABLED")
+    saved_cache = dict(module._BINOCULARS_CACHE)
+    os.environ["BINOCULARS_ENABLED"] = "1"
+    module._BINOCULARS_CACHE.clear()
+    try:
+        with patch.dict(sys.modules, {"binoculars": fake_package}):
+            first = module.BinocularsDetector()
+            second = module.BinocularsDetector()
+            assert first._load() is True
+            assert second._load() is True
+            assert first._bino is second._bino
+            assert construct_calls["count"] == 1
+    finally:
+        module._BINOCULARS_CACHE.clear()
+        module._BINOCULARS_CACHE.update(saved_cache)
+        if previous_enabled is None:
+            os.environ.pop("BINOCULARS_ENABLED", None)
+        else:
+            os.environ["BINOCULARS_ENABLED"] = previous_enabled
+
+
+def test_bf16_env_override_beats_cpu_detection() -> None:
+    """BINOCULARS_BF16 forces either path, capable CPU or not."""
+    from src.backend.engines.ai import binoculars_detector as module
+
+    forced_off = patch.dict(os.environ, {"BINOCULARS_BF16": "0"})
+    capable = patch.object(module, "_cpu_has_native_bf16", return_value=True)
+    with forced_off, capable:
+        assert module._bfloat16_enabled() is False
+
+    forced_on = patch.dict(os.environ, {"BINOCULARS_BF16": "1"})
+    incapable = patch.object(module, "_cpu_has_native_bf16", return_value=False)
+    with forced_on, incapable:
+        assert module._bfloat16_enabled() is True
+
+
+def test_bf16_defaults_to_cpu_capability() -> None:
+    """Without env, bf16 follows native support — emulated bf16 is unusable.
+
+    Regression: the old default was always-on, and torch's emulated bf16 ran
+    GEMM ~159x slower on an AVX2-only host, stranding AI jobs for an hour.
+    """
+    from src.backend.engines.ai import binoculars_detector as module
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("BINOCULARS_BF16", None)
+        with patch.object(module, "_cpu_has_native_bf16", return_value=True):
+            assert module._bfloat16_enabled() is True
+        with patch.object(module, "_cpu_has_native_bf16", return_value=False):
+            assert module._bfloat16_enabled() is False
+
+
+def test_cpu_bf16_probe_is_a_bool() -> None:
+    """The /proc probe answers with a plain bool (and caches itself)."""
+    from src.backend.engines.ai import binoculars_detector as module
+
+    previous = module._NATIVE_BF16
+    module._NATIVE_BF16 = None
+    try:
+        assert isinstance(module._cpu_has_native_bf16(), bool)
+        # Second call uses the cached value without touching /proc again.
+        module._NATIVE_BF16 = True
+        assert module._cpu_has_native_bf16() is True
+    finally:
+        module._NATIVE_BF16 = previous

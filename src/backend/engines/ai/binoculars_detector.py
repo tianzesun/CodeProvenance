@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,60 @@ BINOCULARS_ACCURACY_THRESHOLD = 0.9015310749276843
 # the same semantics as the rest of the ensemble: 1.0 = certainly AI.
 AI_ANCHOR_PROBABILITY = 0.95
 HUMAN_ANCHOR_PROBABILITY = 0.05
+
+# Process-wide cache of the loaded observer/performer pair.
+#
+# Every job builds a fresh detector, and loading the pair costs tens of
+# seconds (two ~0.5B checkpoints plus a Hub version check per checkpoint),
+# which used to be paid on *every* AI detection run — the visible symptom
+# was jobs sitting at "processing" for many minutes on tiny files. The key
+# includes every constructor option so an env-reconfigured pair gets its own
+# entry; the lock doubles as the single-flight guard so concurrent first
+# callers wait for one load instead of racing to start several.
+_BINOCULARS_CACHE: dict[tuple[str, str, bool, int], Any] = {}
+_BINOCULARS_CACHE_LOCK = threading.Lock()
+
+# Result of the one-time /proc/cpuinfo probe; None until first checked.
+_NATIVE_BF16: bool | None = None
+
+
+def _cpu_has_native_bf16() -> bool:
+    """Whether the CPU executes bfloat16 math natively (checked once).
+
+    x86 advertises ``avx512_bf16``/``amx_bf16``, ARM a ``bf16`` feature flag;
+    all three contain the substring ``bf16``. Without one of them torch
+    emulates bf16 — measured on an AVX2-only host at 159x slower GEMM and
+    19x slower attention, which turned single-file AI jobs into hour-long
+    runs. Any doubt (unreadable /proc, exotic platform) falls back to False:
+    fp32 is always correct, just larger in RAM.
+    """
+    global _NATIVE_BF16
+    if _NATIVE_BF16 is None:
+        flags = ""
+        try:
+            with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith(("flags", "Features")):
+                        flags = line
+                        break
+        except OSError:
+            flags = ""
+        _NATIVE_BF16 = "bf16" in flags
+    return _NATIVE_BF16
+
+
+def _bfloat16_enabled() -> bool:
+    """Resolve whether to load the model pair in bfloat16.
+
+    An explicit ``BINOCULARS_BF16`` (0/1) always wins so operators can force
+    either path; otherwise bf16 is used only when the CPU can run it without
+    emulation, which keeps memory small on capable hosts and keeps inference
+    usable everywhere else.
+    """
+    env = os.environ.get("BINOCULARS_BF16")
+    if env is not None:
+        return env != "0"
+    return _cpu_has_native_bf16()
 
 
 def binoculars_score_to_probability(raw_score: float) -> float:
@@ -119,7 +174,7 @@ class BinocularsDetector:
         self._available = False
 
     def _load(self) -> bool:
-        """Lazily load the binoculars package and models.
+        """Lazily load the binoculars package and models, once per process.
 
         Set ``BINOCULARS_ENABLED=0`` to force the heuristic-only fallback without
         uninstalling anything. This is also what the test suite uses, so unit
@@ -127,41 +182,80 @@ class BinocularsDetector:
 
         An already-injected instance is honoured first, so tests can substitute
         a stub without needing the package installed.
+
+        A successfully loaded pair is kept in ``_BINOCULARS_CACHE`` and shared
+        by every detector constructed afterwards, so only the first job after
+        startup pays the model load; later jobs reuse the resident weights.
+        Failures are not cached — a transient error still retries next job.
         """
         if self._bino is not None:
             return self._available
         if os.environ.get("BINOCULARS_ENABLED", "1") != "1":
             return False
 
-        try:
-            from binoculars import Binoculars  # type: ignore
+        with _BINOCULARS_CACHE_LOCK:
+            try:
+                # bf16 halves memory but is emulated (100x+ slower) on CPUs
+                # without native support, so default to fp32 there; the env
+                # var forces either path.
+                use_bfloat16 = _bfloat16_enabled()
+                max_token_observed = int(os.environ.get("BINOCULARS_MAX_TOKENS", "512"))
+                cache_key = (
+                    self.model,
+                    self.performer,
+                    use_bfloat16,
+                    max_token_observed,
+                )
+                cached = _BINOCULARS_CACHE.get(cache_key)
+                if cached is not None:
+                    self._bino = cached
+                    self._available = True
+                    return True
 
-            self._bino = Binoculars(
-                observer_name_or_path=self.model,
-                performer_name_or_path=self.performer,
-                # bfloat16 halves memory. On CPUs without AVX512-BF16 it is
-                # emulated, so callers can opt out via the environment.
-                use_bfloat16=os.environ.get("BINOCULARS_BF16", "1") != "0",
-                max_token_observed=int(os.environ.get("BINOCULARS_MAX_TOKENS", "512")),
-            )
-            self._available = True
-            logger.info(
-                "BinocularsDetector loaded (observer=%s, performer=%s)",
-                self.model,
-                self.performer,
-            )
-        except Exception as exc:
-            logger.warning(
-                "BinocularsDetector could not be loaded: %s. "
-                "Falling back to heuristic signals only. "
-                "Install with: pip install "
-                "git+https://github.com/ahans30/Binoculars.git "
-                "(the PyPI 'binoculars' package is an unrelated statistics "
-                "library, not the AI detector)",
-                exc,
-            )
-            self._available = False
+                from binoculars import Binoculars  # type: ignore
+
+                self._bino = Binoculars(
+                    observer_name_or_path=self.model,
+                    performer_name_or_path=self.performer,
+                    use_bfloat16=use_bfloat16,
+                    max_token_observed=max_token_observed,
+                )
+                self._available = True
+                _BINOCULARS_CACHE[cache_key] = self._bino
+                logger.info(
+                    "BinocularsDetector loaded (observer=%s, performer=%s)",
+                    self.model,
+                    self.performer,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "BinocularsDetector could not be loaded: %s. "
+                    "Falling back to heuristic signals only. "
+                    "Install with: pip install "
+                    "git+https://github.com/ahans30/Binoculars.git "
+                    "(the PyPI 'binoculars' package is an unrelated statistics "
+                    "library, not the AI detector)",
+                    exc,
+                )
+                self._available = False
         return self._available
+
+    def _label_from_score(self, raw_score: float) -> str:
+        """Reproduce ``binoculars.Binoculars.predict`` without a second pass.
+
+        The package's ``predict`` re-runs ``compute_score`` internally — two
+        more forward passes through both models — so the identical label is
+        derived here from the score already computed. The boundary is the
+        loaded instance's own ``threshold`` (the package compares
+        ``score < threshold``), falling back to the published low-FPR value
+        when the attribute is absent, e.g. an injected test stub.
+        """
+        threshold = getattr(self._bino, "threshold", None)
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            threshold = BINOCULARS_FPR_THRESHOLD
+        if raw_score < float(threshold):
+            return "Most likely AI-generated"
+        return "Most likely human-generated"
 
     def analyze(self, code: str, language: str | None = None) -> dict[str, Any]:
         """
@@ -177,7 +271,8 @@ class BinocularsDetector:
                 - ai_probability: float in [0, 1]
                 - confidence: float in [0, 1]
                 - raw_score: original Binoculars score (lower = more AI-like)
-                - label: "MOST_LIKELY_AI" | "MOST_LIKELY_HUMAN" | "UNCERTAIN"
+                - label: "Most likely AI-generated" |
+                         "Most likely human-generated" | "UNCERTAIN"
                 - available: whether Binoculars was actually used
         """
         if not code or len(code.strip()) < 50:
@@ -202,7 +297,9 @@ class BinocularsDetector:
             # compute_score returns perplexity / cross_entropy: a positive
             # ratio where LOWER means more machine-like.
             raw_score = float(self._bino.compute_score(code))
-            label = str(self._bino.predict(code))
+            # predict() would re-run compute_score (two more forward passes
+            # through both models); the label is derived from this score.
+            label = self._label_from_score(raw_score)
 
             ai_probability = binoculars_score_to_probability(raw_score)
 
