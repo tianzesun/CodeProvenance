@@ -1,8 +1,22 @@
-"""Database models for IntegrityDesk multi-tenant system."""
+"""Database models for IntegrityDesk multi-tenant system.
+
+Conventions used throughout this module
+---------------------------------------
+* Foreign keys state what happens on delete. Rows *owned by* a job (submissions, results, viva outcomes, webhook
+  events) are deleted with it (``CASCADE``); rows that only *refer to* something and must outlive it (audit logs,
+  notifications, reports) are detached (``SET NULL``). The matching relationships use ``passive_deletes=True`` so the
+  ORM leaves the work to the database instead of nulling the key itself.
+* Score and rate columns come back as ``float`` (``asdecimal=False``), not ``Decimal``, so they serialise to JSON
+  numbers and mix with ordinary arithmetic.
+* JSONB columns that default to ``{}`` or ``[]`` are mutable-tracked, so editing one in place
+  (``tenant.settings["x"] = 1``) is saved. Plain ``JSONB`` columns still need reassignment.
+* Index and constraint names are explicit and unique across the schema (PostgreSQL requires that for indexes).
+"""
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     Float,
@@ -16,9 +30,48 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, TIMESTAMP, UUID
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import relationship
 
 from src.backend.config.database import Base
+
+# ── Shared building blocks ───────────────────────────────────────────────────
+
+#: Submission and file names. These were String(255) on some tables and String(500) on others, so a long name
+#: (a path inside a ZIP, say) could be stored in one table and rejected by the next.
+SUBMISSION_NAME_LENGTH = 500
+
+JSONDict = MutableDict.as_mutable(JSONB)
+JSONList = MutableList.as_mutable(JSONB)
+
+# Closed sets that the code comments already documented; the CHECK constraints below enforce them.
+VIVA_OUTCOMES = ("authorship_confirmed", "concerns_unresolved", "breach_identified", "inconclusive")
+PAIR_BANDS = ("low", "review", "high")
+PAIR_DISPOSITIONS = ("no_action", "note_on_file", "conversation", "step_up_verification", "formal_escalation")
+APPEAL_STATUSES = ("submitted", "under_review", "upheld", "overturned")
+
+
+def _in(column: str, values: tuple[str, ...]) -> str:
+    """SQL ``column IN ('a', 'b', ...)`` for a fixed tuple of constants."""
+    return f"{column} IN ({', '.join(repr(v) for v in values)})"
+
+
+def uuid_pk() -> Column:
+    # gen_random_uuid() is built into PostgreSQL 13+. The previous uuid_generate_v4() needs the uuid-ossp extension,
+    # which nothing in the code created, so a fresh database failed on the first insert.
+    return Column(UUID(as_uuid=False), primary_key=True, server_default=text("gen_random_uuid()"))
+
+
+def created_at_column() -> Column:
+    return Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+def updated_at_column() -> Column:
+    return Column(TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()"))
+
+
+def score_type(precision: int, scale: int) -> Numeric:
+    return Numeric(precision, scale, asdecimal=False)
 
 
 class Tenant(Base):
@@ -26,24 +79,20 @@ class Tenant(Base):
 
     __tablename__ = "tenants"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     name = Column(String(255), nullable=False)
     api_key_hash = Column(String(255), unique=True, nullable=False)
     tier = Column(String(50), default="free")
     status = Column(String(20), default="active")
-    settings = Column(JSONB, default=dict)
+    settings = Column(JSONDict, default=dict)
     trial_ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     monthly_job_limit = Column(Integer, nullable=True)
     concurrent_job_limit = Column(Integer, nullable=True)
     max_payload_mb = Column(Integer, nullable=True)
     rate_limit_per_minute = Column(Integer, nullable=True)
     retention_days = Column(Integer, nullable=True, default=365)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     jobs = relationship("Job", back_populates="tenant", lazy="dynamic")
     api_keys = relationship("ApiKey", back_populates="tenant", lazy="dynamic")
@@ -62,15 +111,12 @@ class User(Base):
 
     __tablename__ = "users"
     __table_args__ = (
-        Index("idx_users_email", "email"),
         Index("idx_users_role", "role"),
         Index("idx_users_tenant_role", "tenant_id", "role"),
         Index("idx_users_organization", "organization_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=True)
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=True
@@ -81,6 +127,8 @@ class User(Base):
     role = Column(String(50), nullable=False, default="professor")
     is_active = Column(Boolean, default=True)
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # SECURITY: store a SHA-256 of the token here, never the token itself, and compare hashes. A database leak
+    # (backup, replica, SQL injection) should not hand out working password-reset and verification links.
     reset_token = Column(String(255), nullable=True)
     reset_token_expires = Column(TIMESTAMP(timezone=True), nullable=True)
     #: Email-verification token for self-registered accounts. The account
@@ -88,14 +136,14 @@ class User(Base):
     #: is proven before the credential ever works.
     verify_token = Column(String(255), nullable=True)
     verify_token_expires = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     tenant = relationship("Tenant", back_populates="users")
     organization = relationship("Organization", back_populates="users")
-    courses = relationship("CourseInstructor", back_populates="user", lazy="dynamic")
+    courses = relationship(
+        "CourseInstructor", back_populates="user", lazy="dynamic", passive_deletes=True
+    )
     # New relationships
     notifications = relationship("Notification", back_populates="user")
     behavioral_sessions = relationship("BehavioralSession", back_populates="user")
@@ -108,21 +156,17 @@ class ApiKey(Base):
 
     __table_args__ = (Index("idx_api_keys_tenant", "tenant_id"),)
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     key_hash = Column(String(255), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
     prefix = Column(String(12), nullable=True)
-    permissions = Column(JSONB, default=list)
+    permissions = Column(JSONList, default=list)
     rate_limit_override = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
     expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     tenant = relationship("Tenant", back_populates="api_keys")
@@ -133,13 +177,13 @@ class Job(Base):
 
     __tablename__ = "jobs"
     __table_args__ = (
-        Index("idx_jobs_tenant_status", "tenant_id", "status"),
         Index("idx_jobs_assignment", "assignment_id"),
         Index("idx_jobs_created_at", "created_at"),
         Index("idx_jobs_tenant_created_at", "tenant_id", "created_at"),
-        Index("idx_jobs_status", "status"),
         Index("idx_jobs_status_created_at", "status", "created_at"),
         Index("idx_jobs_tenant_status_created_at", "tenant_id", "status", "created_at"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_jobs_tenant_idempotency_key"),
+        CheckConstraint("threshold >= 0 AND threshold <= 1", name="ck_jobs_threshold_range"),
     )
 
     id = Column(String(36), primary_key=True)
@@ -149,7 +193,7 @@ class Job(Base):
     )
     name = Column(String(255), nullable=False)
     status = Column(String(20), default="pending")
-    threshold = Column(Numeric(3, 2), default=0.5)
+    threshold = Column(score_type(3, 2), default=0.5)
     webhook_url = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     detection_modes = Column(JSONB, nullable=True)
@@ -157,12 +201,14 @@ class Job(Base):
     language_filters = Column(JSONB, nullable=True)
     template_files = Column(JSONB, nullable=True)
     settings = Column(JSONB, nullable=True)
-    idempotency_key = Column(String(255), nullable=True, unique=True)
+    # Unique per tenant (see __table_args__). It was unique across *all* tenants, so one tenant's key could
+    # collide with, or reveal the existence of, another tenant's job.
+    idempotency_key = Column(String(255), nullable=True)
     retention_days = Column(Integer, nullable=False, default=90)
     high_similarity_count = Column(Integer, default=0)
     total_pairs_analyzed = Column(Integer, default=0)
     total_submissions = Column(Integer, default=0)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
     started_at = Column(TIMESTAMP(timezone=True), nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_at = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -171,17 +217,25 @@ class Job(Base):
 
     tenant = relationship("Tenant", back_populates="jobs")
     assignment = relationship("Assignment", back_populates="jobs")
-    submissions = relationship("Submission", back_populates="job", lazy="dynamic")
+    submissions = relationship(
+        "Submission", back_populates="job", lazy="dynamic", passive_deletes=True
+    )
     similarity_results = relationship(
-        "SimilarityResult", back_populates="job", lazy="dynamic"
+        "SimilarityResult", back_populates="job", lazy="dynamic", passive_deletes=True
     )
     ai_detection_results = relationship(
-        "AIDetectionResult", back_populates="job", lazy="dynamic"
+        "AIDetectionResult", back_populates="job", lazy="dynamic", passive_deletes=True
     )
-    viva_outcomes = relationship("VivaOutcome", back_populates="job", lazy="dynamic")
+    viva_outcomes = relationship(
+        "VivaOutcome", back_populates="job", lazy="dynamic", passive_deletes=True
+    )
     # New relationships
-    reports = relationship("Report", back_populates="job")
-    behavioral_sessions = relationship("BehavioralSession", back_populates="job")
+    # These two keys are ON DELETE CASCADE. Without passive_deletes the ORM nulled them first: behavioral sessions
+    # (NOT NULL job_id) made deleting a job fail, and reports survived as orphans with job_id NULL.
+    reports = relationship("Report", back_populates="job", passive_deletes=True)
+    behavioral_sessions = relationship(
+        "BehavioralSession", back_populates="job", passive_deletes=True
+    )
 
 
 class Submission(Base):
@@ -195,12 +249,10 @@ class Submission(Base):
         Index("idx_submissions_created_at", "created_at"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    id = uuid_pk()
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     student_id = Column(UUID(as_uuid=False), ForeignKey("students.id"), nullable=True)
-    name = Column(String(255), nullable=False)
+    name = Column(String(SUBMISSION_NAME_LENGTH), nullable=False)
     file_count = Column(Integer, default=1)
     language_detected = Column(String(50), nullable=True)
     languages_detected = Column(JSONB, nullable=True)
@@ -211,12 +263,14 @@ class Submission(Base):
     total_size_bytes = Column(BigInteger, nullable=True)
     processed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     processing_error = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     job = relationship("Job", back_populates="submissions")
     student = relationship("Student", back_populates="submissions")
     # New relationship
-    behavioral_sessions = relationship("BehavioralSession", back_populates="submission")
+    behavioral_sessions = relationship(
+        "BehavioralSession", back_populates="submission", passive_deletes=True
+    )
 
 
 class SimilarityResult(Base):
@@ -225,7 +279,6 @@ class SimilarityResult(Base):
     __tablename__ = "similarity_results"
     __table_args__ = (
         Index("idx_results_job_score", "job_id", "similarity_score"),
-        Index("idx_similarity_results_review_status", "review_status"),
         Index("idx_similarity_results_verdict", "verdict"),
         Index("idx_similarity_results_created_at", "created_at"),
         Index("idx_similarity_results_submission_a", "submission_a_id"),
@@ -234,28 +287,31 @@ class SimilarityResult(Base):
         Index(
             "idx_similarity_results_review_created_at", "review_status", "created_at"
         ),
+        CheckConstraint(
+            "similarity_score >= 0 AND similarity_score <= 1",
+            name="ck_similarity_results_score_range",
+        ),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
-    submission_a_id = Column(String(255), nullable=False)
-    submission_b_id = Column(String(255), nullable=False)
-    similarity_score = Column(Numeric(5, 4), nullable=False)
-    confidence_level = Column(Numeric(3, 2), nullable=True)
-    confidence_lower = Column(Numeric(5, 4), nullable=True)
-    confidence_upper = Column(Numeric(5, 4), nullable=True)
+    id = uuid_pk()
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    # Despite the "_id" suffix these hold submission *names*, not submissions.id: there is no foreign key.
+    submission_a_id = Column(String(SUBMISSION_NAME_LENGTH), nullable=False)
+    submission_b_id = Column(String(SUBMISSION_NAME_LENGTH), nullable=False)
+    similarity_score = Column(score_type(5, 4), nullable=False)
+    confidence_level = Column(score_type(3, 2), nullable=True)
+    confidence_lower = Column(score_type(5, 4), nullable=True)
+    confidence_upper = Column(score_type(5, 4), nullable=True)
     matching_blocks = Column(JSONB, nullable=True)
     excluded_matches = Column(JSONB, nullable=True)
     algorithm_scores = Column(JSONB, nullable=True)
-    verdict = Column(String(20), nullable=True)  # TRUE, PROBABLE, REVIEW, FLAG, CLEAN
+    # Legacy labels: TRUE, PROBABLE, REVIEW, FLAG, CLEAN. Newer ones (STRONG_SIMILARITY_OBSERVED, REVIEW_REQUIRED)
+    # are up to 26 characters, which did not fit the previous String(20).
+    verdict = Column(String(40), nullable=True)
     review_status = Column(String(50), nullable=True)
     review_notes = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     job = relationship("Job", back_populates="similarity_results")
 
@@ -266,21 +322,22 @@ class AIDetectionResult(Base):
     __tablename__ = "ai_detection_results"
 
     __table_args__ = (
-        Index("idx_ai_detection_results_job", "job_id"),
         Index("idx_ai_detection_results_job_probability", "job_id", "ai_probability"),
         Index("idx_ai_detection_results_ai_probability", "ai_probability"),
         Index("idx_ai_detection_results_language", "language"),
         Index("idx_ai_detection_results_created_at", "created_at"),
+        CheckConstraint(
+            "ai_probability IS NULL OR (ai_probability >= 0 AND ai_probability <= 1)",
+            name="ck_ai_detection_results_probability_range",
+        ),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    id = uuid_pk()
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     submission_name = Column(String(500), nullable=False)
     language = Column(String(50), nullable=True)
-    ai_probability = Column(Numeric(5, 4), nullable=True)
-    confidence = Column(Numeric(3, 2), nullable=True)
+    ai_probability = Column(score_type(5, 4), nullable=True)
+    confidence = Column(score_type(3, 2), nullable=True)
     method = Column(String(50), nullable=True)
     model_name = Column(String(500), nullable=True)
     status = Column(String(50), nullable=True)
@@ -290,7 +347,7 @@ class AIDetectionResult(Base):
     flagged_lines = Column(JSONB, nullable=True)
     flagged_regions = Column(JSONB, nullable=True)
     classifier_details = Column(JSONB, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     job = relationship("Job", back_populates="ai_detection_results")
 
@@ -313,21 +370,18 @@ class VivaOutcome(Base):
             "submission_name",
             unique=True,
         ),
+        CheckConstraint(_in("outcome", VIVA_OUTCOMES), name="ck_viva_outcomes_outcome"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    id = uuid_pk()
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     submission_name = Column(String(500), nullable=False)
     # authorship_confirmed | concerns_unresolved | breach_identified | inconclusive
     outcome = Column(String(50), nullable=False)
     notes = Column(Text, nullable=True)
     conducted_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     job = relationship("Job", back_populates="viva_outcomes")
 
@@ -339,15 +393,12 @@ class WebhookEvent(Base):
 
     __table_args__ = (
         Index("idx_webhook_events_job", "job_id"),
-        Index("idx_webhook_events_status", "status"),
         Index("idx_webhook_events_next_attempt", "next_attempt_at"),
         Index("idx_webhook_events_status_next_attempt", "status", "next_attempt_at"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=False)
+    id = uuid_pk()
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(100), nullable=False)
     status = Column(String(50), default="pending")
     payload = Column(JSONB, nullable=True)
@@ -357,10 +408,8 @@ class WebhookEvent(Base):
     last_error = Column(Text, nullable=True)
     next_attempt_at = Column(TIMESTAMP(timezone=True), nullable=True)
     delivered_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
 
 class UsageMetric(Base):
@@ -371,9 +420,7 @@ class UsageMetric(Base):
         UniqueConstraint("tenant_id", "period", name="uq_usage_metrics_tenant_period"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     period = Column(String(7), nullable=False)
     jobs_processed = Column(Integer, default=0)
@@ -387,10 +434,8 @@ class UsageMetric(Base):
     webhook_attempts = Column(Integer, default=0)
     webhook_deliveries = Column(Integer, default=0)
     peak_concurrent_jobs = Column(Integer, default=0)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
 
 class AuditLog(Base):
@@ -406,11 +451,11 @@ class AuditLog(Base):
         Index("idx_audit_logs_action", "action"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=True)
-    job_id = Column(String(36), ForeignKey("jobs.id"), nullable=True)
+    # SET NULL: the audit trail has to survive the purge of the job it describes. With no ON DELETE, one audit
+    # row for a job made that job impossible to delete.
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(UUID(as_uuid=False), nullable=True)
     action = Column(String(100), nullable=False)
     resource_type = Column(String(100), nullable=True)
@@ -418,7 +463,7 @@ class AuditLog(Base):
     changes = Column(JSONB, nullable=True)
     ip_address = Column(INET, nullable=True)
     user_agent = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
 
 class Organization(Base):
@@ -426,15 +471,11 @@ class Organization(Base):
 
     __tablename__ = "organizations"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     name = Column(String(255), nullable=False)
-    settings = Column(JSONB, default=dict)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    settings = Column(JSONDict, default=dict)
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     courses = relationship("Course", back_populates="organization", lazy="dynamic")
     users = relationship("User", back_populates="organization", lazy="dynamic")
@@ -461,13 +502,14 @@ class Term(Base):
         UniqueConstraint(
             "organization_id", "name", "year", name="uq_terms_org_name_year"
         ),
-        Index("idx_terms_organization", "organization_id"),
         Index("idx_terms_org_year", "organization_id", "year"),
+        CheckConstraint(
+            "start_date IS NULL OR end_date IS NULL OR end_date >= start_date",
+            name="ck_terms_date_order",
+        ),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
     )
@@ -481,10 +523,8 @@ class Term(Base):
     # logic reads them, and either end may be left unset.
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     courses = relationship("Course", back_populates="term_record", lazy="dynamic")
 
@@ -503,14 +543,11 @@ class Course(Base):
     __tablename__ = "courses"
 
     __table_args__ = (
-        Index("idx_courses_organization", "organization_id"),
         Index("idx_courses_organization_code", "organization_id", "code"),
         Index("idx_courses_term", "term_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
     )
@@ -525,21 +562,21 @@ class Course(Base):
     # Course analytics metadata
     department = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
-    settings = Column(JSONB, default=dict)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    settings = Column(JSONDict, default=dict)
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     organization = relationship("Organization", back_populates="courses")
     assignments = relationship("Assignment", back_populates="course", lazy="dynamic")
     # Registry entry backing the term/year text columns, when one is linked.
     term_record = relationship("Term", back_populates="courses")
     instructors = relationship(
-        "CourseInstructor", back_populates="course", lazy="dynamic"
+        "CourseInstructor", back_populates="course", lazy="dynamic", passive_deletes=True
     )
     # Student enrollments
-    enrollments = relationship("Enrollment", back_populates="course", lazy="dynamic")
+    enrollments = relationship(
+        "Enrollment", back_populates="course", lazy="dynamic", passive_deletes=True
+    )
 
 
 class Assignment(Base):
@@ -554,14 +591,11 @@ class Assignment(Base):
     __tablename__ = "assignments"
 
     __table_args__ = (
-        Index("idx_assignments_course", "course_id"),
         Index("idx_assignments_course_term", "course_id", "term"),
         Index("idx_assignments_type", "assignment_type"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     course_id = Column(UUID(as_uuid=False), ForeignKey("courses.id"), nullable=False)
     name = Column(String(255), nullable=False)
     term = Column(String(50), nullable=True)  # e.g., "Fall 2024", "Winter 2025"
@@ -576,13 +610,11 @@ class Assignment(Base):
     team_mode = Column(String(20), default="individual")  # individual | group
     open_book = Column(Boolean, default=True)
     time_limited = Column(Boolean, default=False)
-    allowed_resources = Column(JSONB, default=list)  # list[str]
-    detection_config = Column(JSONB, default=dict)
-    settings = Column(JSONB, default=dict)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    allowed_resources = Column(JSONList, default=list)  # list[str]
+    detection_config = Column(JSONDict, default=dict)
+    settings = Column(JSONDict, default=dict)
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     course = relationship("Course", back_populates="assignments")
     jobs = relationship("Job", back_populates="assignment", lazy="dynamic")
@@ -606,13 +638,10 @@ class Enrollment(Base):
 
     __table_args__ = (
         UniqueConstraint("course_id", "student_id", name="uq_enrollment"),
-        Index("idx_enrollments_course", "course_id"),
         Index("idx_enrollments_student", "student_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     course_id = Column(
         UUID(as_uuid=False),
         ForeignKey("courses.id", ondelete="CASCADE"),
@@ -641,23 +670,19 @@ class Student(Base):
         Index("idx_students_student_number", "student_number"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
     )
     email = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=False)
     student_number = Column(String(50), nullable=True)
-    settings = Column(JSONB, default=dict)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    settings = Column(JSONDict, default=dict)
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     organization = relationship("Organization")
-    enrollments = relationship("Enrollment", back_populates="student")
+    enrollments = relationship("Enrollment", back_populates="student", passive_deletes=True)
     submissions = relationship("Submission", back_populates="student", lazy="dynamic")
 
 
@@ -672,13 +697,10 @@ class AssignmentVersion(Base):
         UniqueConstraint(
             "assignment_id", "version", name="uq_assignment_versions_assignment_version"
         ),
-        Index("idx_assignment_versions_assignment", "assignment_id"),
         Index("idx_assignment_versions_course", "course_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     assignment_id = Column(
         UUID(as_uuid=False),
         ForeignKey("assignments.id", ondelete="CASCADE"),
@@ -693,7 +715,7 @@ class AssignmentVersion(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     starter_files = Column(JSONB, nullable=True)
-    settings = Column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    settings = Column(JSONDict, default=dict, server_default=text("'{}'::jsonb"))
     created_at = Column(
         TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
@@ -710,9 +732,7 @@ class CourseInstructor(Base):
 
     __tablename__ = "course_instructors"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     course_id = Column(
         UUID(as_uuid=False),
         ForeignKey("courses.id", ondelete="CASCADE"),
@@ -724,11 +744,10 @@ class CourseInstructor(Base):
     role = Column(
         String(50), default="instructor"
     )  # instructor, primary, ta, assistant
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     __table_args__ = (
         UniqueConstraint("course_id", "user_id", name="uq_course_instructor"),
-        Index("idx_course_instructors_course", "course_id"),
         Index("idx_course_instructors_user", "user_id"),
     )
 
@@ -742,18 +761,20 @@ class Case(Base):
     __tablename__ = "cases"
 
     __table_args__ = (
-        Index("idx_cases_organization", "organization_id"),
         Index("idx_cases_assignment", "assignment_id"),
         Index("idx_cases_created_by", "created_by_id"),
         Index("idx_cases_status", "status"),
         Index("idx_cases_created_at", "created_at"),
         Index("idx_cases_org_created_at", "organization_id", "created_at"),
         Index("idx_cases_org_status", "organization_id", "status"),
+        Index(
+            "idx_cases_investigator",
+            "investigator_id",
+            postgresql_where=text("investigator_id IS NOT NULL"),
+        ),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=False
     )
@@ -765,19 +786,21 @@ class Case(Base):
     priority = Column(String(20), default="MEDIUM")  # LOW, MEDIUM, HIGH, URGENT
     investigator_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     created_by_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
     closed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     organization = relationship("Organization")
     assignment = relationship("Assignment")
     investigator = relationship("User", foreign_keys=[investigator_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
-    result_links = relationship("CaseResultLink", back_populates="case", lazy="dynamic")
-    comments = relationship("CaseComment", back_populates="case", lazy="dynamic")
-    reports = relationship("Report", back_populates="case")
+    result_links = relationship(
+        "CaseResultLink", back_populates="case", lazy="dynamic", passive_deletes=True
+    )
+    comments = relationship(
+        "CaseComment", back_populates="case", lazy="dynamic", passive_deletes=True
+    )
+    reports = relationship("Report", back_populates="case", passive_deletes=True)
 
 
 class CaseResultLink(Base):
@@ -786,18 +809,19 @@ class CaseResultLink(Base):
     __tablename__ = "case_result_links"
 
     __table_args__ = (
-        Index("idx_case_result_links_case", "case_id"),
+        # One link per (case, result). The unique constraint also serves lookups by case_id.
+        UniqueConstraint("case_id", "similarity_result_id", name="uq_case_result_links_case_result"),
         Index("idx_case_result_links_similarity_result", "similarity_result_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=False)
+    id = uuid_pk()
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
     similarity_result_id = Column(
-        UUID(as_uuid=False), ForeignKey("similarity_results.id"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("similarity_results.id", ondelete="CASCADE"),
+        nullable=False,
     )
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     case = relationship("Case", back_populates="result_links")
     similarity_result = relationship("SimilarityResult")
@@ -813,13 +837,11 @@ class CaseComment(Base):
         Index("idx_case_comments_user", "user_id"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=False)
+    id = uuid_pk()
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
     body = Column(Text, nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     case = relationship("Case", back_populates="comments")
     user = relationship("User")
@@ -835,9 +857,7 @@ class Report(Base):
 
     __tablename__ = "reports"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     organization_id = Column(
         UUID(as_uuid=False), ForeignKey("organizations.id"), nullable=True
@@ -846,7 +866,7 @@ class Report(Base):
     job_id = Column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )
-    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id", ondelete="SET NULL"), nullable=True)
 
     report_type = Column(String(50), nullable=False)
     format = Column(String(20), nullable=False)
@@ -863,13 +883,11 @@ class Report(Base):
     expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # ← Fixed: renamed from 'metadata' to 'report_metadata'
-    report_metadata = Column("metadata", JSONB, nullable=False, default=dict)
+    report_metadata = Column("metadata", JSONDict, nullable=False, default=dict)
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     __table_args__ = (
         Index("idx_reports_tenant_status", "tenant_id", "status"),
@@ -877,6 +895,8 @@ class Report(Base):
         Index("idx_reports_case", "case_id"),
         Index("idx_reports_generated_at", "generated_at"),
         Index("idx_reports_tenant_type", "tenant_id", "report_type"),
+        Index("idx_reports_organization", "organization_id", postgresql_where=text("organization_id IS NOT NULL")),
+        Index("idx_reports_generated_by", "generated_by_user_id", postgresql_where=text("generated_by_user_id IS NOT NULL")),
     )
 
     # Relationships
@@ -892,9 +912,7 @@ class Notification(Base):
 
     __tablename__ = "notifications"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
 
@@ -905,9 +923,11 @@ class Notification(Base):
     related_job_id = Column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )
-    related_case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+    related_case_id = Column(
+        UUID(as_uuid=False), ForeignKey("cases.id", ondelete="SET NULL"), nullable=True
+    )
     related_report_id = Column(
-        UUID(as_uuid=False), ForeignKey("reports.id"), nullable=True
+        UUID(as_uuid=False), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True
     )
 
     channel = Column(String(20), nullable=False, default="in_app")
@@ -917,14 +937,19 @@ class Notification(Base):
     read_at = Column(TIMESTAMP(timezone=True), nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    payload = Column(JSONB, nullable=False, default=dict)
+    payload = Column(JSONDict, nullable=False, default=dict)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     __table_args__ = (
         Index("idx_notifications_user_status", "user_id", "status"),
         Index("idx_notifications_tenant_created", "tenant_id", "created_at"),
         Index("idx_notifications_type", "type"),
+        # Deleting a job, case or report scans notifications for rows to cascade to; without these that was a full
+        # table scan per deleted row.
+        Index("idx_notifications_related_job", "related_job_id", postgresql_where=text("related_job_id IS NOT NULL")),
+        Index("idx_notifications_related_case", "related_case_id", postgresql_where=text("related_case_id IS NOT NULL")),
+        Index("idx_notifications_related_report", "related_report_id", postgresql_where=text("related_report_id IS NOT NULL")),
     )
 
     # Relationships
@@ -940,11 +965,11 @@ class BehavioralSession(Base):
 
     __tablename__ = "behavioral_sessions"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     submission_id = Column(
-        UUID(as_uuid=False), ForeignKey("submissions.id"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("submissions.id", ondelete="CASCADE"),
+        nullable=False,
     )
     job_id = Column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
@@ -957,10 +982,10 @@ class BehavioralSession(Base):
     focus_loss_count = Column(Integer, default=0)
     typing_speed_wpm = Column(Float, nullable=True)
 
-    risk_score = Column(Numeric(4, 3), nullable=True)
-    patterns = Column(JSONB, nullable=False, default=dict)
+    risk_score = Column(score_type(4, 3), nullable=True)
+    patterns = Column(JSONDict, nullable=False, default=dict)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     __table_args__ = (
         Index("idx_behavioral_sessions_submission", "submission_id"),
@@ -980,9 +1005,7 @@ class TenantSubscription(Base):
 
     __tablename__ = "tenant_subscriptions"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(
         UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, unique=True
     )
@@ -996,15 +1019,13 @@ class TenantSubscription(Base):
 
     job_limit = Column(Integer, nullable=True)
     storage_limit_mb = Column(Integer, nullable=True)
-    features = Column(JSONB, nullable=False, default=dict)
+    features = Column(JSONDict, nullable=False, default=dict)
 
     stripe_customer_id = Column(String(100), nullable=True)
     stripe_subscription_id = Column(String(100), nullable=True)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True), server_default=text("now()"), onupdate=text("now()")
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
 
     __table_args__ = (Index("idx_tenant_subscriptions_status", "status"),)
 
@@ -1021,9 +1042,7 @@ class FprValidationRun(Base):
 
     __tablename__ = "fpr_validation_runs"
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
     tenant_id = Column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
@@ -1033,12 +1052,12 @@ class FprValidationRun(Base):
     # Denormalized key metrics for fast filtering/listing without loading full payload
     num_submissions = Column(Integer, nullable=True)
     num_pairs = Column(Integer, nullable=True)
-    mean_score = Column(Numeric(5, 4), nullable=True)
-    max_score = Column(Numeric(5, 4), nullable=True)
+    mean_score = Column(score_type(5, 4), nullable=True)
+    max_score = Column(score_type(5, 4), nullable=True)
 
     # Key decision values captured at the time of the run
-    recommended_threshold = Column(Numeric(5, 2), nullable=True)
-    fpr_at_recommended_threshold = Column(Numeric(6, 4), nullable=True)
+    recommended_threshold = Column(score_type(5, 2), nullable=True)
+    fpr_at_recommended_threshold = Column(score_type(6, 4), nullable=True)
 
     # User-provided notes and workflow status
     notes = Column(Text, nullable=True)
@@ -1051,13 +1070,18 @@ class FprValidationRun(Base):
     )
     certified_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     __table_args__ = (
         Index("idx_fpr_runs_tenant_created", "tenant_id", "created_at"),
         Index("idx_fpr_runs_user", "user_id"),
         Index("idx_fpr_runs_tenant_status", "tenant_id", "status"),
         Index("idx_fpr_runs_certified", "is_certified"),
+        Index(
+            "idx_fpr_runs_certified_by",
+            "certified_by_user_id",
+            postgresql_where=text("certified_by_user_id IS NOT NULL"),
+        ),
     )
 
     # Relationships
@@ -1072,17 +1096,14 @@ class TimelineEvent(Base):
     __tablename__ = "timeline_events"
 
     __table_args__ = (
-        Index("idx_timeline_case", "case_id"),
         Index("idx_timeline_job", "job_id"),
         Index("idx_timeline_user", "user_id"),
         Index("idx_timeline_created_at", "created_at"),
         Index("idx_timeline_case_created", "case_id", "created_at"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
-    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id"), nullable=True)
+    id = uuid_pk()
+    case_id = Column(UUID(as_uuid=False), ForeignKey("cases.id", ondelete="SET NULL"), nullable=True)
     job_id = Column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )
@@ -1091,9 +1112,9 @@ class TimelineEvent(Base):
     event_type = Column(String(100), nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    event_metadata = Column("metadata", JSONB, nullable=False, default=dict)
+    event_metadata = Column("metadata", JSONDict, nullable=False, default=dict)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     # Relationships
     case = relationship("Case")
@@ -1108,6 +1129,11 @@ class PairReview(Base):
     submission_b) triplet represents the current state; all prior rows are
     preserved for audit purposes.  Never UPDATE a row — INSERT a new one.
 
+    Caveat: the appeal_* columns below can only be filled in by updating a row,
+    which contradicts the rule above. Decide one way before the appeal workflow
+    is switched on: either appeals insert a new row that copies the review, or
+    appeals move to their own table.
+
     The ``ai_flag`` and ``corroborated`` fields capture the AI corroboration
     state *at the moment of review* so analytics remain accurate even if the
     policy thresholds are later changed.
@@ -1116,24 +1142,32 @@ class PairReview(Base):
     __tablename__ = "pair_reviews"
 
     __table_args__ = (
-        Index("idx_pair_reviews_job", "job_id"),
         Index("idx_pair_reviews_job_band", "job_id", "band"),
-        Index("idx_pair_reviews_job_pair", "job_id", "submission_a", "submission_b"),
+        # Includes reviewed_at: the current state of a pair is its newest row, and this index answers
+        # "latest review per pair" without a sort.
+        Index(
+            "idx_pair_reviews_job_pair",
+            "job_id",
+            "submission_a",
+            "submission_b",
+            "reviewed_at",
+        ),
         Index("idx_pair_reviews_reviewer", "reviewer_id"),
         Index("idx_pair_reviews_reviewed_at", "reviewed_at"),
         Index("idx_pair_reviews_disposition", "disposition"),
+        CheckConstraint(_in("band", PAIR_BANDS), name="ck_pair_reviews_band"),
+        CheckConstraint(_in("disposition", PAIR_DISPOSITIONS), name="ck_pair_reviews_disposition"),
+        CheckConstraint(_in("appeal_status", APPEAL_STATUSES), name="ck_pair_reviews_appeal_status"),
     )
 
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
-    )
+    id = uuid_pk()
 
     # Which job and which pair
     job_id = Column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
     )
-    submission_a = Column(String(255), nullable=False)
-    submission_b = Column(String(255), nullable=False)
+    submission_a = Column(String(SUBMISSION_NAME_LENGTH), nullable=False)
+    submission_b = Column(String(SUBMISSION_NAME_LENGTH), nullable=False)
 
     # Who reviewed and when
     reviewer_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
@@ -1155,7 +1189,7 @@ class PairReview(Base):
     corroborated = Column(Boolean, nullable=False, default=False)
 
     # Similarity score recorded at review time (for analytics / overturn queries)
-    similarity_score = Column(Numeric(5, 4), nullable=True)
+    similarity_score = Column(score_type(5, 4), nullable=True)
 
     # Appeal fields — nullable by design so no migration is needed when the
     # appeal workflow is activated.
@@ -1165,7 +1199,7 @@ class PairReview(Base):
     appeal_outcome_at = Column(TIMESTAMP(timezone=True), nullable=True)
     appeal_notes = Column(Text, nullable=True)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    created_at = created_at_column()
 
     # Relationships
     job = relationship("Job")
@@ -1185,31 +1219,37 @@ class BandThreshold(Base):
 
     __tablename__ = "band_thresholds"
 
-    __table_args__ = (Index("idx_band_thresholds_mode", "assignment_mode"),)
-
-    id = Column(
-        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    # assignment_mode is already unique (an index comes with that), so no separate index.
+    # These rows are edited by hand ("direct DB update"), so the database refuses nonsense bands.
+    __table_args__ = (
+        CheckConstraint(
+            "review_min >= 0 AND review_min < high_min AND high_min <= 1",
+            name="ck_band_thresholds_band_order",
+        ),
+        CheckConstraint(
+            "ai_elevated_min BETWEEN 0 AND 1 AND web_match_min BETWEEN 0 AND 1 AND engine_agree_min BETWEEN 0 AND 1",
+            name="ck_band_thresholds_corroboration_range",
+        ),
+        CheckConstraint("engine_agree_count >= 1", name="ck_band_thresholds_engine_agree_count"),
     )
+
+    id = uuid_pk()
 
     # Unique mode key — matches the assignment_mode field used across the codebase
     assignment_mode = Column(String(64), nullable=False, unique=True)
 
     # Band edges (0.0 – 1.0)
-    review_min = Column(Numeric(4, 3), nullable=False)
-    high_min = Column(Numeric(4, 3), nullable=False)
+    review_min = Column(score_type(4, 3), nullable=False)
+    high_min = Column(score_type(4, 3), nullable=False)
 
     # AI corroboration thresholds
-    ai_elevated_min = Column(Numeric(4, 3), nullable=False, default=0.650)
-    web_match_min = Column(Numeric(4, 3), nullable=False, default=0.700)
+    ai_elevated_min = Column(score_type(4, 3), nullable=False, default=0.650)
+    web_match_min = Column(score_type(4, 3), nullable=False, default=0.700)
 
     # Engine-agreement corroboration: require this many engines to individually
     # score >= engine_agree_min before treating AI+similarity as corroborated.
     engine_agree_count = Column(Integer, nullable=False, default=2)
-    engine_agree_min = Column(Numeric(4, 3), nullable=False, default=0.500)
+    engine_agree_min = Column(score_type(4, 3), nullable=False, default=0.500)
 
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    updated_at = Column(
-        TIMESTAMP(timezone=True),
-        server_default=text("now()"),
-        onupdate=text("now()"),
-    )
+    created_at = created_at_column()
+    updated_at = updated_at_column()
