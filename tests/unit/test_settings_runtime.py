@@ -74,6 +74,29 @@ class TestApplyRuntimeSettingsFromRecord:
             == DEFAULT_ENGINE_WEIGHTS["winnowing"]
         )
 
+    def test_settings_apply_while_model_is_frozen(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The runtime applier must work under the production ``frozen=True`` config.
+
+        The autouse ``_mutable_settings`` fixture unfreezes the model for the whole
+        suite, which hid a real bug: plain ``setattr`` raises ``ValidationError`` on a
+        frozen model and the applier's ``except`` swallowed it, so every saved setting
+        (including provider API keys) was silently dropped in production. Re-freezing
+        here reproduces the production configuration.
+        """
+        from src.backend.config.settings import AppSettings
+
+        monkeypatch.setattr(
+            app_settings, "DEFAULT_THRESHOLD", app_settings.DEFAULT_THRESHOLD
+        )
+        AppSettings.model_config["frozen"] = True
+        try:
+            server._apply_runtime_settings_from_record({"default_threshold": 0.71})
+            assert app_settings.DEFAULT_THRESHOLD == pytest.approx(0.71)
+        finally:
+            AppSettings.model_config["frozen"] = False
+
     def test_secret_settings_mirror_to_process_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

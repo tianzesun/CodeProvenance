@@ -13102,6 +13102,12 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
     into the process environment because some provider clients read
     ``os.environ`` directly. Called after settings are saved and on every
     authenticated dashboard request.
+
+    ``AppSettings`` is ``frozen``, so the assignments go through
+    ``object.__setattr__``: this is the one sanctioned place where a saved
+    tenant setting is meant to override the start-up value. Plain ``setattr``
+    raises ``ValidationError`` here, which the ``except`` below would swallow —
+    silently dropping every saved setting (including provider API keys).
     """
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
@@ -13116,7 +13122,7 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
             if value:
                 os.environ[attr] = str(value)
                 try:
-                    setattr(settings, attr, str(value))
+                    object.__setattr__(settings, attr, str(value))
                 except Exception:
                     logger.warning(
                         "Failed to apply secret setting %s", key, exc_info=True
@@ -13126,7 +13132,7 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
         if not hasattr(settings, attr):
             continue
         try:
-            setattr(settings, attr, value)
+            object.__setattr__(settings, attr, value)
         except (TypeError, ValueError):
             logger.warning(
                 "Failed to apply setting %s -> %s=%r", key, attr, value, exc_info=True
