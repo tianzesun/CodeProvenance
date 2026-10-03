@@ -4,7 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { Job, JobStatus, ReviewStatus, SimilarityResult } from '@/types/api';
 import Link from 'next/link';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode, SyntheticEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -32,7 +32,6 @@ import {
   X,
 } from 'lucide-react';
 
-const API = '';
 const HOME_CARD_STORAGE_KEY = 'integritydesk-home-layout-v1';
 const HOME_LAYOUT_TIP_STORAGE_KEY = 'integritydesk-home-layout-tip-v1';
 const HOME_CARD_DEFAULT_ORDER = [
@@ -44,13 +43,45 @@ const HOME_CARD_DEFAULT_ORDER = [
   'settings',
 ];
 const HOME_CARD_OPTIONAL_ORDER = ['compare-tools', 'benchmark-suite', 'admin-console'];
-const REVIEW_STATUS_LABELS = {
+const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   unreviewed: 'Unreviewed',
   needs_review: 'Needs Review',
   confirmed: 'Confirmed',
   dismissed: 'Dismissed',
   escalated: 'Escalated',
 };
+
+function isReviewStatus(value: unknown): value is ReviewStatus {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(REVIEW_STATUS_LABELS, value);
+}
+
+/** localStorage can throw (Safari private mode, quota, disabled storage); never let that crash the page. */
+const safeStorage = {
+  get(key: string): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Storage unavailable or full; layout simply won't persist.
+    }
+  },
+};
+
+function sortJobsNewestFirst(list: Job[]): Job[] {
+  const time = (job: Job) => {
+    const t = Date.parse(job.created_at ?? '');
+    return Number.isNaN(t) ? 0 : t;
+  };
+  return [...list].sort((a, b) => time(b) - time(a));
+}
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) {
@@ -86,9 +117,15 @@ function formatRelativeTime(value: string | null | undefined): string {
   const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 
   if (abs < 60) return rtf.format(diffSeconds, 'second');
-  if (abs < 3600) return rtf.format(Math.round(diffSeconds / 60), 'minute');
-  if (abs < 86400) return rtf.format(Math.round(diffSeconds / 3600), 'hour');
-  if (abs < 2592000) return rtf.format(Math.round(diffSeconds / 86400), 'day');
+
+  const minutes = Math.round(diffSeconds / 60);
+  if (Math.abs(minutes) < 60) return rtf.format(minutes, 'minute');
+
+  const hours = Math.round(diffSeconds / 3600);
+  if (Math.abs(hours) < 24) return rtf.format(hours, 'hour');
+
+  const days = Math.round(diffSeconds / 86400);
+  if (Math.abs(days) < 30) return rtf.format(days, 'day');
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
 }
 
@@ -109,18 +146,22 @@ function getReferenceLabel(job: Job): string {
 }
 
 function getThreshold(job: Job | null | undefined): number {
-  const threshold = Number(job?.threshold);
+  // Number(null) === 0 would flag every pair, so treat missing values as the default.
+  if (job?.threshold === null || job?.threshold === undefined) {
+    return 0.5;
+  }
+  const threshold = Number(job.threshold);
   return Number.isFinite(threshold) ? threshold : 0.5;
 }
 
 function getReviewStatus(job: Job | null | undefined): ReviewStatus {
   const status = job?.review_status;
-  return status && REVIEW_STATUS_LABELS[status] ? status : 'unreviewed';
+  return isReviewStatus(status) ? status : 'unreviewed';
 }
 
 function formatReviewStatus(status: string | null | undefined): string {
-  if (status && status in REVIEW_STATUS_LABELS) {
-    return REVIEW_STATUS_LABELS[status as ReviewStatus];
+  if (isReviewStatus(status)) {
+    return REVIEW_STATUS_LABELS[status];
   }
   return REVIEW_STATUS_LABELS.unreviewed;
 }
@@ -134,8 +175,8 @@ function getReviewTone(status: string | null | undefined): string {
     escalated: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
   };
 
-  if (status && status in toneMap) {
-    return toneMap[status as ReviewStatus];
+  if (isReviewStatus(status)) {
+    return toneMap[status];
   }
   return toneMap.unreviewed;
 }
@@ -166,7 +207,7 @@ function getTopFeature(result: SimilarityResult | null | undefined): string {
     return 'Evidence ready for manual review';
   }
 
-  return `${topFeature[0]} strongest`;
+  return `${topFeature[0].replace(/_/g, ' ')} strongest`;
 }
 
 function getHomeCardStorageKey(userId: string | null | undefined): string {
@@ -235,7 +276,10 @@ export default function Home() {
   const [editMode, setEditMode] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
-  const [layoutLoaded, setLayoutLoaded] = useState(false);
+  const [layoutLoadedFor, setLayoutLoadedFor] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
   const [showLayoutTip, setShowLayoutTip] = useState(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -243,17 +287,37 @@ export default function Home() {
     ? [...HOME_CARD_DEFAULT_ORDER, ...HOME_CARD_OPTIONAL_ORDER]
     : [...HOME_CARD_DEFAULT_ORDER, 'compare-tools'];
   const optionalCardIds = availableCardIds.filter((id) => !HOME_CARD_DEFAULT_ORDER.includes(id));
+  // Bug 10: layout only counts as "loaded" for the user whose storage key it was read from,
+  // so a user switch can never write the previous user's layout under the new key.
+  const layoutStorageKey = getHomeCardStorageKey(user?.id);
+  const layoutLoaded = layoutLoadedFor === layoutStorageKey;
 
   const fetchJobs = useCallback(async () => {
+    // Ignore out-of-order responses: only the newest request may update state.
+    const requestId = ++requestIdRef.current;
+
     try {
       const res = await apiClient.get('/api/jobs');
-      setJobs(res.data.jobs || []);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      setJobs(sortJobsNewestFirst(res.data.jobs || []));
+      setLoadError(false);
     } catch {
-      setJobs([]);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      // Keep the last good data on screen; a failed refresh must not look like "no checks".
+      setLoadError(true);
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
-
-    setLoading(false);
   }, []);
+
+  const hasActiveJobs = jobs.some((job) => ['pending', 'processing', 'analyzing'].includes(job.status));
+  const pollIntervalMs = hasActiveJobs ? 8000 : 30000;
 
   useEffect(() => {
     if (authLoading) {
@@ -265,10 +329,24 @@ export default function Home() {
     }
 
     fetchJobs();
-    const interval = setInterval(fetchJobs, 30000);
 
-    return () => clearInterval(interval);
-  }, [authLoading, fetchJobs, user]);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchJobs();
+      }
+    }, pollIntervalMs);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchJobs();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [authLoading, fetchJobs, pollIntervalMs, user]);
 
   useEffect(() => {
     if (authLoading || typeof window === 'undefined') {
@@ -279,7 +357,7 @@ export default function Home() {
     setActiveCardId(null);
 
     try {
-      const rawLayout = window.localStorage.getItem(getHomeCardStorageKey(user?.id));
+      const rawLayout = safeStorage.get(layoutStorageKey);
 
       if (!rawLayout) {
         setCardOrder(availableCardIds);
@@ -294,7 +372,7 @@ export default function Home() {
       setHiddenCards(optionalCardIds);
     }
 
-    setLayoutLoaded(true);
+    setLayoutLoadedFor(layoutStorageKey);
   }, [authLoading, availableCardIds.join('|'), optionalCardIds.join('|'), user?.id]);
 
   useEffect(() => {
@@ -302,23 +380,23 @@ export default function Home() {
       return;
     }
 
-    const dismissed = window.localStorage.getItem(getHomeLayoutTipStorageKey(user?.id)) === 'hidden';
+    const dismissed = safeStorage.get(getHomeLayoutTipStorageKey(user?.id)) === 'hidden';
     setShowLayoutTip(!dismissed);
   }, [authLoading, user?.id]);
 
   useEffect(() => {
-    if (!layoutLoaded || typeof window === 'undefined') {
+    if (!layoutLoaded) {
       return;
     }
 
-    window.localStorage.setItem(
-      getHomeCardStorageKey(user?.id),
+    safeStorage.set(
+      layoutStorageKey,
       JSON.stringify({
         order: normalizeCardOrder(cardOrder, availableCardIds),
         hidden: normalizeHiddenCards(hiddenCards, availableCardIds),
       })
     );
-  }, [availableCardIds.join('|'), cardOrder, hiddenCards, layoutLoaded, user?.id]);
+  }, [availableCardIds.join('|'), cardOrder, hiddenCards, layoutLoaded, layoutStorageKey]);
 
   useEffect(() => () => {
     if (longPressTimerRef.current) {
@@ -332,14 +410,10 @@ export default function Home() {
     () => jobs.filter((job) => job.status === 'completed'),
     [jobs]
   );
-  const [selectedReportJob, setSelectedReportJob] = useState<Job | null>(null);
-
-  useEffect(() => {
-    if (completedJobs.length > 0 && !selectedReportJob) {
-      setSelectedReportJob(completedJobs[0]);
-    }
-  }, [completedJobs]);
-  const runningCount = jobs.filter((job) => ['processing', 'analyzing'].includes(job.status)).length;
+  // Derive the selection from the id so it never goes stale after a poll or when a job disappears.
+  const selectedReportJob =
+    completedJobs.find((job) => job.id === selectedReportId) ?? completedJobs[0] ?? null;
+  const runningCount = jobs.filter((job) => ['pending', 'processing', 'analyzing'].includes(job.status)).length;
   const latestFlaggedResults = latestCompleted ? getFlaggedResults(latestCompleted) : [];
 
   // Review workload: how many completed jobs still need attention
@@ -361,6 +435,8 @@ export default function Home() {
   const latestPreviewResults = latestFlaggedResults.slice(0, 3);
   const latestThreshold = getThreshold(latestCompleted);
   const latestSummary = latestCompleted?.summary || {};
+  // Prefer the server-side summary: job.results may be omitted from the list endpoint.
+  const latestFlaggedCount = latestSummary.suspicious_pairs ?? latestFlaggedResults.length;
   const latestHighestMatch = latestFlaggedResults[0];
   const latestReviewStatus = getReviewStatus(latestCompleted);
   const visibleCardIds = normalizeCardOrder(cardOrder, availableCardIds).filter((id) => !hiddenCards.includes(id));
@@ -389,7 +465,7 @@ export default function Home() {
     }
   };
 
-  const handleCardClickCapture = (event: React.SyntheticEvent) => {
+  const handleCardClickCapture = (event: SyntheticEvent) => {
     if (longPressTriggeredRef.current) {
       event.preventDefault();
       event.stopPropagation();
@@ -460,14 +536,12 @@ export default function Home() {
 
   const dismissLayoutTip = () => {
     setShowLayoutTip(false);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(getHomeLayoutTipStorageKey(user?.id), 'hidden');
-    }
+    safeStorage.set(getHomeLayoutTipStorageKey(user?.id), 'hidden');
   };
 
   const dashboardCards: Record<
     string,
-    { id: string; label: string; className: string; content: React.ReactNode }
+    { id: string; label: string; className: string; content: ReactNode }
   > = {
     'recent-checks': {
       id: 'recent-checks',
@@ -498,8 +572,14 @@ export default function Home() {
             </div>
           </div>
 
+          {loadError && (
+            <div role="alert" className="px-6 pb-3 text-xs font-medium text-amber-600 dark:text-amber-400">
+              Couldn&apos;t refresh your checks. Retrying automatically.
+            </div>
+          )}
+
           {loading ? (
-            <div className="space-y-4 px-6 pb-6">
+            <div aria-busy="true" className="space-y-4 px-6 pb-6">
               {[1, 2, 3, 4].map((item) => (
                 <div key={item} className="rounded-[22px] border border-[color:var(--border)] bg-[var(--surface-muted)] p-4">
                   <div className="flex items-center gap-4">
@@ -513,7 +593,7 @@ export default function Home() {
                 </div>
               ))}
             </div>
-          ) : recentJobs.length === 0 ? (
+          ) : recentJobs.length === 0 && !loadError ? (
             <div className="px-6 pb-6">
               <div className="theme-card-muted rounded-[24px] px-6 py-12 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--surface)] text-[var(--accent-blue)]">
@@ -579,16 +659,22 @@ export default function Home() {
                         {job.status === 'completed' && <ReviewBadge status={getReviewStatus(job)} />}
                         {job.status === 'completed' ? (
                           <Link
-                            href={`/results/${job.id}`}
+                            href={`/results/${encodeURIComponent(job.id)}`}
+                            aria-label={`Open ${getAssignmentTitle(job)}`}
                             className="theme-link inline-flex items-center gap-1 text-sm font-medium"
                           >
                             Open
                             <ArrowRight size={15} />
                           </Link>
+                        ) : job.status === 'failed' ? (
+                          <span className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                            <AlertTriangle size={14} />
+                            Failed
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
                             <Loader2 size={14} className="animate-spin" />
-                            Running
+                            {job.status === 'pending' ? 'Queued' : 'Running'}
                           </span>
                         )}
                       </div>
@@ -645,24 +731,19 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Summary row */}
+                {/* Summary row: colours match getReviewTone */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-[20px] border border-amber-500/15 bg-amber-500/[0.08] px-4 py-3">
-                    <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{workload.pending}</div>
-                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Unreviewed</div>
-                  </div>
-                  <div className="rounded-[20px] border border-blue-500/15 bg-blue-500/[0.08] px-4 py-3">
-                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{workload.inProgress}</div>
-                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">In progress</div>
-                  </div>
-                  <div className="rounded-[20px] border border-red-500/15 bg-red-500/[0.08] px-4 py-3">
-                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{workload.escalated}</div>
-                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Escalated</div>
-                  </div>
-                  <div className="rounded-[20px] border border-emerald-500/15 bg-emerald-500/[0.08] px-4 py-3">
-                    <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{workload.confirmed}</div>
-                    <div className="mt-0.5 text-xs text-[var(--text-muted)]">Confirmed</div>
-                  </div>
+                  {[
+                    { label: 'Unreviewed', value: workload.pending, box: 'border-slate-500/15 bg-slate-500/[0.08]', text: 'text-slate-600 dark:text-slate-300' },
+                    { label: 'In progress', value: workload.inProgress, box: 'border-amber-500/15 bg-amber-500/[0.08]', text: 'text-amber-600 dark:text-amber-400' },
+                    { label: 'Escalated', value: workload.escalated, box: 'border-violet-500/15 bg-violet-500/[0.08]', text: 'text-violet-600 dark:text-violet-400' },
+                    { label: 'Confirmed', value: workload.confirmed, box: 'border-red-500/15 bg-red-500/[0.08]', text: 'text-red-600 dark:text-red-400' },
+                  ].map((tile) => (
+                    <div key={tile.label} className={`rounded-[20px] border px-4 py-3 ${tile.box}`}>
+                      <div className={`text-2xl font-bold ${tile.text}`}>{tile.value}</div>
+                      <div className="mt-0.5 text-xs text-[var(--text-muted)]">{tile.label}</div>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Flagged pairs summary */}
@@ -682,7 +763,7 @@ export default function Home() {
                 <div className="pt-1">
                   <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-muted)]">
                     <span>Overall progress</span>
-                    <span>{workload.confirmed + workload.escalated + (workload.total - workload.pending - workload.inProgress - workload.confirmed - workload.escalated)} / {workload.total} reviewed</span>
+                    <span>{workload.total - workload.pending - workload.inProgress} / {workload.total} reviewed</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]">
                     <div
@@ -724,11 +805,9 @@ export default function Home() {
             ) : (
               <div className="space-y-3">
                 <select
+                  aria-label="Choose a check to export reports from"
                   value={selectedReportJob?.id || ''}
-                  onChange={(e) => {
-                    const job = completedJobs.find((j) => j.id === e.target.value);
-                    setSelectedReportJob(job || null);
-                  }}
+                  onChange={(e) => setSelectedReportId(e.target.value)}
                   className="w-full rounded-xl border border-[color:var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:ring-1 focus:ring-blue-400"
                 >
                   {completedJobs.map((job) => (
@@ -741,26 +820,26 @@ export default function Home() {
                 {selectedReportJob && (
                   <>
                     <ReportLink
-                      href={`${API}/report/${selectedReportJob.id}/download`}
+                      href={`/report/${encodeURIComponent(selectedReportJob.id)}/download`}
                       icon={FileText}
                       title="HTML report"
                       description="Open the formatted report with verdict summary and evidence."
                     />
                     <ReportLink
-                      href={`${API}/report/${selectedReportJob.id}/download-json`}
+                      href={`/report/${encodeURIComponent(selectedReportJob.id)}/download-json`}
                       icon={Download}
                       title="JSON data"
                       description="Download the structured analysis output for records or tooling."
                     />
                     <ReportLink
-                      href={`${API}/report/${selectedReportJob.id}/committee`}
+                      href={`/report/${encodeURIComponent(selectedReportJob.id)}/committee`}
                       icon={Shield}
                       title="Committee report"
                       description="Open the evidence-focused report prepared for formal review."
                     />
 
                     <Link
-                      href={`/results/${selectedReportJob.id}`}
+                      href={`/results/${encodeURIComponent(selectedReportJob.id)}`}
                       className="theme-button-secondary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold"
                     >
                       <FileSearch size={16} />
@@ -891,7 +970,7 @@ export default function Home() {
 
                   {latestCompleted && (
                     <Link
-                      href={`/results/${latestCompleted.id}`}
+                      href={`/results/${encodeURIComponent(latestCompleted.id)}`}
                       className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-sm font-semibold transition hover:scale-105"
                     >
                       <FileSearch size={16} />
@@ -964,7 +1043,7 @@ export default function Home() {
                     </div>
 
                     {latestCompleted && (
-                      <Link href={`/results/${latestCompleted.id}`} className="theme-link inline-flex items-center gap-1 text-sm font-medium">
+                      <Link href={`/results/${encodeURIComponent(latestCompleted.id)}`} className="theme-link inline-flex items-center gap-1 text-sm font-medium">
                         Open
                         <ChevronRight size={16} />
                       </Link>
@@ -999,7 +1078,7 @@ export default function Home() {
                   ) : (
                     <div className="space-y-4">
                       <div
-                        className={`rounded-[22px] border px-4 py-4 ${latestFlaggedResults.length > 0
+                        className={`rounded-[22px] border px-4 py-4 ${latestFlaggedCount > 0
                           ? 'border-amber-500/20 bg-amber-500/[0.08]'
                           : 'border-emerald-500/20 bg-emerald-500/[0.08]'
                           }`}
@@ -1007,13 +1086,13 @@ export default function Home() {
                         <div className="grid gap-4 2xl:grid-cols-[1.2fr_0.8fr] 2xl:items-start">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
-                              {latestFlaggedResults.length > 0 ? (
+                              {latestFlaggedCount > 0 ? (
                                 <AlertTriangle size={16} className="text-amber-600" />
                               ) : (
                                 <CheckCircle2 size={16} className="text-emerald-600" />
                               )}
-                              {latestFlaggedResults.length > 0
-                                ? `${latestFlaggedResults.length} pair${latestFlaggedResults.length === 1 ? '' : 's'} flagged`
+                              {latestFlaggedCount > 0
+                                ? `${latestFlaggedCount} pair${latestFlaggedCount === 1 ? '' : 's'} flagged`
                                 : 'No pairs crossed the review threshold'}
                             </div>
                             <div className="mt-3">
@@ -1025,7 +1104,9 @@ export default function Home() {
                             <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
                               {latestHighestMatch
                                 ? `Highest match: ${formatPercent(latestHighestMatch.score)} between ${latestHighestMatch.file_a} and ${latestHighestMatch.file_b}.`
-                                : `The latest assignment finished below the ${formatPercent(latestThreshold)} review threshold.`}
+                                : latestFlaggedCount > 0
+                                  ? 'Open the result to see which pairs were flagged.'
+                                  : `The latest assignment finished below the ${formatPercent(latestThreshold)} review threshold.`}
                             </p>
                           </div>
 
@@ -1042,7 +1123,7 @@ export default function Home() {
 
                       <div className="grid gap-3 sm:grid-cols-3">
                         <SummaryChip label="Files checked" value={latestCompleted.file_count || 0} />
-                        <SummaryChip label="Flagged pairs" value={latestSummary.suspicious_pairs || 0} />
+                        <SummaryChip label="Flagged pairs" value={latestFlaggedCount} />
                         <SummaryChip label="Review status" value={formatReviewStatus(latestReviewStatus)} />
                       </div>
 
@@ -1058,14 +1139,14 @@ export default function Home() {
                               </p>
                             </div>
 
-                            <Link href={`/results/${latestCompleted.id}`} className="theme-link inline-flex items-center gap-1 text-sm font-medium">
+                            <Link href={`/results/${encodeURIComponent(latestCompleted.id)}`} className="theme-link inline-flex items-center gap-1 text-sm font-medium">
                               Review all
                               <ChevronRight size={16} />
                             </Link>
                           </div>
 
-                          <div className="mt-4">
-                            {latestPreviewResults.slice(0, 1).map((result) => (
+                          <div className="mt-4 space-y-3">
+                            {latestPreviewResults.map((result) => (
                               <FindingPreviewRow key={`${result.file_a}-${result.file_b}`} result={result} />
                             ))}
                           </div>
@@ -1164,7 +1245,9 @@ export default function Home() {
               </div>
             )}
 
-            {visibleCardIds.length === 0 ? (
+            {!layoutLoaded ? (
+              <div aria-busy="true" className="h-64 rounded-[30px] skeleton" />
+            ) : visibleCardIds.length === 0 ? (
               <div className="theme-card rounded-[30px] px-6 py-10 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--surface-muted)] text-[var(--accent-blue)]">
                   <LayoutGrid size={20} />
@@ -1178,6 +1261,9 @@ export default function Home() {
               <div className="grid gap-6 lg:gap-8 xl:grid-cols-12">
                 {visibleCardIds.map((cardId) => {
                   const card = dashboardCards[cardId];
+                  if (!card) {
+                    return null;
+                  }
                   const cardIndex = visibleCardIds.indexOf(cardId);
 
                   return (
@@ -1202,7 +1288,7 @@ export default function Home() {
                         setEditMode(true);
                       }}
                       onDragOver={() => {
-                        if (editMode) {
+                        if (editMode && activeCardId !== cardId) {
                           setActiveCardId(cardId);
                         }
                       }}
@@ -1250,7 +1336,7 @@ const EditableDashboardCard = ({
   onPressEnd,
   onClickCapture,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
   label: string;
   editMode: boolean;
@@ -1268,7 +1354,7 @@ const EditableDashboardCard = ({
   onDragEnd?: () => void;
   onPressStart?: () => void;
   onPressEnd?: () => void;
-  onClickCapture?: (event: React.SyntheticEvent) => void;
+  onClickCapture?: (event: SyntheticEvent) => void;
 }) => (
   <div
     className={`relative ${className || ''}`}
@@ -1304,6 +1390,7 @@ const EditableDashboardCard = ({
     onMouseUp={onPressEnd}
     onMouseLeave={onPressEnd}
     onTouchStart={onPressStart}
+    onTouchMove={onPressEnd}
     onTouchEnd={onPressEnd}
     onTouchCancel={onPressEnd}
     onClickCapture={onClickCapture}
@@ -1373,7 +1460,7 @@ const EditableDashboardCard = ({
   </div>
 );
 
-const SummaryChip = ({ label, value }: { label: string; value: React.ReactNode }) => (
+const SummaryChip = ({ label, value }: { label: string; value: ReactNode }) => (
   <div className="theme-card-muted rounded-[22px] px-4 py-4">
     <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{label}</div>
     <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
