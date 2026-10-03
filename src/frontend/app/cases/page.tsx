@@ -2,16 +2,11 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import {
-  Card,
   CardHeader,
-  ErrorState,
   FilterChip,
   PageHeader,
   RiskBadge,
   StatusBadge,
-  TableBody,
-  TableHeader,
-  TableRow,
 } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -185,6 +180,37 @@ function pageNumbers(current: number, total: number): (number | '…')[] {
   if (end < total - 1) pages.push('…');
   pages.push(total);
   return pages;
+}
+
+function CaseRowSkeleton() {
+  return (
+    <tr>
+      <td className="px-5 py-4">
+        <div className="h-6 w-20 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-4 w-36 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+        <div className="mt-2 h-3 w-48 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-4 w-40 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-6 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-4 w-28 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-4 w-20 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="flex justify-end">
+          <div className="h-9 w-24 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
@@ -386,11 +412,11 @@ export default function CasesQueuePage() {
   };
 
   const renderSortIcon = (column: SortKey) => {
-    if (sortKey !== column) return <ArrowUpDown size={13} className="text-slate-400" aria-hidden="true" />;
+    if (sortKey !== column) return <ArrowUpDown size={13} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />;
     return sortDir === 'asc' ? (
-      <ArrowUp size={13} className="text-blue-600" aria-hidden="true" />
+      <ArrowUp size={13} className="text-blue-600 dark:text-blue-400" aria-hidden="true" />
     ) : (
-      <ArrowDown size={13} className="text-blue-600" aria-hidden="true" />
+      <ArrowDown size={13} className="text-blue-600 dark:text-blue-400" aria-hidden="true" />
     );
   };
 
@@ -400,14 +426,17 @@ export default function CasesQueuePage() {
     className = ''
   ) => (
     <th
+      scope="col"
       className={`px-5 py-3 text-left ${className}`}
       aria-sort={sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
         type="button"
         onClick={() => handleSort(column)}
-        className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-          sortKey === column ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'
+        className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+          sortKey === column
+            ? 'text-slate-900 dark:text-white'
+            : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
         }`}
       >
         {label}
@@ -416,18 +445,40 @@ export default function CasesQueuePage() {
     </th>
   );
 
+  const tableHeader = (
+    <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
+      <tr>
+        {/* Status was the only sortable-by-design column without a sort control. */}
+        {renderSortableTh('status', 'Status')}
+        {renderSortableTh('course', 'Course')}
+        <th scope="col" className="px-5 py-3 text-left">
+          Pair
+        </th>
+        {renderSortableTh('risk', 'Risk')}
+        <th scope="col" className="px-5 py-3 text-left">
+          Assigned reviewer
+        </th>
+        {renderSortableTh('updated', 'Updated', 'text-right')}
+        <th scope="col" className="px-5 py-3 text-right">
+          <span className="sr-only">Actions</span>
+        </th>
+      </tr>
+    </thead>
+  );
+
   const isFiltered = Boolean(search) || activeStatus !== 'ALL';
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
+      <div className="theme-page-container space-y-6">
         <PageHeader
           eyebrow="Cases"
+          eyebrowStyle="badge"
           title="An inbox for academic integrity review."
           description="Teaching teams can assign, review, dismiss, and export cases without digging through raw tool output."
           action={
-            <label className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 lg:w-80">
-              <Search size={16} aria-hidden="true" />
+            <label className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-500 shadow-sm transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 lg:w-80">
+              <Search size={16} className="text-slate-400" aria-hidden="true" />
               <input
                 type="search"
                 name="case-search"
@@ -436,19 +487,34 @@ export default function CasesQueuePage() {
                 placeholder="Search cases, courses, reviewers"
                 autoComplete="off"
                 spellCheck={false}
-                className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-white dark:placeholder:text-slate-500"
                 aria-label="Search cases"
               />
             </label>
           }
         />
 
-        {error && <ErrorState message={error} />}
+        {error && (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+          >
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span className="flex-1">{error}</span>
+            <button
+              type="button"
+              onClick={() => setReloadKey((key) => key + 1)}
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
         {truncated && !error && (
           <div
             role="status"
-            className="mt-6 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
           >
             <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             <span>
@@ -459,7 +525,7 @@ export default function CasesQueuePage() {
         )}
 
         {/* Status tabs */}
-        <div className="mt-8 mb-6 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {STATUS_TABS.map((tab) => (
             <FilterChip
               key={tab.key}
@@ -472,21 +538,21 @@ export default function CasesQueuePage() {
           ))}
         </div>
 
-        <Card className="overflow-hidden">
+        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="px-6 pt-6 lg:px-7 lg:pt-7">
             <CardHeader
               title="Queue"
               description={`Sorted by ${SORT_LABELS[sortKey]}, ${sortDir === 'asc' ? 'ascending' : 'descending'}.`}
               action={
-                <div className="flex items-center gap-3 text-sm text-slate-500">
+                <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
                   <span aria-live="polite">
                     Showing{' '}
-                    <strong className="font-semibold text-slate-900">
+                    <strong className="font-semibold text-slate-900 dark:text-white">
                       {sorted.length === 0 ? 0 : pageStart + 1}–{pageStart + visible.length}
                     </strong>{' '}
-                    of <strong className="font-semibold text-slate-900">{sorted.length}</strong>{' '}
+                    of <strong className="font-semibold text-slate-900 dark:text-white">{sorted.length}</strong>{' '}
                     {sorted.length === 1 ? 'case' : 'cases'}
-                    {isFiltered ? <span className="text-slate-400"> (filtered)</span> : null}
+                    {isFiltered ? <span className="text-slate-400 dark:text-slate-500"> (filtered)</span> : null}
                   </span>
                 </div>
               }
@@ -494,71 +560,65 @@ export default function CasesQueuePage() {
           </div>
           <div className="overflow-x-auto">
             {loading ? (
-              <div role="status" className="px-6 py-8 text-sm text-slate-500 lg:px-7">
-                Loading cases...
-              </div>
+              <table className="w-full min-w-[900px] text-left">
+                <caption className="sr-only">Case queue</caption>
+                {tableHeader}
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {Array.from({ length: 5 }).map((_, i) => <CaseRowSkeleton key={i} />)}
+                </tbody>
+              </table>
             ) : error && cases.length === 0 ? (
               // A failed load must not look like "no cases yet".
-              <div className="flex flex-col items-center px-6 py-12 text-center lg:px-7">
-                <button
-                  type="button"
-                  onClick={() => setReloadKey((key) => key + 1)}
-                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+              <div className="px-5 py-12 lg:px-7">
+                <div
+                  role="alert"
+                  className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
                 >
-                  Try again
-                </button>
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span className="flex-1">{error}</span>
+                  <button
+                    type="button"
+                    onClick={() => setReloadKey((key) => key + 1)}
+                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Try again
+                  </button>
+                </div>
               </div>
             ) : sorted.length === 0 ? (
-              <div className="flex flex-col items-center px-6 py-12 text-center lg:px-7">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
-                  <Inbox size={20} aria-hidden="true" />
+              <div className="px-5 py-16 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <Inbox size={22} aria-hidden="true" />
                 </div>
-                <p className="mt-3 text-sm font-medium text-slate-700">No cases found</p>
-                <p className="mt-1 text-sm text-slate-500">
+                <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No cases found</h3>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
                   {cases.length === 0
                     ? 'Run an AI detection or similarity analysis to create cases.'
                     : 'No cases match the current filters or search.'}
                 </p>
               </div>
             ) : (
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[900px] text-left">
                 <caption className="sr-only">Case queue</caption>
-                <TableHeader>
-                  <tr>
-                    {/* Status was the only sortable-by-design column without a sort control. */}
-                    {renderSortableTh('status', 'Status')}
-                    {renderSortableTh('course', 'Course')}
-                    <th className="theme-table-header px-5 py-3 text-left">
-                      Pair
-                    </th>
-                    {renderSortableTh('risk', 'Risk')}
-                    <th className="theme-table-header px-5 py-3 text-left">
-                      Assigned reviewer
-                    </th>
-                    {renderSortableTh('updated', 'Updated', 'text-right')}
-                    <th className="theme-table-header px-5 py-3 text-right">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </TableHeader>
-                <TableBody>
+                {tableHeader}
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {visible.map((item) => (
-                    <TableRow key={item.id}>
+                    <tr key={item.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50">
                       <td className="px-5 py-4">
                         <StatusBadge status={item.status} />
                       </td>
                       <td className="px-5 py-4">
-                        <div className="text-sm font-semibold text-slate-950">{item.course}</div>
-                        <div className="mt-1 text-xs text-slate-500">{item.assignment}</div>
+                        <div className="truncate font-medium text-slate-900 dark:text-white">{item.course}</div>
+                        <div className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">{item.assignment}</div>
                       </td>
                       <td className="px-5 py-4">
-                        <div className="text-sm font-semibold text-slate-950">{item.title}</div>
+                        <div className="truncate font-medium text-slate-900 dark:text-white">{item.title}</div>
                       </td>
                       <td className="px-5 py-4">
                         <RiskBadge value={item.risk || 50} />
                       </td>
-                      <td className="px-5 py-4 text-sm text-slate-600">{item.reviewer}</td>
-                      <td className="px-5 py-4 text-right text-xs text-slate-500">
+                      <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">{item.reviewer}</td>
+                      <td className="px-5 py-4 text-right text-xs text-slate-500 dark:text-slate-400">
                         <span title={formatFullDate(item.updatedAt)}>{formatDate(item.updatedAt)}</span>
                       </td>
                       <td className="px-5 py-4 text-right">
@@ -566,22 +626,22 @@ export default function CasesQueuePage() {
                         <Link
                           href={`/cases/${encodeURIComponent(item.id)}`}
                           aria-label={`Open case ${item.title}`}
-                          className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+                          className="text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                         >
                           Open
                         </Link>
                       </td>
-                    </TableRow>
+                    </tr>
                   ))}
-                </TableBody>
+                </tbody>
               </table>
             )}
           </div>
 
           {/* Pagination footer */}
           {!loading && sorted.length > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-3.5 sm:flex-row sm:items-center sm:justify-between lg:px-7">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-3.5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between lg:px-7">
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <label htmlFor="cases-page-size">Rows per page</label>
                 <select
                   id="cases-page-size"
@@ -590,7 +650,7 @@ export default function CasesQueuePage() {
                     setPageSize(Number(e.target.value));
                     setPage(1);
                   }}
-                  className="theme-compact-field h-8 w-auto"
+                  className="h-8 w-auto rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                 >
                   {PAGE_SIZES.map((size) => (
                     <option key={size} value={size}>
@@ -612,7 +672,7 @@ export default function CasesQueuePage() {
                 </button>
                 {pageNumbers(safePage, totalPages).map((num, i) =>
                   num === '…' ? (
-                    <span key={`gap-${i}`} className="px-1 text-xs text-slate-400" aria-hidden="true">
+                    <span key={`gap-${i}`} className="px-1 text-xs text-slate-400 dark:text-slate-500" aria-hidden="true">
                       …
                     </span>
                   ) : (
@@ -624,8 +684,8 @@ export default function CasesQueuePage() {
                       aria-current={safePage === num ? 'page' : undefined}
                       className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold transition ${
                         safePage === num
-                          ? 'bg-slate-900 text-white'
-                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
+                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {num}
@@ -644,7 +704,7 @@ export default function CasesQueuePage() {
               </nav>
             </div>
           )}
-        </Card>
+        </section>
       </div>
     </DashboardLayout>
   );

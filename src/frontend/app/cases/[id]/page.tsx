@@ -5,6 +5,7 @@ import {
   ActionButton,
   Card,
   CardHeader,
+  PageHeader,
   RiskBadge,
   StatusBadge,
 } from '@/components/saas/SaaSPrimitives';
@@ -12,10 +13,12 @@ import { apiClient } from '@/lib/apiClient';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
   Clock3,
   Download,
   FileText,
   History,
+  Loader2,
   MessageSquare,
   SearchCheck,
   ShieldCheck,
@@ -352,8 +355,11 @@ export default function CompareCasePage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div role="status" className="flex min-h-[50vh] items-center justify-center">
-          <div className="text-slate-500">Loading case details...</div>
+        <div className="theme-page-container space-y-6">
+          <div role="status" className="flex min-h-[50vh] items-center justify-center gap-2">
+            <Loader2 size={16} className="animate-spin text-slate-400" aria-hidden="true" />
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading case details...</p>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -362,21 +368,30 @@ export default function CompareCasePage() {
   if (error || !caseData) {
     return (
       <DashboardLayout>
-        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4 text-center">
-          <div role="alert" className="text-red-600">
-            {error || 'This case could not be loaded.'}
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setReloadKey((key) => key + 1)}
-              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+        <div className="theme-page-container space-y-6">
+          <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4">
+            <div
+              role="alert"
+              className="flex w-full max-w-2xl items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
             >
-              Try again
-            </button>
-            <Link href="/cases" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-              Back to cases
-            </Link>
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span className="flex-1">{error || 'This case could not be loaded.'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReloadKey((key) => key + 1)}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Try again
+              </button>
+              <Link
+                href="/cases"
+                className="text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Back to cases
+              </Link>
+            </div>
           </div>
         </div>
       </DashboardLayout>
@@ -406,88 +421,88 @@ export default function CompareCasePage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container flex flex-col gap-6 lg:gap-8">
+      <div className="theme-page-container space-y-6">
         {/* ── Header ──────────────────────────────────────────────────────────── */}
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          {/* Breadcrumb + status row */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-100 bg-slate-50/70 px-6 py-3.5 lg:px-8">
-            <Link
-              href="/cases"
-              className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 hover:text-slate-600"
-            >
-              Cases
-            </Link>
-            <span aria-hidden="true" className="text-slate-300">
-              /
-            </span>
-            <span className="font-mono text-xs text-slate-500">{caseData.id.slice(0, 8)}</span>
-            <span className="ml-auto flex flex-wrap items-center gap-2">
-              <StatusBadge status={caseData.status || 'OPEN'} />
-              <RiskBadge value={badgeValue} label={`${priorityLabel} priority`} />
-            </span>
-          </div>
+        {/* Breadcrumb + status row */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <Link
+            href="/cases"
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          >
+            <ChevronLeft size={13} aria-hidden="true" />
+            Cases
+          </Link>
+          <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">
+            /
+          </span>
+          <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{caseData.id.slice(0, 8)}</span>
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            <StatusBadge status={caseData.status || 'OPEN'} />
+            <RiskBadge value={badgeValue} label={`${priorityLabel} priority`} />
+          </span>
+        </div>
 
-          <div className="px-6 py-6 lg:px-8 lg:py-7">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
-                  Instructor Review Case
-                </h1>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  {assignmentCourse} · {assignmentTitle}
-                </p>
-                <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600">
-                  <span>
-                    <span className="font-medium text-slate-500">Reviewer: </span>
-                    {investigator?.name || 'Unassigned'}
-                  </span>
-                  <span aria-hidden="true" className="hidden h-4 w-px bg-slate-200 sm:block" />
-                  <span className="inline-flex items-center gap-1.5">
-                    <Clock3 size={14} className="text-slate-400" aria-hidden="true" />
-                    {comments.length} reviewer {comments.length === 1 ? 'note' : 'notes'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex max-w-sm items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                <AlertTriangle size={16} className="mt-1 shrink-0" aria-hidden="true" />
-                Similarity does not by itself imply misconduct. Instructor review is required.
-              </div>
-            </div>
+        <PageHeader
+          eyebrow="Case"
+          eyebrowStyle="badge"
+          title="Instructor Review Case"
+          description={`${assignmentCourse} · ${assignmentTitle}`}
+        />
 
-            {/* Case-specific figures. These used to be workspace-wide totals (all submissions,
-                all open cases), which don't belong on one case and cost two heavy requests. */}
-            <dl className="mt-6 grid grid-cols-2 gap-4 text-sm text-slate-600 xl:grid-cols-4">
-              <HeaderMetric value={riskPct !== null ? `${riskPct}/100` : '—'} label="Risk score" />
-              <HeaderMetric value={linkedResults !== null ? linkedResults : '—'} label="Linked results" />
-              <HeaderMetric value={comments.length} label="Reviewer notes" />
-              <HeaderMetric value={priority} label="Queue priority" />
-            </dl>
-          </div>
-        </section>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-400">
+          <span>
+            <span className="font-medium text-slate-500 dark:text-slate-400">Reviewer: </span>
+            {investigator?.name || 'Unassigned'}
+          </span>
+          <span aria-hidden="true" className="hidden h-4 w-px bg-slate-200 sm:block dark:bg-slate-800" />
+          <span className="inline-flex items-center gap-1.5">
+            <Clock3 size={14} className="text-slate-400" aria-hidden="true" />
+            {comments.length} reviewer {comments.length === 1 ? 'note' : 'notes'}
+          </span>
+        </div>
+
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>Similarity does not by itself imply misconduct. Instructor review is required.</span>
+        </div>
+
+        {/* Case-specific figures. These used to be workspace-wide totals (all submissions,
+            all open cases), which don't belong on one case and cost two heavy requests. */}
+        <dl className="grid grid-cols-2 gap-4 text-sm text-slate-600 dark:text-slate-400 xl:grid-cols-4">
+          <HeaderMetric value={riskPct !== null ? `${riskPct}/100` : '—'} label="Risk score" />
+          <HeaderMetric value={linkedResults !== null ? linkedResults : '—'} label="Linked results" />
+          <HeaderMetric value={comments.length} label="Reviewer notes" />
+          <HeaderMetric value={priority} label="Queue priority" />
+        </dl>
 
         {/* ── Risk + confidence ───────────────────────────────────────────────── */}
         <section className={`grid items-start gap-6 ${SHOW_SAMPLE_EVIDENCE ? 'lg:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
           <Card>
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <div className="text-sm font-semibold text-slate-500">Risk Summary</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                  Risk Summary
+                </div>
                 {SHOW_SAMPLE_EVIDENCE ? (
                   <>
                     <SampleBadge />
-                    <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+                    <h2 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
                       Multiple uncommon similarities were detected.
                     </h2>
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
                       This case was flagged based on multiple independent signals. It is recommended
                       for manual review, not treated as a misconduct conclusion.
                     </p>
                   </>
                 ) : (
                   <>
-                    <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+                    <h2 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
                       {priorityLabel} priority case flagged for review.
                     </h2>
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
                       This case was flagged by the analysis that created it. It is recommended for manual
                       review, not treated as a misconduct conclusion.
                     </p>
@@ -511,15 +526,15 @@ export default function CompareCasePage() {
           {SHOW_SAMPLE_EVIDENCE && (
             <Card className="h-full gap-5 lg:gap-6">
               <SampleBadge />
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-                <ShieldCheck size={17} className="text-blue-600" aria-hidden="true" />
+              <div className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
+                <ShieldCheck size={17} className="text-blue-600 dark:text-blue-400" aria-hidden="true" />
                 Confidence Basis
               </div>
-              <p className="text-sm leading-6 text-slate-600">
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
                 Confidence derived from 4 independent signals after starter code and common
                 assignment patterns were excluded.
               </p>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
                 Similar code structure detected between student submissions.
               </div>
             </Card>
@@ -544,9 +559,9 @@ export default function CompareCasePage() {
                     'Matching helper function logic',
                     'Similarity exceeds course baseline',
                   ].map((reason) => (
-                    <div key={reason} className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                      <SearchCheck size={18} className="mt-0.5 shrink-0 text-blue-600" aria-hidden="true" />
-                      <div className="text-sm font-medium text-slate-800">{reason}</div>
+                    <div key={reason} className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+                      <SearchCheck size={18} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                      <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{reason}</div>
                     </div>
                   ))}
                 </div>
@@ -610,7 +625,7 @@ export default function CompareCasePage() {
                 title="Evidence"
                 description="Matched code, flagged reasons and history for this case."
               />
-              <p className="text-sm leading-6 text-slate-600">
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
                 Detailed evidence isn’t shown on this page yet.{' '}
                 {linkedResults
                   ? `This case links to ${linkedResults} analysis ${linkedResults === 1 ? 'result' : 'results'}; review the matches there before deciding.`
@@ -662,13 +677,13 @@ export default function CompareCasePage() {
             <div className="flex flex-col gap-5">
               {/* Assign Reviewer */}
               <div className="space-y-2">
-                <label htmlFor="assign-reviewer" className="text-sm font-medium text-slate-700">
+                <label htmlFor="assign-reviewer" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   Assign Reviewer
                 </label>
                 <div className="flex gap-2">
                   <select
                     id="assign-reviewer"
-                    className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                     value={investigator?.id || ''}
                     disabled={isBusy}
                     onChange={(e) => handleAssign(e.target.value)}
@@ -744,21 +759,29 @@ export default function CompareCasePage() {
             <div className="max-h-60 space-y-3 overflow-y-auto" tabIndex={0} aria-label="Reviewer notes">
               {comments.length > 0 ? (
                 comments.map((comment) => (
-                  <div key={comment.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                  <div key={comment.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
                     {/* Was always "Instructor"; now the author's name when it's known. */}
-                    <div className="mb-1 font-medium text-slate-700">{authorName(comment.user_id)}</div>
-                    <div className="whitespace-pre-wrap text-slate-600">{comment.body}</div>
-                    <div className="mt-1 text-xs text-slate-400">{formatDateTime(comment.created_at)}</div>
+                    <div className="mb-1 font-medium text-slate-700 dark:text-slate-300">{authorName(comment.user_id)}</div>
+                    <div className="whitespace-pre-wrap text-slate-600 dark:text-slate-400">{comment.body}</div>
+                    <div className="mt-1 text-xs text-slate-400 dark:text-slate-500">{formatDateTime(comment.created_at)}</div>
                   </div>
                 ))
               ) : (
-                <div className="text-sm italic text-slate-500">No notes yet. Add your first note below.</div>
+                <div className="px-5 py-14 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <MessageSquare size={22} aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No notes yet</h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Add your first note below.
+                  </p>
+                </div>
               )}
             </div>
 
             {/* Add Note Form */}
             <div>
-              <label htmlFor="case-note" className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <label htmlFor="case-note" className="mb-1.5 flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 <MessageSquare size={16} aria-hidden="true" />
                 Add Instructor Note
               </label>
@@ -774,7 +797,7 @@ export default function CompareCasePage() {
                 }}
                 placeholder="Enter your notes for this case..."
                 rows={4}
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
               />
               {/* The button used to sit inside the <label>, which made the whole label a click target for it. */}
               <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -782,11 +805,18 @@ export default function CompareCasePage() {
                   type="button"
                   disabled={isBusy || !noteText.trim()}
                   onClick={handleSaveNote}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {pendingAction === 'note' ? 'Saving...' : 'Save Note'}
+                  {pendingAction === 'note' ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Note'
+                  )}
                 </button>
-                <span className="text-xs text-slate-400">Ctrl/⌘ + Enter to save</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Ctrl/⌘ + Enter to save</span>
               </div>
               {notesNotice && (
                 <div className="mt-3">
@@ -805,24 +835,26 @@ export default function CompareCasePage() {
 
 function NoticeBanner({ notice }: { notice: Notice }) {
   const styles: Record<Notice['tone'], string> = {
-    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    error: 'border-red-200 bg-red-50 text-red-700',
-    warning: 'border-amber-200 bg-amber-50 text-amber-800',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300',
+    error: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+    warning: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
   };
+  const Icon = notice.tone === 'success' ? CheckCircle2 : AlertTriangle;
 
   return (
     <div
       role={notice.tone === 'error' ? 'alert' : 'status'}
-      className={`rounded-lg border px-3 py-2 text-sm ${styles[notice.tone]}`}
+      className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${styles[notice.tone]}`}
     >
-      {notice.text}
+      <Icon size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+      <span>{notice.text}</span>
     </div>
   );
 }
 
 function SampleBadge() {
   return (
-    <span className="inline-flex w-fit items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+    <span className="inline-flex w-fit items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
       Sample data — not from this case
     </span>
   );
@@ -832,9 +864,9 @@ function SampleBadge() {
 // `order` keeps the value visually above the label.
 function HeaderMetric({ value, label }: { value: string | number; label: string }) {
   return (
-    <div className="flex flex-col rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+    <div className="flex flex-col rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
       <dt className="order-2 mt-1 leading-5">{label}</dt>
-      <dd className="order-1 text-lg font-semibold text-slate-950">{value}</dd>
+      <dd className="order-1 text-lg font-semibold text-slate-900 dark:text-white">{value}</dd>
     </div>
   );
 }
@@ -849,9 +881,9 @@ function RiskMetric({
   tone: 'red' | 'blue' | 'slate';
 }) {
   const tones = {
-    red: 'text-red-700 bg-red-50 border-red-100',
-    blue: 'text-blue-700 bg-blue-50 border-blue-100',
-    slate: 'text-slate-800 bg-slate-50 border-slate-200',
+    red: 'text-red-700 bg-red-50 border-red-100 dark:text-red-300 dark:bg-red-500/10 dark:border-red-500/20',
+    blue: 'text-blue-700 bg-blue-50 border-blue-100 dark:text-blue-300 dark:bg-blue-500/10 dark:border-blue-500/20',
+    slate: 'text-slate-800 bg-slate-50 border-slate-200 dark:text-slate-300 dark:bg-slate-800 dark:border-slate-700',
   };
 
   return (
@@ -877,15 +909,15 @@ function CodePanel({
   const starterLines = new Set([1, 2]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <div className="text-sm font-semibold text-slate-950">{title}</div>
-        <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+        <div className="text-sm font-semibold text-slate-900 dark:text-white">{title}</div>
+        <div className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
           <Clock3 size={14} aria-hidden="true" />
           Synchronized scroll
         </div>
       </div>
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500">
+      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
         Unrelated code collapsed. Starter code greyed out.
       </div>
       {/* Focusable so keyboard users can scroll it; the <pre> wrapper held <div>s, which is invalid. */}
@@ -930,12 +962,12 @@ function EvidenceRow({
   detail: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex gap-3">
-        <Icon size={17} className="mt-0.5 shrink-0 text-blue-600" />
+        <Icon size={17} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
         <div>
-          <div className="text-sm font-semibold text-slate-950">{title}</div>
-          <div className="mt-1 text-sm leading-5 text-slate-500">{detail}</div>
+          <div className="text-sm font-semibold text-slate-900 dark:text-white">{title}</div>
+          <div className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">{detail}</div>
         </div>
       </div>
     </div>

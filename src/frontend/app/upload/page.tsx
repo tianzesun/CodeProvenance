@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import { PageHeader } from '@/components/saas/SaaSPrimitives';
 import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -17,7 +18,6 @@ import {
   Layers3,
   ArrowRight,
   Zap,
-  Shield,
   Clock3,
   FileCode,
   SearchCheck,
@@ -247,7 +247,6 @@ function formatSize(bytes: number) {
     : `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-const cardShadow = { boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04)' };
 const dotGrid = { backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' };
 type UploadProgressStage = { stage: string; label: string };
 
@@ -781,80 +780,59 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
-        <div className="space-y-8 lg:space-y-10">
+      <div className="theme-page-container space-y-6">
 
-          {/* Header */}
-          <section className="theme-card-strong rounded-[30px] overflow-hidden mb-8">
-            <div className="theme-section-line px-6 py-5 lg:px-7">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-blue)]">
-                    <Shield size={13} />
-                    Plagiarism Detection
+          <PageHeader
+            eyebrow="Upload"
+            eyebrowStyle="badge"
+            title="Plagiarism Checker"
+            description="Upload files and IntegrityDesk compares them using similarity engines + AI detection. When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code."
+            action={
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Small external scan status pill next to Analyze button */}
+                {tenantExternalScanEnabled !== null && (
+                  <div className={`hidden md:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${tenantExternalScanEnabled
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+                    }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-hidden="true" />
+                    External: {tenantExternalScanEnabled ? 'On' : 'Off'}
                   </div>
-                  <div>
-                    <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
-                      Plagiarism Checker
-                    </h1>
-                  </div>
-                  <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
-                    Upload files and IntegrityDesk compares them using similarity engines + AI detection.
-                    When enabled in Settings, it also scans admin-configured GitHub repos and public websites for copied code.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Small external scan status pill next to Analyze button */}
-                  {tenantExternalScanEnabled !== null && (
-                    <div className={`hidden md:flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${tenantExternalScanEnabled
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : 'border-amber-200 bg-amber-50 text-amber-700'
-                      }`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${tenantExternalScanEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                      External: {tenantExternalScanEnabled ? 'On' : 'Off'}
-                    </div>
-                  )}
+                )}
 
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!canRunCheck}
-                    className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold transition hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
-                  >
-                    {uploading
-                      ? <>
-                        <svg width="18" height="18" viewBox="0 0 20 20">
-                          <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
-                          <circle cx="10" cy="10" r="8" fill="none" stroke="white" strokeWidth="2" strokeDasharray="50" strokeDashoffset={50 - (progress * 50)} strokeLinecap="round" className="transition-all duration-150" style={{ transformOrigin: '50% 50%', transform: 'rotate(-90deg)' }} />
-                        </svg>
-                        Analyzing…
-                      </>
-                      : <><Zap size={16} />Analyze<ArrowRight size={15} className="opacity-70" /></>}
-                  </button>
-                </div>
+                <button
+                  onClick={handleSubmit}
+                  disabled={!canRunCheck}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {uploading
+                    ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" />Analyzing…</>
+                    : <><Zap size={16} aria-hidden="true" />Analyze<ArrowRight size={15} className="opacity-70" aria-hidden="true" /></>}
+                </button>
               </div>
-            </div>
-          </section>
+            }
+          />
 
           {uploading && (
-            <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
               <p role="status" className="sr-only">
                 {jobProgress?.label ?? 'Uploading files to the analysis queue'}
               </p>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-blue-950">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-blue-950 dark:text-blue-100">
                     <Loader2 size={16} className="animate-spin shrink-0" />
                     <span className="truncate">
                       {jobProgress?.label ?? `Analyzing ${zipFile ? 'submissions from archive' : `${files.length} submissions`}...`}
                     </span>
                     {jobProgress?.stage === 'comparing_submissions' && jobProgress.total_units ? (
-                      <span className="rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                      <span className="rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
                         pair {jobProgress.completed_units ?? 0} of {jobProgress.total_units}
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-1.5 flex items-center gap-2 text-xs text-blue-800">
-                    <FileCode size={12} className="shrink-0 text-blue-500" />
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-blue-800 dark:text-blue-300">
+                    <FileCode size={12} className="shrink-0 text-blue-500 dark:text-blue-400" aria-hidden="true" />
                     <span className="truncate">{currentWork}</span>
                   </div>
                   <div
@@ -863,28 +841,28 @@ export default function UploadPage() {
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={progressPct}
-                    className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner"
+                    className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner dark:bg-slate-800"
                   >
                     <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${progressPct}%` }} />
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="truncate text-[11px] text-blue-700/80">{progressFooter}</span>
-                    <span className="text-xs font-medium text-blue-700">{progressPct}%</span>
+                    <span className="truncate text-[11px] text-blue-700/80 dark:text-blue-300/80">{progressFooter}</span>
+                    <span className="text-xs font-medium text-blue-700 dark:text-blue-300">{progressPct}%</span>
                   </div>
                 </div>
-                <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">
+                <div className="grid gap-2 text-sm text-blue-800 dark:text-blue-300 sm:grid-cols-2">
                   {progressPlan.map((task, index) => (
                     <div key={task.stage} className="flex items-center gap-2">
                       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                         {index < activeStageIndex ? (
-                          <Check size={14} className="text-blue-700" />
+                          <Check size={14} className="text-blue-700 dark:text-blue-300" aria-hidden="true" />
                         ) : index === activeStageIndex ? (
-                          <Loader2 size={13} className="animate-spin text-blue-700" />
+                          <Loader2 size={13} className="animate-spin text-blue-700 dark:text-blue-300" aria-hidden="true" />
                         ) : (
-                          <span className="h-2 w-2 rounded-full bg-blue-300" />
+                          <span className="h-2 w-2 rounded-full bg-blue-300 dark:bg-blue-500/50" />
                         )}
                       </span>
-                      <span className={index === activeStageIndex ? 'font-semibold text-blue-950' : index < activeStageIndex ? 'text-blue-700' : 'text-blue-500/70'}>
+                      <span className={index === activeStageIndex ? 'font-semibold text-blue-950 dark:text-blue-100' : index < activeStageIndex ? 'text-blue-700 dark:text-blue-300' : 'text-blue-500/70 dark:text-blue-400/70'}>
                         {task.label}
                       </span>
                     </div>
@@ -893,13 +871,13 @@ export default function UploadPage() {
               </div>
 
               {activity.length > 0 && (
-                <div className="mt-4 rounded-xl border border-blue-100 bg-white/70 px-3 py-2.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
-                    <Clock3 size={12} /> Live activity
+                <div className="mt-4 rounded-xl border border-blue-100 bg-white/70 px-3 py-2.5 dark:border-blue-500/20 dark:bg-slate-900/60">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                    <Clock3 size={12} aria-hidden="true" /> Live activity
                   </div>
                   <ul className="mt-2 space-y-1">
                     {activity.map((line, index) => (
-                      <li key={`${index}-${line}`} className="truncate font-mono text-[11px] text-blue-900/80">
+                      <li key={`${index}-${line}`} className="truncate font-mono text-[11px] text-blue-900/80 dark:text-blue-200/80">
                         {line}
                       </li>
                     ))}
@@ -910,7 +888,7 @@ export default function UploadPage() {
                 <button
                   type="button"
                   onClick={handleCancel}
-                  className="rounded-xl border border-blue-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>
@@ -919,12 +897,12 @@ export default function UploadPage() {
           )}
 
           {inferredComparisonScope && (
-            <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 dark:border-blue-500/20 dark:bg-blue-500/10">
               <div className="flex items-start gap-3">
-                <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                <SearchCheck size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
                 <div>
-                  <div className="text-sm font-semibold text-blue-950">{inferredComparisonScope.label}</div>
-                  <p className="mt-1 text-sm leading-6 text-blue-800">{inferredComparisonScope.detail}</p>
+                  <div className="text-sm font-semibold text-blue-950 dark:text-blue-100">{inferredComparisonScope.label}</div>
+                  <p className="mt-1 text-sm leading-6 text-blue-800 dark:text-blue-300">{inferredComparisonScope.detail}</p>
                 </div>
               </div>
             </section>
@@ -932,12 +910,12 @@ export default function UploadPage() {
 
           {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
           {tenantExternalScanEnabled === false && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5 dark:border-amber-500/20 dark:bg-amber-500/10">
               <div className="flex items-center gap-3 text-sm">
-                <AlertCircle size={16} className="shrink-0 text-amber-600" />
-                <div className="flex-1 text-amber-900">
+                <AlertCircle size={16} className="shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+                <div className="flex-1 text-amber-900 dark:text-amber-200">
                   External source scanning (GitHub + web) is disabled at the tenant level.
-                  <Link href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</Link>
+                  <Link href="/settings" className="ml-1.5 text-amber-700 underline hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200">Enable it in Settings</Link>
                 </div>
               </div>
             </div>
@@ -947,24 +925,24 @@ export default function UploadPage() {
               has no workspace to file a run under (and no Courses page to
               create one on). */}
           {!isGuest && (
-            <div className="rounded-2xl bg-white p-5" style={cardShadow}>
-              <div className="flex items-center gap-2 mb-4">
-                <BookOpen size={15} className="text-slate-500" />
-                <span className="text-sm font-semibold text-slate-800">Course & Assignment</span>
-                <span className="ml-auto rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+            <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="mb-4 flex items-center gap-2">
+                <BookOpen size={15} className="text-slate-500" aria-hidden="true" />
+                <span className="text-sm font-semibold text-slate-900 dark:text-white">Course & Assignment</span>
+                <span className="ml-auto rounded-full bg-blue-600/10 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
                   Optional
                 </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {/* Course select — options are read from the database */}
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="upload-course" className="text-xs font-medium text-slate-500">Course</label>
+                <div className="flex flex-col">
+                  <label htmlFor="upload-course" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Course</label>
                   <select
                     id="upload-course"
                     value={selectedCourseId}
                     onChange={(e) => { setSelectedCourseId(e.target.value); setSelectedAssignmentId(''); }}
                     disabled={coursesLoading}
-                    className="theme-field"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                   >
                     <option value="">
                       {coursesLoading
@@ -988,21 +966,21 @@ export default function UploadPage() {
                     </button>
                   )}
                   {!coursesLoading && !coursesError && courses.length === 0 && (
-                    <span className="text-xs text-slate-400">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
                       {user ? 'Create a course on the Courses page first.' : 'Sign in to load your courses.'}
                     </span>
                   )}
                 </div>
 
                 {/* Assignment select — filled from the selected course */}
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="upload-assignment" className="text-xs font-medium text-slate-500">Assignment</label>
+                <div className="flex flex-col">
+                  <label htmlFor="upload-assignment" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Assignment</label>
                   <select
                     id="upload-assignment"
                     value={selectedAssignmentId}
                     onChange={(e) => setSelectedAssignmentId(e.target.value)}
                     disabled={!selectedCourseId || assignmentsLoading}
-                    className="theme-field"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                   >
                     <option value="">
                       {!selectedCourseId
@@ -1024,19 +1002,19 @@ export default function UploadPage() {
                   chosen, so the professor can confirm the detection strategy
                   before uploading rather than after. */}
               {recommendedMode?.matched && recommendedMode.mode_id && (
-                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3.5">
+                <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-500/20 dark:bg-blue-500/10">
                   <div className="flex flex-wrap items-start gap-3">
                     <SearchCheck size={15} className="mt-0.5 shrink-0 text-blue-600" />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-sm font-semibold text-slate-900">
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white">
                           Recommended scan engine
                         </span>
-                        <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
                           {recommendedMode.mode_name}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                      <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-blue-200">
                         {selectedAssignment?.name} is stored as{' '}
                         <span className="font-medium">
                           {selectedAssignment?.assignment_type?.replace(/_/g, ' ') ?? 'programming'}
@@ -1046,16 +1024,16 @@ export default function UploadPage() {
                       </p>
                       {recommendedMode.top_engines.length > 0 && (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-blue-300">
                             Key engines
                           </span>
                           {recommendedMode.top_engines.map((engine) => (
                             <span
                               key={engine.key}
-                              className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-blue-200"
+                              className="rounded-md border border-blue-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-blue-500/20 dark:bg-slate-900 dark:text-blue-200"
                             >
                               {ENGINE_LABELS[engine.key] ?? engine.key}
-                              <span className="ml-1 text-slate-400">
+                              <span className="ml-1 text-slate-400 dark:text-blue-300">
                                 {Math.round(engine.weight * 100)}%
                               </span>
                             </span>
@@ -1068,9 +1046,9 @@ export default function UploadPage() {
                           const details = document.getElementById('advanced-detection');
                           if (details instanceof HTMLDetailsElement) details.open = true;
                         }}
-                        className="mt-2 text-xs font-medium text-blue-700 hover:underline"
+                        className="theme-link mt-2 block text-xs font-medium"
                       >
-                        Change engine weights →
+                        Change engine weights
                       </button>
                     </div>
                   </div>
@@ -1082,7 +1060,7 @@ export default function UploadPage() {
           {/* Upload Cards */}
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Upload Card */}
-            <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
+            <div className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <div
                 onDrop={handleDrop}
                 onDragEnter={() => { dragDepth.current += 1; setIsDragOver(true); }}
@@ -1108,36 +1086,32 @@ export default function UploadPage() {
                 {files.length === 0 ? (
                   /* ── Empty drop zone ── */
                   <div
-                    className="relative flex flex-col items-center justify-center text-center px-8 py-20 cursor-pointer"
+                    className="relative flex cursor-pointer flex-col items-center justify-center px-5 py-16 text-center"
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <div
-                      className={`w-[72px] h-[72px] rounded-[20px] flex items-center justify-center mb-5 transition-all duration-300 shadow-sm ring-[10px] ${isDragOver
-                          ? 'scale-[1.08] bg-blue-100 ring-blue-500/10 dark:bg-blue-500/20 dark:ring-blue-500/25'
-                          : 'bg-slate-50 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700/80'
-                        }`}
+                      className={`mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 shadow-sm transition-colors dark:bg-slate-900 dark:text-slate-400 ${isDragOver
+                          ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300'
+                          : ''}`}
                     >
-                      <UploadIcon
-                        size={28}
-                        className={`transition-colors ${isDragOver ? 'text-blue-600' : 'text-slate-400'}`}
-                      />
+                      <UploadIcon size={22} aria-hidden="true" />
                     </div>
-                    <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
+                    <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
                       {isDragOver ? 'Release to upload' : 'Drag files here'}
                     </h3>
-                    <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
                       Upload a ZIP archive, LMS export, repository bundle, or source files for this review.
                     </p>
-                    <div className="flex flex-wrap justify-center gap-3">
+                    <div className="mt-4 flex flex-wrap justify-center gap-3">
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-all duration-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
-                        <FileUp size={13} />Browse files
+                        <FileUp size={14} aria-hidden="true" />Browse files
                       </button>
                     </div>
-                    <p className="mt-5 text-xs text-slate-300 font-medium">
+                    <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
                       .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift · .zip
                     </p>
                   </div>
@@ -1148,14 +1122,14 @@ export default function UploadPage() {
                       <div className="flex items-center gap-2.5">
                         {zipFile ? (
                           <>
-                            <div className="w-5 h-5 rounded-md flex items-center justify-center bg-amber-100">
-                              <FolderArchive size={11} className="text-amber-600" />
+                            <div className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-500/15">
+                              <FolderArchive size={11} className="text-amber-600 dark:text-amber-300" aria-hidden="true" />
                             </div>
-                            <span className="text-sm font-semibold text-slate-700">ZIP Archive</span>
+                            <span className="text-sm font-semibold text-slate-900 dark:text-white">ZIP Archive</span>
                           </>
                         ) : (
                           <>
-                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white bg-blue-600">
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-[11px] font-semibold text-white">
                               {selectedFiles.length}
                             </span>
                             <span className="text-sm font-semibold text-slate-700">
@@ -1181,13 +1155,13 @@ export default function UploadPage() {
 
                     <div className="grid gap-1.5 max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                       {zipFile ? (
-                        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5">
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-100">
-                            <FolderArchive size={15} className="text-amber-600" />
+                        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5 dark:border-amber-500/20 dark:bg-amber-500/10">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-500/15">
+                            <FolderArchive size={15} className="text-amber-600 dark:text-amber-300" aria-hidden="true" />
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-800 truncate">{zipFile.name}</p>
-                            <p className="text-xs font-medium text-amber-700">{formatSize(zipFile.size)}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{zipFile.name}</p>
+                            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{formatSize(zipFile.size)}</p>
                           </div>
                         </div>
                       ) : (
@@ -1196,19 +1170,19 @@ export default function UploadPage() {
                           return (
                             <div
                               key={`${f.name}-${f.size}-${f.lastModified}-${i}`}
-                              className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
+                              className="group/row flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 transition-colors hover:border-slate-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700 dark:hover:bg-slate-900"
                             >
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
+                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${c}`}>
                                 {getExt(f.name)}
                               </div>
-                              <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
-                              <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
+                              <span className="flex-1 truncate text-sm font-medium text-slate-900 dark:text-white">{f.name}</span>
+                              <span className="mr-1 shrink-0 text-xs text-slate-500 dark:text-slate-400">{formatSize(f.size)}</span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}
                                 aria-label={`Remove ${f.name}`}
-                                className="w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50 text-slate-300 hover:text-red-500"
+                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                               >
-                                <X size={12} />
+                                <X size={12} aria-hidden="true" />
                               </button>
                             </div>
                           );
@@ -1229,29 +1203,29 @@ export default function UploadPage() {
               />
 
               {error && (
-                <div role="alert" className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
-                  <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
-                  <p className="text-sm text-red-700 flex-1">{error}</p>
-                  <button onClick={() => setError('')} aria-label="Dismiss error" className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+                <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0 text-red-400" aria-hidden="true" />
+                  <p className="flex-1">{error}</p>
+                  <button onClick={() => setError('')} aria-label="Dismiss error" className="shrink-0 text-red-400 transition hover:text-red-600 dark:text-red-400/60 dark:hover:text-red-300"><X size={14} aria-hidden="true" /></button>
                 </div>
               )}
               {notice && (
-                <div role="status" className="border-t border-blue-100 bg-blue-50 px-5 py-3.5 flex items-start gap-2.5">
-                  <AlertCircle size={14} className="text-blue-400 mt-0.5 shrink-0" />
-                  <p className="text-sm text-blue-800 flex-1">{notice}</p>
-                  <button type="button" onClick={() => setNotice('')} aria-label="Dismiss message" className="text-blue-300 hover:text-blue-500 transition-colors shrink-0"><X size={13} /></button>
+                <div role="status" className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0 text-blue-500 dark:text-blue-300" aria-hidden="true" />
+                  <p className="flex-1">{notice}</p>
+                  <button type="button" onClick={() => setNotice('')} aria-label="Dismiss message" className="shrink-0 text-blue-400 transition hover:text-blue-600 dark:text-blue-400/60 dark:hover:text-blue-300"><X size={14} aria-hidden="true" /></button>
                 </div>
               )}
               {hasMixedZipSelection && (
-                <div className="border-t border-amber-100 bg-amber-50 px-5 py-3 flex items-center gap-2">
-                  <AlertCircle size={13} className="text-amber-500 shrink-0" />
-                  <p className="text-sm text-amber-700">Remove the ZIP or the other files. Do not mix both.</p>
+                <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                  <AlertCircle size={16} className="shrink-0 text-amber-500 dark:text-amber-300" aria-hidden="true" />
+                  <p>Remove the ZIP or the other files. Do not mix both.</p>
                 </div>
               )}
             </div>
 
             {/* Starter Code Upload */}
-            <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
+            <div className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <div
                 onDrop={handleStarterDrop}
                 onDragEnter={() => { starterDragDepth.current += 1; setIsStarterDragOver(true); }}
@@ -1269,40 +1243,38 @@ export default function UploadPage() {
 
                 {/* Drag ring */}
                 {isStarterDragOver && (
-                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl bg-emerald-50/60 ring-2 ring-inset ring-emerald-500 dark:bg-emerald-500/10" />
+                  <div className="absolute inset-0 z-10 pointer-events-none rounded-t-2xl bg-blue-50/60 ring-2 ring-inset ring-blue-500 dark:bg-blue-500/10" />
                 )}
 
                 {starterFiles.length === 0 ? (
                   /* Empty drop zone */
                   <div
-                    className="relative flex flex-col items-center justify-center text-center px-8 py-16 cursor-pointer"
+                    className="relative flex cursor-pointer flex-col items-center justify-center px-5 py-16 text-center"
                     onClick={() => starterFileInputRef.current?.click()}
                   >
                     <div
-                      className={`w-[60px] h-[60px] rounded-[16px] flex items-center justify-center mb-4 transition-all duration-300 shadow-sm ring-[8px] ${isStarterDragOver
-                          ? 'scale-[1.05] bg-emerald-100 ring-emerald-500/10 dark:bg-emerald-500/20 dark:ring-emerald-500/25'
-                          : 'bg-slate-50 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700/80'
-                        }`}
+                      className={`mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 shadow-sm transition-colors dark:bg-slate-900 dark:text-slate-400 ${isStarterDragOver
+                          ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300'
+                          : ''}`}
                     >
-                      <Layers3
-                        size={24}
-                        className={`transition-colors ${isStarterDragOver ? 'text-emerald-600' : 'text-slate-400'}`}
-                      />
+                      <Layers3 size={22} aria-hidden="true" />
                     </div>
-                    <h3 className="text-sm font-semibold text-slate-800 mb-1">
+                    <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
                       {isStarterDragOver ? 'Release to upload starter code' : 'Starter Code (Optional)'}
                     </h3>
-                    <p className="text-xs text-slate-400 mb-4 max-w-xs leading-relaxed">
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
                       Upload template files, boilerplate code, or reference implementations that should be ignored during comparison.
                     </p>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); starterFileInputRef.current?.click(); }}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
-                    >
-                      <FileUp size={11} />Browse files
-                    </button>
-                    <p className="mt-3 text-[10px] text-slate-300 font-medium">
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); starterFileInputRef.current?.click(); }}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <FileUp size={14} aria-hidden="true" />Browse files
+                      </button>
+                    </div>
+                    <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
                       .py · .java · .c · .cpp · .js · .ts · .go · .rs · .rb · .php · .cs · .kt · .swift
                     </p>
                   </div>
@@ -1311,15 +1283,15 @@ export default function UploadPage() {
                   <div className="px-5 pt-5 pb-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2.5">
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white bg-emerald-500">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-[11px] font-semibold text-white">
                           {starterFiles.length}
                         </span>
-                        <span className="text-sm font-semibold text-slate-700">
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white">
                           Starter file{starterFiles.length === 1 ? '' : 's'} uploaded
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <button type="button" onClick={() => starterFileInputRef.current?.click()} className="text-xs font-medium text-emerald-600 hover:text-emerald-700 transition-colors">
+                        <button type="button" onClick={() => starterFileInputRef.current?.click()} className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-700">
                           Add more
                         </button>
                         <button onClick={() => setStarterFiles([])} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
@@ -1334,19 +1306,19 @@ export default function UploadPage() {
                         return (
                           <div
                             key={`${f.name}-${f.size}-${f.lastModified}-${i}`}
-                            className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
+                            className="group/row flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 transition-colors hover:border-slate-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700 dark:hover:bg-slate-900"
                           >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
+                            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${c}`}>
                               {getExt(f.name)}
                             </div>
-                            <span className="flex-1 text-sm font-medium text-slate-700 truncate">{f.name}</span>
-                            <span className="text-xs text-slate-400 shrink-0 mr-1">{formatSize(f.size)}</span>
+                            <span className="flex-1 truncate text-sm font-medium text-slate-900 dark:text-white">{f.name}</span>
+                            <span className="mr-1 shrink-0 text-xs text-slate-500 dark:text-slate-400">{formatSize(f.size)}</span>
                             <button
                               onClick={(e) => { e.stopPropagation(); setStarterFiles(starterFiles.filter((_, j) => j !== i)); }}
                               aria-label={`Remove ${f.name}`}
-                              className="w-6 h-6 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-red-50 text-slate-300 hover:text-red-500"
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                             >
-                              <X size={12} />
+                              <X size={12} aria-hidden="true" />
                             </button>
                           </div>
                         );
@@ -1369,11 +1341,11 @@ export default function UploadPage() {
           </div>
 
           {/* Config */}
-          <details id="advanced-detection" className="rounded-2xl bg-white p-5" style={cardShadow}>
-            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          <details id="advanced-detection" className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900 dark:text-white">
               Advanced detection settings
             </summary>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               Defaults are recommended for professors. Adjust engine weights for your specific assignment type.
             </p>
 
@@ -1381,20 +1353,20 @@ export default function UploadPage() {
                 settings: it is a per-submission opt-in that most professors
                 never change, so it should not compete with the primary
                 upload/analysis controls. */}
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3.5">
-              <label className="flex items-start gap-3 cursor-pointer">
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+              <label className="flex cursor-pointer items-start gap-3">
                 <input
                   type="checkbox"
                   checked={effectiveSourceScan}
                   onChange={(e) => setSourceScanEnabled(e.target.checked)}
                   disabled={tenantExternalScanEnabled === false}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-blue-400"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-slate-800">
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-white">
                     External Source Scan
                   </span>
-                  <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+                  <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
                     {tenantExternalScanEnabled === false
                       ? 'Disabled for this workspace. A tenant administrator can enable it in Settings → External Sources.'
                       : tenantExternalScanEnabled === true
@@ -1408,17 +1380,17 @@ export default function UploadPage() {
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
 
               {/* Assignment Type - Left side */}
-              <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
                 <div className="p-5">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="mb-4 flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-100">
-                        <Layers3 size={13} className="text-slate-500" />
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                        <Layers3 size={13} className="text-slate-500" aria-hidden="true" />
                       </div>
-                      <span className="text-sm font-semibold text-slate-800">Assignment Type</span>
+                      <span className="text-sm font-semibold text-slate-900 dark:text-white">Assignment Type</span>
                     </div>
                     {selectedAssignmentMode?.version && (
-                      <span className="text-[10px] font-bold tracking-wider rounded-md px-2 py-0.5 bg-slate-100 text-slate-400">
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                         v{selectedAssignmentMode.version}
                       </span>
                     )}
@@ -1431,24 +1403,26 @@ export default function UploadPage() {
                         type="button"
                         onClick={() => setSelectedAssignmentModeId(option.id)}
                         aria-pressed={selectedAssignmentModeId === option.id}
-                        className={`rounded-xl border p-4 text-left transition ${selectedAssignmentModeId === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+                        className={`rounded-xl border p-4 text-left transition ${selectedAssignmentModeId === option.id
+                          ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100 dark:border-blue-500/40 dark:bg-blue-500/10 dark:ring-blue-500/20'
+                          : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:bg-slate-800/50'
                           }`}
                       >
-                        <div className="text-sm font-semibold text-slate-950">{option.label}</div>
-                        <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] mb-1 ${selectedAssignmentModeId === option.id ? 'text-blue-600' : 'text-slate-400'}`}>{option.eyebrow}</div>
-                        <div className="text-sm leading-6 text-slate-500">{option.description}</div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white">{option.label}</div>
+                        <div className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${selectedAssignmentModeId === option.id ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}>{option.eyebrow}</div>
+                        <div className="text-sm leading-6 text-slate-500 dark:text-slate-400">{option.description}</div>
                       </button>
                     ))}
                   </div>
 
                   {selectedAssignmentMode?.context && (
-                    <p className="mt-2.5 text-xs text-slate-500 leading-relaxed">{selectedAssignmentMode.context}</p>
+                    <p className="mt-2.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{selectedAssignmentMode.context}</p>
                   )}
 
                   {selectedAssignmentMode?.warnings?.length ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3">
-                      <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-500" />
-                      <p className="text-xs leading-relaxed text-amber-800">{selectedAssignmentMode.warnings[0]}</p>
+                    <div className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                      <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-300" aria-hidden="true" />
+                      <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">{selectedAssignmentMode.warnings[0]}</p>
                     </div>
                   ) : null}
 
@@ -1456,14 +1430,14 @@ export default function UploadPage() {
               </div>
 
               {/* Similarity Engine Weights - Right side */}
-              <div className="rounded-2xl bg-white overflow-hidden" style={cardShadow}>
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
                 <div className="p-5">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="mb-4 flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-100">
-                        <SearchCheck size={13} className="text-slate-500" />
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                        <SearchCheck size={13} className="text-slate-500" aria-hidden="true" />
                       </div>
-                      <span className="text-sm font-semibold text-slate-800">Similarity Engine Weights</span>
+                      <span className="text-sm font-semibold text-slate-900 dark:text-white">Similarity Engine Weights</span>
                     </div>
                     <button
                       type="button"
@@ -1490,18 +1464,18 @@ export default function UploadPage() {
                       return (
                         <div
                           key={engine.key}
-                          className={`w-full flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200 ${weight > 0
-                              ? 'border-blue-200 bg-blue-50'
-                              : 'border-slate-100 bg-slate-50'
+                          className={`flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${weight > 0
+                              ? 'border-blue-200 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10'
+                              : 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50'
                             }`}
                         >
-                          <div aria-hidden="true" className={`w-4 h-4 rounded flex items-center justify-center border-2 shrink-0 ${weight > 0
-                              ? 'border-blue-600 bg-blue-600'
-                              : 'border-slate-300 bg-white'
+                          <div aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${weight > 0
+                              ? 'border-blue-600 bg-blue-600 dark:border-blue-400 dark:bg-blue-400'
+                              : 'border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900'
                             }`}
                           >
                           </div>
-                          <p className={`text-sm font-semibold flex-1 ${weight > 0 ? 'text-blue-700' : 'text-slate-700'}`}>{engine.label}</p>
+                          <p className={`flex-1 text-sm font-semibold ${weight > 0 ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300'}`}>{engine.label}</p>
                           <div className="flex items-center gap-2 w-48">
                             <input
                               type="range"
@@ -1512,9 +1486,9 @@ export default function UploadPage() {
                               onChange={(e) => updateEngineWeight(engine.key, Number(e.target.value) / 100)}
                               aria-label={`${engine.label} weight`}
                               aria-valuetext={`${share}% of the total`}
-                              className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                              className="h-2 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-blue-600 dark:bg-slate-700"
                             />
-                            <span title="Share of the total weight" className="text-xs font-mono text-slate-600 w-10 text-right">{share}%</span>
+                            <span title="Share of the total weight" className="w-10 text-right font-mono text-xs text-slate-600 dark:text-slate-400">{share}%</span>
                           </div>
                         </div>
                       );
@@ -1522,13 +1496,13 @@ export default function UploadPage() {
                   </div>
 
                   {(selectedAssignmentModeId !== 'auto_detect' || weightsTouched) && weightTotal <= 0 && (
-                    <div className="mt-3 border-t border-amber-100 bg-amber-50 px-3.5 py-3 flex items-center gap-2 rounded-xl">
-                      <AlertCircle size={12} className="text-amber-500" />
-                      <p className="text-xs text-amber-700">All weights are zero. At least one engine must have weight &#62; 0.</p>
+                    <div className="mt-3 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                      <AlertCircle size={16} className="shrink-0 text-amber-500 dark:text-amber-300" aria-hidden="true" />
+                      <p className="text-xs text-amber-700 dark:text-amber-200">All weights are zero. At least one engine must have weight &#62; 0.</p>
                     </div>
                   )}
 
-                  <div className="mt-2 text-xs text-slate-500">
+                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                     {selectedAssignmentModeId === 'auto_detect' && !weightsTouched
                       ? 'Auto Detect chooses engine weights for each submission. Moving a slider overrides that.'
                       : 'The percentage beside each slider is that engine’s share of the total weight; shares always add up to 100%.'}
@@ -1540,39 +1514,22 @@ export default function UploadPage() {
 
           {/* Ready Banner: status only — the header holds the single Analyze CTA */}
           {canRunCheck && (
-            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-blue-100">
-                <Zap size={14} className="text-blue-600" />
+            <div className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-500/20">
+                <Zap size={14} className="text-blue-600 dark:text-blue-300" aria-hidden="true" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-blue-900">
+                <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                   {zipFile ? '1 archive' : `${selectedFiles.length} files`} ready to analyze
                 </p>
-                <p className="text-xs text-blue-600">
+                <p className="text-xs text-blue-600 dark:text-blue-400">
                   Auto profile · starter code removal · previous-term matching when available
                 </p>
               </div>
             </div>
           )}
 
-        </div>
       </div>
     </DashboardLayout>
-  );
-}
-
-function AutoStep({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4" style={cardShadow}>
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-          <Icon size={16} />
-        </div>
-        <div>
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          <div className="mt-1 text-sm leading-5 text-slate-500">{detail}</div>
-        </div>
-      </div>
-    </div>
   );
 }

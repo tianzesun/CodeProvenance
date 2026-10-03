@@ -61,11 +61,11 @@ interface NormalizedLine {
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const VERDICT_STYLES: Record<string, string> = {
-  TRUE: 'bg-red-100 text-red-700 border-red-200',
-  PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200',
-  REVIEW: 'bg-blue-100 text-blue-700 border-blue-200',
-  FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  TRUE: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/15 dark:text-red-300 dark:border-red-500/20',
+  PROBABLE: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/20',
+  REVIEW: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/20',
+  FLAG: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-300 dark:border-yellow-500/20',
+  CLEAN: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/20',
 };
 
 const LANGUAGES: { id: Language; label: string }[] = [
@@ -398,11 +398,11 @@ function CodePane({
   onLineClick: (index: number) => void;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-        <FileText size={16} className="text-slate-500" aria-hidden="true" />
-        <span className="font-medium text-slate-700">{title}</span>
-        <span className="text-xs text-slate-500 ml-auto">{lines.length} lines</span>
+    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden dark:border-slate-800 dark:bg-slate-950">
+      <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/80">
+        <FileText size={16} className="text-slate-500 dark:text-slate-400" aria-hidden="true" />
+        <span className="font-medium text-slate-900 dark:text-white">{title}</span>
+        <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">{lines.length} lines</span>
       </div>
       <div
         ref={containerRef}
@@ -430,7 +430,7 @@ function CodePane({
               }`}
             >
               <span className="select-none pr-3 text-right text-xs leading-6 text-slate-400">{index + 1}</span>
-              <code className="whitespace-pre-wrap break-words leading-6 text-slate-800">
+              <code className="whitespace-pre-wrap break-words leading-6 text-slate-800 dark:text-slate-200">
                 {line || ' '}
                 {status && <span className="sr-only"> ({status === 'exact' ? 'identical line' : 'renamed match'})</span>}
               </code>
@@ -608,17 +608,15 @@ export default function EvidenceViewerPage() {
 
   return (
     <DashboardLayout>
-      <div className="theme-page-container">
-        <div className="mb-4">
-          <button
-            type="button"
-            onClick={goBack}
-            className="theme-link mb-4 flex items-center gap-2 text-sm font-semibold"
-          >
-            <ChevronLeft size={16} aria-hidden="true" />
-            Back
-          </button>
-        </div>
+      <div className="theme-page-container space-y-6">
+        <button
+          type="button"
+          onClick={goBack}
+          className="theme-link flex items-center gap-2 text-sm font-semibold"
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+          Back
+        </button>
 
         <PageHeader
           eyebrow="Evidence"
@@ -627,7 +625,7 @@ export default function EvidenceViewerPage() {
           description="Compare two submissions side by side and see which lines match, including lines that only differ by renamed variables."
           action={
             verdict || score !== null ? (
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 {verdict && <VerdictBadge v={verdict} />}
                 {score !== null && (
                   <span className="text-sm font-medium text-[var(--text-secondary)]">
@@ -639,17 +637,17 @@ export default function EvidenceViewerPage() {
           }
         />
 
-        <p className="mb-4 flex items-start gap-2 text-sm text-slate-600">
-          <Info size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+          <Info size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span>
             Matching is calculated in your browser and the code stays on this page unless you choose “Get engine evidence”.
             Highlights are a reading aid. They are not the detection engine’s score, and similarity alone does not show misconduct.
           </span>
-        </p>
+        </div>
 
         {/* Mode + controls */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div role="group" aria-label="Viewer mode" className="inline-flex rounded-xl bg-slate-100 p-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <div role="group" aria-label="Viewer mode" className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
             {(['edit', 'compare'] as const).map((mode) => (
               <button
                 key={mode}
@@ -658,7 +656,9 @@ export default function EvidenceViewerPage() {
                 disabled={mode === 'compare' && !hasBoth}
                 onClick={() => setView(mode)}
                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                  view === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  view === mode
+                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
                 {mode === 'edit' ? <Code size={15} aria-hidden="true" /> : <GitCompare size={15} aria-hidden="true" />}
@@ -667,12 +667,12 @@ export default function EvidenceViewerPage() {
             ))}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-600">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>Language</span>
             <select
               value={language}
               onChange={(event) => setLanguage(event.target.value as Language)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
             >
               {LANGUAGES.map((lang) => (
                 <option key={lang.id} value={lang.id}>
@@ -687,14 +687,14 @@ export default function EvidenceViewerPage() {
               type="button"
               onClick={swap}
               disabled={!codeA && !codeB}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <ArrowLeftRight size={14} aria-hidden="true" /> Swap A and B
             </button>
             <button
               type="button"
               onClick={loadSample}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Load sample
             </button>
@@ -702,7 +702,7 @@ export default function EvidenceViewerPage() {
               type="button"
               onClick={clearAll}
               disabled={!codeA && !codeB}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Trash2 size={14} aria-hidden="true" /> Clear
             </button>
@@ -710,13 +710,13 @@ export default function EvidenceViewerPage() {
         </div>
 
         {isSample && (
-          <div role="status" className="mb-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <div role="status" className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
             <Info size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             Sample code loaded. It is made-up example code, not a real submission.
           </div>
         )}
         {inputNotice && (
-          <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div role="alert" className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             {inputNotice}
           </div>
@@ -724,19 +724,19 @@ export default function EvidenceViewerPage() {
 
         {/* ── Edit mode ── */}
         {view === 'edit' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {([
               { id: 'a' as const, title: 'Submission A', value: codeA, input: fileInputA },
               { id: 'b' as const, title: 'Submission B', value: codeB, input: fileInputB },
             ]).map((pane) => (
-              <div key={pane.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-                  <FileText size={16} className="text-slate-500" aria-hidden="true" />
-                  <label htmlFor={`code-${pane.id}`} className="font-medium text-slate-700">{pane.title}</label>
+              <div key={pane.id} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/80">
+                  <FileText size={16} className="text-slate-500 dark:text-slate-400" aria-hidden="true" />
+                  <label htmlFor={`code-${pane.id}`} className="font-medium text-slate-900 dark:text-white">{pane.title}</label>
                   <button
                     type="button"
                     onClick={() => pane.input.current?.click()}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     <FileUp size={13} aria-hidden="true" /> Load file
                   </button>
@@ -755,7 +755,7 @@ export default function EvidenceViewerPage() {
                   maxLength={MAX_CODE_CHARS}
                   spellCheck={false}
                   placeholder="Paste code here, or use Load file"
-                  className="block h-80 w-full resize-y border-0 p-4 font-mono text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500/20"
+                  className="block h-80 w-full resize-y border-0 p-4 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500/20 dark:text-slate-200 dark:placeholder:text-slate-500"
                 />
               </div>
             ))}
@@ -765,35 +765,35 @@ export default function EvidenceViewerPage() {
         {/* ── Compare mode ── */}
         {view === 'compare' && comparison && (
           <>
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {[
                 { label: 'Line match', value: `${comparison.percent}%`, sub: `${comparison.matched} of ${Math.max(comparison.consideredA, comparison.consideredB)} code lines` },
                 { label: 'Identical lines', value: String(comparison.exact), sub: 'Same text on both sides' },
                 { label: 'Renamed matches', value: String(comparison.renamed), sub: 'Same structure, different names' },
                 { label: 'Matched blocks', value: String(comparison.blocks.length), sub: 'Runs of consecutive lines' },
               ].map((stat) => (
-                <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">{stat.label}</div>
-                  <div className="mt-1 text-2xl font-bold text-slate-900">{stat.value}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{stat.sub}</div>
+                <div key={stat.label} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">{stat.label}</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{stat.value}</div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{stat.sub}</div>
                 </div>
               ))}
             </div>
 
-            <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-slate-600">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-400">
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border-l-4 border-red-400 bg-red-50" aria-hidden="true" /> Identical line</span>
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border-l-4 border-amber-400 bg-amber-50" aria-hidden="true" /> Renamed match</span>
               <label className="ml-auto inline-flex items-center gap-2">
-                <input type="checkbox" checked={syncScroll} onChange={(event) => setSyncScroll(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+                <input type="checkbox" checked={syncScroll} onChange={(event) => setSyncScroll(event.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:text-blue-400" />
                 Scroll both panes together
               </label>
             </div>
 
             {comparison.truncated && (
-              <p role="status" className="mb-3 text-xs text-amber-700">Only the first {MAX_LINES.toLocaleString('en-US')} lines of each file are compared.</p>
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-300">Only the first {MAX_LINES.toLocaleString('en-US')} lines of each file are compared.</p>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <CodePane
                 title="Submission A"
                 prefix="a"
@@ -815,31 +815,41 @@ export default function EvidenceViewerPage() {
             </div>
 
             {/* Keyboard-friendly list of the matches */}
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
-              <h2 className="text-lg font-semibold text-slate-900">Matched blocks</h2>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Matched blocks</h2>
               {comparison.blocks.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No matching lines were found between these two files.</p>
+                <div className="px-5 py-16 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <GitCompare size={22} aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No matching lines</h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    No matching lines were found between these two files.
+                  </p>
+                </div>
               ) : (
                 <ul className="mt-3 space-y-2">
                   {comparison.blocks.slice(0, MAX_BLOCKS_SHOWN).map((block, index) => (
-                    <li key={`${block.aStart}-${block.bStart}-${index}`} className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm">
+                    <li key={`${block.aStart}-${block.bStart}-${index}`} className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900/50">
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                          block.status === 'exact' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          block.status === 'exact'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
                         }`}
                       >
                         {block.status === 'exact' ? 'Identical' : 'Renamed'}
                       </span>
-                      <span className="text-slate-700">
+                      <span className="text-slate-600 dark:text-slate-400">
                         A lines {block.aStart + 1}{block.aEnd !== block.aStart ? `–${block.aEnd + 1}` : ''}
                         {' ↔ '}
                         B lines {block.bStart + 1}{block.bEnd !== block.bStart ? `–${block.bEnd + 1}` : ''}
                       </span>
-                      <span className="text-xs text-slate-500">{block.lines} code line{block.lines === 1 ? '' : 's'}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{block.lines} code line{block.lines === 1 ? '' : 's'}</span>
                       <button
                         type="button"
                         onClick={() => jumpTo(block.aStart, block.bStart)}
-                        className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        className="ml-auto rounded-xl border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         Show
                       </button>
@@ -848,24 +858,24 @@ export default function EvidenceViewerPage() {
                 </ul>
               )}
               {comparison.blocks.length > MAX_BLOCKS_SHOWN && (
-                <p className="mt-3 text-xs text-slate-500">Showing the first {MAX_BLOCKS_SHOWN} of {comparison.blocks.length} blocks.</p>
+                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Showing the first {MAX_BLOCKS_SHOWN} of {comparison.blocks.length} blocks.</p>
               )}
             </div>
           </>
         )}
 
         {/* ── Engine evidence ── */}
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Engine evidence</h2>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Engine evidence</h2>
               <p className="text-sm text-slate-500">Ask the detection service for its own evidence on this pair. This sends both code samples to the server.</p>
             </div>
             <button
               type="button"
               onClick={requestEngineEvidence}
               disabled={!hasBoth || serverLoading}
-              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              className="ml-auto inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-50"
             >
               {serverLoading && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
               {serverLoading ? 'Requesting…' : 'Get engine evidence'}
@@ -873,7 +883,7 @@ export default function EvidenceViewerPage() {
           </div>
 
           {serverError && (
-            <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
               {serverError}
             </div>
@@ -882,23 +892,23 @@ export default function EvidenceViewerPage() {
           {serverData !== null && !serverError && (
             <div className="mt-4 space-y-4" aria-live="polite">
               {evidenceSections.length === 0 ? (
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   The service returned an evidence record{serverId ? ` (${serverId})` : ''} with no matched elements to display.
                 </p>
               ) : (
                 evidenceSections.map((section) => (
                   <div key={section.title}>
-                    <h3 className="mb-2 font-medium capitalize text-slate-800">{section.title}</h3>
+                    <h3 className="mb-2 text-base font-semibold capitalize text-slate-900 dark:text-white">{section.title}</h3>
                     <div className="space-y-2">
                       {section.items.map((item, index) => (
-                        <div key={`${item.title}-${index}`} className="rounded-lg bg-slate-50 p-3">
+                        <div key={`${item.title}-${index}`} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
                           <div className="flex items-center justify-between gap-3">
-                            <span className="font-medium text-slate-800">{item.title}</span>
+                            <span className="font-medium text-slate-900 dark:text-white">{item.title}</span>
                             {item.score !== null && (
-                              <span className="rounded bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">{item.score}%</span>
+                              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{item.score}%</span>
                             )}
                           </div>
-                          {item.text && <p className="mt-2 text-sm text-slate-600">{item.text}</p>}
+                          {item.text && <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{item.text}</p>}
                         </div>
                       ))}
                     </div>
