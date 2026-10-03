@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -19,78 +19,75 @@ import {
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/components/AuthProvider';
 
-function getErrorMessage(error: unknown): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof error.response === 'object' &&
-    error.response !== null &&
-    'data' in error.response &&
-    typeof error.response.data === 'object' &&
-    error.response.data !== null &&
-    'detail' in error.response.data &&
-    typeof error.response.data.detail === 'string'
-  ) {
-    return error.response.data.detail;
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const REFERENCE_HEADERS = ['x-correlation-id', 'x-request-id'];
+
+function getErrorInfo(error: unknown): { status?: number; reference?: string } {
+  const response = (error as { response?: { status?: unknown; headers?: unknown } } | null)?.response;
+  if (!response || typeof response !== 'object') {
+    return {};
   }
 
-  return 'Something went wrong. Please try again.';
+  const status = typeof response.status === 'number' ? response.status : undefined;
+  const headers = (response.headers ?? {}) as Record<string, unknown>;
+  const reference = REFERENCE_HEADERS.map((name) => headers[name]).find(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  );
+
+  return { status, reference };
 }
 
+/**
+ * User-facing errors are generic and keyed off the HTTP status; server
+ * messages are never echoed. When the backend returns a correlation / request
+ * id header it is appended so support can find the matching log line.
+ */
+function getErrorMessage(error: unknown, context: 'signin' | 'general' = 'general'): string {
+  const { status, reference } = getErrorInfo(error);
+
+  let message: string;
+  if (status === undefined) {
+    message = 'Something went wrong. Please try again.';
+  } else if (status === 429) {
+    message = 'Too many attempts. Please wait a few minutes and try again.';
+  } else if (status === 401 && context === 'signin') {
+    message = 'Incorrect email or password.';
+  } else if (status === 403 && context === 'signin') {
+    message = 'This account can’t sign in yet. If you just registered, open the verification link we emailed you.';
+  } else if (status >= 500) {
+    message = 'Something went wrong on our side. Please try again.';
+  } else {
+    message = 'We couldn’t complete that request. Please check your details and try again.';
+  }
+
+  return reference ? `${message} (Reference: ${reference})` : message;
+}
+
+/**
+ * Only same-origin, in-app paths are allowed. The query string is kept
+ * (``/results?tab=pairs`` used to lose ``?tab=pairs``), and ``/login`` itself
+ * is rejected so a signed-in user can't be bounced back onto this page.
+ */
 function sanitizeNextPath(value: string | null): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
     return '/';
   }
 
-  const target = value.split('#')[0];
   try {
-    const url = new URL(target, window.location.origin);
-    return url.origin === window.location.origin ? url.pathname : '/';
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return '/';
+    }
+    if (url.pathname === '/login' || url.pathname.startsWith('/login/')) {
+      return '/';
+    }
+    return `${url.pathname}${url.search}`;
   } catch {
     return '/';
   }
-}
-
-function calculatePasswordStrength(password: string): {
-  score: number;
-  label: string;
-  tone: string;
-  bar: string;
-} {
-  let score = 0;
-
-  if (password.length >= 8) score += 1;
-  if (password.length >= 12) score += 1;
-  if (/[a-z]/.test(password)) score += 1;
-  if (/[A-Z]/.test(password)) score += 1;
-  if (/[0-9]/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
-
-  if (score <= 2) {
-    return {
-      score,
-      label: 'Weak',
-      tone: 'text-red-700',
-      bar: 'bg-red-500',
-    };
-  }
-
-  if (score <= 4) {
-    return {
-      score,
-      label: 'Medium',
-      tone: 'text-amber-700',
-      bar: 'bg-amber-500',
-    };
-  }
-
-  return {
-    score,
-    label: 'Strong',
-    tone: 'text-emerald-700',
-    bar: 'bg-emerald-500',
-  };
 }
 
 /**
@@ -108,12 +105,276 @@ function validateNewPassword(password: string): string | null {
   return null;
 }
 
+function calculatePasswordStrength(password: string): {
+  score: number;
+  label: string;
+  tone: string;
+  bar: string;
+} {
+  let score = 0;
+
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password)) score += 1;
+  if (/[A-Z]/.test(password)) score += 1;
+  if (/[0-9]/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  // The meter must never call a password "Strong" or "Medium" when the server
+  // would reject it (e.g. "Passw0rd!" is 9 characters).
+  if (validateNewPassword(password) !== null) {
+    score = Math.min(score, 2);
+  }
+
+  if (score <= 2) {
+    return { score, label: 'Weak', tone: 'text-red-700', bar: 'bg-red-500' };
+  }
+
+  if (score <= 4) {
+    return { score, label: 'Medium', tone: 'text-amber-700', bar: 'bg-amber-500' };
+  }
+
+  return { score, label: 'Strong', tone: 'text-emerald-700', bar: 'bg-emerald-500' };
+}
+
 function validateEmail(email: string): string | null {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!email) return null;
   if (!emailRegex.test(email)) return 'Please enter a valid email address.';
   return null;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Shared styles + small components (defined outside LoginPage on purpose:    */
+/* components declared inside would remount on every keystroke)               */
+/* -------------------------------------------------------------------------- */
+
+const PRIMARY_BUTTON =
+  'theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60';
+const SECONDARY_BUTTON =
+  'inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60';
+
+function inputClass(invalid: boolean, padRight = ''): string {
+  return `w-full rounded-2xl border bg-white px-4 py-3.5 ${padRight} text-slate-900 outline-none transition focus:ring-4 ${invalid
+    ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
+    : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
+    }`;
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  if (!message) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function TextField({
+  id,
+  label,
+  value,
+  onChange,
+  autoComplete,
+  placeholder,
+  autoFocus,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  placeholder: string;
+  autoFocus?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <input
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        className={inputClass(false)}
+      />
+    </div>
+  );
+}
+
+function EmailField({
+  id,
+  value,
+  error,
+  onChange,
+  onBlur,
+  autoComplete = 'email',
+  autoFocus,
+}: {
+  id: string;
+  value: string;
+  error: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  autoComplete?: string;
+  autoFocus?: boolean;
+}) {
+  const errorId = `${id}-error`;
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        Email address
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          name="email"
+          type="email"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          placeholder="name@institution.edu"
+          className={inputClass(Boolean(error), 'pr-11')}
+        />
+        {value && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
+            {error ? (
+              <XCircle size={16} className="text-red-500" />
+            ) : validateEmail(value.trim()) === null ? (
+              <CheckCircle size={16} className="text-emerald-600" />
+            ) : null}
+          </div>
+        )}
+      </div>
+      {error && (
+        <p id={errorId} role="alert" className="text-xs text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PasswordField({
+  id,
+  name,
+  label = 'Password',
+  value,
+  error,
+  onChange,
+  show,
+  onToggleShow,
+  autoComplete,
+  placeholder,
+  children,
+}: {
+  id: string;
+  name: string;
+  label?: string;
+  value: string;
+  error: string;
+  onChange: (value: string) => void;
+  show: boolean;
+  onToggleShow: () => void;
+  autoComplete: string;
+  placeholder: string;
+  children?: ReactNode;
+}) {
+  const errorId = `${id}-error`;
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          name={name}
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          autoComplete={autoComplete}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder={placeholder}
+          className={inputClass(Boolean(error), 'pr-12')}
+        />
+        <button
+          type="button"
+          aria-label={show ? 'Hide password' : 'Show password'}
+          onClick={onToggleShow}
+          className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+        >
+          {show ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+        </button>
+      </div>
+
+      {children}
+
+      {error && (
+        <p id={errorId} role="alert" className="text-xs text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PasswordStrengthMeter({ password }: { password: string }) {
+  const strength = useMemo(() => calculatePasswordStrength(password), [password]);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className={`text-sm font-medium ${strength.tone}`}>Password strength: {strength.label}</span>
+        <span className="text-xs text-slate-500">{password.length} characters</span>
+      </div>
+      <div className="flex gap-1" aria-hidden="true">
+        {[1, 2, 3, 4, 5, 6].map((level) => (
+          <div
+            key={level}
+            className={`h-2 flex-1 rounded-full ${level <= strength.score ? strength.bar : 'bg-slate-200'}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PasswordHint() {
+  return (
+    <p className="text-xs text-slate-500">
+      Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
+    </p>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page                                                                       */
+/* -------------------------------------------------------------------------- */
+
+type LoginMethod = 'password' | 'sso' | 'register';
+type View = 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'sso' | 'register' | 'register-sent';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -123,16 +384,23 @@ export default function LoginPage() {
   const [fullName, setFullName] = useState('');
   const [tenantName, setTenantName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [forceSignIn, setForceSignIn] = useState(false);
 
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [formError, setFormError] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [guestSubmitting, setGuestSubmitting] = useState(false);
-  const [nextPath, setNextPath] = useState('/');
+
+  // ``null`` until the ?next= parameter has been read. The sign-in redirect
+  // waits for it, which replaces the old 200ms timer that only existed to
+  // stop an already-signed-in user being sent to "/" before ``next`` was parsed.
+  const [nextPath, setNextPath] = useState<string | null>(null);
+
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
   // Sign-in method chosen on this page. SSO is UI-only for now: picking it
@@ -140,21 +408,30 @@ export default function LoginPage() {
   // until an identity provider is connected. "register" opens the
   // self-signup form, which ends in a "check your inbox" card rather than a
   // session — the account stays locked until the emailed link is redeemed.
-  const [loginMethod, setLoginMethod] = useState<'password' | 'sso' | 'register'>('password');
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
   const [ssoNotice, setSsoNotice] = useState('');
   const [registerEmailSent, setRegisterEmailSent] = useState(false);
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [resendNotice, setResendNotice] = useState('');
 
   // Treat "status still loading" as sign-in so returning professors never see
   // the bootstrap form flash before /api/auth/status resolves.
   const showLogin = loading || bootstrapped || forceSignIn;
 
-  const passwordStrength = useMemo(
-    () => calculatePasswordStrength(password),
-    [password]
-  );
+  const view: View = showForgotPassword
+    ? resetEmailSent
+      ? 'forgot-sent'
+      : 'forgot'
+    : showLogin && loginMethod === 'sso'
+      ? 'sso'
+      : showLogin && loginMethod === 'register'
+        ? registerEmailSent
+          ? 'register-sent'
+          : 'register'
+        : showLogin
+          ? 'signin'
+          : 'bootstrap';
+
+  const busy = loading || submitting || guestSubmitting;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -162,17 +439,55 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    // Add a small delay to prevent immediate redirects during authentication resolution
-    const timer = setTimeout(() => {
-      // Guests are bounced back to the sign-in form rather than away from it:
-      // they reached /login to upgrade the demo session into a real account.
-      if (!loading && user && user.role !== 'guest') {
-        router.replace(nextPath);
-      }
-    }, 200); // 200ms delay
-
-    return () => clearTimeout(timer);
+    // Guests are bounced back to the sign-in form rather than away from it:
+    // they reached /login to upgrade the demo session into a real account.
+    if (loading || !user || user.role === 'guest' || nextPath === null) {
+      return;
+    }
+    router.replace(nextPath);
   }, [loading, user, nextPath, router]);
+
+  /* ----------------------------- state helpers ---------------------------- */
+
+  const clearFeedback = () => {
+    setFormError('');
+    setEmailError('');
+    setPasswordError('');
+    setConfirmPasswordError('');
+    setSsoNotice('');
+    setResendNotice('');
+  };
+
+  // Passwords never carry over between views (e.g. sign-in -> register).
+  const clearSecrets = () => {
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+  };
+
+  /** Switch view and reset everything transient so nothing stale carries over. */
+  const openView = (method: LoginMethod) => {
+    clearFeedback();
+    clearSecrets();
+    setShowForgotPassword(false);
+    setResetEmailSent(false);
+    setRegisterEmailSent(false);
+    setLoginMethod(method);
+  };
+
+  const handleBackToPassword = () => openView('password');
+  const handleBackToLogin = () => openView('password');
+  const handleChooseSso = () => openView('sso');
+  const handleChooseRegister = () => openView('register');
+
+  const handleShowForgotPassword = () => {
+    // Without this, a failed sign-in's error banner followed the user into
+    // the reset form.
+    clearFeedback();
+    clearSecrets();
+    setResetEmailSent(false);
+    setShowForgotPassword(true);
+  };
 
   const handleEmailChange = (value: string) => {
     setEmail(value);
@@ -191,29 +506,48 @@ export default function LoginPage() {
     if (passwordError) setPasswordError('');
   };
 
+  const handleConfirmPasswordChange = (value: string) => {
+    setConfirmPassword(value);
+    if (confirmPasswordError) setConfirmPasswordError('');
+  };
+
+  /** Shared email checks; returns true when the address is usable. */
+  const checkEmail = (trimmedEmail: string): boolean => {
+    if (!trimmedEmail) {
+      setEmailError('Email address is required.');
+      return false;
+    }
+    const emailValidationError = validateEmail(trimmedEmail);
+    if (emailValidationError) {
+      setEmailError(emailValidationError);
+      return false;
+    }
+    return true;
+  };
+
+  /* -------------------------------- handlers ------------------------------ */
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting || guestSubmitting) return;
 
-    setFormError('');
-    setEmailError('');
-    setPasswordError('');
+    clearFeedback();
 
     const trimmedEmail = email.trim();
     const trimmedFullName = fullName.trim();
     const trimmedTenantName = tenantName.trim();
 
-    if (!trimmedEmail) {
-      setEmailError('Email address is required.');
+    if (!checkEmail(trimmedEmail)) {
       return;
     }
 
-    const emailValidationError = validateEmail(trimmedEmail);
-    if (emailValidationError) {
-      setEmailError(emailValidationError);
-      return;
-    }
-
-    if (!showLogin) {
+    if (showLogin) {
+      // Don't spend a request (and a rate-limit attempt) on an empty password.
+      if (!password) {
+        setPasswordError('Password is required.');
+        return;
+      }
+    } else {
       if (!trimmedFullName) {
         setFormError('Full name is required.');
         return;
@@ -245,9 +579,9 @@ export default function LoginPage() {
         });
       }
 
-      router.replace(nextPath);
+      router.replace(nextPath ?? '/');
     } catch (authError) {
-      setFormError(getErrorMessage(authError));
+      setFormError(getErrorMessage(authError, showLogin ? 'signin' : 'general'));
     } finally {
       setSubmitting(false);
     }
@@ -255,20 +589,12 @@ export default function LoginPage() {
 
   const handleForgotPasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
 
-    setFormError('');
-    setEmailError('');
+    clearFeedback();
 
     const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setEmailError('Email address is required.');
-      return;
-    }
-
-    const emailValidationError = validateEmail(trimmedEmail);
-
-    if (emailValidationError) {
-      setEmailError(emailValidationError);
+    if (!checkEmail(trimmedEmail)) {
       return;
     }
 
@@ -277,19 +603,19 @@ export default function LoginPage() {
     try {
       await apiClient.post('/api/auth/forgot-password', { email: trimmedEmail });
       setResetEmailSent(true);
-    } catch {
-      setResetEmailSent(true);
+    } catch (error) {
+      // 4xx answers are shown as "sent" so the form never reveals whether an
+      // account exists. Network failures, rate limits and server errors are
+      // real problems the user can act on, so those are surfaced.
+      const { status } = getErrorInfo(error);
+      if (status === undefined || status === 429 || status >= 500) {
+        setFormError(getErrorMessage(error));
+      } else {
+        setResetEmailSent(true);
+      }
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleBackToLogin = () => {
-    setShowForgotPassword(false);
-    setResetEmailSent(false);
-    setFormError('');
-    setEmailError('');
-    setPasswordError('');
   };
 
   /**
@@ -297,17 +623,21 @@ export default function LoginPage() {
    *
    * ``nextPath`` is set before the session starts so the sign-in redirect
    * (which fires once ``user`` resolves) also goes to ``/upload``: a guest has
-   * no dashboard to land on.
+   * no dashboard to land on. If it fails, the original ``next`` target is
+   * restored (it used to be reset to "/").
    */
   const handleGuestLogin = async () => {
-    setFormError('');
+    if (submitting || guestSubmitting) return;
+
+    clearFeedback();
+    const previousNextPath = nextPath;
     setGuestSubmitting(true);
     try {
       setNextPath('/upload');
       await guestLogin();
       router.replace('/upload');
     } catch (error) {
-      setNextPath('/');
+      setNextPath(previousNextPath);
       setFormError(getErrorMessage(error));
     } finally {
       setGuestSubmitting(false);
@@ -325,53 +655,14 @@ export default function LoginPage() {
   const handleSsoSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    setFormError('');
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setEmailError('Email address is required.');
-      return;
-    }
-    const emailValidationError = validateEmail(trimmedEmail);
-    if (emailValidationError) {
-      setEmailError(emailValidationError);
+    clearFeedback();
+    if (!checkEmail(email.trim())) {
       return;
     }
 
     setSsoNotice(
       'Single sign-on isn’t configured for this workspace yet — no identity provider is connected. Use your email and password to sign in for now.'
     );
-  };
-
-  /** Leave the SSO/register prompts and restore the password form. */
-  const handleBackToPassword = () => {
-    setLoginMethod('password');
-    setSsoNotice('');
-    setRegisterEmailSent(false);
-    setResendNotice('');
-    setFormError('');
-    setEmailError('');
-    setPasswordError('');
-    setConfirmPasswordError('');
-    setPassword('');
-    setConfirmPassword('');
-  };
-
-  /** Swap the password form's email prompt for the SSO one. */
-  const handleChooseSso = () => {
-    setLoginMethod('sso');
-    setSsoNotice('');
-    setEmailError('');
-  };
-
-  /** Open the self-registration form. */
-  const handleChooseRegister = () => {
-    setLoginMethod('register');
-    setRegisterEmailSent(false);
-    setResendNotice('');
-    setFormError('');
-    setEmailError('');
-    setPasswordError('');
-    setConfirmPasswordError('');
   };
 
   /**
@@ -383,22 +674,14 @@ export default function LoginPage() {
    */
   const handleRegisterSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
 
-    setFormError('');
-    setEmailError('');
-    setPasswordError('');
-    setConfirmPasswordError('');
+    clearFeedback();
 
     const trimmedEmail = email.trim();
     const trimmedFullName = fullName.trim();
 
-    if (!trimmedEmail) {
-      setEmailError('Email address is required.');
-      return;
-    }
-    const emailValidationError = validateEmail(trimmedEmail);
-    if (emailValidationError) {
-      setEmailError(emailValidationError);
+    if (!checkEmail(trimmedEmail)) {
       return;
     }
     if (!trimmedFullName) {
@@ -439,6 +722,8 @@ export default function LoginPage() {
    * works whether or not the first email ever arrived.
    */
   const handleResendVerification = async () => {
+    if (submitting) return;
+
     setFormError('');
     setResendNotice('');
     setSubmitting(true);
@@ -455,6 +740,26 @@ export default function LoginPage() {
       setSubmitting(false);
     }
   };
+
+  /* --------------------------------- render ------------------------------- */
+
+  const headings: Record<View, string> = {
+    signin: 'Sign-In',
+    bootstrap: 'Create Administrator Account',
+    forgot: 'Reset password',
+    'forgot-sent': 'Check your email',
+    sso: 'Sign in with SSO',
+    register: 'Create Account',
+    'register-sent': 'Check your email',
+  };
+
+  const subtitles: Partial<Record<View, string>> = {
+    forgot: 'Enter your email address and we will send reset instructions.',
+    'forgot-sent': 'If the account exists, password reset instructions have been sent.',
+    bootstrap: 'Set up the first administrator account for this workspace.',
+  };
+
+  const subtitle = subtitles[view];
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
@@ -474,14 +779,14 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-md">
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
-                                    {!showLogin
+                  {!showLogin
                     ? 'Initialize Institutional Workspace'
                     : loginMethod === 'register'
                       ? 'Create Your Account'
                       : 'Academic Workspace Sign-In'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
-                                    {!showLogin
+                  {!showLogin
                     ? 'Create the first administrator account and configure the workspace for your institution.'
                     : loginMethod === 'register'
                       ? 'Set up your workspace in minutes and start checking submissions for academic integrity.'
@@ -503,7 +808,7 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="flex items-center justify-center bg-white">
+        <main className="flex items-center justify-center bg-white">
           <div className="w-full max-w-md px-6 py-10 sm:px-10">
             <div className="mb-8 lg:hidden">
               <div className="flex items-center gap-3">
@@ -519,166 +824,73 @@ export default function LoginPage() {
 
             <div className="mb-8">
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                {loginMethod === 'register' && showLogin ? (
+                {view === 'register' || view === 'register-sent' ? (
                   <UserPlus size={20} aria-hidden="true" />
-                ) : loginMethod === 'sso' && showLogin ? (
+                ) : view === 'sso' ? (
                   <KeyRound size={20} aria-hidden="true" />
                 ) : (
                   <LockKeyhole size={20} aria-hidden="true" />
                 )}
               </div>
-<h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-                {showForgotPassword
-                  ? resetEmailSent
-                    ? 'Check your email'
-                    : 'Reset password'
-                  : showLogin
-                    ? loginMethod === 'sso'
-                      ? 'Sign in with SSO'
-                      : loginMethod === 'register'
-                        ? registerEmailSent
-                          ? 'Check your email'
-                          : 'Create Account'
-                        : 'Sign-In'
-                    : 'Create Administrator Account'}
-              </h2>
-{(showForgotPassword || !showLogin) && (
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {showForgotPassword
-                    ? resetEmailSent
-                      ? 'If the account exists, password reset instructions have been sent.'
-                      : 'Enter your email address and we will send reset instructions.'
-                    : 'Set up the first administrator account for this workspace.'}
-                </p>
-              )}
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{headings[view]}</h2>
+              {subtitle && <p className="mt-2 text-sm leading-6 text-slate-600">{subtitle}</p>}
             </div>
 
-            {showForgotPassword ? (
-              resetEmailSent ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">
-                          Reset instructions sent
-                        </p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          If an account exists for <strong>{email.trim()}</strong>, you’ll receive an email shortly.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleBackToLogin}
-                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition"
-                  >
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    Return to sign in
-                  </button>
-                </div>
-              ) : (
-                <form className="space-y-5" onSubmit={handleForgotPasswordSubmit} noValidate>
-                  <div className="space-y-2">
-                    <label htmlFor="forgot-email" className="block text-sm font-medium text-slate-700">
-                      Email address
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="forgot-email"
-                        type="email"
-                        value={email}
-                        onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
-                        aria-invalid={emailError ? true : undefined}
-                        aria-describedby={emailError ? 'forgot-email-error' : undefined}
-                        autoComplete="email"
-                        placeholder="name@institution.edu"
-                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
-                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                          }`}
-                      />
-                      {email && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
-                          {emailError ? (
-                            <XCircle size={16} className="text-red-500" />
-                          ) : validateEmail(email.trim()) === null ? (
-                            <CheckCircle size={16} className="text-emerald-600" />
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                    {emailError && (
-                      <p id="forgot-email-error" role="alert" className="text-xs text-red-600">
-                        {emailError}
+            {view === 'forgot-sent' && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">Reset instructions sent</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        If an account exists for <strong>{email.trim()}</strong>, you’ll receive an email shortly.
                       </p>
-                    )}
-                  </div>
-
-                  {formError && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>{formError}</span>
                     </div>
-                  )}
+                  </div>
+                </div>
 
-<button
-                  type="submit"
-                  disabled={loading || submitting}
-                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                >
+                <button type="button" onClick={handleBackToLogin} className={PRIMARY_BUTTON}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Return to sign in
+                </button>
+              </div>
+            )}
+
+            {view === 'forgot' && (
+              <form className="space-y-5" onSubmit={handleForgotPasswordSubmit} noValidate>
+                <EmailField
+                  id="forgot-email"
+                  value={email}
+                  error={emailError}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  autoFocus
+                />
+
+                <ErrorBanner message={formError} />
+
+                <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                   {submitting ? 'Sending...' : 'Send reset instructions'}
                 </button>
 
-                  <button
-                    type="button"
-                    onClick={handleBackToLogin}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    Back to sign in
-                  </button>
-                </form>
-              )
-            ) : loginMethod === 'sso' && showLogin ? (
+                <button type="button" onClick={handleBackToLogin} className={SECONDARY_BUTTON}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Back to sign in
+                </button>
+              </form>
+            )}
+
+            {view === 'sso' && (
               <form className="space-y-5" onSubmit={handleSsoSubmit} noValidate>
-                <div className="space-y-2">
-                  <label htmlFor="sso-email" className="block text-sm font-medium text-slate-700">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="sso-email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
-                      aria-invalid={emailError ? true : undefined}
-                      aria-describedby={emailError ? 'sso-email-error' : undefined}
-                      autoComplete="email"
-                      placeholder="name@institution.edu"
-                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
-                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                        }`}
-                    />
-                    {email && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
-                        {emailError ? (
-                          <XCircle size={16} className="text-red-500" />
-                        ) : validateEmail(email.trim()) === null ? (
-                          <CheckCircle size={16} className="text-emerald-600" />
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                  {emailError && (
-                    <p id="sso-email-error" role="alert" className="text-xs text-red-600">
-                      {emailError}
-                    </p>
-                  )}
-                </div>
+                <EmailField
+                  id="sso-email"
+                  value={email}
+                  error={emailError}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  autoFocus
+                />
 
                 {ssoNotice && (
                   <div
@@ -690,407 +902,176 @@ export default function LoginPage() {
                   </div>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={loading || submitting}
-                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                >
+                <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
                   Continue with SSO
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleBackToPassword}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
+                <button type="button" onClick={handleBackToPassword} className={SECONDARY_BUTTON}>
                   <ArrowLeft size={16} aria-hidden="true" />
                   Back to sign in
                 </button>
               </form>
-            ) : loginMethod === 'register' && showLogin ? (
-              registerEmailSent ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">
-                          Verification email sent
-                        </p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          We sent a verification link to <strong>{email.trim()}</strong>. Open it
-                          to activate your account.
-                        </p>
-                      </div>
+            )}
+
+            {view === 'register-sent' && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">Verification email sent</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        We sent a verification link to <strong>{email.trim()}</strong>. Open it to activate your
+                        account.
+                      </p>
                     </div>
                   </div>
-
-                  {resendNotice && (
-                    <div
-                      role="status"
-                      className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-                    >
-                      {resendNotice}
-                    </div>
-                  )}
-
-                  {formError && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>{formError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleResendVerification}
-                    disabled={loading || submitting}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                    Resend verification email
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleBackToPassword}
-                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition"
-                  >
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    Back to sign in
-                  </button>
                 </div>
-              ) : (
-                <form className="space-y-5" onSubmit={handleRegisterSubmit} noValidate>
-                  <div className="space-y-2">
-                    <label htmlFor="register-name" className="block text-sm font-medium text-slate-700">
-                      Full name
-                    </label>
-                    <input
-                      id="register-name"
+
+                {resendNotice && (
+                  <div
+                    role="status"
+                    className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                  >
+                    {resendNotice}
+                  </div>
+                )}
+
+                <ErrorBanner message={formError} />
+
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={busy}
+                  className={SECONDARY_BUTTON}
+                >
+                  {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                  Resend verification email
+                </button>
+
+                <button type="button" onClick={handleBackToPassword} className={PRIMARY_BUTTON}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Back to sign in
+                </button>
+              </div>
+            )}
+
+            {view === 'register' && (
+              <form className="space-y-5" onSubmit={handleRegisterSubmit} noValidate>
+                <TextField
+                  id="register-name"
+                  label="Full name"
+                  value={fullName}
+                  onChange={(value) => {
+                    setFullName(value);
+                    if (formError) setFormError('');
+                  }}
+                  autoComplete="name"
+                  placeholder="Professor Ada Lovelace"
+                  autoFocus
+                />
+
+                <EmailField
+                  id="register-email"
+                  value={email}
+                  error={emailError}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                />
+
+                <PasswordField
+                  id="register-password"
+                  name="new-password"
+                  value={password}
+                  error={passwordError}
+                  onChange={handlePasswordChange}
+                  show={showPassword}
+                  onToggleShow={() => setShowPassword((value) => !value)}
+                  autoComplete="new-password"
+                  placeholder="Create a password"
+                >
+                  {password ? <PasswordStrengthMeter password={password} /> : <PasswordHint />}
+                </PasswordField>
+
+                <PasswordField
+                  id="register-confirm"
+                  name="confirm-password"
+                  label="Confirm password"
+                  value={confirmPassword}
+                  error={confirmPasswordError}
+                  onChange={handleConfirmPasswordChange}
+                  show={showPassword}
+                  onToggleShow={() => setShowPassword((value) => !value)}
+                  autoComplete="new-password"
+                  placeholder="Repeat the password"
+                />
+
+                <ErrorBanner message={formError} />
+
+                <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
+                  {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                  {submitting ? 'Creating account…' : 'Create account'}
+                </button>
+
+                <button type="button" onClick={handleBackToPassword} className={SECONDARY_BUTTON}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Back to sign in
+                </button>
+              </form>
+            )}
+
+            {(view === 'signin' || view === 'bootstrap') && (
+              <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+                {view === 'bootstrap' && (
+                  <>
+                    <TextField
+                      id="full-name"
+                      label="Full name"
                       value={fullName}
-                      onChange={(event) => {
-                        setFullName(event.target.value);
-                        if (formError) setFormError('');
-                      }}
+                      onChange={setFullName}
                       autoComplete="name"
                       placeholder="Professor Ada Lovelace"
-                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label htmlFor="register-email" className="block text-sm font-medium text-slate-700">
-                      Email address
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="register-email"
-                        type="email"
-                        value={email}
-                        onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
-                        aria-invalid={emailError ? true : undefined}
-                        aria-describedby={emailError ? 'register-email-error' : undefined}
-                        autoComplete="email"
-                        placeholder="name@institution.edu"
-                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
-                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                          }`}
-                      />
-                      {email && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
-                          {emailError ? (
-                            <XCircle size={16} className="text-red-500" />
-                          ) : validateEmail(email.trim()) === null ? (
-                            <CheckCircle size={16} className="text-emerald-600" />
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                    {emailError && (
-                      <p id="register-email-error" role="alert" className="text-xs text-red-600">
-                        {emailError}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <label htmlFor="register-password" className="block text-sm font-medium text-slate-700">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="register-password"
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(event) => handlePasswordChange(event.target.value)}
-                        aria-invalid={passwordError ? true : undefined}
-                        aria-describedby={passwordError ? 'register-password-error' : undefined}
-                        autoComplete="new-password"
-                        placeholder="Create a password"
-                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${passwordError
-                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                          }`}
-                      />
-                      <button
-                        type="button"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        onClick={() => setShowPassword((value) => !value)}
-                        className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                      >
-                        {showPassword ? (
-                          <EyeOff size={18} aria-hidden="true" />
-                        ) : (
-                          <Eye size={18} aria-hidden="true" />
-                        )}
-                      </button>
-                    </div>
-
-                    {password && (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className={`text-sm font-medium ${passwordStrength.tone}`}>
-                            Password strength: {passwordStrength.label}
-                          </span>
-                          <span className="text-xs text-slate-500">{password.length} characters</span>
-                        </div>
-                        <div className="flex gap-1" aria-hidden="true">
-                          {[1, 2, 3, 4, 5, 6].map((level) => (
-                            <div
-                              key={level}
-                              className={`h-2 flex-1 rounded-full ${level <= passwordStrength.score ? passwordStrength.bar : 'bg-slate-200'
-                                }`}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {!password && (
-                      <p className="text-xs text-slate-500">
-                        Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
-                      </p>
-                    )}
-
-                    {passwordError && (
-                      <p id="register-password-error" role="alert" className="text-xs text-red-600">
-                        {passwordError}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <label htmlFor="register-confirm" className="block text-sm font-medium text-slate-700">
-                      Confirm password
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="register-confirm"
-                        type={showPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(event) => {
-                          setConfirmPassword(event.target.value);
-                          if (confirmPasswordError) setConfirmPasswordError('');
-                        }}
-                        aria-invalid={confirmPasswordError ? true : undefined}
-                        aria-describedby={confirmPasswordError ? 'register-confirm-error' : undefined}
-                        autoComplete="new-password"
-                        placeholder="Repeat the password"
-                        className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${confirmPasswordError
-                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                          : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                          }`}
-                      />
-                      <button
-                        type="button"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        onClick={() => setShowPassword((value) => !value)}
-                        className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                      >
-                        {showPassword ? (
-                          <EyeOff size={18} aria-hidden="true" />
-                        ) : (
-                          <Eye size={18} aria-hidden="true" />
-                        )}
-                      </button>
-                    </div>
-                    {confirmPasswordError && (
-                      <p id="register-confirm-error" role="alert" className="text-xs text-red-600">
-                        {confirmPasswordError}
-                      </p>
-                    )}
-                  </div>
-
-                  {formError && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>{formError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={loading || submitting}
-                    className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                    {submitting ? 'Creating account…' : 'Create account'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleBackToPassword}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    Back to sign in
-                  </button>
-                </form>
-              )
-            ) : (
-              <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-                                {!showLogin && (
-                  <>
-                    <div className="space-y-2">
-                      <label htmlFor="full-name" className="block text-sm font-medium text-slate-700">
-                        Full name
-                      </label>
-                      <input
-                        id="full-name"
-                        value={fullName}
-                        onChange={(event) => setFullName(event.target.value)}
-                        autoComplete="name"
-                        placeholder="Professor Ada Lovelace"
-                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label htmlFor="tenant-name" className="block text-sm font-medium text-slate-700">
-                        Workspace name
-                      </label>
-                      <input
-                        id="tenant-name"
-                        value={tenantName}
-                        onChange={(event) => setTenantName(event.target.value)}
-                        autoComplete="organization"
-                        placeholder="Computer Science Department"
-                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-4 focus:ring-slate-900/10"
-                      />
-                    </div>
+                    <TextField
+                      id="tenant-name"
+                      label="Workspace name"
+                      value={tenantName}
+                      onChange={setTenantName}
+                      autoComplete="organization"
+                      placeholder="Computer Science Department"
+                    />
                   </>
                 )}
 
-                <div className="space-y-2">
-                  <label htmlFor="email" className="block text-sm font-medium text-slate-700">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => handleEmailChange(event.target.value)} onBlur={handleEmailBlur}
-                      aria-invalid={emailError ? true : undefined}
-                      aria-describedby={emailError ? 'login-email-error' : undefined}
-                      autoComplete="email"
-                      placeholder="name@institution.edu"
-                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-11 text-slate-900 outline-none transition focus:ring-4 ${emailError
-                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                        }`}
-                    />
-                    {email && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true">
-                        {emailError ? (
-                          <XCircle size={16} className="text-red-500" />
-                        ) : validateEmail(email.trim()) === null ? (
-                          <CheckCircle size={16} className="text-emerald-600" />
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                  {emailError && (
-                    <p id="login-email-error" role="alert" className="text-xs text-red-600">
-                      {emailError}
-                    </p>
-                  )}
-                </div>
+                <EmailField
+                  id="email"
+                  value={email}
+                  error={emailError}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  autoComplete={view === 'signin' ? 'username' : 'email'}
+                />
 
-                <div className="space-y-2">
-                  <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(event) => handlePasswordChange(event.target.value)}
-                      aria-invalid={passwordError ? true : undefined}
-                      aria-describedby={passwordError ? 'password-error' : undefined}
-                      autoComplete={showLogin ? 'current-password' : 'new-password'}
-                      placeholder="Enter your password"
-                      className={`w-full rounded-2xl border bg-white px-4 py-3.5 pr-12 text-slate-900 outline-none transition focus:ring-4 ${passwordError
-                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/10'
-                        : 'border-slate-300 focus:border-slate-900 focus:ring-slate-900/10'
-                        }`}
-                    />
-                    <button
-                      type="button"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      onClick={() => setShowPassword((value) => !value)}
-                      className="absolute right-1.5 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                    >
-                      {showPassword ? (
-                        <EyeOff size={18} aria-hidden="true" />
-                      ) : (
-                        <Eye size={18} aria-hidden="true" />
-                      )}
-                    </button>
-                  </div>
+                <PasswordField
+                  id="password"
+                  name="password"
+                  value={password}
+                  error={passwordError}
+                  onChange={handlePasswordChange}
+                  show={showPassword}
+                  onToggleShow={() => setShowPassword((value) => !value)}
+                  autoComplete={view === 'signin' ? 'current-password' : 'new-password'}
+                  placeholder="Enter your password"
+                >
+                  {view === 'bootstrap' && (password ? <PasswordStrengthMeter password={password} /> : <PasswordHint />)}
+                </PasswordField>
 
-                  {!showLogin && password && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className={`text-sm font-medium ${passwordStrength.tone}`}>
-                          Password strength: {passwordStrength.label}
-                        </span>
-                        <span className="text-xs text-slate-500">{password.length} characters</span>
-                      </div>
-                      <div className="flex gap-1" aria-hidden="true">
-                        {[1, 2, 3, 4, 5, 6].map((level) => (
-                          <div
-                            key={level}
-                            className={`h-2 flex-1 rounded-full ${level <= passwordStrength.score ? passwordStrength.bar : 'bg-slate-200'
-                              }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                                    {!showLogin && !password && (
-                    <p className="text-xs text-slate-500">
-                      Use at least 12 characters with an uppercase letter, a lowercase letter, and a number.
-                    </p>
-                  )}
-
-                  {passwordError && (
-                    <p id="password-error" role="alert" className="text-xs text-red-600">
-                      {passwordError}
-                    </p>
-                  )}
-                </div>
-
-                                {showLogin && (
+                {view === 'signin' && (
                   <div className="flex items-center justify-end">
                     <button
                       type="button"
-                      onClick={() => setShowForgotPassword(true)}
+                      onClick={handleShowForgotPassword}
                       className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
                     >
                       Forgot password?
@@ -1098,24 +1079,11 @@ export default function LoginPage() {
                   </div>
                 )}
 
-                {formError && (
-                  <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    <span>{formError}</span>
-                  </div>
-                )}
+                <ErrorBanner message={formError} />
 
-                <button
-                  type="submit"
-                  disabled={loading || submitting}
-                  className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                >
+                <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                  {submitting
-                    ? 'Processing...'
-                    : showLogin
-                      ? 'Sign in'
-                      : 'Create administrator account'}
+                  {submitting ? 'Processing...' : view === 'signin' ? 'Sign in' : 'Create administrator account'}
                 </button>
 
                 <div className="relative py-1" aria-hidden="true">
@@ -1125,23 +1093,14 @@ export default function LoginPage() {
                   </span>
                 </div>
 
-                {showLogin && (
-                  <button
-                    type="button"
-                    onClick={handleChooseSso}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
+                {view === 'signin' && (
+                  <button type="button" onClick={handleChooseSso} className={SECONDARY_BUTTON}>
                     <KeyRound size={16} aria-hidden="true" />
                     Continue with SSO
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={handleGuestLogin}
-                  disabled={loading || guestSubmitting}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
+                <button type="button" onClick={handleGuestLogin} disabled={busy} className={SECONDARY_BUTTON}>
                   {guestSubmitting ? (
                     <Loader2 size={16} className="animate-spin" aria-hidden="true" />
                   ) : (
@@ -1150,7 +1109,7 @@ export default function LoginPage() {
                   {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
                 </button>
 
-                {showLogin && (
+                {view === 'signin' && (
                   <p className="text-center text-sm text-slate-500">
                     Don’t have an account?{' '}
                     <button
@@ -1163,19 +1122,15 @@ export default function LoginPage() {
                   </p>
                 )}
 
-                {!showLogin && (
-                  <button
-                    type="button"
-                    onClick={() => setForceSignIn(true)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                  >
+                {view === 'bootstrap' && (
+                  <button type="button" onClick={() => setForceSignIn(true)} className={SECONDARY_BUTTON}>
                     Already have an account? Sign in
                   </button>
                 )}
-               </form>
-             )}
-           </div>
-         </section>
+              </form>
+            )}
+          </div>
+        </main>
       </div>
     </div>
   );
