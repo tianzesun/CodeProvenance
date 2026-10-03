@@ -5,7 +5,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/apiClient';
-import axios from 'axios';
+import Link from 'next/link';
 import {
   Upload as UploadIcon,
   FileUp,
@@ -14,7 +14,6 @@ import {
   Check,
   X,
   AlertCircle,
-  Settings2,
   Layers3,
   ArrowRight,
   Zap,
@@ -26,7 +25,6 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-const API = '';
 const UPLOAD_FORM_STORAGE_KEY = 'integritydesk-upload-form-v1';
 /** Course/assignment labels a guest demo run files itself under. */
 const GUEST_COURSE_LABEL = 'Guest demo';
@@ -141,15 +139,98 @@ type AssignmentMode = {
   weights?: Record<string, number>;
 };
 
-function getApiErrorMessage(error: unknown, fallback = 'Request failed') {
-  if (axios.isAxiosError(error)) {
-    return (
-      (error.response?.data as { detail?: string; error?: string } | undefined)?.detail ||
-      (error.response?.data as { detail?: string; error?: string } | undefined)?.error ||
-      error.message || fallback
-    );
+const REFERENCE_HEADERS = ['x-correlation-id', 'x-request-id'];
+
+function getErrorInfo(error: unknown): { status?: number; reference?: string } {
+  const response = (error as { response?: { status?: unknown; headers?: unknown } } | null)?.response;
+  if (!response || typeof response !== 'object') {
+    return {};
   }
-  return fallback;
+
+  const status = typeof response.status === 'number' ? response.status : undefined;
+  const headers = (response.headers ?? {}) as Record<string, unknown>;
+  const reference = REFERENCE_HEADERS.map((name) => headers[name]).find(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  );
+
+  return { status, reference };
+}
+
+/**
+ * Generic, status-keyed text; the server's own wording is no longer echoed. A correlation id
+ * is appended when the backend sends one.
+ */
+function describeApiError(error: unknown, fallback = 'Request failed'): string {
+  const { status, reference } = getErrorInfo(error);
+
+  let message = fallback;
+  if (status === 401) {
+    message = 'Your session has expired. Please sign in again.';
+  } else if (status === 403) {
+    message = 'You don’t have permission to do that.';
+  } else if (status === 413) {
+    message = 'The upload is too large. Remove some files or upload them in smaller batches.';
+  } else if (status === 400 || status === 415 || status === 422) {
+    message = 'The upload was rejected. Check that the files are supported source files and try again.';
+  } else if (status === 429) {
+    message = 'Too many requests. Please wait a moment and try again.';
+  } else if (status !== undefined && status >= 500) {
+    message = 'Something went wrong on our side. Please try again.';
+  }
+
+  return reference ? `${message} (Reference: ${reference})` : message;
+}
+
+/** localStorage can throw (private mode, quota, disabled); never let that break the page. */
+const safeStorage = {
+  get(key: string): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Storage unavailable; the preference simply won't persist.
+    }
+  },
+};
+
+// The file inputs only *hint* at these types; dragged-in files bypass `accept` entirely.
+const ALLOWED_EXTENSIONS = ['zip', 'py', 'java', 'c', 'cpp', 'h', 'js', 'ts', 'go', 'rs', 'rb', 'php', 'cs', 'kt', 'swift'];
+const POLL_INTERVAL_MS = 1000;
+const MAX_POLL_FAILURES = 3;
+
+function fileExtension(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+}
+
+function fileKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+/** Appends `added` to `existing`, skipping files that are already in the list. */
+function mergeFiles(existing: File[], added: File[]): File[] {
+  const seen = new Set(existing.map(fileKey));
+  const fresh = added.filter((file) => {
+    const key = fileKey(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...existing, ...fresh];
+}
+
+function describeSkipped(rejected: File[]): string {
+  const names = rejected.slice(0, 3).map((f) => f.name).join(', ');
+  const more = rejected.length > 3 ? ` and ${rejected.length - 3} more` : '';
+  return `Skipped ${rejected.length} unsupported ${rejected.length === 1 ? 'file' : 'files'}: ${names}${more}. Supported types: .${ALLOWED_EXTENSIONS.join(', .')}. Zip a folder before uploading it.`;
 }
 
 /** Tailwind classes for the extension chip shown beside each selected file. */
@@ -212,7 +293,12 @@ export default function UploadPage() {
   // course, so the picker stays hidden and the review starts without one.
   const isGuest = user?.role === 'guest';
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollingRef = useRef(false);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const dragDepth = useRef(0);
+  const starterDragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const starterFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -234,10 +320,10 @@ export default function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [jobProgress, setJobProgress] = useState<UploadJobProgress | null>(null);
   const [activity, setActivity] = useState<string[]>([]);
-  const [scanIndex, setScanIndex] = useState(0);
-  const [animateFiles, setAnimateFiles] = useState(false);
-  const [dragCount, setDragCount] = useState(0);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [notice, setNotice] = useState('');
+  const [weightsTouched, setWeightsTouched] = useState(false);
+  const [uploadInFlight, setUploadInFlight] = useState(false);
+  const [modeRestored, setModeRestored] = useState(false);
   const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
   const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
@@ -265,7 +351,23 @@ export default function UploadPage() {
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => {
+    pollingRef.current = false;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    uploadAbortRef.current?.abort();
+  }, []);
+
+  // Closing the tab while files are still being sent would silently drop the upload. Once the
+  // server has created the job it keeps running, so the warning only covers the upload itself.
+  useEffect(() => {
+    if (!uploadInFlight) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [uploadInFlight]);
 
   // Fallback crawl for the window between "Analyze" and the first server-side
   // progress payload: real stage/percent values take over as soon as the job
@@ -293,8 +395,10 @@ export default function UploadPage() {
         const sites = res.data?.source_scan_sites || [];
         setTenantExternalScanEnabled(enabled);
         setConfiguredSourceCount(Array.isArray(sites) ? sites.length : 0);
-      } catch (e) {
-        setTenantExternalScanEnabled(false);
+      } catch {
+        // Unknown, not "disabled": a failed request used to switch the option off and tell the
+        // user an administrator had disabled it.
+        setTenantExternalScanEnabled(null);
         setConfiguredSourceCount(0);
       }
     };
@@ -303,11 +407,28 @@ export default function UploadPage() {
     }
   }, [user]);
 
+  const stopPolling = useCallback(() => {
+    pollingRef.current = false;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // A chained timeout instead of setInterval: requests can no longer overlap when one is slow,
+  // and a single dropped request no longer ends the status updates.
   const startPolling = useCallback((jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+    stopPolling();
+    pollingRef.current = true;
+    let failures = 0;
+
+    const tick = async () => {
+      if (!pollingRef.current) return;
       try {
-        const s = await apiClient.get(`/api/jobs/${jobId}`);
+        const s = await apiClient.get(`/api/jobs/${encodeURIComponent(jobId)}`);
+        if (!pollingRef.current) return;
+        failures = 0;
+
         const reported = s.data?.progress as UploadJobProgress | undefined;
         if (reported) {
           setJobProgress(reported);
@@ -316,11 +437,35 @@ export default function UploadPage() {
             previous[0] === entry ? previous : [entry, ...previous].slice(0, 6),
           );
         }
-        if (s.data.status === 'completed') { clearInterval(pollRef.current!); router.push(`/results/${jobId}`); }
-        else if (s.data.status === 'failed') { clearInterval(pollRef.current!); setUploading(false); setError(s.data.error || 'Analysis failed'); }
-      } catch (e) { clearInterval(pollRef.current!); setUploading(false); setError(getApiErrorMessage(e, 'Could not load status.')); }
-    }, 1000);
-  }, [router]);
+        if (s.data?.status === 'completed') {
+          stopPolling();
+          router.push(`/results/${encodeURIComponent(jobId)}`);
+          return;
+        }
+        if (s.data?.status === 'failed') {
+          stopPolling();
+          setUploading(false);
+          // The backend's failure text is not shown; the job id lets support find the details.
+          setError(`The analysis could not be completed. Check the files and try again. (Reference: ${jobId})`);
+          return;
+        }
+      } catch (e) {
+        if (!pollingRef.current) return;
+        failures += 1;
+        if (failures >= MAX_POLL_FAILURES) {
+          stopPolling();
+          setUploading(false);
+          setError(
+            `${describeApiError(e, 'Could not load the analysis status.')} The analysis may still be running; check History.`,
+          );
+          return;
+        }
+      }
+      pollTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+
+    pollTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+  }, [router, stopPolling]);
 
   const zipFile = useMemo(() => {
     if (files.length !== 1) return null;
@@ -370,11 +515,19 @@ export default function UploadPage() {
   const progressFooter = jobProgress?.total_units
     ? `${submissionScope} · ${jobProgress.completed_units ?? 0} of ${jobProgress.total_units} ${jobProgress.unit || 'units'} complete`
     : submissionScope;
+  // Don't allow a run before the workspace defaults (threshold, modes) have loaded; clicking
+  // early used to submit the hard-coded fallback threshold and no engine weights.
   const canRunCheck = useMemo(() => {
-    if (uploading || hasMixedZipSelection) return false;
+    if (uploading || hasMixedZipSelection || thresholdLoading || modesLoading) return false;
     // IntegrityDesk is always used, so we just need files
     return zipFile ? true : files.length >= 2;
-  }, [files.length, hasMixedZipSelection, uploading, zipFile]);
+  }, [files.length, hasMixedZipSelection, uploading, zipFile, thresholdLoading, modesLoading]);
+
+  const progressPct = Math.max(0, Math.min(100, Math.round(displayProgress * 100)));
+  const weightTotal = Object.values(engineWeights).reduce((sum, v) => sum + v, 0);
+  // When the workspace has external scanning off, the per-run option is off too. The checkbox
+  // used to show "checked" (and the run sent `true`) while disabled.
+  const effectiveSourceScan = tenantExternalScanEnabled === false ? false : sourceScanEnabled;
 
   const uploadFormStorageKey = useMemo(
     () => `${UPLOAD_FORM_STORAGE_KEY}:${user?.tenant_id || 'no-tenant'}:${user?.id || 'guest'}`,
@@ -412,6 +565,7 @@ export default function UploadPage() {
   // Initialize engine weights from selected assignment mode
   useEffect(() => {
     const mode = assignmentModes.find((m) => m.id === selectedAssignmentModeId);
+    setWeightsTouched(false);
     if (mode?.weights && Object.keys(mode.weights).length > 0) {
       setEngineWeights(normalizeWeights(mode.weights));
     } else if (selectedAssignmentModeId !== 'auto_detect') {
@@ -419,25 +573,34 @@ export default function UploadPage() {
       const defaultWeights: Record<string, number> = {};
       activeEngines.forEach((k) => { defaultWeights[k] = 1 / activeEngines.length; });
       setEngineWeights(defaultWeights);
+    } else {
+      // Auto Detect chooses weights per submission. The previous mode's weights used to stay
+      // behind and were sent along with "auto_detect".
+      setEngineWeights({});
     }
   }, [selectedAssignmentModeId, assignmentModes, activeEngines, normalizeWeights]);
 
   useEffect(() => {
-    if (authLoading || typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(uploadFormStorageKey);
-      if (!raw) return;
-      const p = JSON.parse(raw);
-      if (typeof p.assignment_mode === 'string') setSelectedAssignmentModeId(p.assignment_mode);
-    } catch { }
+    if (authLoading) return;
+    const raw = safeStorage.get(uploadFormStorageKey);
+    if (raw) {
+      try {
+        const p = JSON.parse(raw);
+        if (typeof p.assignment_mode === 'string') setSelectedAssignmentModeId(p.assignment_mode);
+      } catch {
+        /* ignore a corrupt saved value */
+      }
+    }
+    setModeRestored(true);
   }, [authLoading, uploadFormStorageKey]);
 
+  // Wait until the saved value has been read, or the default would overwrite it on first render.
   useEffect(() => {
-    if (authLoading || typeof window === 'undefined') return;
-    window.localStorage.setItem(uploadFormStorageKey, JSON.stringify({
+    if (authLoading || !modeRestored) return;
+    safeStorage.set(uploadFormStorageKey, JSON.stringify({
       assignment_mode: selectedAssignmentModeId,
     }));
-  }, [authLoading, selectedAssignmentModeId, uploadFormStorageKey]);
+  }, [authLoading, modeRestored, selectedAssignmentModeId, uploadFormStorageKey]);
 
   // Fetch courses from the database once the session is known
   const fetchCourses = useCallback(async () => {
@@ -462,18 +625,21 @@ export default function UploadPage() {
     fetchCourses();
   }, [authLoading, user, fetchCourses]);
 
-  // Fetch the selected course's assignments from the database
+  // Fetch the selected course's assignments from the database. The request is cancelled when
+  // the course changes, so a slow answer for the previous course can't fill the list.
   useEffect(() => {
     if (!selectedCourseId) { setAssignments([]); setSelectedAssignmentId(''); return; }
+    const controller = new AbortController();
     setAssignmentsLoading(true);
     setSelectedAssignmentId('');
-    apiClient.get('/api/assignments', { params: { course_id: selectedCourseId } })
+    apiClient.get('/api/assignments', { params: { course_id: selectedCourseId }, signal: controller.signal })
       .then((res) => {
         const list = Array.isArray(res.data?.assignments) ? res.data.assignments : (Array.isArray(res.data) ? res.data : []);
         setAssignments(list);
       })
-      .catch(() => { setAssignments([]); })
-      .finally(() => { setAssignmentsLoading(false); });
+      .catch(() => { if (!controller.signal.aborted) setAssignments([]); })
+      .finally(() => { if (!controller.signal.aborted) setAssignmentsLoading(false); });
+    return () => controller.abort();
   }, [selectedCourseId]);
 
   // Recommendation for the chosen assignment, derived server-side from its
@@ -496,26 +662,57 @@ export default function UploadPage() {
     appliedRecommendationRef.current = selectedAssignmentId;
   }, [recommendedMode, selectedAssignmentId]);
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault(); setIsDragOver(false);
-    const f = Array.from(e.dataTransfer.files);
-    if (f.length) setFiles(f);
+  // Adds files to the list (it used to replace it, so "Add more" threw the earlier files away),
+  // skipping duplicates and anything that isn't a supported type.
+  const acceptFiles = useCallback((incoming: File[], target: 'main' | 'starter') => {
+    if (incoming.length === 0) return;
+    const accepted = incoming.filter((f) => ALLOWED_EXTENSIONS.includes(fileExtension(f.name)));
+    const rejected = incoming.filter((f) => !ALLOWED_EXTENSIONS.includes(fileExtension(f.name)));
+    if (accepted.length > 0) {
+      const setter = target === 'main' ? setFiles : setStarterFiles;
+      setter((current) => mergeFiles(current, accepted));
+    }
+    setError(rejected.length > 0 ? describeSkipped(rejected) : '');
   }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragOver(false);
+    acceptFiles(Array.from(e.dataTransfer.files), 'main');
+  }, [acceptFiles]);
 
   const handleStarterDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault(); setIsStarterDragOver(false);
-    const f = Array.from(e.dataTransfer.files);
-    if (f.length) setStarterFiles(f);
-  }, []);
+    e.preventDefault();
+    starterDragDepth.current = 0;
+    setIsStarterDragOver(false);
+    acceptFiles(Array.from(e.dataTransfer.files), 'starter');
+  }, [acceptFiles]);
 
   const handleSubmit = async () => {
+    if (uploading) return;
     setError('');
+    setNotice('');
     if (hasMixedZipSelection) { setError('Upload either one ZIP archive or multiple files, not both.'); return; }
     if (!zipFile && files.length < 2) { setError('Select at least 2 submission files.'); return; }
+
+    // Auto Detect picks weights per submission, so custom weights are only sent when the user
+    // set them. A non-auto mode with every weight at zero used to be sent anyway.
+    const sendWeights = selectedAssignmentModeId !== 'auto_detect' || weightsTouched;
+    if (sendWeights && weightTotal <= 0) {
+      setError('Give at least one similarity engine a weight above 0, or choose Auto Detect.');
+      return;
+    }
+
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    jobIdRef.current = null;
     setUploading(true);
+    setUploadInFlight(true);
     setProgress(0.03);
     setJobProgress(null);
     setActivity([]);
+
     const fd = new FormData();
     if (zipFile) fd.append('file', zipFile); else files.forEach((f) => fd.append('files', f));
     starterFiles.forEach((f) => fd.append('starter_files', f));
@@ -535,26 +732,52 @@ export default function UploadPage() {
     if (chosenAssignment) fd.append('assignment_id', chosenAssignment.id);
     fd.append('assignment_mode', selectedAssignmentModeId);
     fd.append('threshold', String(threshold));
-    fd.append('engine_weights', JSON.stringify(engineWeights));
-    fd.append('source_scan_enabled', String(sourceScanEnabled));
+    fd.append('engine_weights', sendWeights ? JSON.stringify(normalizeWeights(engineWeights)) : '{}');
+    fd.append('source_scan_enabled', String(effectiveSourceScan));
     try {
-      const url = zipFile ? `${API}/api/upload-zip` : `${API}/api/upload`;
-      const res = await apiClient.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const url = zipFile ? '/api/upload-zip' : '/api/upload';
+      // No manual Content-Type: the browser has to add the multipart boundary itself.
+      const res = await apiClient.post(url, fd, {
+        signal: controller.signal,
+        onUploadProgress: (event) => {
+          if (event.total) setProgress(0.03 + 0.07 * Math.min(1, event.loaded / event.total));
+        },
+      });
+      setUploadInFlight(false);
       const jobId = res.data?.job_id;
       if (!jobId) { setUploading(false); setError('Upload completed but no job ID returned.'); return; }
-      if (res.data?.status === 'completed') { router.push(`/results/${jobId}`); return; }
+      jobIdRef.current = jobId;
+      if (res.data?.status === 'completed') { router.push(`/results/${encodeURIComponent(jobId)}`); return; }
       startPolling(jobId);
-    } catch (err) { setUploading(false); setError(getApiErrorMessage(err, 'Upload failed')); }
+    } catch (err) {
+      setUploadInFlight(false);
+      if (controller.signal.aborted) return;
+      setUploading(false);
+      setError(describeApiError(err, 'Upload failed. Please try again.'));
+    }
   };
 
-  const toggleEngine = useCallback((k: string) =>
-    setActiveEngines((c) => c.includes(k) ? c.filter((x) => x !== k) : [...c, k]), []);
+  const handleCancel = () => {
+    const hadJob = jobIdRef.current !== null;
+    uploadAbortRef.current?.abort();
+    stopPolling();
+    setUploadInFlight(false);
+    setUploading(false);
+    setJobProgress(null);
+    setActivity([]);
+    setNotice(
+      hadJob
+        ? 'Stopped watching this analysis. It keeps running in the background and will appear in History when it finishes.'
+        : 'Upload cancelled.',
+    );
+  };
+
+  // Raw slider values are kept as the user sets them; they are only normalized when the run is
+  // submitted. Normalizing on every change made the thumb jump away from the pointer.
   const updateEngineWeight = useCallback((engineKey: string, value: number) => {
-    setEngineWeights((prev) => {
-      const next = { ...prev, [engineKey]: Math.max(0, value) };
-      return normalizeWeights(next);
-    });
-  }, [normalizeWeights]);
+    setWeightsTouched(true);
+    setEngineWeights((prev) => ({ ...prev, [engineKey]: Math.min(1, Math.max(0, value)) }));
+  }, []);
 
   return (
     <DashboardLayout>
@@ -614,6 +837,9 @@ export default function UploadPage() {
 
           {uploading && (
             <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <p role="status" className="sr-only">
+                {jobProgress?.label ?? 'Uploading files to the analysis queue'}
+              </p>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-blue-950">
@@ -631,12 +857,19 @@ export default function UploadPage() {
                     <FileCode size={12} className="shrink-0 text-blue-500" />
                     <span className="truncate">{currentWork}</span>
                   </div>
-                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner">
-                    <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${Math.round(displayProgress * 100)}%` }} />
+                  <div
+                    role="progressbar"
+                    aria-label="Analysis progress"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={progressPct}
+                    className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner"
+                  >
+                    <div className="h-full rounded-full bg-blue-600 shadow-sm transition-all duration-500" style={{ width: `${progressPct}%` }} />
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="truncate text-[11px] text-blue-700/80">{progressFooter}</span>
-                    <span className="text-xs font-medium text-blue-700">{Math.round(displayProgress * 100)}%</span>
+                    <span className="text-xs font-medium text-blue-700">{progressPct}%</span>
                   </div>
                 </div>
                 <div className="grid gap-2 text-sm text-blue-800 sm:grid-cols-2">
@@ -673,6 +906,15 @@ export default function UploadPage() {
                   </ul>
                 </div>
               )}
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-xl border border-blue-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                >
+                  Cancel
+                </button>
+              </div>
             </section>
           )}
 
@@ -689,13 +931,13 @@ export default function UploadPage() {
           )}
 
           {/* Only show this when tenant-level is disabled AND user hasn't overridden for this submission */}
-          {tenantExternalScanEnabled === false && !sourceScanEnabled && (
+          {tenantExternalScanEnabled === false && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5">
               <div className="flex items-center gap-3 text-sm">
                 <AlertCircle size={16} className="shrink-0 text-amber-600" />
                 <div className="flex-1 text-amber-900">
                   External source scanning (GitHub + web) is disabled at the tenant level.
-                  <a href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</a>
+                  <Link href="/settings" className="ml-1.5 underline hover:text-amber-800">Enable it in Settings</Link>
                 </div>
               </div>
             </div>
@@ -716,8 +958,9 @@ export default function UploadPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {/* Course select — options are read from the database */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-500">Course</label>
+                  <label htmlFor="upload-course" className="text-xs font-medium text-slate-500">Course</label>
                   <select
+                    id="upload-course"
                     value={selectedCourseId}
                     onChange={(e) => { setSelectedCourseId(e.target.value); setSelectedAssignmentId(''); }}
                     disabled={coursesLoading}
@@ -753,8 +996,9 @@ export default function UploadPage() {
 
                 {/* Assignment select — filled from the selected course */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-slate-500">Assignment</label>
+                  <label htmlFor="upload-assignment" className="text-xs font-medium text-slate-500">Assignment</label>
                   <select
+                    id="upload-assignment"
                     value={selectedAssignmentId}
                     onChange={(e) => setSelectedAssignmentId(e.target.value)}
                     disabled={!selectedCourseId || assignmentsLoading}
@@ -841,8 +1085,14 @@ export default function UploadPage() {
             <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
               <div
                 onDrop={handleDrop}
-                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                onDragLeave={() => setIsDragOver(false)}
+                onDragEnter={() => { dragDepth.current += 1; setIsDragOver(true); }}
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDragLeave={() => {
+                  // dragleave also fires when the pointer crosses a child element, which made the
+                  // highlight flicker; only clear it when the drag has really left the zone.
+                  dragDepth.current = Math.max(0, dragDepth.current - 1);
+                  if (dragDepth.current === 0) setIsDragOver(false);
+                }}
                 className="relative"
               >
                 {/* Dot-grid bg — only visible in empty state */}
@@ -945,7 +1195,7 @@ export default function UploadPage() {
                           const c = getExtColor(f.name);
                           return (
                             <div
-                              key={i}
+                              key={`${f.name}-${f.size}-${f.lastModified}-${i}`}
                               className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
                             >
                               <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
@@ -975,14 +1225,21 @@ export default function UploadPage() {
                 multiple
                 accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
                 className="hidden"
-                onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setFiles(f); }}
+                onChange={(e) => { acceptFiles(Array.from(e.target.files || []), 'main'); e.target.value = ''; }}
               />
 
               {error && (
-                <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
+                <div role="alert" className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
                   <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
                   <p className="text-sm text-red-700 flex-1">{error}</p>
                   <button onClick={() => setError('')} aria-label="Dismiss error" className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
+                </div>
+              )}
+              {notice && (
+                <div role="status" className="border-t border-blue-100 bg-blue-50 px-5 py-3.5 flex items-start gap-2.5">
+                  <AlertCircle size={14} className="text-blue-400 mt-0.5 shrink-0" />
+                  <p className="text-sm text-blue-800 flex-1">{notice}</p>
+                  <button type="button" onClick={() => setNotice('')} aria-label="Dismiss message" className="text-blue-300 hover:text-blue-500 transition-colors shrink-0"><X size={13} /></button>
                 </div>
               )}
               {hasMixedZipSelection && (
@@ -997,8 +1254,12 @@ export default function UploadPage() {
             <div className="rounded-2xl bg-white overflow-hidden relative transition-all duration-300" style={cardShadow}>
               <div
                 onDrop={handleStarterDrop}
-                onDragOver={(e) => { e.preventDefault(); setIsStarterDragOver(true); }}
-                onDragLeave={() => setIsStarterDragOver(false)}
+                onDragEnter={() => { starterDragDepth.current += 1; setIsStarterDragOver(true); }}
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDragLeave={() => {
+                  starterDragDepth.current = Math.max(0, starterDragDepth.current - 1);
+                  if (starterDragDepth.current === 0) setIsStarterDragOver(false);
+                }}
                 className="relative"
               >
                 {/* Dot-grid bg */}
@@ -1072,7 +1333,7 @@ export default function UploadPage() {
                         const c = getExtColor(f.name);
                         return (
                           <div
-                            key={i}
+                            key={`${f.name}-${f.size}-${f.lastModified}-${i}`}
                             className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 group/row transition-all duration-150 hover:border-slate-200 hover:bg-white"
                           >
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0 ${c}`}>
@@ -1101,16 +1362,9 @@ export default function UploadPage() {
                 multiple
                 accept=".zip,.py,.java,.c,.cpp,.h,.js,.ts,.go,.rs,.rb,.php,.cs,.kt,.swift"
                 className="hidden"
-                onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) setStarterFiles(f); }}
+                onChange={(e) => { acceptFiles(Array.from(e.target.files || []), 'starter'); e.target.value = ''; }}
               />
 
-              {error && starterFiles.length > 0 && (
-                <div className="border-t border-red-100 bg-red-50 px-5 py-3.5 flex items-start gap-2.5">
-                  <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
-                  <p className="text-sm text-red-700 flex-1">{error}</p>
-                  <button onClick={() => setError('')} aria-label="Dismiss error" className="text-red-300 hover:text-red-500 transition-colors shrink-0"><X size={13} /></button>
-                </div>
-              )}
             </div>
           </div>
 
@@ -1131,7 +1385,7 @@ export default function UploadPage() {
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={sourceScanEnabled}
+                  checked={effectiveSourceScan}
                   onChange={(e) => setSourceScanEnabled(e.target.checked)}
                   disabled={tenantExternalScanEnabled === false}
                   className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1145,7 +1399,7 @@ export default function UploadPage() {
                       ? 'Disabled for this workspace. A tenant administrator can enable it in Settings → External Sources.'
                       : tenantExternalScanEnabled === true
                         ? `Check public sources for this submission (${configuredSourceCount} source${configuredSourceCount === 1 ? '' : 's'} configured).`
-                        : 'Checking public sources for this submission.'}
+                        : 'Uses your workspace setting for external source scanning.'}
                   </span>
                 </span>
               </label>
@@ -1176,6 +1430,7 @@ export default function UploadPage() {
                         key={option.id}
                         type="button"
                         onClick={() => setSelectedAssignmentModeId(option.id)}
+                        aria-pressed={selectedAssignmentModeId === option.id}
                         className={`rounded-xl border p-4 text-left transition ${selectedAssignmentModeId === option.id ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
                           }`}
                       >
@@ -1216,18 +1471,22 @@ export default function UploadPage() {
                         const mode = assignmentModes.find((m) => m.id === selectedAssignmentModeId);
                         if (mode?.weights) {
                           setEngineWeights(normalizeWeights(mode.weights));
+                          setWeightsTouched(false);
                         }
                       }}
-                      className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors"
+                      disabled={!selectedAssignmentMode?.weights}
+                      className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-slate-400"
                     >
                       Reset to preset
                     </button>
                   </div>
 
                   <div className="space-y-1.5">
-                    {UPLOAD_ENGINE_OPTIONS.map((engine) => {
+                    {/* Only engines the workspace has active are listed (every engine used to show). */}
+                    {UPLOAD_ENGINE_OPTIONS.filter((engine) => activeEngines.includes(engine.key)).map((engine) => {
                       const weight = engineWeights[engine.key] ?? 0;
-                      const percentage = Math.round(weight * 100);
+                      const sliderValue = Math.round(weight * 100);
+                      const share = weightTotal > 0 ? Math.round((weight / weightTotal) * 100) : 0;
                       return (
                         <div
                           key={engine.key}
@@ -1236,7 +1495,7 @@ export default function UploadPage() {
                               : 'border-slate-100 bg-slate-50'
                             }`}
                         >
-                          <div className={`w-4 h-4 rounded flex items-center justify-center border-2 shrink-0 ${weight > 0
+                          <div aria-hidden="true" className={`w-4 h-4 rounded flex items-center justify-center border-2 shrink-0 ${weight > 0
                               ? 'border-blue-600 bg-blue-600'
                               : 'border-slate-300 bg-white'
                             }`}
@@ -1249,18 +1508,20 @@ export default function UploadPage() {
                               min="0"
                               max="100"
                               step="1"
-                              value={percentage}
+                              value={sliderValue}
                               onChange={(e) => updateEngineWeight(engine.key, Number(e.target.value) / 100)}
+                              aria-label={`${engine.label} weight`}
+                              aria-valuetext={`${share}% of the total`}
                               className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                             />
-                            <span className="text-xs font-mono text-slate-600 w-10 text-right">{percentage}%</span>
+                            <span title="Share of the total weight" className="text-xs font-mono text-slate-600 w-10 text-right">{share}%</span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
 
-                  {Object.values(engineWeights).every((v) => v === 0) && (
+                  {(selectedAssignmentModeId !== 'auto_detect' || weightsTouched) && weightTotal <= 0 && (
                     <div className="mt-3 border-t border-amber-100 bg-amber-50 px-3.5 py-3 flex items-center gap-2 rounded-xl">
                       <AlertCircle size={12} className="text-amber-500" />
                       <p className="text-xs text-amber-700">All weights are zero. At least one engine must have weight &#62; 0.</p>
@@ -1268,7 +1529,9 @@ export default function UploadPage() {
                   )}
 
                   <div className="mt-2 text-xs text-slate-500">
-                    Weights are normalized to sum to 100%. Sliders adjust proportionally.
+                    {selectedAssignmentModeId === 'auto_detect' && !weightsTouched
+                      ? 'Auto Detect chooses engine weights for each submission. Moving a slider overrides that.'
+                      : 'The percentage beside each slider is that engine’s share of the total weight; shares always add up to 100%.'}
                   </div>
                 </div>
               </div>

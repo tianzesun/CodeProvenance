@@ -58,20 +58,20 @@ function relativeTime(value: string | null): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
 
-  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
   if (minutes < 1) return 'Just now';
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
 
-  const hours = Math.round(minutes / 60);
+  const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
 
-  const days = Math.round(hours / 24);
+  const days = Math.floor(hours / 24);
   if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
 
-  const months = Math.round(days / 30);
+  const months = Math.floor(days / 30);
   if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
 
-  const years = Math.round(months / 12);
+  const years = Math.floor(months / 12);
   return `${years} year${years === 1 ? '' : 's'} ago`;
 }
 
@@ -186,22 +186,41 @@ function StatCard({
   );
 }
 
-interface AxiosErrorResponse {
-  response?: {
-    data?: {
-      detail?: string;
-      message?: string;
-    };
-  };
-}
+const REFERENCE_HEADERS = ['x-correlation-id', 'x-request-id'];
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+/** Sentinel for the "remove term link" option, which has to differ from the empty placeholder. */
+const UNLINK_TERM = '__unlink__';
 
-function getErrorMessage(error: unknown): string {
-  const axiosError = error as AxiosErrorResponse;
-  const detail = axiosError?.response?.data?.detail;
-  if (typeof detail === 'string') {
-    return detail;
+/**
+ * Generic, status-keyed text; the server's own wording is no longer echoed. `conflict` is the
+ * explanation to show for a 409. A correlation id is appended when the backend sends one.
+ */
+function getErrorMessage(
+  error: unknown,
+  fallback = 'Unable to complete that action right now.',
+  conflict?: string,
+): string {
+  const response = (error as { response?: { status?: unknown; headers?: unknown } } | null)?.response;
+  const status = typeof response?.status === 'number' ? response.status : undefined;
+  const headers = (response?.headers ?? {}) as Record<string, unknown>;
+  const reference = REFERENCE_HEADERS.map((name) => headers[name]).find(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  );
+
+  let message = fallback;
+  if (status === 401) {
+    message = 'Your session has expired. Please sign in again.';
+  } else if (status === 403) {
+    message = 'You don’t have permission to do that.';
+  } else if (status === 404) {
+    message = 'That item no longer exists. Refresh the page and try again.';
+  } else if (status === 409) {
+    message = conflict ?? 'This conflicts with existing data. Refresh the page and try again.';
+  } else if (status === 429) {
+    message = 'Too many requests. Please wait a moment and try again.';
   }
-  return 'Unable to complete that action right now.';
+
+  return reference ? `${message} (Reference: ${reference})` : message;
 }
 
 function validatePasswordInput(password: string): string | null {
@@ -212,6 +231,7 @@ function validatePasswordInput(password: string): string | null {
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type RoleFilter = 'all' | AuthRole;
+type StatusFilter = 'all' | 'active' | 'suspended';
 
 interface CourseInstructor {
   id: string;
@@ -1000,15 +1020,18 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-        {label}
-        {required && (
-          <span aria-hidden="true" className="ml-0.5 text-red-500 dark:text-red-400">
-            *
-          </span>
-        )}
+      {/* The control sits inside the <label>; before, the two were not connected. */}
+      <label className="block">
+        <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {label}
+          {required && (
+            <span aria-hidden="true" className="ml-0.5 text-red-500 dark:text-red-400">
+              *
+            </span>
+          )}
+        </span>
+        {children}
       </label>
-      {children}
       {hint && <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
     </div>
   );
@@ -1042,6 +1065,12 @@ export default function AdminPage() {
   const [showCreatePanel, setShowCreatePanel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [pendingSuspend, setPendingSuspend] = useState<AuthUser | null>(null);
+  const [revealPasswords, setRevealPasswords] = useState(false);
+  const [copyNotice, setCopyNotice] = useState('');
+  const [courseDeleteError, setCourseDeleteError] = useState('');
+  const [termDeleteError, setTermDeleteError] = useState('');
 
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [importContent, setImportContent] = useState('');
@@ -1112,46 +1141,54 @@ export default function AdminPage() {
 
   // ── Data loading ─────────────────────────────────────────────────────────────
 
-  const loadUsers = useCallback(async () => {
-    setLoadingUsers(true);
-    setPageError('');
+  // `silent` refreshes in the background. Refreshing after an action used to flip the list back
+  // to its loading skeleton, and load failures for courses and terms were only console.error'd,
+  // which left an empty list that looked like "no data".
+  const loadUsers = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoadingUsers(true);
+      setPageError('');
+    }
     try {
       const result = await listUsers();
       setUsers(result);
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setPageError(getErrorMessage(error, 'Couldn’t load users. Please try again.'));
     } finally {
-      setLoadingUsers(false);
+      if (!silent) setLoadingUsers(false);
     }
   }, [listUsers]);
 
-  const loadCoursesWithInstructors = useCallback(async () => {
-    setLoadingCourses(true);
+  const loadCoursesWithInstructors = useCallback(async (silent = false) => {
+    if (!silent) setLoadingCourses(true);
     try {
       const res = await apiClient.get('/api/admin/courses-with-instructors');
       setCoursesWithInstructors(res.data?.courses || []);
     } catch (error) {
-      console.error('Failed to load courses with instructors', error);
+      setPageError(getErrorMessage(error, 'Couldn’t load courses. Please try again.'));
     } finally {
-      setLoadingCourses(false);
+      if (!silent) setLoadingCourses(false);
     }
   }, []);
 
-  const loadTerms = useCallback(async () => {
-    setLoadingTerms(true);
+  const loadTerms = useCallback(async (silent = false) => {
+    if (!silent) setLoadingTerms(true);
     try {
       const res = await apiClient.get('/api/terms');
       setTerms(Array.isArray(res.data) ? res.data : []);
     } catch (error) {
-      console.error('Failed to load terms', error);
+      setPageError(getErrorMessage(error, 'Couldn’t load terms. Please try again.'));
     } finally {
-      setLoadingTerms(false);
+      if (!silent) setLoadingTerms(false);
     }
   }, []);
 
+  // Depend on the role, not the whole user object, so an auth refresh doesn't reload everything.
+  const isAdmin = user?.role === 'admin';
+
   useEffect(() => {
     if (!bootstrapped || authLoading || status === 'loading') return;
-    if (!user || user.role !== 'admin') {
+    if (!isAdmin) {
       setLoadingUsers(false);
       setLoadingCourses(false);
       setLoadingTerms(false);
@@ -1160,7 +1197,7 @@ export default function AdminPage() {
     loadUsers();
     loadCoursesWithInstructors();
     loadTerms();
-  }, [bootstrapped, authLoading, status, user, loadUsers, loadCoursesWithInstructors, loadTerms]);
+  }, [bootstrapped, authLoading, status, isAdmin, loadUsers, loadCoursesWithInstructors, loadTerms]);
 
   // ── Panel open/close ──────────────────────────────────────────────────────────
 
@@ -1200,14 +1237,16 @@ export default function AdminPage() {
     const query = searchQuery.trim().toLowerCase();
     return users.filter((entry) => {
       const matchesRole = roleFilter === 'all' || entry.role === roleFilter;
+      const matchesStatus =
+        statusFilter === 'all' || (statusFilter === 'suspended' ? Boolean(entry.suspended) : !entry.suspended);
       const matchesQuery =
         !query ||
         entry.full_name.toLowerCase().includes(query) ||
         entry.email.toLowerCase().includes(query) ||
         (entry.tenant_name || '').toLowerCase().includes(query);
-      return matchesRole && matchesQuery;
+      return matchesRole && matchesStatus && matchesQuery;
     });
-  }, [users, roleFilter, searchQuery]);
+  }, [users, roleFilter, statusFilter, searchQuery]);
 
   const totalUsers = users.length;
   const activeUsers = users.filter((u) => !u.suspended).length;
@@ -1315,10 +1354,18 @@ export default function AdminPage() {
 
   const handleSaveCourse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (courseSaving) return;
     setCourseError('');
     if (!courseForm.name.trim()) {
       setCourseError('Course name is required.');
       return;
+    }
+    if (courseForm.year) {
+      const yearValue = Number(courseForm.year);
+      if (!Number.isInteger(yearValue) || yearValue < 1900 || yearValue > 2200) {
+        setCourseError('Year must be a whole number between 1900 and 2200.');
+        return;
+      }
     }
     const wasEditing = Boolean(editingCourseId);
     setCourseSaving(true);
@@ -1337,7 +1384,7 @@ export default function AdminPage() {
       } else {
         await apiClient.post('/api/courses', payload);
       }
-      await loadCoursesWithInstructors();
+      await loadCoursesWithInstructors(true);
       setShowCourseModal(false);
       setEditingCourseId(null);
       setSuccessMessage(wasEditing ? 'Course updated successfully.' : 'Course created successfully.');
@@ -1351,20 +1398,32 @@ export default function AdminPage() {
 
   // ── Course deletion ───────────────────────────────────────────────────────────
 
+  const closeCourseDeleteDialog = () => {
+    if (courseDeleting) return;
+    setCourseToDelete(null);
+    setCourseDeleteError('');
+  };
+
   const confirmDeleteCourse = async () => {
-    if (!courseToDelete) return;
+    if (!courseToDelete || courseDeleting) return;
+    const course = courseToDelete;
     setCourseDeleting(true);
-    setPageError('');
+    setCourseDeleteError('');
     try {
-      await apiClient.delete(`/api/courses/${courseToDelete.id}`);
+      await apiClient.delete(`/api/courses/${encodeURIComponent(course.id)}`);
       setCourseToDelete(null);
-      await loadCoursesWithInstructors();
-      setSuccessMessage(`“${courseToDelete.name}” deleted.`);
+      await loadCoursesWithInstructors(true);
+      setSuccessMessage(`“${course.name}” deleted.`);
     } catch (error) {
-      // Courses that still own assignments come back as 409 with an
-      // actionable message — surface it instead of a generic failure.
-      setCourseToDelete(null);
-      setPageError(getErrorMessage(error));
+      // The dialog stays open and shows the reason. (It used to close and put the error in a
+      // banner at the top of the page.) A 409 means checks or cases still reference its assignments.
+      setCourseDeleteError(
+        getErrorMessage(
+          error,
+          'Couldn’t delete the course. Please try again.',
+          'This course can’t be deleted while checks or integrity cases still reference its assignments.',
+        ),
+      );
     } finally {
       setCourseDeleting(false);
     }
@@ -1445,7 +1504,7 @@ export default function AdminPage() {
             : 'Term created successfully.',
         );
       }
-      await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
+      await Promise.all([loadTerms(true), loadCoursesWithInstructors(true)]);
       setShowTermModal(false);
       setTimeout(() => termButtonRef.current?.focus(), 0);
     } catch (error) {
@@ -1459,19 +1518,25 @@ export default function AdminPage() {
     setTermToDelete(term);
   };
 
+  const closeTermDeleteDialog = () => {
+    if (deletingTermId) return;
+    setTermToDelete(null);
+    setTermDeleteError('');
+  };
+
   const confirmDeleteTerm = async () => {
-    if (!termToDelete) return;
+    if (!termToDelete || deletingTermId) return;
     const term = termToDelete;
     const label = term.label || `${term.name} ${term.year}`;
-    setTermToDelete(null);
     setDeletingTermId(term.id);
-    setPageError('');
+    setTermDeleteError('');
     try {
-      await apiClient.delete(`/api/terms/${term.id}`);
-      await Promise.all([loadTerms(), loadCoursesWithInstructors()]);
+      await apiClient.delete(`/api/terms/${encodeURIComponent(term.id)}`);
+      setTermToDelete(null);
+      await Promise.all([loadTerms(true), loadCoursesWithInstructors(true)]);
       setSuccessMessage(`Term ${label} removed.`);
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setTermDeleteError(getErrorMessage(error, 'Couldn’t remove the term. Please try again.'));
     } finally {
       setDeletingTermId(null);
     }
@@ -1479,6 +1544,7 @@ export default function AdminPage() {
 
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
     setFormError('');
     setSuccessMessage('');
 
@@ -1498,11 +1564,13 @@ export default function AdminPage() {
         role: form.role,
         tenant_name: form.tenant_name.trim(),
       });
-      await loadUsers();
+      await loadUsers(true);
       closeCreatePanel();
       setSuccessMessage('User created successfully.');
     } catch (error) {
-      setFormError(getErrorMessage(error));
+      setFormError(
+        getErrorMessage(error, 'Couldn’t create the user. Please try again.', 'An account with this email may already exist.'),
+      );
     } finally {
       setSaving(false);
     }
@@ -1515,9 +1583,17 @@ export default function AdminPage() {
   };
 
   const closeImportPanel = () => {
+    if (importBusy) return;
     setShowImportPanel(false);
     setImportPreview(null);
     setImportError('');
+    // The pasted content can contain passwords and the default password is a credential. They
+    // used to stay in memory, and reappear when the dialog was reopened.
+    setImportContent('');
+    setImportDefaultPassword('');
+    setImportDefaultTenant('');
+    setRevealPasswords(false);
+    setCopyNotice('');
   };
 
   const handleExportUsers = async (format: 'csv' | 'json') => {
@@ -1531,13 +1607,13 @@ export default function AdminPage() {
       const url = URL.createObjectURL(res.data as Blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `users.${format}`;
+      link.download = `users-${new Intl.DateTimeFormat('en-CA').format(new Date())}.${format}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setPageError(getErrorMessage(error, 'Couldn’t export users. Please try again.'));
     } finally {
       setExportingUsers(false);
     }
@@ -1545,21 +1621,28 @@ export default function AdminPage() {
 
   const handleImportFile = async (file: File | null) => {
     if (!file) return;
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportError('That file is too large to import (limit 2 MB). Split it into smaller files.');
+      return;
+    }
     try {
       setImportContent(await file.text());
       setImportPreview(null);
       setImportError('');
+      setCopyNotice('');
     } catch {
       setImportError('Could not read that file.');
     }
   };
 
   const runImport = async (dryRun: boolean) => {
+    if (importBusy) return;
     if (!importContent.trim()) {
       setImportError('Paste CSV or JSON content, or choose a file first.');
       return;
     }
     setImportBusy(true);
+    setCopyNotice('');
     setImportError('');
     try {
       const res = await apiClient.post('/api/admin/users/import', {
@@ -1571,19 +1654,41 @@ export default function AdminPage() {
       const report = res.data as ImportReport;
       setImportPreview(report);
       if (!dryRun) {
-        await loadUsers();
+        // Done with the input: don't keep the pasted rows or the default password around.
+        setImportContent('');
+        setImportDefaultPassword('');
+        await loadUsers(true);
         setSuccessMessage(
           `Imported ${report.created} user(s) — ${report.skipped} skipped, ${report.failed} failed.`
         );
       }
     } catch (error) {
-      setImportError(getErrorMessage(error));
+      setImportError(getErrorMessage(error, 'The import failed. Please check the content and try again.'));
     } finally {
       setImportBusy(false);
     }
   };
 
   const canImport = Boolean(importPreview && importPreview.previewed > 0);
+  const importHasPasswords = importPreview?.results.some((row) => row.temporary_password) ?? false;
+  // Rows holding a temporary password are all shown. Only the first 50 rows used to be listed, so
+  // the passwords for any later rows were created but could never be seen.
+  const importRowLimit = importHasPasswords ? Number.POSITIVE_INFINITY : 50;
+
+  const copyImportedCredentials = async () => {
+    if (!importPreview) return;
+    const quote = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+    const lines = importPreview.results
+      .filter((row) => row.temporary_password)
+      .map((row) => `${quote(row.email)},${quote(row.temporary_password ?? '')}`);
+    if (lines.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(['email,temporary_password', ...lines].join('\n'));
+      setCopyNotice('Copied. Store them somewhere secure; they are not shown again.');
+    } catch {
+      setCopyNotice('Couldn’t copy automatically. Show the passwords and copy them by hand.');
+    }
+  };
 
   const handleToggleSuspend = async (entry: AuthUser) => {
     setTogglingId(entry.id);
@@ -1594,17 +1699,32 @@ export default function AdminPage() {
       await apiClient.patch(`/api/admin/users/${entry.id}`, {
         suspended: !entry.suspended,
       });
-      await loadUsers();
+      await loadUsers(true);
       setSuccessMessage(
         entry.suspended
           ? `${entry.full_name} has been reactivated.`
           : `${entry.full_name} has been suspended.`
       );
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setPageError(getErrorMessage(error, 'Couldn’t update the account. Please try again.'));
     } finally {
       setTogglingId(null);
     }
+  };
+
+  const requestToggleSuspend = (entry: AuthUser) => {
+    if (entry.suspended) {
+      handleToggleSuspend(entry);
+    } else {
+      setPendingSuspend(entry);
+    }
+  };
+
+  const confirmSuspend = async () => {
+    const entry = pendingSuspend;
+    if (!entry || togglingId) return;
+    await handleToggleSuspend(entry);
+    setPendingSuspend(null);
   };
 
   const assignInstructor = async (courseId: string, userId: string) => {
@@ -1615,7 +1735,7 @@ export default function AdminPage() {
         user_id: userId,
         role: 'instructor',
       });
-      await loadCoursesWithInstructors();
+      await loadCoursesWithInstructors(true);
       setSelectedProfessorForCourse((prev) => ({ ...prev, [courseId]: '' }));
     } catch (error) {
       setPageError(getErrorMessage(error));
@@ -1636,7 +1756,7 @@ export default function AdminPage() {
       await apiClient.delete('/api/admin/course-instructors', {
         data: { course_id: pending.courseId, user_id: pending.userId },
       });
-      await loadCoursesWithInstructors();
+      await loadCoursesWithInstructors(true);
       setPendingInstructorRemoval(null);
     } catch (error) {
       setPageError(getErrorMessage(error));
@@ -1656,9 +1776,11 @@ export default function AdminPage() {
         code: course.code ?? null,
         department: course.department ?? null,
         description: course.description ?? null,
-        term_id: termId || null,   // empty string → unlink
+        // The unlink option uses a sentinel, because an empty value means "nothing chosen" and
+        // keeps the Assign button disabled (so a term link could never be removed).
+        term_id: termId && termId !== UNLINK_TERM ? termId : null,
       });
-      await loadCoursesWithInstructors();
+      await loadCoursesWithInstructors(true);
       setSelectedTermForCourse((prev) => ({ ...prev, [courseId]: '' }));
       setSuccessMessage('Term assignment updated.');
     } catch (error) {
@@ -1743,7 +1865,7 @@ export default function AdminPage() {
         {(successMessage || pageError) && (
           <div className="space-y-3">
             {successMessage && (
-              <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+              <div role="status" className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                 <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
                 <span>{successMessage}</span>
                 <button
@@ -1757,7 +1879,7 @@ export default function AdminPage() {
               </div>
             )}
             {pageError && (
-              <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+              <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
                 <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                 <span>{pageError}</span>
                 <button
@@ -1781,8 +1903,11 @@ export default function AdminPage() {
             hint={`${adminCount} admin${adminCount === 1 ? '' : 's'} · ${professorCount} professor${professorCount === 1 ? '' : 's'}`}
             icon={<Users size={14} />}
             tone="slate"
-            active={activeTab === 'users'}
-            onClick={() => setActiveTab('users')}
+            active={activeTab === 'users' && statusFilter === 'all'}
+            onClick={() => {
+              setStatusFilter('all');
+              setActiveTab('users');
+            }}
           />
           <StatCard
             label="Active"
@@ -1790,10 +1915,11 @@ export default function AdminPage() {
             hint={totalUsers > 0 ? `${activePercent}% of accounts active` : 'No accounts yet'}
             icon={<UserCheck size={14} />}
             tone="emerald"
-            active={false}
+            active={activeTab === 'users' && statusFilter === 'active'}
             onClick={() => {
               setRoleFilter('all');
               setSearchQuery('');
+              setStatusFilter('active');
               setActiveTab('users');
             }}
           />
@@ -1803,8 +1929,14 @@ export default function AdminPage() {
             hint={suspendedUsers === 0 ? 'All accounts in good standing' : 'Disabled from signing in'}
             icon={<UserX size={14} />}
             tone="amber"
-            active={false}
-            onClick={() => setActiveTab('users')}
+            active={activeTab === 'users' && statusFilter === 'suspended'}
+            onClick={() => {
+              // This card used to just switch tabs, without showing the suspended accounts.
+              setRoleFilter('all');
+              setSearchQuery('');
+              setStatusFilter('suspended');
+              setActiveTab('users');
+            }}
           />
           <StatCard
             label="Courses"
@@ -1836,11 +1968,12 @@ export default function AdminPage() {
         </section>
 
         {/* ── Section tabs ──────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
+        <div role="tablist" aria-label="Administration sections" className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setActiveTab('users')}
-            aria-pressed={activeTab === 'users'}
+            role="tab"
+            aria-selected={activeTab === 'users'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'users'
               ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
               : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
@@ -1854,7 +1987,8 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('courses')}
-            aria-pressed={activeTab === 'courses'}
+            role="tab"
+            aria-selected={activeTab === 'courses'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'courses'
               ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
               : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
@@ -1868,7 +2002,8 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('terms')}
-            aria-pressed={activeTab === 'terms'}
+            role="tab"
+            aria-selected={activeTab === 'terms'}
             className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${activeTab === 'terms'
               ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
               : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
@@ -1883,7 +2018,7 @@ export default function AdminPage() {
 
         {/* ── Users table ─────────────────────────────────────────────────────── */}
         {activeTab === 'users' && (
-          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <section role="tabpanel" className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
             {/* Table header + filters */}
             <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1903,6 +2038,9 @@ export default function AdminPage() {
                   />
                   <input
                     value={searchQuery}
+                    aria-label="Search users"
+                    name="user-search"
+                    autoComplete="off"
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by name, email, workspace…"
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
@@ -1912,12 +2050,27 @@ export default function AdminPage() {
                 <div className="relative">
                   <select
                     value={roleFilter}
+                    aria-label="Filter by role"
                     onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
                     className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-9 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
                   >
                     <option value="all">All roles</option>
                     <option value="admin">Admin</option>
                     <option value="professor">Professor</option>
+                  </select>
+                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                    aria-label="Filter by status"
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-9 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="suspended">Suspended</option>
                   </select>
                   <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 </div>
@@ -1950,12 +2103,12 @@ export default function AdminPage() {
                 <table className="min-w-full text-left">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
                     <tr>
-                      <th className="px-5 py-3">User</th>
-                      <th className="px-5 py-3">Role</th>
-                      <th className="px-5 py-3">Status</th>
-                      <th className="px-5 py-3">Last login</th>
-                      <th className="px-5 py-3">Workspace</th>
-                      <th className="px-5 py-3 text-right">Actions</th>
+                      <th scope="col" className="px-5 py-3">User</th>
+                      <th scope="col" className="px-5 py-3">Role</th>
+                      <th scope="col" className="px-5 py-3">Status</th>
+                      <th scope="col" className="px-5 py-3">Last login</th>
+                      <th scope="col" className="px-5 py-3">Workspace</th>
+                      <th scope="col" className="px-5 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -1982,12 +2135,12 @@ export default function AdminPage() {
                   <table className="min-w-full text-left">
                     <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
                       <tr>
-                        <th className="px-5 py-3">User</th>
-                        <th className="px-5 py-3">Role</th>
-                        <th className="px-5 py-3">Status</th>
-                        <th className="px-5 py-3">Last login</th>
-                        <th className="px-5 py-3">Workspace</th>
-                        <th className="px-5 py-3 text-right">Actions</th>
+                        <th scope="col" className="px-5 py-3">User</th>
+                        <th scope="col" className="px-5 py-3">Role</th>
+                        <th scope="col" className="px-5 py-3">Status</th>
+                        <th scope="col" className="px-5 py-3">Last login</th>
+                        <th scope="col" className="px-5 py-3">Workspace</th>
+                        <th scope="col" className="px-5 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -2046,7 +2199,7 @@ export default function AdminPage() {
                                   <button
                                     type="button"
                                     disabled={isToggling}
-                                    onClick={() => handleToggleSuspend(entry)}
+                                    onClick={() => requestToggleSuspend(entry)}
                                     className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${entry.suspended
                                       ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
                                       : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
@@ -2126,7 +2279,7 @@ export default function AdminPage() {
                           <button
                             type="button"
                             disabled={isToggling}
-                            onClick={() => handleToggleSuspend(entry)}
+                            onClick={() => requestToggleSuspend(entry)}
                             className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition disabled:opacity-50 ${entry.suspended
                               ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
                               : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
@@ -2157,7 +2310,7 @@ export default function AdminPage() {
 
         {/* ── Course & Instructor Assignments ─────────────────────────────────── */}
         {activeTab === 'courses' && (
-          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <section role="tabpanel" className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
@@ -2254,7 +2407,7 @@ export default function AdminPage() {
             ) : (
               <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
                 {filteredCourses.map((course) => {
-                  const professors = users.filter((u) => u.role === 'professor' || u.role === 'admin');
+                  const professors = users.filter((u) => (u.role === 'professor' || u.role === 'admin') && !u.suspended);
                   const currentInstructorIds = course.instructors.map((i) => i.id);
                   const availableProfessors = professors.filter((p) => !currentInstructorIds.includes(p.id));
                   const isAssigning = assigningCourse === course.id;
@@ -2350,12 +2503,9 @@ export default function AdminPage() {
                                 className="h-9 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                               >
                                 <option value="">
-                                  {course.term_id
-                                    ? '— Remove term link —'
-                                    : course.term
-                                      ? 'Assign a registry term…'
-                                      : 'Assign a term…'}
+                                  {course.term ? 'Assign a registry term…' : 'Assign a term…'}
                                 </option>
+                                {course.term_id && <option value={UNLINK_TERM}>— Remove term link —</option>}
                                 {terms.map((t) => (
                                   <option key={t.id} value={t.id}>
                                     {t.label || `${t.name} ${t.year}`}
@@ -2482,7 +2632,7 @@ export default function AdminPage() {
 
         {/* ── Academic terms ─────────────────────────────────────────────────── */}
         {activeTab === 'terms' && (
-          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <section role="tabpanel" className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-blue-600/10 bg-blue-600/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-400">
@@ -2812,178 +2962,161 @@ export default function AdminPage() {
         </form>
       </Modal>
 
-      {/* ── Delete term confirmation modal ───────────────────────────────────── */}
-      {termToDelete && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-term-title"
-          onClick={() => setTermToDelete(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl bg-white shadow-2xl dark:bg-slate-950 ring-1 ring-slate-200 dark:ring-slate-800"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-start gap-4 px-6 pt-6 pb-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/15">
-                <Trash2 size={20} className="text-red-600 dark:text-red-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3
-                  id="delete-term-title"
-                  className="text-base font-semibold text-slate-900 dark:text-white"
-                >
-                  Remove term from registry?
-                </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  <strong className="font-semibold text-slate-700 dark:text-slate-300">
-                    {termToDelete.label || `${termToDelete.name} ${termToDelete.year}`}
-                  </strong>{' '}
-                  will be removed from the registry.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTermToDelete(null)}
-                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-                aria-label="Cancel"
-              >
-                <X size={16} />
-              </button>
-            </div>
+      {/* ── Suspend confirmation ───────────────────────────────────────────────── */}
+      <Modal
+        open={pendingSuspend !== null}
+        title="Suspend this user?"
+        onClose={() => {
+          if (!togglingId) setPendingSuspend(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setPendingSuspend(null)}
+              disabled={Boolean(togglingId)}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmSuspend}
+              disabled={Boolean(togglingId)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-70"
+            >
+              {togglingId ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />}
+              Suspend
+            </button>
+          </>
+        }
+      >
+        {pendingSuspend && (
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+            <strong className="font-semibold text-slate-800 dark:text-white">{pendingSuspend.full_name}</strong>{' '}
+            ({pendingSuspend.email}) will be signed out of new sessions and unable to sign in until you
+            activate the account again. Their courses, checks and cases are kept.
+          </p>
+        )}
+      </Modal>
 
-            {/* Warning when courses are linked */}
+      {/* ── Delete term confirmation ───────────────────────────────────────────── */}
+      <Modal
+        open={termToDelete !== null}
+        title="Remove term from registry?"
+        onClose={closeTermDeleteDialog}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closeTermDeleteDialog}
+              disabled={Boolean(deletingTermId)}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteTerm}
+              disabled={Boolean(deletingTermId)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-70"
+            >
+              {deletingTermId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {deletingTermId ? 'Removing…' : 'Remove term'}
+            </button>
+          </>
+        }
+      >
+        {termToDelete && (
+          <div className="space-y-3 text-sm">
+            <p className="text-slate-600 dark:text-slate-300">
+              <strong className="font-semibold text-slate-800 dark:text-white">
+                {termToDelete.label || `${termToDelete.name} ${termToDelete.year}`}
+              </strong>{' '}
+              will be removed from the registry.
+            </p>
+
             {termToDelete.course_count > 0 && (
-              <div className="mx-6 mb-2 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+              <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
                 <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                <p className="text-sm text-amber-800 dark:text-amber-300">
+                <p className="text-amber-800 dark:text-amber-300">
                   <strong>{termToDelete.course_count} course{termToDelete.course_count !== 1 ? 's' : ''}</strong>{' '}
-                  {termToDelete.course_count !== 1 ? 'are' : 'is'} linked to this term. Each course will
-                  keep its term label but will no longer be linked to the registry entry.
+                  {termToDelete.course_count !== 1 ? 'are' : 'is'} linked to this term. Each course will keep its
+                  term label but will no longer be linked to the registry entry.
                 </p>
               </div>
             )}
 
-            {/* Info note */}
-            <p className="px-6 pb-4 text-xs text-slate-400 dark:text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               This only removes the registry entry — no courses, assignments, or submission data will be deleted.
             </p>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setTermToDelete(null)}
-                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteTerm}
-                className="h-10 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-              >
-                <Trash2 size={14} />
-                Remove term
-              </button>
-            </div>
+            {termDeleteError && (
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                {termDeleteError}
+              </p>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
-      {/* ── Delete course confirmation modal ───────────────────────────────────── */}
-      {courseToDelete && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-course-title"
-          onClick={() => {
-            if (!courseDeleting) setCourseToDelete(null);
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl bg-white shadow-2xl dark:bg-slate-950 ring-1 ring-slate-200 dark:ring-slate-800"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-start gap-4 px-6 pt-6 pb-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/15">
-                <Trash2 size={20} className="text-red-600 dark:text-red-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3
-                  id="delete-course-title"
-                  className="text-base font-semibold text-slate-900 dark:text-white"
-                >
-                  Delete course?
-                </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  <strong className="font-semibold text-slate-700 dark:text-slate-300">
-                    {courseToDelete.name}
-                  </strong>{' '}
-                  and its {courseAssignmentCount(courseToDelete)} assignment
-                  {courseAssignmentCount(courseToDelete) === 1 ? '' : 's'} will be permanently
-                  deleted.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCourseToDelete(null)}
-                disabled={courseDeleting}
-                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-                aria-label="Cancel"
-              >
-                <X size={16} />
-              </button>
-            </div>
+      {/* ── Delete course confirmation ─────────────────────────────────────────── */}
+      <Modal
+        open={courseToDelete !== null}
+        title="Delete course?"
+        onClose={closeCourseDeleteDialog}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closeCourseDeleteDialog}
+              disabled={courseDeleting}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteCourse}
+              disabled={courseDeleting}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-70"
+            >
+              {courseDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {courseDeleting ? 'Deleting…' : 'Delete course'}
+            </button>
+          </>
+        }
+      >
+        {courseToDelete && (
+          <div className="space-y-3 text-sm">
+            <p className="text-slate-600 dark:text-slate-300">
+              <strong className="font-semibold text-slate-800 dark:text-white">{courseToDelete.name}</strong> and its{' '}
+              {courseAssignmentCount(courseToDelete)} assignment{courseAssignmentCount(courseToDelete) === 1 ? '' : 's'}{' '}
+              will be permanently deleted.
+            </p>
 
-            {/* Evidence that is kept is evidence that blocks the delete */}
             {courseAssignmentCount(courseToDelete) > 0 && (
-              <div className="mx-6 mb-2 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+              <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
                 <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                <p className="text-sm text-amber-800 dark:text-amber-300">
-                  Check history and integrity cases are <strong>kept</strong>, not deleted. If any
-                  of these assignments has them attached, the deletion is refused instead.
+                <p className="text-amber-800 dark:text-amber-300">
+                  Check history and integrity cases are <strong>kept</strong>, not deleted. If any of these
+                  assignments has them attached, the deletion is refused instead.
                 </p>
               </div>
             )}
 
-            {/* Info note */}
-            <p className="px-6 pb-4 text-xs text-slate-400 dark:text-slate-500">
-              Enrollments and instructor links for this course are removed with it. This cannot be
-              undone.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Enrollments and instructor links for this course are removed with it. This cannot be undone.
             </p>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setCourseToDelete(null)}
-                disabled={courseDeleting}
-                className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteCourse}
-                disabled={courseDeleting}
-                className="h-10 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70"
-              >
-                {courseDeleting ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Trash2 size={14} />
-                )}
-                {courseDeleting ? 'Deleting…' : 'Delete course'}
-              </button>
-            </div>
+            {courseDeleteError && (
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                {courseDeleteError}
+              </p>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       {/* ── Create user slide-over ─────────────────────────────────────────────── */}
       {showCreatePanel && (
@@ -3034,7 +3167,7 @@ export default function AdminPage() {
             <form onSubmit={handleCreateUser} className="px-6 py-6">
               <div className="space-y-5">
                 {formError && (
-                  <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                  <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <span>{formError}</span>
                   </div>
@@ -3052,6 +3185,7 @@ export default function AdminPage() {
                 <Field label="Email address">
                   <input
                     type="email"
+                    autoComplete="off"
                     value={form.email}
                     onChange={(e) => setForm((c) => ({ ...c, email: e.target.value }))}
                     placeholder="name@university.edu"
@@ -3090,6 +3224,7 @@ export default function AdminPage() {
                 >
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={form.password}
                     onChange={(e) => setForm((c) => ({ ...c, password: e.target.value }))}
                     placeholder="At least 8 characters"
@@ -3162,8 +3297,9 @@ export default function AdminPage() {
             <Field label="Default password" hint="Used for rows without their own password.">
               <input
                 type="password"
+                autoComplete="new-password"
                 value={importDefaultPassword}
-                onChange={(e) => setImportDefaultPassword(e.target.value)}
+                onChange={(e) => { setImportDefaultPassword(e.target.value); setImportPreview(null); }}
                 placeholder="Leave blank to auto-generate"
                 className={inputClass}
               />
@@ -3172,7 +3308,7 @@ export default function AdminPage() {
               <input
                 type="text"
                 value={importDefaultTenant}
-                onChange={(e) => setImportDefaultTenant(e.target.value)}
+                onChange={(e) => { setImportDefaultTenant(e.target.value); setImportPreview(null); }}
                 placeholder="Optional"
                 className={inputClass}
               />
@@ -3199,7 +3335,7 @@ export default function AdminPage() {
           </Field>
 
           {importError && (
-            <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+            <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <span>{importError}</span>
             </div>
@@ -3221,8 +3357,27 @@ export default function AdminPage() {
                 </span>
               </div>
 
+              {importHasPasswords && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRevealPasswords((value) => !value)}
+                    className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+                  >
+                    {revealPasswords ? 'Hide passwords' : 'Show passwords'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyImportedCredentials}
+                    className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+                  >
+                    Copy email + password list
+                  </button>
+                </div>
+              )}
+
               <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                {importPreview.results.slice(0, 50).map((row) => (
+                {importPreview.results.slice(0, importRowLimit).map((row) => (
                   <div
                     key={`${row.row}-${row.email}`}
                     className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-slate-900/60"
@@ -3247,7 +3402,7 @@ export default function AdminPage() {
                       </span>
                       {row.temporary_password && (
                         <span className="mt-0.5 block font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                          Temp password: {row.temporary_password}
+                          Temp password: {revealPasswords ? row.temporary_password : '••••••••••••'}
                         </span>
                       )}
                     </span>
@@ -3255,7 +3410,7 @@ export default function AdminPage() {
                 ))}
               </div>
 
-              {importPreview.results.length > 50 && (
+              {importPreview.results.length > importRowLimit && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Showing the first 50 of {importPreview.results.length} rows.
                 </p>
@@ -3264,6 +3419,12 @@ export default function AdminPage() {
               {importPreview.results.some((row) => row.temporary_password) && (
                 <p className="text-xs text-amber-700 dark:text-amber-300">
                   Temporary passwords are shown once — copy them before closing this dialog.
+                </p>
+              )}
+
+              {copyNotice && (
+                <p role="status" className="text-xs text-slate-600 dark:text-slate-300">
+                  {copyNotice}
                 </p>
               )}
             </div>

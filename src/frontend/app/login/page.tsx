@@ -25,7 +25,7 @@ import { useAuth } from '@/components/AuthProvider';
 
 const REFERENCE_HEADERS = ['x-correlation-id', 'x-request-id'];
 
-function getErrorInfo(error: unknown): { status?: number; reference?: string } {
+function getErrorInfo(error: unknown): { status?: number; reference?: string; retryAfter?: number } {
   const response = (error as { response?: { status?: unknown; headers?: unknown } } | null)?.response;
   if (!response || typeof response !== 'object') {
     return {};
@@ -37,7 +37,11 @@ function getErrorInfo(error: unknown): { status?: number; reference?: string } {
     (value): value is string => typeof value === 'string' && value.length > 0
   );
 
-  return { status, reference };
+  const retryHeader = Number(headers['retry-after']);
+  const retryAfter =
+    Number.isFinite(retryHeader) && retryHeader > 0 ? Math.min(Math.ceil(retryHeader), 300) : undefined;
+
+  return { status, reference, retryAfter };
 }
 
 /**
@@ -52,7 +56,7 @@ function getErrorMessage(error: unknown, context: 'signin' | 'general' = 'genera
   if (status === undefined) {
     message = 'Something went wrong. Please try again.';
   } else if (status === 429) {
-    message = 'Too many attempts. Please wait a few minutes and try again.';
+    message = 'Too many attempts. Please wait a moment and try again.';
   } else if (status === 401 && context === 'signin') {
     message = 'Incorrect email or password.';
   } else if (status === 403 && context === 'signin') {
@@ -87,6 +91,31 @@ function sanitizeNextPath(value: string | null): string {
     return `${url.pathname}${url.search}`;
   } catch {
     return '/';
+  }
+}
+
+const SSO_START_URL = process.env.NEXT_PUBLIC_SSO_START_URL ?? '';
+
+/**
+ * Where "Sign in with UTORid" sends the browser (the backend's OIDC start
+ * endpoint). Returns null until NEXT_PUBLIC_SSO_START_URL is configured. Only
+ * same-origin or HTTPS targets are accepted so a bad value can't send users
+ * to a plain-HTTP or odd-scheme address.
+ */
+function resolveSsoStartUrl(nextPath: string | null): string | null {
+  if (!SSO_START_URL) {
+    return null;
+  }
+
+  try {
+    const url = new URL(SSO_START_URL, window.location.origin);
+    if (url.origin !== window.location.origin && url.protocol !== 'https:') {
+      return null;
+    }
+    url.searchParams.set('next', nextPath ?? '/');
+    return url.toString();
+  } catch {
+    return null;
   }
 }
 
@@ -297,6 +326,7 @@ function PasswordField({
   children?: ReactNode;
 }) {
   const errorId = `${id}-error`;
+  const [capsLock, setCapsLock] = useState(false);
 
   return (
     <div className="space-y-2">
@@ -312,6 +342,9 @@ function PasswordField({
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
+          onKeyDown={(event) => setCapsLock(event.getModifierState('CapsLock'))}
+          onKeyUp={(event) => setCapsLock(event.getModifierState('CapsLock'))}
+          onBlur={() => setCapsLock(false)}
           autoComplete={autoComplete}
           autoCapitalize="none"
           autoCorrect="off"
@@ -328,6 +361,12 @@ function PasswordField({
           {show ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
         </button>
       </div>
+
+      {capsLock && (
+        <p role="status" className="text-xs font-medium text-amber-700">
+          Caps Lock is on.
+        </p>
+      )}
 
       {children}
 
@@ -373,8 +412,67 @@ function PasswordHint() {
 /* Page                                                                       */
 /* -------------------------------------------------------------------------- */
 
-type LoginMethod = 'password' | 'sso' | 'register';
-type View = 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'sso' | 'register' | 'register-sent';
+function PasswordRequirements({ password }: { password: string }) {
+  const rules = [
+    { label: 'At least 12 characters', ok: password.length >= 12 },
+    { label: 'An uppercase letter', ok: /[A-Z]/.test(password) },
+    { label: 'A lowercase letter', ok: /[a-z]/.test(password) },
+    { label: 'A number', ok: /[0-9]/.test(password) },
+  ];
+
+  return (
+    <ul className="space-y-1 text-xs" aria-label="Password requirements">
+      {rules.map((rule) => (
+        <li key={rule.label} className={`flex items-center gap-2 ${rule.ok ? 'text-emerald-700' : 'text-slate-500'}`}>
+          {rule.ok ? (
+            <CheckCircle size={13} aria-hidden="true" />
+          ) : (
+            <span className="inline-block h-[13px] w-[13px] rounded-full border border-slate-300" aria-hidden="true" />
+          )}
+          <span className="sr-only">{rule.ok ? 'Met: ' : 'Not met: '}</span>
+          {rule.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Empty field -> one-line hint; while typing -> strength meter + live checklist. */
+function PasswordFeedback({ password }: { password: string }) {
+  if (!password) {
+    return <PasswordHint />;
+  }
+
+  return (
+    <>
+      <PasswordStrengthMeter password={password} />
+      <PasswordRequirements password={password} />
+    </>
+  );
+}
+
+function NoticeBanner({ message }: { message: string }) {
+  return (
+    <div
+      role="status"
+      className="mb-5 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+    >
+      <ShieldCheck size={16} className="mt-0.5 shrink-0 text-slate-500" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+// Fixed, benign messages selected by ?reason=. Anything not listed is ignored,
+// so a crafted link can't put arbitrary text on the page.
+const NOTICES: Record<string, string> = {
+  expired: 'Your session expired. Please sign in again.',
+  signed_out: 'You have been signed out.',
+  password_reset: 'Your password was updated. Sign in with your new password.',
+};
+
+type LoginMethod = 'password' | 'register';
+type View = 'start' | 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'register' | 'register-sent';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -395,6 +493,8 @@ export default function LoginPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [guestSubmitting, setGuestSubmitting] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [notice, setNotice] = useState('');
 
   // ``null`` until the ?next= parameter has been read. The sign-in redirect
   // waits for it, which replaces the old 200ms timer that only existed to
@@ -403,12 +503,13 @@ export default function LoginPage() {
 
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
-  // Sign-in method chosen on this page. SSO is UI-only for now: picking it
-  // swaps the password form for an email prompt, and no session is issued
-  // until an identity provider is connected. "register" opens the
-  // self-signup form, which ends in a "check your inbox" card rather than a
-  // session — the account stays locked until the emailed link is redeemed.
+  // "password" is the sign-in landing (UTORid first, or the email form when
+  // showEmailForm is on). "register" opens the self-signup form, which ends in a
+  // "check your inbox" card rather than a session — the account stays locked
+  // until the emailed link is redeemed.
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [ssoNotice, setSsoNotice] = useState('');
   const [registerEmailSent, setRegisterEmailSent] = useState(false);
   const [resendNotice, setResendNotice] = useState('');
@@ -421,21 +522,29 @@ export default function LoginPage() {
     ? resetEmailSent
       ? 'forgot-sent'
       : 'forgot'
-    : showLogin && loginMethod === 'sso'
-      ? 'sso'
-      : showLogin && loginMethod === 'register'
-        ? registerEmailSent
-          ? 'register-sent'
-          : 'register'
-        : showLogin
+    : showLogin && loginMethod === 'register'
+      ? registerEmailSent
+        ? 'register-sent'
+        : 'register'
+      : showLogin
+        ? showEmailForm
           ? 'signin'
-          : 'bootstrap';
+          : 'start'
+        : 'bootstrap';
 
-  const busy = loading || submitting || guestSubmitting;
+  const busy = loading || submitting || guestSubmitting || redirecting || cooldown > 0;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setNextPath(sanitizeNextPath(params.get('next')));
+
+    const reason = params.get('reason');
+    setNotice(reason && Object.prototype.hasOwnProperty.call(NOTICES, reason) ? NOTICES[reason] : '');
+
+    // ?method=email opens the email form directly (used after a password reset).
+    if (params.get('method') === 'email') {
+      setShowEmailForm(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -447,6 +556,27 @@ export default function LoginPage() {
     router.replace(nextPath);
   }, [loading, user, nextPath, router]);
 
+  // Rate-limit countdown: submit buttons stay locked until it reaches zero.
+  useEffect(() => {
+    if (cooldown <= 0) {
+      return;
+    }
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  // Coming back with the browser's Back button can restore this page with the
+  // redirect spinner still on; reset it.
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        setRedirecting(false);
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   /* ----------------------------- state helpers ---------------------------- */
 
   const clearFeedback = () => {
@@ -456,6 +586,7 @@ export default function LoginPage() {
     setConfirmPasswordError('');
     setSsoNotice('');
     setResendNotice('');
+    setNotice('');
   };
 
   // Passwords never carry over between views (e.g. sign-in -> register).
@@ -466,19 +597,33 @@ export default function LoginPage() {
   };
 
   /** Switch view and reset everything transient so nothing stale carries over. */
-  const openView = (method: LoginMethod) => {
+  const openView = (method: LoginMethod, options: { emailForm?: boolean } = {}) => {
     clearFeedback();
     clearSecrets();
     setShowForgotPassword(false);
     setResetEmailSent(false);
     setRegisterEmailSent(false);
+    setShowEmailForm(options.emailForm ?? false);
     setLoginMethod(method);
   };
 
   const handleBackToPassword = () => openView('password');
-  const handleBackToLogin = () => openView('password');
-  const handleChooseSso = () => openView('sso');
+  // From the reset flow, "back" returns to the email form the user came from.
+  const handleBackToLogin = () => openView('password', { emailForm: true });
   const handleChooseRegister = () => openView('register');
+
+  const handleUseEmail = () => {
+    // Keep any ?reason= notice (e.g. "session expired") visible on the email form.
+    setFormError('');
+    setSsoNotice('');
+    setShowEmailForm(true);
+  };
+
+  const handleBackToUtorid = () => {
+    clearFeedback();
+    clearSecrets();
+    setShowEmailForm(false);
+  };
 
   const handleShowForgotPassword = () => {
     // Without this, a failed sign-in's error banner followed the user into
@@ -512,20 +657,37 @@ export default function LoginPage() {
   };
 
   /** Shared email checks; returns true when the address is usable. */
-  const checkEmail = (trimmedEmail: string): boolean => {
+  const checkEmail = (trimmedEmail: string, fieldId: string): boolean => {
     if (!trimmedEmail) {
       setEmailError('Email address is required.');
+      focusField(fieldId);
       return false;
     }
     const emailValidationError = validateEmail(trimmedEmail);
     if (emailValidationError) {
       setEmailError(emailValidationError);
+      focusField(fieldId);
       return false;
     }
     return true;
   };
 
   /* -------------------------------- handlers ------------------------------ */
+
+  /** Move focus to the first invalid field so keyboard and screen-reader users land on the problem. */
+  const focusField = (id: string) => {
+    window.requestAnimationFrame(() => document.getElementById(id)?.focus());
+  };
+
+  /** On a 429, lock the submit buttons for the server's Retry-After (30s if absent). */
+  const applyRateLimit = (error: unknown) => {
+    const { status, retryAfter } = getErrorInfo(error);
+    if (status === 429) {
+      setCooldown(retryAfter ?? 30);
+    }
+  };
+
+  const cooldownLabel = cooldown > 0 ? `Try again in ${cooldown}s` : null;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -537,7 +699,7 @@ export default function LoginPage() {
     const trimmedFullName = fullName.trim();
     const trimmedTenantName = tenantName.trim();
 
-    if (!checkEmail(trimmedEmail)) {
+    if (!checkEmail(trimmedEmail, 'email')) {
       return;
     }
 
@@ -545,22 +707,26 @@ export default function LoginPage() {
       // Don't spend a request (and a rate-limit attempt) on an empty password.
       if (!password) {
         setPasswordError('Password is required.');
+        focusField('password');
         return;
       }
     } else {
       if (!trimmedFullName) {
         setFormError('Full name is required.');
+        focusField('full-name');
         return;
       }
 
       if (!trimmedTenantName) {
         setFormError('Workspace name is required.');
+        focusField('tenant-name');
         return;
       }
 
       const validatedPasswordError = validateNewPassword(password);
       if (validatedPasswordError) {
         setPasswordError(validatedPasswordError);
+        focusField('password');
         return;
       }
     }
@@ -582,6 +748,7 @@ export default function LoginPage() {
       router.replace(nextPath ?? '/');
     } catch (authError) {
       setFormError(getErrorMessage(authError, showLogin ? 'signin' : 'general'));
+      applyRateLimit(authError);
     } finally {
       setSubmitting(false);
     }
@@ -594,7 +761,7 @@ export default function LoginPage() {
     clearFeedback();
 
     const trimmedEmail = email.trim();
-    if (!checkEmail(trimmedEmail)) {
+    if (!checkEmail(trimmedEmail, 'forgot-email')) {
       return;
     }
 
@@ -610,6 +777,7 @@ export default function LoginPage() {
       const { status } = getErrorInfo(error);
       if (status === undefined || status === 429 || status >= 500) {
         setFormError(getErrorMessage(error));
+        applyRateLimit(error);
       } else {
         setResetEmailSent(true);
       }
@@ -639,30 +807,34 @@ export default function LoginPage() {
     } catch (error) {
       setNextPath(previousNextPath);
       setFormError(getErrorMessage(error));
+      applyRateLimit(error);
     } finally {
       setGuestSubmitting(false);
     }
   };
 
   /**
-   * Collect the email for a single-sign-on attempt.
+   * Start UTORid sign-in (Entra ID).
    *
-   * SSO is UI-only for now: this is where a real flow would hand the address
-   * to ``POST /api/auth/sso/start``, resolve the domain's identity provider
-   * and redirect the browser to it. Until one is connected, say so plainly
-   * instead of pretending the hand-off happened.
+   * A full-page redirect to the backend's sign-in endpoint, which owns the
+   * OIDC exchange and the session; this page never handles a password or token
+   * for it. ``next`` is passed along, but the backend must validate it again
+   * before redirecting after sign-in. Until NEXT_PUBLIC_SSO_START_URL is set,
+   * say so plainly instead of pretending the hand-off happened.
    */
-  const handleSsoSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleUtorid = () => {
+    if (loading || submitting || guestSubmitting || redirecting) return;
 
     clearFeedback();
-    if (!checkEmail(email.trim())) {
+
+    const target = resolveSsoStartUrl(nextPath);
+    if (!target) {
+      setSsoNotice('UTORid sign-in isn’t connected for this workspace yet. Use your email to sign in for now.');
       return;
     }
 
-    setSsoNotice(
-      'Single sign-on isn’t configured for this workspace yet — no identity provider is connected. Use your email and password to sign in for now.'
-    );
+    setRedirecting(true);
+    window.location.assign(target);
   };
 
   /**
@@ -681,20 +853,23 @@ export default function LoginPage() {
     const trimmedEmail = email.trim();
     const trimmedFullName = fullName.trim();
 
-    if (!checkEmail(trimmedEmail)) {
+    if (!checkEmail(trimmedEmail, 'register-email')) {
       return;
     }
     if (!trimmedFullName) {
       setFormError('Full name is required.');
+      focusField('register-name');
       return;
     }
     const passwordValidationError = validateNewPassword(password);
     if (passwordValidationError) {
       setPasswordError(passwordValidationError);
+      focusField('register-password');
       return;
     }
     if (password !== confirmPassword) {
       setConfirmPasswordError('Passwords do not match.');
+      focusField('register-confirm');
       return;
     }
 
@@ -709,6 +884,7 @@ export default function LoginPage() {
       setResendNotice('');
     } catch (error) {
       setFormError(getErrorMessage(error));
+      applyRateLimit(error);
     } finally {
       setSubmitting(false);
     }
@@ -736,6 +912,7 @@ export default function LoginPage() {
       setResendNotice('Verification email sent again.');
     } catch (error) {
       setFormError(getErrorMessage(error));
+      applyRateLimit(error);
     } finally {
       setSubmitting(false);
     }
@@ -744,16 +921,17 @@ export default function LoginPage() {
   /* --------------------------------- render ------------------------------- */
 
   const headings: Record<View, string> = {
+    start: 'Sign-In',
     signin: 'Sign-In',
     bootstrap: 'Create Administrator Account',
     forgot: 'Reset password',
     'forgot-sent': 'Check your email',
-    sso: 'Sign in with SSO',
     register: 'Create Account',
     'register-sent': 'Check your email',
   };
 
   const subtitles: Partial<Record<View, string>> = {
+    start: 'Use your UTORid to sign in, or continue with email.',
     forgot: 'Enter your email address and we will send reset instructions.',
     'forgot-sent': 'If the account exists, password reset instructions have been sent.',
     bootstrap: 'Set up the first administrator account for this workspace.',
@@ -826,8 +1004,6 @@ export default function LoginPage() {
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
                 {view === 'register' || view === 'register-sent' ? (
                   <UserPlus size={20} aria-hidden="true" />
-                ) : view === 'sso' ? (
-                  <KeyRound size={20} aria-hidden="true" />
                 ) : (
                   <LockKeyhole size={20} aria-hidden="true" />
                 )}
@@ -835,6 +1011,8 @@ export default function LoginPage() {
               <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{headings[view]}</h2>
               {subtitle && <p className="mt-2 text-sm leading-6 text-slate-600">{subtitle}</p>}
             </div>
+
+            {(view === 'start' || view === 'signin') && notice && <NoticeBanner message={notice} />}
 
             {view === 'forgot-sent' && (
               <div className="space-y-6">
@@ -871,7 +1049,7 @@ export default function LoginPage() {
                 <ErrorBanner message={formError} />
 
                 <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-                  {submitting ? 'Sending...' : 'Send reset instructions'}
+                  {submitting ? 'Sending...' : cooldownLabel ?? 'Send reset instructions'}
                 </button>
 
                 <button type="button" onClick={handleBackToLogin} className={SECONDARY_BUTTON}>
@@ -881,17 +1059,8 @@ export default function LoginPage() {
               </form>
             )}
 
-            {view === 'sso' && (
-              <form className="space-y-5" onSubmit={handleSsoSubmit} noValidate>
-                <EmailField
-                  id="sso-email"
-                  value={email}
-                  error={emailError}
-                  onChange={handleEmailChange}
-                  onBlur={handleEmailBlur}
-                  autoFocus
-                />
-
+            {view === 'start' && (
+              <div className="space-y-5">
                 {ssoNotice && (
                   <div
                     role="status"
@@ -902,16 +1071,58 @@ export default function LoginPage() {
                   </div>
                 )}
 
-                <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-                  {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                  Continue with SSO
+                <ErrorBanner message={formError} />
+
+                <button
+                  type="button"
+                  onClick={handleUtorid}
+                  disabled={loading || submitting || guestSubmitting || redirecting}
+                  className={PRIMARY_BUTTON}
+                >
+                  {redirecting ? (
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <KeyRound size={16} aria-hidden="true" />
+                  )}
+                  {redirecting ? 'Redirecting…' : 'Sign in with UTORid'}
                 </button>
 
-                <button type="button" onClick={handleBackToPassword} className={SECONDARY_BUTTON}>
-                  <ArrowLeft size={16} aria-hidden="true" />
-                  Back to sign in
+                <button
+                  type="button"
+                  onClick={handleUseEmail}
+                  disabled={redirecting}
+                  className="block w-full text-center text-sm font-medium text-slate-600 transition hover:text-slate-900 disabled:opacity-60"
+                >
+                  Use email instead
                 </button>
-              </form>
+
+                <div className="relative py-1" aria-hidden="true">
+                  <span className="block w-full border-t border-slate-200" />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    or
+                  </span>
+                </div>
+
+                <button type="button" onClick={handleGuestLogin} disabled={busy} className={SECONDARY_BUTTON}>
+                  {guestSubmitting ? (
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Rocket size={16} aria-hidden="true" />
+                  )}
+                  {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
+                </button>
+
+                <p className="text-center text-sm text-slate-500">
+                  Don’t have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={handleChooseRegister}
+                    className="font-semibold text-slate-900 underline-offset-4 transition hover:underline"
+                  >
+                    Create one
+                  </button>
+                </p>
+              </div>
             )}
 
             {view === 'register-sent' && (
@@ -991,7 +1202,7 @@ export default function LoginPage() {
                   autoComplete="new-password"
                   placeholder="Create a password"
                 >
-                  {password ? <PasswordStrengthMeter password={password} /> : <PasswordHint />}
+                  {<PasswordFeedback password={password} />}
                 </PasswordField>
 
                 <PasswordField
@@ -1011,7 +1222,7 @@ export default function LoginPage() {
 
                 <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                  {submitting ? 'Creating account…' : 'Create account'}
+                  {submitting ? 'Creating account…' : cooldownLabel ?? 'Create account'}
                 </button>
 
                 <button type="button" onClick={handleBackToPassword} className={SECONDARY_BUTTON}>
@@ -1064,7 +1275,7 @@ export default function LoginPage() {
                   autoComplete={view === 'signin' ? 'current-password' : 'new-password'}
                   placeholder="Enter your password"
                 >
-                  {view === 'bootstrap' && (password ? <PasswordStrengthMeter password={password} /> : <PasswordHint />)}
+                  {view === 'bootstrap' && <PasswordFeedback password={password} />}
                 </PasswordField>
 
                 {view === 'signin' && (
@@ -1083,7 +1294,9 @@ export default function LoginPage() {
 
                 <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                   {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                  {submitting ? 'Processing...' : view === 'signin' ? 'Sign in' : 'Create administrator account'}
+                  {submitting
+                    ? 'Processing...'
+                    : cooldownLabel ?? (view === 'signin' ? 'Sign in' : 'Create administrator account')}
                 </button>
 
                 <div className="relative py-1" aria-hidden="true">
@@ -1094,9 +1307,9 @@ export default function LoginPage() {
                 </div>
 
                 {view === 'signin' && (
-                  <button type="button" onClick={handleChooseSso} className={SECONDARY_BUTTON}>
-                    <KeyRound size={16} aria-hidden="true" />
-                    Continue with SSO
+                  <button type="button" onClick={handleBackToUtorid} className={SECONDARY_BUTTON}>
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back to UTORid sign-in
                   </button>
                 )}
 

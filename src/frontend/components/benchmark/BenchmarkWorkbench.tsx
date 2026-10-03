@@ -2417,6 +2417,8 @@ const BENCHMARK_PROTOCOLS = [
   },
 ];
 // ── Shared Workbench ───────────────────────────────────────────────────────
+// Lives in a component module (not in a page.tsx) so both routes can import it. Next.js only allows a
+// page file to export its default component and route settings such as `metadata`.
 export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'benchmark' | 'comparison' }) {
   const { user, loading: authLoading } = useAuth();
   const availableModes = useMemo(
@@ -2678,8 +2680,4 @@ export function BenchmarkWorkbench({ modeScope = 'benchmark' }: { modeScope?: 'b
       </div>
     </DashboardLayout>
   );
-}
-// ── Route Page ─────────────────────────────────────────────────────────────
-export default function BenchmarkPage() {
-  return <BenchmarkWorkbench modeScope="benchmark" />;
 }
