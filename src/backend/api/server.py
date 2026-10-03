@@ -4250,9 +4250,15 @@ def _set_job_progress(
 
     previous = job.get("progress") if isinstance(job.get("progress"), dict) else {}
     if percent is None:
-        percent = _coerce_float(
-            previous.get("percent"), ANALYSIS_STAGE_PERCENT.get(stage, 0.0)
-        )
+        stage_floor = ANALYSIS_STAGE_PERCENT.get(stage, 0.0)
+        if previous.get("stage") == stage:
+            # Same stage: keep whatever real progress it has already reported.
+            percent = _coerce_float(previous.get("percent"), stage_floor)
+        else:
+            # A stage change must advance the bar to that stage's own floor,
+            # otherwise the label flips while the number stays on the previous
+            # stage's value and the run looks frozen. max() keeps it monotonic.
+            percent = max(_coerce_float(previous.get("percent"), 0.0), stage_floor)
     if plan is None:
         existing_plan = previous.get("plan")
         plan = existing_plan if isinstance(existing_plan, list) else []
@@ -13390,8 +13396,19 @@ def _sweep_expired_guest_jobs(now: float | None = None) -> int:
     current = time.time() if now is None else now
     removed = 0
 
+    # A guest job still being analysed owns CPU time and holds results that
+    # exist nowhere else. Dropping it mid-flight stops _set_job_progress from
+    # ever updating again (the upload page freezes on its last reported
+    # percent) and the worker later raises KeyError writing to the _jobs entry
+    # that was removed here. Those jobs are expired by the next sweep instead,
+    # once they have reported a terminal status.
+    active_statuses = {"queued", "processing", "analyzing"}
+
     for job_id, job in list(_jobs.items()):
         if not job.get("guest"):
+            continue
+
+        if str(job.get("status") or "").lower() in active_statuses:
             continue
 
         try:

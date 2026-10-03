@@ -507,6 +507,40 @@ class TestGuestJobSweeper:
         assert not (uploads / "g1").exists()
         assert not (reports / "g1").exists()
 
+    def test_expired_guest_job_still_running_is_kept_until_it_finishes(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """An in-flight job must survive its own session expiry.
+
+        Sweeping it mid-analysis deletes the only copy of its uploads, freezes
+        ``_set_job_progress`` at the last percent the page managed to read, and
+        leaves the worker writing into a ``_jobs`` entry that no longer exists.
+        """
+        uploads, reports = self._prepare_dirs(tmp_path)
+        monkeypatch.setattr(server, "UPLOADS_DIR", uploads)
+        monkeypatch.setattr(server, "_job_report_dir", lambda job_id: reports / job_id)
+        monkeypatch.setitem(
+            server._jobs,
+            "g1",
+            {
+                "id": "g1",
+                "guest": True,
+                "guest_expires_at": 100.0,
+                "status": "analyzing",
+            },
+        )
+
+        assert server._sweep_expired_guest_jobs(now=200.0) == 0
+        assert "g1" in server._jobs
+        assert (uploads / "g1").exists()
+
+        server._jobs["g1"]["status"] = "failed"
+
+        assert server._sweep_expired_guest_jobs(now=200.0) == 1
+        assert "g1" not in server._jobs
+        assert not (uploads / "g1").exists()
+        assert not (reports / "g1").exists()
+
     def test_live_guest_jobs_and_workspace_jobs_are_left_alone(
         self, monkeypatch, tmp_path
     ) -> None:

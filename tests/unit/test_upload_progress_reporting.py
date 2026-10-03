@@ -80,11 +80,41 @@ class TestJobProgressPayload:
         finally:
             server._jobs.pop(job_id, None)
 
-    def test_stage_change_without_percent_keeps_previous_value(
+    def test_stage_change_advances_percent_to_the_stage_floor(
         self, monkeypatch
     ) -> None:
+        """A stage change moves the bar even before the stage reports units.
+
+        Otherwise the label flips to the new stage while the percent stays on
+        the previous stage's value — which is what made a live run look stuck.
+        """
         monkeypatch.setattr(server, "_persist_job", lambda job_id: None)
         job_id = "progress-unit-test-stage"
+        self._seed_job(job_id)
+        try:
+            server._set_job_progress(job_id, "reading_submissions", detail="Reading")
+            assert (
+                server._jobs[job_id]["progress"]["percent"]
+                == server.ANALYSIS_STAGE_PERCENT["reading_submissions"]
+            )
+
+            server._set_job_progress(
+                job_id, "comparing_submissions", detail="Comparing"
+            )
+
+            progress = server._jobs[job_id]["progress"]
+            assert progress["stage"] == "comparing_submissions"
+            assert (
+                progress["percent"]
+                == server.ANALYSIS_STAGE_PERCENT["comparing_submissions"]
+            )
+        finally:
+            server._jobs.pop(job_id, None)
+
+    def test_stage_change_never_moves_the_percent_backwards(self, monkeypatch) -> None:
+        """Reported progress stays monotonic when a later stage starts lower."""
+        monkeypatch.setattr(server, "_persist_job", lambda job_id: None)
+        job_id = "progress-unit-test-monotonic"
         self._seed_job(job_id)
         try:
             server._set_job_progress(
@@ -96,9 +126,30 @@ class TestJobProgressPayload:
 
             progress = server._jobs[job_id]["progress"]
             assert progress["stage"] == "generating_reports"
-            assert progress["percent"] == 0.42
+            assert progress["percent"] >= 0.42
             assert progress["current_pair"] is None
             assert progress["completed_units"] is None
+        finally:
+            server._jobs.pop(job_id, None)
+
+    def test_stage_change_keeps_percent_within_the_same_stage(
+        self, monkeypatch
+    ) -> None:
+        """Re-publishing the same stage without a percent keeps its reported value."""
+        monkeypatch.setattr(server, "_persist_job", lambda job_id: None)
+        job_id = "progress-unit-test-same-stage"
+        self._seed_job(job_id)
+        try:
+            server._set_job_progress(
+                job_id, "comparing_submissions", percent=0.42, detail="A.py vs B.py"
+            )
+            server._set_job_progress(
+                job_id, "comparing_submissions", detail="C.py vs D.py"
+            )
+
+            progress = server._jobs[job_id]["progress"]
+            assert progress["percent"] == 0.42
+            assert progress["detail"] == "C.py vs D.py"
         finally:
             server._jobs.pop(job_id, None)
 
