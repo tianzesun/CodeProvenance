@@ -65,7 +65,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
             minutes=settings.AUTH_TOKEN_EXPIRE_MINUTES
         )
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.AUTH_JWT_SECRET, algorithm="HS256")
+    encoded_jwt = jwt.encode(to_encode, settings.auth_jwt_secret, algorithm="HS256")
     return encoded_jwt
 
 
@@ -77,7 +77,7 @@ def get_current_user_optional(
 
     try:
         payload = jwt.decode(
-            credentials.credentials, settings.AUTH_JWT_SECRET, algorithms=["HS256"]
+            credentials.credentials, settings.auth_jwt_secret, algorithms=["HS256"]
         )
         email: str = payload.get("sub")
         if email is None:

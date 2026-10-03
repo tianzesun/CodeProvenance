@@ -155,7 +155,7 @@ class TestGuestTokenValidation:
         """The guest branch must not swallow a normal session token."""
         user_token = server.jwt.encode(
             {"sub": "someone-else", "role": "professor"},
-            server.settings.AUTH_JWT_SECRET,
+            server.settings.auth_jwt_secret,
             algorithm="HS256",
         )
         lookups: list[bool] = []

@@ -188,7 +188,7 @@ def get_current_user(request: Request = None) -> dict:
         try:
             import jwt as _jwt
 
-            payload = _jwt.decode(token, settings.AUTH_JWT_SECRET, algorithms=["HS256"])
+            payload = _jwt.decode(token, settings.auth_jwt_secret, algorithms=["HS256"])
             user_id = str(payload.get("sub") or "").strip()
             if user_id:
                 from src.backend.config.database import SessionLocal

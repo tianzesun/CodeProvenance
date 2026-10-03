@@ -531,6 +531,16 @@ class AppSettings(BaseSettings):
         legacy = {"openai": self.OPENAI_API_KEY, "anthropic": self.ANTHROPIC_API_KEY}.get(provider)
         return self.LLM_API_KEYS.get(provider) or legacy
 
+    @property
+    def auth_jwt_secret(self) -> str:
+        """The JWT signing key as a plain string.
+
+        ``jose`` requires a ``str``/``bytes`` key and raises ``JWSError`` when handed a
+        ``SecretStr`` wrapper, so every sign/verify call site must go through this
+        accessor rather than reading ``AUTH_JWT_SECRET`` directly.
+        """
+        return self.AUTH_JWT_SECRET.get_secret_value()
+
     def llm_model(self, provider: str) -> str:
         """The configured model, or "" meaning "the provider's newest"."""
         provider = provider.strip().lower()

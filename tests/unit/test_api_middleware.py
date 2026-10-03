@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 from fastapi import HTTPException, Request
 from jose import jwt as jose_jwt
+from pydantic import SecretStr
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -72,16 +73,16 @@ class TestAuthMiddleware:
 
         return await self.middleware.dispatch(request, fake_next)
 
-    def test_valid_session_cookie_detected(self, monkeypatch):
+    def test_valid_session_cookie_detected(self, override_setting):
         """A cryptographically valid session cookie bypasses the API key check."""
-        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        override_setting("AUTH_JWT_SECRET", SecretStr(TEST_JWT_SECRET))
         request = _make_request(cookie_value=_build_session_token())
 
         assert self.middleware._has_valid_session_cookie(request) is True
 
-    def test_invalid_session_cookie_detected(self, monkeypatch):
+    def test_invalid_session_cookie_detected(self, override_setting):
         """Garbage or tampered cookies never bypass the API key check."""
-        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        override_setting("AUTH_JWT_SECRET", SecretStr(TEST_JWT_SECRET))
         tampered = _build_session_token()[:-4] + "aaaa"
         assert (
             self.middleware._has_valid_session_cookie(
@@ -97,9 +98,9 @@ class TestAuthMiddleware:
         )
         assert self.middleware._has_valid_session_cookie(_make_request()) is False
 
-    def test_dispatch_allows_valid_session_without_api_key(self, monkeypatch):
+    def test_dispatch_allows_valid_session_without_api_key(self, override_setting):
         """Dashboard requests with a valid session cookie must not require an API key."""
-        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        override_setting("AUTH_JWT_SECRET", SecretStr(TEST_JWT_SECRET))
         request = _make_request(cookie_value=_build_session_token())
 
         response = asyncio.run(self._run_dispatch(request))
@@ -107,9 +108,9 @@ class TestAuthMiddleware:
         assert response.status_code == 200
         assert response.body == b'{"ok":true}'
 
-    def test_dispatch_rejects_missing_api_key_without_session(self, monkeypatch):
+    def test_dispatch_rejects_missing_api_key_without_session(self, override_setting):
         """Requests without a session cookie still require a valid API key."""
-        monkeypatch.setattr(settings, "AUTH_JWT_SECRET", TEST_JWT_SECRET)
+        override_setting("AUTH_JWT_SECRET", SecretStr(TEST_JWT_SECRET))
         request = _make_request()
 
         response = asyncio.run(self._run_dispatch(request))

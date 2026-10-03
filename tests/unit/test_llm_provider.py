@@ -271,7 +271,7 @@ class TestSettingsEndpoints:
         now = datetime.now(timezone.utc)
         token = jose_jwt.encode(
             {"sub": "admin-1", "exp": now + timedelta(minutes=30), "iat": now},
-            app_settings.AUTH_JWT_SECRET or "unit-test-secret",
+            app_settings.auth_jwt_secret or "unit-test-secret",
             algorithm="HS256",
         )
         return {AUTH_COOKIE_NAME: token}

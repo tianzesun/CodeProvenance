@@ -246,7 +246,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return False
 
         try:
-            payload = jwt.decode(token, settings.AUTH_JWT_SECRET, algorithms=["HS256"])
+            payload = jwt.decode(token, settings.auth_jwt_secret, algorithms=["HS256"])
         except JWTError:
             return False
 

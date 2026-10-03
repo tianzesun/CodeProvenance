@@ -12750,7 +12750,7 @@ def _ensure_auth_secret() -> str:
             "AUTH_JWT_SECRET is required. Set it in src/backend/.env.local with a secure random string. "
             'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
         )
-    return settings.AUTH_JWT_SECRET
+    return settings.auth_jwt_secret
 
 
 def _normalize_email(value: str) -> str:

@@ -199,8 +199,10 @@ class TestOutboundServiceSettings:
             "email_use_tls",
             "sendgrid_api_key",
         ):
-            assert re.search(
-                rf"\b{key}:", source
+            # Keys are declared either as an object property (``key:``) or as a
+            # quoted entry in the key arrays (``'key',``); both reach buildPayload.
+            assert re.search(rf"\b{key}\s*:", source) or re.search(
+                rf"['\"]{key}['\"]", source
             ), f"{key} missing from {SETTINGS_PAGE.name}"
 
 

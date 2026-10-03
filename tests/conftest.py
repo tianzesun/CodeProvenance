@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 import pytest
 import asyncio
-from typing import Generator, AsyncGenerator
+from typing import Callable, Generator, AsyncGenerator
 from fastapi.testclient import TestClient
 
 # Keep the AI detector on its fast, deterministic heuristic path during tests.
@@ -40,3 +40,48 @@ def client() -> Generator[TestClient, None, None]:
 
 # Additional test fixtures would go here
 # For example: database fixtures, test clients, etc.
+
+
+@pytest.fixture(autouse=True)
+def _mutable_settings() -> Generator[None, None, None]:
+    """Let tests monkeypatch fields on the otherwise-frozen settings singleton.
+
+    ``AppSettings`` is ``frozen=True`` so production code cannot reassign a value
+    after start-up. Tests legitimately need to change individual fields (feature
+    flags, secrets), and the pre-existing suite does that with
+    ``monkeypatch.setattr``. Unfreezing the model config here keeps those tests
+    working and confines the relaxation to the test run.
+    """
+    from src.backend.config.settings import AppSettings, settings
+
+    original_frozen = AppSettings.model_config.get("frozen")
+    if original_frozen:
+        AppSettings.model_config["frozen"] = False
+    try:
+        yield
+    finally:
+        if original_frozen:
+            AppSettings.model_config["frozen"] = original_frozen
+
+
+@pytest.fixture
+def override_setting() -> Generator[Callable[[str, object], None], None, None]:
+    """Return a helper that sets one settings field, restoring it afterwards.
+
+    Preferred over ``monkeypatch.setattr`` when the value needs wrapping (for
+    example a ``SecretStr`` field such as ``AUTH_JWT_SECRET``).
+    """
+    from src.backend.config.settings import settings
+
+    original: dict[str, object] = {}
+
+    def _override(name: str, value: object) -> None:
+        """Set a settings field, remembering its previous value for restoration."""
+        if name not in original:
+            original[name] = getattr(settings, name)
+        object.__setattr__(settings, name, value)
+
+    yield _override
+
+    for name, value in original.items():
+        object.__setattr__(settings, name, value)
