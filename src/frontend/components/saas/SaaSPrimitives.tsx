@@ -374,7 +374,7 @@ export function ButtonLink({ href, children, variant = 'primary', icon: Icon }: 
   );
 }
 
-export function ActionButton({ children, variant = 'primary', icon: Icon, onClick }: { children: React.ReactNode; variant?: string; icon?: React.ComponentType<{ size: number }>; onClick?: () => void }) {
+export function ActionButton({ children, variant = 'primary', icon: Icon, onClick, disabled }: { children: React.ReactNode; variant?: string; icon?: React.ComponentType<{ size: number }>; onClick?: () => void; disabled?: boolean }) {
   const className = variant === 'primary'
     ? 'theme-button-primary px-5 py-2.5 text-sm font-semibold transition'
     : 'theme-button-secondary px-5 py-2.5 text-sm font-semibold transition';
@@ -383,7 +383,8 @@ export function ActionButton({ children, variant = 'primary', icon: Icon, onClic
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${className}`}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
     >
       {Icon && <Icon size={16} />}
       {children}
