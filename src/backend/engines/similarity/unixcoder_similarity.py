@@ -197,8 +197,6 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 cached_redis = redis_cache.get(cache_key)
                 if cached_redis is not None:
                     try:
-                        import numpy as np
-
                         results[i] = np.array(cached_redis)
                         continue
                     except Exception:
