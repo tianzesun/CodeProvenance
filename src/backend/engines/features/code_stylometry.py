@@ -23,6 +23,10 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+#: Node types that increase nesting depth. Hoisted so the hot loop below tests
+#: against a pre-built tuple/frozenset instead of rebuilding one per node.
+_NESTING_NODES = (ast.If, ast.For, ast.While, ast.With, ast.Try)
+
 
 @dataclass
 class StylometryFeatures:
@@ -232,14 +236,14 @@ class StylometryExtractor:
         features.branch_ratio = self._total_branches / max(1, self._total_statements)
         features.func_call_ratio = self._total_calls / max(1, self._total_statements)
 
-        # Structural
+        # Structural — counted from the single walk already done in _walk_ast.
         features.num_functions = self._total_functions
         features.avg_func_length = self._avg(self._func_lengths)
-        features.num_classes = len(
-            [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+        features.num_classes = sum(
+            1 for n in self._nodes if isinstance(n, ast.ClassDef)
         )
-        features.num_imports = len(
-            [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+        features.num_imports = sum(
+            1 for n in self._nodes if isinstance(n, (ast.Import, ast.ImportFrom))
         )
 
         # Comment features
@@ -250,8 +254,8 @@ class StylometryExtractor:
         features.inline_comment_count = len(re.findall(r"#.*$", source, re.MULTILINE))
 
         # Complexity
-        n_if = len([n for n in ast.walk(tree) if isinstance(n, ast.If)])
-        n_bool = len([n for n in ast.walk(tree) if isinstance(n, (ast.And, ast.Or))])
+        n_if = sum(1 for n in self._nodes if isinstance(n, ast.If))
+        n_bool = sum(1 for n in self._nodes if isinstance(n, (ast.And, ast.Or)))
         features.cyclomatic_complexity = 1 + n_if + self._total_loops + n_bool
         features.unique_keywords = len(set(self._keywords))
         features.keyword_diversity = features.unique_keywords / max(
@@ -271,6 +275,7 @@ class StylometryExtractor:
 
     def _reset(self) -> None:
         """Reset all counters."""
+        self._nodes: list[ast.AST] = []
         self._prefix_counter.clear()
         self._suffix_counter.clear()
         self._char_counter.clear()
@@ -402,8 +407,17 @@ class StylometryExtractor:
         return round(comment_chars / total_chars, 4)
 
     def _walk_ast(self, tree: ast.AST) -> None:
-        """Walk AST to extract structural features."""
-        for node in ast.walk(tree):
+        """Walk the AST once to extract structural features.
+
+        The visited nodes are cached on ``self._nodes`` so ``extract`` can derive
+        its class/import/branch counts from the same traversal. This module used
+        to walk the tree five times (once here, then again for classes, imports,
+        ``if`` count and boolean-op count); on a 40k-line file ``ast.walk`` was
+        the single most expensive stage of extraction.
+        """
+        nodes = list(ast.walk(tree))
+        self._nodes = nodes
+        for node in nodes:
             if isinstance(node, ast.FunctionDef):
                 self._total_functions += 1
                 self._func_lengths.append(len(node.body))
@@ -450,18 +464,26 @@ class StylometryExtractor:
                 self._comprehensions += 1
 
     def _compute_nesting_depth(self, func: ast.FunctionDef) -> int:
-        """Compute max nesting depth of a function."""
+        """Compute max nesting depth of a function.
 
-        def _depth(node: ast.AST, current: int) -> int:
-            max_d = current
+        Iterative rather than recursive: this runs once per function over that
+        function's entire subtree, so on a large file the recursive form spent
+        most of the extraction budget on Python call overhead (523k calls for a
+        40k-line file).
+        """
+        max_depth = 0
+        # Each stack entry is (node, depth-so-far).
+        stack: list[tuple[ast.AST, int]] = [(func, 0)]
+        while stack:
+            node, depth = stack.pop()
             for child in ast.iter_child_nodes(node):
-                if isinstance(child, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
-                    max_d = max(max_d, _depth(child, current + 1))
-                else:
-                    max_d = max(max_d, _depth(child, current))
-            return max_d
-
-        return _depth(func, 0)
+                child_depth = depth + 1 if isinstance(child, _NESTING_NODES) else depth
+                # Explicit comparison rather than max() to avoid a call per node;
+                # this loop runs once per AST node of every function.
+                if child_depth > max_depth:  # noqa: PLR1730
+                    max_depth = child_depth
+                stack.append((child, child_depth))
+        return max_depth
 
     @staticmethod
     def _avg(values: list[float]) -> float:
