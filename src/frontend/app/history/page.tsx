@@ -25,7 +25,6 @@ import {
   Eye,
   FileCode2,
   FileDown,
-  FileSearch,
   FileSpreadsheet,
   FileText,
   MoreHorizontal,
@@ -523,19 +522,6 @@ function PersistenceWarning({ text }: { text: string }) {
   );
 }
 
-function OpenLink({ job }: { job: JobItem }) {
-  return (
-    <Link
-      href={`/results/${encodeURIComponent(job.id)}`}
-      aria-label={`Open ${job.assignmentName}`}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-500/40 dark:hover:text-blue-300"
-    >
-      Open
-      <FileSearch size={13} aria-hidden="true" />
-    </Link>
-  );
-}
-
 /** Compact row used on small screens, mirroring the desktop table's information. */
 function HistoryCard({ job }: { job: JobItem }) {
   return (
@@ -560,7 +546,6 @@ function HistoryCard({ job }: { job: JobItem }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <OpenLink job={job} />
           <ExportMenu job={job} />
         </div>
       </div>
@@ -987,22 +972,25 @@ export default function HistoryPage() {
             <>
               {/* Desktop table */}
               <div className="hidden overflow-x-auto xl:block">
-                <table className="w-full min-w-[880px] table-fixed">
+                <table className="w-full min-w-[820px] table-fixed">
                   <caption className="sr-only">Plagiarism check history</caption>
                   <TableHeader>
                     <tr>
                       {renderSortableTh('date', 'Date', 'left', '100px')}
-                      {renderSortableTh('name', 'Check')}
-                      {renderSortableTh('submissions', 'Submissions', 'right', '110px')}
-                      {renderSortableTh('highRisk', 'High-risk', 'right', '95px')}
-                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '130px' }}>
+                      {renderSortableTh('name', 'Check', 'left', '190px')}
+                      {renderSortableTh('submissions', 'Submissions', 'right', '100px')}
+                      {renderSortableTh('highRisk', 'High-risk', 'right', '90px')}
+                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '120px' }}>
                         Review
                       </th>
-                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '125px' }}>
+                      {/* Status carries a chip plus an optional persistence warning, so it
+                          needs more room than the other badge column. */}
+                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-left" style={{ width: '160px' }}>
                         Status
                       </th>
-                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-right" style={{ width: '118px' }}>
-                        Actions
+                      {/* Export is an icon-only menu, so the column just holds the button. */}
+                      <th scope="col" className="whitespace-nowrap px-4 py-3 text-right" style={{ width: '56px' }}>
+                        <span className="sr-only">Actions</span>
                       </th>
                     </tr>
                   </TableHeader>
@@ -1033,7 +1021,7 @@ export default function HistoryPage() {
                             <div className="min-w-0">
                               <Link
                                 href={`/results/${encodeURIComponent(job.id)}`}
-                                className="block break-words text-sm font-semibold leading-5 text-[var(--text-primary)] hover:text-blue-600 dark:hover:text-blue-400"
+                                className="block truncate text-sm font-semibold leading-5 text-[var(--text-primary)] hover:text-blue-600 dark:hover:text-blue-400"
                                 title={job.assignmentName}
                               >
                                 {job.assignmentName}
@@ -1079,8 +1067,9 @@ export default function HistoryPage() {
                         </td>
 
                         <td className="px-4 py-4 align-top">
-                          <div className="flex items-center justify-end gap-2">
-                            <OpenLink job={job} />
+                          {/* The assignment name above is already the link to the review
+                              workspace, so this column holds only the export menu. */}
+                          <div className="flex items-center justify-end">
                             <ExportMenu job={job} />
                           </div>
                         </td>
