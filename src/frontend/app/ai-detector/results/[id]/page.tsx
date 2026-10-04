@@ -339,6 +339,16 @@ function SubmissionCard({ entry, expanded, onToggle }) {
           </div>
         </div>
 
+        {/* Two bare percentages read as two failures. Say what each one is, and that a low
+            pair means "look elsewhere", not "cleared" — the detector misses assisted code. */}
+        <p className="mt-3 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+          <span className="font-medium text-slate-700 dark:text-slate-300">Assistance Score</span> is a
+          screening signal that this file is worth a closer read.{' '}
+          <span className="font-medium text-slate-700 dark:text-slate-300">Confidence</span> is how strongly
+          the underlying signals agree with each other — a low pair here means the evidence is weak, not that
+          the code was cleared.
+        </p>
+
         {/* Indicator pills */}
         {indicators.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
