@@ -91,6 +91,44 @@ stays reproducible.
   carries ~0.5 weight at ≥60 lines, so it does not lift the fused AUC beyond
   0.59 either.
 
+## 5. Rejected: docstring-uniformity fingerprints (2026-10-03)
+
+A user-reported symptom — clearly AI-written code (classes, methods, a docstring
+on every one) scoring **0.44**, i.e. "likely human" — prompted a candidate
+signal: *LLM output documents every function, human code is selective*. Measured
+per fingerprint family on such a file, **all 21 patterns in
+`similarity/ai_detection.py` score 0**: they target 2023-era output
+(`# Let's…`, `Here we…`, Sphinx `Args:` blocks) that current models no longer
+emit. So the gap is real.
+
+The candidate was rejected on measurement (`scripts/eval_ai_signals.py`):
+
+| candidate | AUC vs AIGCodeSet human | AUC vs Kaggle students | verdict |
+|---|---|---|---|
+| `docstring_uniformity` | 0.4900 | 0.4919 | reject |
+| `short_docstring_uniformity` | 0.4950 | 0.4815 | reject |
+| `uniform_documentation` (>=0.9 gate) | 0.4950 | 0.5078 | reject |
+
+At a 0.5 threshold the signal fires on **4.4% of AI files, 6.5% of AIGCodeSet
+human files and 6.0% of student files** — human code in these corpora is
+documented *more* often than AI code (mean 0.048 vs 0.033). It would have been
+an inverted false-positive generator.
+
+Two reasons it cannot work here:
+
+1. **The corpora do not contain the code shape.** Median functions per file:
+   AIGCodeSet AI **0**, AIGCodeSet human **0**, Kaggle students 4. Only 45/400 AI
+   files have >=2 functions, so the signal is mostly unmeasurable.
+2. **A single hand-written snippet is not evidence.** The candidate looked
+   compelling on one ChatGPT example (6/6 documented vs 0/2). That is the exact
+   failure mode section 4 warns about, and `scripts/eval_ai_signals.py` exists to
+   prevent a repeat: a candidate must clear AUC 0.55 against **both** negative
+   corpora before it is worth shipping.
+
+Consequence: the "modern AI scores low" symptom is **not** fixable by widening
+the fingerprint library against these corpora. It needs either a
+modern-assistant holdout (see `AI_HOLDOUT_COLLECTION.md`) or Binoculars.
+
 ## What is actually needed
 
 The heuristic signals are close to exhausted. Meaningful gains require one of:
@@ -100,6 +138,17 @@ The heuristic signals are close to exhausted. Meaningful gains require one of:
    by default, which is why the numbers above are all heuristic-only. It needs
    a reproducible install (see the open packaging blocker) and a run on the
    full FP corpus before its accuracy can be claimed.
+
+   **Host feasibility (measured 2026-10-03).** The package *is* installed and
+   importable — the blocker is RAM, not packaging. The default pair is two
+   Qwen2.5-0.5B checkpoints (~5.4 GB peak RSS, fp32) and the dev host has
+   **2.5 GB available of 7.8 GB total**. This CPU also advertises **no native
+   bf16** (`avx512_bf16`/`amx_bf16` absent), so the fp32 fallback applies, and
+   `_cpu_has_native_bf16` documents bf16 emulation on such hosts as ~159x slower
+   GEMM — which is what turned single-file AI jobs into hour-long runs.
+   `BINOCULARS_ENABLED=0` in `.env.local` is therefore correct on this host;
+   enabling it needs a larger machine or smaller checkpoints, not a config
+   change.
 2. **Retrain the classifier** on current features with a grouped holdout, and
    report CV rather than in-sample AUC.
 3. **Recalibrate the output scale** so the bands mean something. Until scores
