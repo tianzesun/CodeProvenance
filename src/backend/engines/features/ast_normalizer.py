@@ -23,10 +23,50 @@ will NOT change the CFG/PDG structure.
 
 import ast
 import hashlib
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+#: Hard ceiling on the number of CFG nodes built for a single program.
+#: Building the graph is linear in statements, so this only trips on a
+#: pathological module (a minified bundle, a generated data table). Refusing
+#: such a graph is deliberate: it reports "no structural evidence" instead of
+#: burning the worker for minutes on a run nobody can cancel.
+MAX_CFG_NODES = 200_000
+
+
+#: Maximum number of live exit nodes carried between consecutive statements.
+#: Without this cap, a statement returning k exits is rebuilt k times for the
+#: next statement, so a function with nested branches grows the graph
+#: multiplicatively rather than linearly.
+MAX_PENDING_EXITS = 32
+
+
+class CFGTooLargeError(RuntimeError):
+    """Raised when a program exceeds :data:`MAX_CFG_NODES`."""
+
+
+def _cap_exits(exits: list[int]) -> list[int]:
+    """De-duplicate and cap a pending-exit list.
+
+    The statement following a compound one is rebuilt once per pending exit, so
+    an unbounded exit list makes graph size grow multiplicatively with nesting
+    depth instead of linearly. Deduplicate first (exit lists are usually highly
+    repetitive), then truncate: the exits that remain are a representative
+    subset, which is all the structural comparison downstream consumes.
+
+    Args:
+        exits: Exit node ids collected while building one statement.
+
+    Returns:
+        The de-duplicated exits, at most :data:`MAX_PENDING_EXITS` of them.
+    """
+    unique = list(dict.fromkeys(exits))
+    return unique[:MAX_PENDING_EXITS]
 
 
 @dataclass
@@ -197,7 +237,9 @@ class CFGBuilder:
         """
         self._node_counter = 0
         self._nodes: list[CFGNode] = []
+        self._nodes_by_id: dict[int, CFGNode] = {}
         self._edges: list[tuple[int, int]] = []
+        self._edge_keys: set[tuple[int, int]] = set()
 
         entry = self._make_node("Entry", is_entry=True)
         exit_node = self._make_node("Exit", is_exit=True)
@@ -221,6 +263,8 @@ class CFGBuilder:
         is_exit: bool = False,
     ) -> CFGNode:
         """Create a new CFG node."""
+        if self._node_counter >= MAX_CFG_NODES:
+            raise CFGTooLargeError(f"control-flow graph exceeded {MAX_CFG_NODES} nodes")
         node_id = self._node_counter
         self._node_counter += 1
 
@@ -236,6 +280,7 @@ class CFGBuilder:
             is_exit=is_exit,
         )
         self._nodes.append(cfg_node)
+        self._nodes_by_id[node_id] = cfg_node
         return cfg_node
 
     def _hash_stmt(self, node: ast.AST) -> str:
@@ -248,14 +293,25 @@ class CFGBuilder:
         return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
     def _add_edge(self, from_id: int, to_id: int) -> None:
-        """Add a CFG edge."""
-        if (from_id, to_id) not in self._edges:
-            self._edges.append((from_id, to_id))
-            for n in self._nodes:
-                if n.node_id == from_id and to_id not in n.successors:
-                    n.successors.append(to_id)
-                if n.node_id == to_id and from_id not in n.predecessors:
-                    n.predecessors.append(from_id)
+        """Add a CFG edge.
+
+        Edge de-duplication and successor/predecessor bookkeeping go through a
+        set and an id-indexed node map. The previous list-membership test plus
+        full ``_nodes`` scan made a build O(nodes x edges), which is what turned
+        a few thousand statements into minutes of CPU.
+        """
+        key = (from_id, to_id)
+        if key in self._edge_keys:
+            return
+        self._edge_keys.add(key)
+        self._edges.append(key)
+
+        source = self._nodes_by_id.get(from_id)
+        if source is not None and to_id not in source.successors:
+            source.successors.append(to_id)
+        target = self._nodes_by_id.get(to_id)
+        if target is not None and from_id not in target.predecessors:
+            target.predecessors.append(from_id)
 
     def _build_function_cfg(
         self, func: ast.FunctionDef, entry: CFGNode, exit_node: CFGNode
@@ -272,7 +328,7 @@ class CFGBuilder:
             for last_id in last_nodes:
                 exits = self._build_stmt_cfg(stmt, last_id, exit_node.node_id)
                 new_last.extend(exits)
-            last_nodes = new_last if new_last else [exit_node.node_id]
+            last_nodes = _cap_exits(new_last) or [exit_node.node_id]
 
         # Last → Exit
         for lid in last_nodes:
@@ -341,7 +397,7 @@ class CFGBuilder:
                 false_exits = [if_node.node_id]
 
             # Merge
-            merge_exits = list(set(true_exits + false_exits))
+            merge_exits = _cap_exits(true_exits + false_exits)
             return merge_exits if merge_exits else [if_node.node_id]
 
         elif isinstance(stmt, ast.For):
@@ -358,7 +414,7 @@ class CFGBuilder:
                 for eid in body_exits:
                     exits = self._build_stmt_cfg(s, eid, for_node.node_id)
                     new_exits.extend(exits)
-                body_exits = new_exits
+                body_exits = _cap_exits(new_exits) or [body_entry.node_id]
 
             # Back edge
             if body_exits:
@@ -383,7 +439,7 @@ class CFGBuilder:
                 for eid in body_exits:
                     exits = self._build_stmt_cfg(s, eid, while_node.node_id)
                     new_exits.extend(exits)
-                body_exits = new_exits
+                body_exits = _cap_exits(new_exits) or [body_entry.node_id]
 
             # Back edge
             if body_exits:
@@ -405,7 +461,7 @@ class CFGBuilder:
                 for eid in try_exits:
                     exits = self._build_stmt_cfg(s, eid, exit_id)
                     new_exits.extend(exits)
-                try_exits = new_exits
+                try_exits = _cap_exits(new_exits) or [try_node.node_id]
 
             # Except handlers
             for handler in stmt.handlers:
@@ -415,7 +471,7 @@ class CFGBuilder:
                     exits = self._build_stmt_cfg(s, handler_entry.node_id, exit_id)
 
             # Both try and except can reach exit
-            results = list(set(try_exits))
+            results = _cap_exits(try_exits)
             return results if results else [try_node.node_id]
 
         elif isinstance(stmt, (ast.Break, ast.Continue)):
@@ -545,7 +601,22 @@ class ASTNormalizer:
         ast_hash = self._compute_ast_hash(tree)
 
         # Step 3: Build CFG
-        cfg_nodes, cfg_edges = self.cfg_builder.build(tree)
+        try:
+            cfg_nodes, cfg_edges = self.cfg_builder.build(tree)
+        except CFGTooLargeError as exc:
+            # The graph is the expensive half of structural scoring. When it is
+            # refused, keep the AST/token evidence and report no CFG/PDG signal
+            # rather than spending minutes of worker time on it.
+            logger.warning("Skipping CFG/PDG for oversized program: %s", exc)
+            return NormalizedProgram(
+                ast_structure_hash=ast_hash,
+                cfg_nodes=[],
+                cfg_edges=[],
+                pdg_nodes=[],
+                token_sequence=self._extract_tokens(tree),
+                function_signatures=self._extract_function_signatures(tree),
+                complexity_scores=self._compute_complexity(tree),
+            )
 
         # Step 4: Build PDG
         pdg_nodes = self.pdg_builder.build(tree)
@@ -668,6 +739,11 @@ class CFGComparator:
             Similarity score in [0, 1]
         """
         if not cfg1 or not cfg2:
+            return 0.0
+        # An empty graph means structural evidence is unavailable (refused as
+        # oversized), not that the two graphs agree. Comparing two empty edge
+        # sets would otherwise report a perfect edge-pattern match.
+        if not cfg1.cfg_nodes or not cfg2.cfg_nodes:
             return 0.0
 
         # 1. Node type distribution similarity

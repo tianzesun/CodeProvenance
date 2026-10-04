@@ -354,6 +354,10 @@ class AppSettings(BaseSettings):
     # Advanced
     BATCH_SIZE: int = Field(32, ge=1)
     MAX_FILE_SIZE_MB: int = Field(10, ge=1)
+    #: Ceiling on the line count of a single submission. The byte cap alone does
+    #: not bound analysis cost: a million-line file of short statements is under
+    #: 10 MB but drives the engine pipeline for hours.
+    MAX_FILE_LINES: int = Field(50_000, ge=1)
     MAX_FILES_PER_JOB: int = Field(500, ge=1)
 
     # Integrations

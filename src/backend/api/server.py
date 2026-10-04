@@ -609,6 +609,57 @@ def _is_code_file(filename: str) -> bool:
     return PathLib(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
+def _check_submission_size(filename: str, content: bytes) -> str | None:
+    """Validate one submission against the per-file upload limits.
+
+    Enforces the limits that ``MAX_FILE_SIZE_MB`` / ``MAX_FILE_LINES`` describe.
+    They were previously defined but never read on the upload path: only a
+    hard-coded 10 MB byte check ran, which bounded *bytes* but not *work* — a
+    million-line file of short statements fits in 9.4 MB and still drove the
+    analysis pipeline for hours.
+
+    Args:
+        filename: Original client filename, used in the error message.
+        content: Raw bytes of the uploaded file.
+
+    Returns:
+        An error message describing the violation, or ``None`` when the file
+        is within both limits.
+    """
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    if len(content) > max_bytes:
+        return (
+            f"File '{filename}' is {len(content) / 1024 / 1024:.1f} MB, which "
+            f"exceeds the {settings.MAX_FILE_SIZE_MB} MB per-file limit."
+        )
+
+    line_count = content.count(b"\n") + (0 if content.endswith(b"\n") else 1)
+    if line_count > settings.MAX_FILE_LINES:
+        return (
+            f"File '{filename}' has {line_count:,} lines, which exceeds the "
+            f"{settings.MAX_FILE_LINES:,} line per-file limit."
+        )
+    return None
+
+
+def _check_submission_count(count: int) -> str | None:
+    """Validate how many submissions a single upload carries.
+
+    Args:
+        count: Number of code files found in the upload.
+
+    Returns:
+        An error message when the upload exceeds ``MAX_FILES_PER_JOB``, else
+        ``None``.
+    """
+    if count > settings.MAX_FILES_PER_JOB:
+        return (
+            f"Upload contains {count} code files, which exceeds the "
+            f"{settings.MAX_FILES_PER_JOB} file per-upload limit."
+        )
+    return None
+
+
 def _language_file_extension(language: str) -> str:
     return {
         "python": ".py",
@@ -2374,6 +2425,10 @@ def _run_selected_external_tools(
     return runner.run_selected_tools(selected_tool_ids, submissions, pairs)
 
 
+class UploadTooLargeError(Exception):
+    """Raised when an upload violates the per-file size or line limits."""
+
+
 def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
     extracted = []
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -2392,8 +2447,16 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
                 )
                 target = _unique_child_path(target_dir, relative_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(member) as src, open(target, "wb") as dst:
-                    dst.write(src.read())
+                with zf.open(member) as src:
+                    payload = src.read()
+                # The 200 MB cap bounds the *compressed* archive only, so a tiny
+                # zip can still expand into arbitrarily large submissions. Every
+                # member therefore carries the same per-file limits a direct
+                # upload does.
+                error = _check_submission_size(member_path.name, payload)
+                if error:
+                    raise UploadTooLargeError(error)
+                target.write_bytes(payload)
                 extracted.append(str(target))
     return extracted
 
@@ -7319,22 +7382,25 @@ async def upload_files(
     job_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
+    oversized: list[str] = []
     for f in files:
         if f.filename and _is_code_file(f.filename):
             content = await f.read()
-            if len(content) > 10 * 1024 * 1024:  # 10 MB per file
-                shutil.rmtree(job_dir, ignore_errors=True)
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "error": f"File '{f.filename}' exceeds the 10 MB per-file limit."
-                    },
-                )
+            size_error = _check_submission_size(f.filename, content)
+            if size_error:
+                oversized.append(size_error)
+                continue
             safe_name = PathLib(f.filename).name
             target = _unique_child_path(job_dir, PathLib(safe_name))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
             saved_files.append(str(target.relative_to(job_dir)))
+
+    size_error = oversized[0] if oversized else None
+    size_error = size_error or _check_submission_count(len(saved_files))
+    if size_error:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(status_code=400, content={"error": size_error})
 
     starter_dir = job_dir / "starter"
     starter_sources = []
@@ -7422,7 +7488,17 @@ async def upload_zip(
         )
     zip_path.write_bytes(content)
 
-    extracted = _extract_zip(zip_path, job_dir)
+    try:
+        extracted = _extract_zip(zip_path, job_dir)
+    except UploadTooLargeError as exc:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+    count_error = _check_submission_count(len(extracted))
+    if count_error:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return JSONResponse(status_code=400, content={"error": count_error})
+
     if len(extracted) < 2:
         shutil.rmtree(job_dir)
         return JSONResponse(

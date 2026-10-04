@@ -21,6 +21,38 @@ ITERATIVE_BLOCK_TOKEN = "ITERATIVE_BLOCK"
 DECISION_BLOCK_TOKEN = "DECISION_BLOCK"
 BRANCH_BLOCK_TOKEN = "BRANCH_BLOCK"
 
+#: Ceiling on chunk comparisons performed for a single pair of submissions.
+#: Each one is a full engine sweep, so an unbounded pair count turns a large
+#: submission into an unbounded job.
+MAX_CHUNK_COMPARISONS_PER_PAIR = 400
+
+
+def _aligned_chunks(chunks_a: list[Any], chunks_b: list[Any]) -> list[tuple[Any, Any]]:
+    """Pair chunks from two chunked files by position.
+
+    Chunks are cut at the same target size from the same kind of source, so the
+    chunk at index *i* of A corresponds to the chunk at index *i* of B. Comparing
+    them positionally keeps the result meaningful and costs ``max(n, m)``
+    comparisons instead of the ``n * m`` cross product. When one file yields more
+    chunks than the other, the trailing chunks are compared against the last
+    chunk of the shorter file so no part of the longer submission is skipped.
+
+    Args:
+        chunks_a: Chunks of the first file, ordered by start line.
+        chunks_b: Chunks of the second file, ordered by start line.
+
+    Returns:
+        ``(chunk_a, chunk_b)`` pairs, at most ``max(len(a), len(b))`` of them.
+    """
+    if not chunks_a or not chunks_b:
+        return []
+    pairs = []
+    for index in range(max(len(chunks_a), len(chunks_b))):
+        chunk_a = chunks_a[index] if index < len(chunks_a) else chunks_a[-1]
+        chunk_b = chunks_b[index] if index < len(chunks_b) else chunks_b[-1]
+        pairs.append((chunk_a, chunk_b))
+    return pairs
+
 
 @dataclass
 class ComparisonResult:
@@ -693,21 +725,36 @@ class BatchDetectionService:
         chunk_comparisons = []
 
         if chunking_a and chunking_b:
-            # Both chunked: compare all chunk pairs
-            for chunk_a in chunking_a.chunks:
-                for chunk_b in chunking_b.chunks:
-                    result = self._compare_chunk_pair(
-                        chunk_a.content,
-                        chunk_b.content,
+            # Both chunked: compare aligned chunks, not the full cross product.
+            # Pairing every chunk of A against every chunk of B costs O(n*m) full
+            # engine sweeps (206 * 206 for a million-line submission) and was the
+            # reason a large upload never finished. Chunks come from the same
+            # source layout, so matching them positionally keeps the comparison
+            # meaningful while costing O(max(n, m)).
+            for chunk_a, chunk_b in _aligned_chunks(
+                chunking_a.chunks, chunking_b.chunks
+            ):
+                result = self._compare_chunk_pair(
+                    chunk_a.content,
+                    chunk_b.content,
+                    filename_a,
+                    filename_b,
+                    highlighter,
+                )
+                result["chunk_a_id"] = chunk_a.chunk_id
+                result["chunk_b_id"] = chunk_b.chunk_id
+                result["line_offset_a"] = chunk_a.start_line - 1
+                result["line_offset_b"] = chunk_b.start_line - 1
+                chunk_comparisons.append(result)
+                if len(chunk_comparisons) >= MAX_CHUNK_COMPARISONS_PER_PAIR:
+                    logger.warning(
+                        "Chunk comparison cap (%d) reached for pair %s/%s; "
+                        "remaining chunks were not compared",
+                        MAX_CHUNK_COMPARISONS_PER_PAIR,
                         filename_a,
                         filename_b,
-                        highlighter,
                     )
-                    result["chunk_a_id"] = chunk_a.chunk_id
-                    result["chunk_b_id"] = chunk_b.chunk_id
-                    result["line_offset_a"] = chunk_a.start_line - 1
-                    result["line_offset_b"] = chunk_b.start_line - 1
-                    chunk_comparisons.append(result)
+                    break
 
         elif chunking_a:
             # Only A chunked: compare each chunk against full B
