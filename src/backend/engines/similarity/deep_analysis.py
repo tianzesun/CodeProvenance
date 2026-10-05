@@ -570,9 +570,12 @@ class DeepCodeAnalyzer:
 
 class ASTTreeEditDistance:
     """
-    Tree Edit Distance (TED) calculator for AST comparison.
+    Approximate tree distance for AST comparison.
 
-    Implements Zhang-Shasha algorithm for efficient tree comparison.
+    This is NOT a Zhang-Shasha edit distance (the previous docstring claimed it was,
+    and the method said "simplified implementation for demonstration"): the distance
+    is estimated from the overlap of node-TYPE sets and the size difference. It is a
+    cheap structural-similarity proxy and is reported as such.
     """
 
     def __init__(self):
@@ -593,8 +596,8 @@ class ASTTreeEditDistance:
         tree_a = self._ast_to_tree(ast_a)
         tree_b = self._ast_to_tree(ast_b)
 
-        # Calculate edit distance
-        distance = self._zhang_shasha(tree_a, tree_b)
+        # Estimate the distance
+        distance = self._approximate_distance(tree_a, tree_b)
 
         # Normalize by maximum possible distance
         max_nodes = max(self._count_nodes(tree_a), self._count_nodes(tree_b))
@@ -632,25 +635,23 @@ class ASTTreeEditDistance:
             return 0
         return 1 + sum(self._count_nodes(child) for child in node.children)
 
-    def _zhang_shasha(self, tree_a: "TreeNode", tree_b: "TreeNode") -> int:
-        """
-        Zhang-Shasha algorithm for tree edit distance.
+    def _zhang_shasha(self, tree_a: "TreeNode", tree_b: "TreeNode") -> float:
+        """Backward-compatible name for :meth:`_approximate_distance`."""
+        return self._approximate_distance(tree_a, tree_b)
 
-        Simplified implementation for demonstration.
+    def _approximate_distance(self, tree_a: "TreeNode", tree_b: "TreeNode") -> float:
+        """Estimated distance from node-type overlap and size difference.
+
+        (The two ``_tree_to_list`` calls that used to start this method built lists
+        that were never used, and the result was truncated with ``int()``.)
         """
         if tree_a is None and tree_b is None:
-            return 0
+            return 0.0
         if tree_a is None:
-            return self._count_nodes(tree_b)
+            return float(self._count_nodes(tree_b))
         if tree_b is None:
-            return self._count_nodes(tree_a)
+            return float(self._count_nodes(tree_a))
 
-        # Build tree lists (preorder with keyroots)
-        self._tree_to_list(tree_a)
-        self._tree_to_list(tree_b)
-
-        # Simple tree distance using tree size difference as approximation
-        # Full Zhang-Shasha is complex; this is a practical approximation
         size_a = self._count_nodes(tree_a)
         size_b = self._count_nodes(tree_b)
 
@@ -662,13 +663,13 @@ class ASTTreeEditDistance:
         total_types = len(type_a.union(type_b))
 
         if total_types == 0:
-            return 0
+            return 0.0
 
         # Approximate distance
         type_distance = 1 - (common_types / total_types)
         size_distance = abs(size_a - size_b) / max(size_a, size_b, 1)
 
-        return int((type_distance * 0.7 + size_distance * 0.3) * max(size_a, size_b))
+        return (type_distance * 0.7 + size_distance * 0.3) * max(size_a, size_b)
 
     def _tree_to_list(self, node: "TreeNode") -> list["TreeNode"]:
         """Convert tree to list in preorder."""
@@ -944,27 +945,35 @@ class PatternCloneDetector:
         subtrees_a = set(analysis_a.get("subtrees", []))
         subtrees_b = set(analysis_b.get("subtrees", []))
 
-        # Find common patterns
+        # Find common patterns. Each pattern is paired with AT MOST one pattern of the
+        # same type on the other side. Pairing every one with every other produced
+        # n*m "common patterns" (3 loops each -> 9), so ``pattern_score`` and with it
+        # ``clone_score`` could exceed 1.0.
         common_subtrees = subtrees_a & subtrees_b
         common_patterns = []
 
-        for p_a in patterns_a:
-            for p_b in patterns_b:
-                if p_a["type"] == p_b["type"]:
-                    common_patterns.append(
-                        {
-                            "type": p_a["type"],
-                            "signature_a": p_a["signature"],
-                            "signature_b": p_b["signature"],
-                        }
-                    )
+        by_type_a: dict[str, list[dict[str, Any]]] = {}
+        by_type_b: dict[str, list[dict[str, Any]]] = {}
+        for p in patterns_a:
+            by_type_a.setdefault(p["type"], []).append(p)
+        for p in patterns_b:
+            by_type_b.setdefault(p["type"], []).append(p)
+        for ptype, group_a in by_type_a.items():
+            for p_a, p_b in zip(group_a, by_type_b.get(ptype, [])):
+                common_patterns.append(
+                    {
+                        "type": ptype,
+                        "signature_a": p_a["signature"],
+                        "signature_b": p_b["signature"],
+                    }
+                )
 
         # Calculate clone scores
         subtree_score = len(common_subtrees) / max(len(subtrees_a | subtrees_b), 1)
         pattern_score = len(common_patterns) / max(len(patterns_a), len(patterns_b), 1)
 
         # Combined score
-        clone_score = subtree_score * 0.6 + pattern_score * 0.4
+        clone_score = min(1.0, subtree_score * 0.6 + pattern_score * 0.4)
 
         return {
             "clone_score": clone_score,
@@ -1030,6 +1039,7 @@ def compare_codes_deep(
     ast_a = parsed_a.get("ast")
     ast_b = parsed_b.get("ast")
 
+    ast_available = bool(ast_a and ast_b)
     results = {
         "tree_edit_distance": 1.0,
         "tree_kernel_similarity": 0.0,
@@ -1037,9 +1047,12 @@ def compare_codes_deep(
         "clone_detection": {},
         "normalized_ast_similarity": 0.0,
         "combined_score": 0.0,
+        # False when a side has no parsed AST (raw-source input): every number above
+        # is then a placeholder, and callers must not blend ``combined_score`` in.
+        "ast_available": ast_available,
     }
 
-    if ast_a and ast_b:
+    if ast_available:
         # Tree edit distance (lower is more similar)
         results["tree_edit_distance"] = ted.calculate_distance(ast_a, ast_b)
 
@@ -1131,6 +1144,19 @@ class DeepVerify:
     All thresholds are fully configurable via engine_weights.yaml
     """
 
+    #: Defaults for every threshold; ``engine_weights.yaml`` values override them.
+    #: This attribute was referenced by ``verify_pair`` (``self.VERIFICATION_THRESHOLDS``)
+    #: and by ``TwoStageSimilarityPipeline`` (``DeepVerify.VERIFICATION_THRESHOLDS``) but
+    #: never defined, so both raised AttributeError.
+    VERIFICATION_THRESHOLDS: ClassVar[dict[str, float]] = {
+        "ast_normalized_min": 0.60,
+        "tree_kernel_min": 0.65,
+        "cfg_similarity_min": 0.55,
+        "minimum_agreeing_engines": 3,
+        "false_positive_safety_cap": 0.58,
+        "final_confidence_floor": 0.70,
+    }
+
     def __init__(self):
         from src.backend.engines.weight_config import EngineWeightConfig
 
@@ -1140,6 +1166,12 @@ class DeepVerify:
         self.cfg_analyzer = ControlFlowAnalyzer()
         self.clone_detector = PatternCloneDetector()
         self.deep_analyzer = DeepCodeAnalyzer()
+
+    @property
+    def thresholds(self) -> dict[str, float]:
+        """Effective thresholds: the defaults overridden by the configuration."""
+        configured = getattr(self.config, "deep_verify_thresholds", None) or {}
+        return {**self.VERIFICATION_THRESHOLDS, **configured}
 
     def verify_pair(
         self,
@@ -1165,6 +1197,8 @@ class DeepVerify:
         """
         ast_a = parsed_a.get("ast")
         ast_b = parsed_b.get("ast")
+        thresholds = self.thresholds
+        safety_cap = thresholds["false_positive_safety_cap"]
 
         result = {
             "verified": False,
@@ -1179,10 +1213,34 @@ class DeepVerify:
 
         if not ast_a or not ast_b:
             result["rejection_reason"] = "AST_UNAVAILABLE"
-            result["final_score"] = min(
-                initial_score, self.VERIFICATION_THRESHOLDS["false_positive_safety_cap"]
-            )
+            result["final_score"] = min(initial_score, safety_cap)
             return result
+
+        try:
+            return self._verify_with_asts(
+                result, parsed_a, parsed_b, ast_a, ast_b, initial_score, language, thresholds
+            )
+        except RecursionError:
+            result["rejection_reason"] = "AST_TOO_DEEP"
+            result["final_score"] = min(initial_score, safety_cap)
+            return result
+
+    def _verify_with_asts(
+        self,
+        result: dict[str, Any],
+        parsed_a: dict[str, Any],
+        parsed_b: dict[str, Any],
+        ast_a: Any,
+        ast_b: Any,
+        initial_score: float,
+        language: str,
+        thresholds: dict[str, float],
+    ) -> dict[str, Any]:
+        safety_cap = thresholds["false_positive_safety_cap"]
+        # A rejected candidate is reported at no more than min(initial score, safety
+        # cap). It used to be set TO the cap, so a pair that scored 0.05 and failed
+        # verification was reported at 0.58, and every rejected candidate tied there.
+        rejected_score = min(initial_score, safety_cap)
 
         # Step 1: Normalized AST comparison (fastest first)
         norm_a = self.deep_analyzer._normalize_ast(ast_a, language)
@@ -1191,11 +1249,9 @@ class DeepVerify:
         result["evidence"]["ast_normalized"] = ast_norm_score
         result["verification_steps_run"] += 1
 
-        thresholds = self.config.deep_verify_thresholds
-
-        if ast_norm_score < thresholds.get("ast_normalized_min", 0.60):
+        if ast_norm_score < thresholds["ast_normalized_min"]:
             result["rejection_reason"] = "AST_NORMALIZED_FAIL"
-            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            result["final_score"] = rejected_score
             return result
 
         result["agreeing_engines"] += 1
@@ -1205,9 +1261,9 @@ class DeepVerify:
         result["evidence"]["tree_kernel"] = tree_kernel_score
         result["verification_steps_run"] += 1
 
-        if tree_kernel_score < thresholds.get("tree_kernel_min", 0.65):
+        if tree_kernel_score < thresholds["tree_kernel_min"]:
             result["rejection_reason"] = "TREE_KERNEL_FAIL"
-            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            result["final_score"] = rejected_score
             return result
 
         result["agreeing_engines"] += 1
@@ -1219,7 +1275,7 @@ class DeepVerify:
         result["evidence"]["cfg_similarity"] = cfg_score
         result["verification_steps_run"] += 1
 
-        if cfg_score >= thresholds.get("cfg_similarity_min", 0.55):
+        if cfg_score >= thresholds["cfg_similarity_min"]:
             result["agreeing_engines"] += 1
 
         # Step 4: Tree Edit Distance
@@ -1241,14 +1297,13 @@ class DeepVerify:
         if clone_result["clone_score"] > 0.45:
             result["agreeing_engines"] += 1
 
-        thresholds = self.config.deep_verify_thresholds
         weights = self.config.weights
 
         # Consensus decision - multiple engines must agree
-        minimum_engines = thresholds.get("minimum_agreeing_engines", 3)
+        minimum_engines = thresholds["minimum_agreeing_engines"]
         if result["agreeing_engines"] < minimum_engines:
             result["rejection_reason"] = "INSUFFICIENT_CONSENSUS"
-            result["final_score"] = thresholds.get("false_positive_safety_cap", 0.58)
+            result["final_score"] = rejected_score
             return result
 
         # Calculate final weighted score using global weights
@@ -1271,7 +1326,7 @@ class DeepVerify:
         ) / weight_sum
 
         # Apply confidence floor
-        confidence_floor = thresholds.get("final_confidence_floor", 0.70)
+        confidence_floor = thresholds["final_confidence_floor"]
         if result["final_score"] >= confidence_floor:
             result["verified"] = True
             result["confidence"] = min(
@@ -1279,9 +1334,7 @@ class DeepVerify:
             )
         else:
             result["rejection_reason"] = "FINAL_SCORE_BELOW_THRESHOLD"
-            result["final_score"] = min(
-                result["final_score"], thresholds.get("false_positive_safety_cap", 0.58)
-            )
+            result["final_score"] = min(result["final_score"], safety_cap)
 
         return result
 

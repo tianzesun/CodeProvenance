@@ -15,7 +15,12 @@ Output format:
 
 from __future__ import annotations
 
+import copy
+import logging
+import math
 import os
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +44,11 @@ from src.backend.evaluation.arbitration import PrecisionWeightedFuser
 if TYPE_CHECKING:
     from src.backend.engines.features.feature_extractor import FeatureVector
 
+logger = logging.getLogger(__name__)
+
+#: A shared (starter-code / boilerplate dominated) match is never auto-escalated past this.
+STARTER_OVERLAP_CAP = 0.70
+
 
 @dataclass
 class FusedScore:
@@ -59,19 +69,6 @@ class FusedScore:
     verdict: str = "INCONCLUSIVE"
 
 
-# Baseline scores expected for two unrelated files in the same language.
-LANGUAGE_BASELINE: dict[str, float] = {
-    "embedding": 0.70,
-    "winnowing": 0.25,
-    "string_tiling": 0.20,
-    "ngram": 0.15,
-    "ast": 0.25,
-    "graph": 0.20,
-    "static_rules": 0.20,
-    "fingerprint": 0.15,
-    "sklearn_cosine": 0.25,
-}
-
 WEIGHT_ALIASES: dict[str, str] = {
     "token": "fingerprint",
     "semantic": "embedding",
@@ -86,85 +83,151 @@ WEIGHT_ALIASES: dict[str, str] = {
 CONFIG_PATH = Path(__file__).parent.parent / "engine_weights.yaml"
 
 
+_config_lock = threading.Lock()
+
+
 def load_engine_config() -> dict:
-    """Load engine configuration from YAML config file."""
+    """Load engine configuration from YAML config file.
+
+    Missing sections are filled from the defaults (a YAML without ``weights`` or
+    ``arbitration`` used to crash ``FusionEngine.__init__`` with a KeyError), and a broken file
+    is logged instead of silently replaced by the defaults.
+    """
     if not CONFIG_PATH.exists():
         return _get_default_config()
 
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
+        if config is not None and not isinstance(config, dict):
+            raise TypeError(f"engine config must be a mapping, got {type(config).__name__}")
         return _with_policy_defaults(config or {})
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not read %s (%s); using the default engine configuration", CONFIG_PATH, exc)
         return _get_default_config()
 
 
+def _finite_non_negative(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and number >= 0.0 else None
+
+
 def save_engine_config(config: dict) -> None:
-    """Save engine configuration to YAML config file with validation."""
-    config = _with_policy_defaults(config)
+    """Save engine configuration to YAML config file with validation.
 
-    if "weights" in config:
-        total = sum(config["weights"].values())
+    The caller's dict is not modified; weights must be finite and non-negative (they were
+    normalised BEFORE negatives were clamped, and NaN passed straight through); booleans such as
+    ``baseline_correction.enabled`` are no longer turned into 1.0; and the file is replaced
+    atomically so a crash or a concurrent reader never sees a half-written config.
+    """
+    config = _with_policy_defaults(copy.deepcopy(config))
+
+    weights = config.get("weights")
+    if isinstance(weights, dict):
+        clean: dict[str, float] = {}
+        for key, value in weights.items():
+            number = _finite_non_negative(value)
+            if number is None:
+                raise ValueError(f"weight {key!r} must be a finite, non-negative number, got {value!r}")
+            clean[key] = number
+        total = sum(clean.values())
         if total > 0 and abs(total - 1.0) > 0.001:
-            config["weights"] = {
-                k: round(v / total, 4) for k, v in config["weights"].items()
-            }
+            clean = {k: round(v / total, 4) for k, v in clean.items()}
+        config["weights"] = {k: max(0.0, min(1.0, v)) for k, v in clean.items()}
 
-    for section in ["weights", "baseline_correction"]:
-        if section in config:
-            for key, value in config[section].items():
-                if isinstance(value, (int, float)):
-                    config[section][key] = max(0.0, min(1.0, value))
+    baselines = config.get("baseline_correction")
+    if isinstance(baselines, dict):
+        for key, value in list(baselines.items()):
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                baselines[key] = max(0.0, min(1.0, float(value))) if math.isfinite(value) else 0.0
+        inner = baselines.get("baselines")
+        if isinstance(inner, dict):
+            for key, value in list(inner.items()):
+                number = _finite_non_negative(value)
+                inner[key] = max(0.0, min(1.0, number)) if number is not None else 0.0
 
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
+    with _config_lock:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=CONFIG_PATH.parent, prefix=".engine_weights.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                yaml.safe_dump(config, handle, sort_keys=False, default_flow_style=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if CONFIG_PATH.exists():
+                os.chmod(tmp_name, CONFIG_PATH.stat().st_mode & 0o777)
+            os.replace(tmp_name, CONFIG_PATH)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+
+
+def _base_config() -> dict:
+    return {
+        "weights": {
+            "token": 0.12,
+            "winnowing": 0.16,
+            "gst": 0.13,
+            "ast": 0.17,
+            "ngram": 0.10,
+            "graph": 0.15,
+            "embedding": 0.12,
+            "static_rules": 0.05,
+            "codebert": 0.00,
+            "sklearn_cosine": 0.00,
+        },
+        "baseline_correction": {
+            "enabled": True,
+            "baselines": {
+                "embedding": 0.70,
+                "winnowing": 0.25,
+                "string_tiling": 0.20,
+                "ngram": 0.15,
+                "ast": 0.25,
+                "graph": 0.20,
+                "static_rules": 0.20,
+                "fingerprint": 0.15,
+                "sklearn_cosine": 0.25,
+            },
+        },
+        "arbitration": {
+            "enabled": True,
+            "prior_precision_multiplier": 20.0,
+            "minimum_agreement": 0.30,
+        },
+        "ast_boost": {
+            "enabled": True,
+            "threshold": 0.90,
+            "minimum_guaranteed_score": 0.75,
+        },
+    }
 
 
 def _get_default_config() -> dict:
-    return _with_policy_defaults(
-        {
-            "weights": {
-                "token": 0.12,
-                "winnowing": 0.16,
-                "gst": 0.13,
-                "ast": 0.17,
-                "ngram": 0.10,
-                "graph": 0.15,
-                "embedding": 0.12,
-                "static_rules": 0.05,
-                "codebert": 0.00,
-                "sklearn_cosine": 0.00,
-            },
-            "baseline_correction": {
-                "enabled": True,
-                "baselines": {
-                    "embedding": 0.70,
-                    "winnowing": 0.25,
-                    "string_tiling": 0.20,
-                    "ngram": 0.15,
-                    "ast": 0.25,
-                    "graph": 0.20,
-                    "static_rules": 0.20,
-                    "fingerprint": 0.15,
-                    "sklearn_cosine": 0.25,
-                },
-            },
-            "arbitration": {
-                "enabled": True,
-                "prior_precision_multiplier": 20.0,
-                "minimum_agreement": 0.30,
-            },
-            "ast_boost": {
-                "enabled": True,
-                "threshold": 0.90,
-                "minimum_guaranteed_score": 0.75,
-            },
-        }
-    )
+    return _with_policy_defaults(_base_config())
+
+
+def _fill_missing(target: dict, defaults: dict) -> None:
+    """Recursively add keys that ``target`` lacks (never overwrites)."""
+    for key, value in defaults.items():
+        if key not in target or target[key] is None:
+            target[key] = copy.deepcopy(value)
+        elif key != "weights" and isinstance(value, dict) and isinstance(target[key], dict):
+            # (``weights`` is taken whole: merging default engines into a user's partial
+            # weight set would change what it sums to.)
+            _fill_missing(target[key], value)
 
 
 def _with_policy_defaults(config: dict[str, Any]) -> dict[str, Any]:
-    """Ensure fusion policy sections are present in loaded configuration."""
+    """Ensure the core and fusion-policy sections are present in the configuration."""
+    _fill_missing(config, _base_config())
     config.setdefault("score_normalization", default_normalization_config())
     config.setdefault("fusion_presets", fusion_presets_payload())
     config.setdefault("weight_governance", default_weight_governance_policy())
@@ -179,63 +242,69 @@ LANGUAGE_BASELINE: dict[str, float] = _get_default_config()["baseline_correction
 ]
 
 
-def hard_gate(
+def _finite_scores(evidence: dict[str, Any]) -> dict[str, float]:
+    """Numeric, finite scores only (a NaN made ``max()`` order-dependent)."""
+    out: dict[str, float] = {}
+    for key, value in evidence.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        number = float(value)
+        if math.isfinite(number):
+            out[key] = number
+    return out
+
+
+_STRUCTURAL_SIGNALS = ("ast", "logic_flow", "ngram", "winnowing", "token", "fingerprint")
+
+
+def hard_gate_reason(
     evidence: dict[str, float],
-    coverage: float = 0.0,
-) -> str | None:
-    """
-    Hard gating layer to veto false positives.
+    coverage: float | None = 0.0,
+) -> tuple[str | None, str]:
+    """Hard gating layer to veto false positives; returns ``(verdict_or_None, reason)``.
 
     Rules:
     1. If max signal < 0.50: CLEAN (insufficient evidence)
     2. If no structural signals above 0.50: CLEAN
-    3. If weak signals dominate: CLEAN
-    4. If high similarity but low coverage: CLEAN (few matching lines)
-    5. If low coverage with low identical_line_ratio: CLEAN
+    3. If high similarity but low coverage: CLEAN (few matching lines)
+    4. If strong STRUCTURAL similarity but modest coverage: CLEAN
 
-    Args:
-        evidence: Dictionary of engine names to scores
-        coverage: Fraction of code covered by matching segments (0.0-1.0).
-                  Computed by CodeHighlighter based on line-level matches.
+    ``coverage`` is the fraction of code covered by matching segments. ``None`` means it could
+    not be computed: the coverage rules are then skipped. (A failed computation used to be
+    0.0, which vetoed every pair as CLEAN.)
 
-    Returns:
-        "CLEAN" if vetoed, None if should proceed
+    Rule 4 now looks at the strongest STRUCTURAL signal. It used the maximum over all signals,
+    which includes the embedding score (about 0.7 for unrelated files), so whether a pair was
+    vetoed depended on embedding noise.
     """
-    if not evidence:
-        return "CLEAN"
+    scores = _finite_scores(evidence)
+    if not scores:
+        return "CLEAN", "no usable engine scores"
 
-    max_signal = max(evidence.values())
+    if max(scores.values()) < 0.50:
+        return "CLEAN", "all engine scores are below 0.50"
 
-    # Rule 1: Completely clean - no signal strong enough
-    if max_signal < 0.50:
-        return "CLEAN"
-
-    # Rule 2: No structural evidence
-    structural_signals = [
-        "ast",
-        "logic_flow",
-        "ngram",
-        "winnowing",
-        "token",
-        "fingerprint",
-    ]
-    structural_max = max(evidence.get(s, 0.0) for s in structural_signals)
-
+    structural_max = max(scores.get(name, 0.0) for name in _STRUCTURAL_SIGNALS)
     if structural_max < 0.50:
-        return "CLEAN"
+        return "CLEAN", "no structural evidence (strongest structural signal below 0.50)"
 
-    # Rule 3: Coverage gate — if coverage is too low, veto
-    # A high similarity score on a tiny matched region is a false positive signal
-    if coverage < 0.15:
-        return "CLEAN"
+    if coverage is not None:
+        if coverage < 0.15:
+            return "CLEAN", f"matching code covers only {coverage:.0%} of the files (below 15%)"
+        if structural_max >= 0.80 and coverage < 0.40:
+            return "CLEAN", (
+                f"high similarity comes from small isolated matches (coverage {coverage:.0%}, below 40%)"
+            )
 
-    # Rule 4: Disproportionate signal-to-coverage ratio
-    # If max_signal is high (>0.80) but coverage is still modest (<0.40),
-    # the high score comes from small isolated matches, not widespread copying
-    if max_signal >= 0.80 and coverage < 0.40:
-        return "CLEAN"
+    return None, ""
 
-    return None
+
+def hard_gate(
+    evidence: dict[str, float],
+    coverage: float | None = 0.0,
+) -> str | None:
+    """Returns ``"CLEAN"`` if the pair is vetoed, else None (see :func:`hard_gate_reason`)."""
+    return hard_gate_reason(evidence, coverage)[0]
 
 
 class FusionEngine:
@@ -244,6 +313,7 @@ class FusionEngine:
     def __init__(self, weights: dict[str, float] | None = None) -> None:
         self._config = load_engine_config()
         self._last_load_time = time.time()
+        self._custom_weights = dict(weights) if weights is not None else None
 
         if weights is None:
             weights = self._config["weights"]
@@ -274,9 +344,13 @@ class FusionEngine:
     def reload_config(self) -> None:
         """Reload configuration from disk if modified."""
         if self._config.get("advanced", {}).get("hot_reload", True):
-            mtime = os.path.getmtime(CONFIG_PATH)
+            try:
+                mtime = os.path.getmtime(CONFIG_PATH)
+            except OSError:  # no config file: the defaults stay in force (it used to raise)
+                return
             if mtime > self._last_load_time:
-                self.__init__()
+                # Weights given at construction are kept (re-running __init__() discarded them).
+                self.__init__(self._custom_weights)
 
     @classmethod
     def get_current_config(cls) -> dict:
@@ -340,16 +414,18 @@ class FusionEngine:
                 FeatureExtractor,
             )
 
+            started = time.perf_counter()
             generator = SyntheticDatasetGenerator(seed=42)
             dataset = generator.generate_pair_count(
                 type1=25, type2=25, type3=25, type4=25, non_clone=100
             )
             extractor = FeatureExtractor()
+            engine = cls()  # one engine: it was rebuilt (and the YAML re-read) for every pair
             results = []
 
             for pair in dataset.pairs:
                 features = extractor.extract(pair.code_a, pair.code_b)
-                score = cls().fuse(features)
+                score = engine.fuse(features)
                 results.append(
                     {
                         "score": score.final_score,
@@ -361,7 +437,9 @@ class FusionEngine:
             labels = np.array([r["ground_truth"] for r in results])
 
             roc_curve = compute_roc_curve(labels, scores)
-            roc_auc = float(np.trapz(roc_curve.tpr, roc_curve.fpr))
+            # np.trapz was removed in NumPy 2.0 (np.trapezoid replaces it)
+            trapezoid = getattr(np, "trapezoid", None) or np.trapz
+            roc_auc = float(trapezoid(roc_curve.tpr, roc_curve.fpr))
 
             # Pick the threshold that maximizes F1 on the ROC curve.
             best_f1 = 0.0
@@ -397,9 +475,10 @@ class FusionEngine:
                     "fn": final_metrics["fn"],
                 },
                 "total_pairs": len(results),
-                "runtime_ms": 0,
+                "runtime_ms": int((time.perf_counter() - started) * 1000),
             }
         except Exception as e:
+            logger.exception("Calibration benchmark failed")
             return {"status": "failed", "error": str(e)}
 
     def fuse(
@@ -424,11 +503,13 @@ class FusionEngine:
         raw_scores = features.as_dict()
         raw_scores["logic_flow"] = logic_flow
 
-        # Extract coverage from FeatureVector (computed by CodeHighlighter)
-        coverage = getattr(features, "coverage", 0.0)
+        # Coverage from the FeatureVector (computed by CodeHighlighter). ``None`` = unknown.
+        coverage: float | None = getattr(features, "coverage", None)
+        if not getattr(features, "coverage_available", True):
+            coverage = None
 
         # HARD GATE LAYER: Veto false positives before any processing
-        veto = hard_gate(raw_scores, coverage=coverage)
+        veto, veto_reason = hard_gate_reason(raw_scores, coverage=coverage)
         if veto == "CLEAN":
             return FusedScore(
                 final_score=0.0,
@@ -439,16 +520,24 @@ class FusionEngine:
                 contributions={},
                 review_priority=0.0,
                 professor_summary="Hard gate veto: Insufficient evidence for plagiarism.",
-                evidence_reasons=["No structural evidence", "Low signal strength"],
-                evidence_guardrails=["max_signal < 0.50 or no structural evidence"],
+                # The REAL reason (it always said "No structural evidence / Low signal
+                # strength", even for a coverage veto) and no "relevant engines".
+                evidence_reasons=[f"Hard gate: {veto_reason}"],
+                evidence_guardrails=[f"hard gate: {veto_reason}"],
                 evidence_quality=self._calculate_evidence_quality(raw_scores, {}),
-                relevant_engines=list(raw_scores.keys()),
+                relevant_engines=[],
                 verdict="CLEAN",
             )
 
-        # Check for exact match first - return 100% for identical files
+        shared_regions = self._shared_region_overlap(features)
+        ranking = self._rank(raw_scores)
+
+        # Exact match: return 100% for identical files, unless the shared text is the
+        # instructor's starter code / boilerplate (two untouched starter files are identical).
         token_score = raw_scores.get("fingerprint", raw_scores.get("token", 0.0))
-        if token_score >= 0.95:
+        if _finite_scores({"t": token_score}).get("t", 0.0) >= 0.95:
+            if shared_regions >= STARTER_OVERLAP_CAP:
+                return self._shared_region_result(raw_scores, ranking, shared_regions)
             return FusedScore(
                 final_score=1.0,
                 confidence=0.99,
@@ -485,7 +574,9 @@ class FusionEngine:
 
         # AGGREGATE: Consolidate to evidence vector (NO scoring)
         # Use weighted scores for evidence aggregation
-        evidence = aggregate_from_scores(weighted_scores, logic_flow, coverage=coverage)
+        evidence = aggregate_from_scores(
+            weighted_scores, logic_flow, coverage=0.0 if coverage is None else coverage
+        )
 
         # Apply baseline correction for display purposes only
         corrected_scores = {}
@@ -552,22 +643,87 @@ class FusionEngine:
                         triggered_layer=decision.triggered_layer,
                     )
 
+        guardrails = list(ranking.guardrails) if ranking else []
+        reasons = [decision.reason] + (list(ranking.reasons) if ranking else [])
+        if shared_regions >= STARTER_OVERLAP_CAP and decision.verdict in ("TRUE", "PROBABLE"):
+            # The overlap is mostly starter code / boilerplate: never auto-escalate it.
+            decision = Decision(
+                verdict="REVIEW",
+                confidence=min(decision.confidence, 0.5),
+                evidence=decision.evidence,
+                reason="shared_starter_or_boilerplate_overlap",
+                triggered_layer=decision.triggered_layer,
+            )
+            guardrails.append("Verdict capped at REVIEW: the overlap is mostly shared starter/boilerplate code.")
+            reasons = [decision.reason] + reasons[1:]
+
+        if decision.verdict == "TRUE":
+            review_priority = 1.0
+        elif decision.verdict == "CLEAN" or ranking is None:
+            review_priority = 0.0
+        else:
+            # PROBABLE / REVIEW used to be 0.0, so the review queue could not order them.
+            review_priority = ranking.review_priority
+
         return FusedScore(
-            final_score=decision.confidence,
+            # final_score is a RISK score: the confidence of a positive verdict, 0.0 for CLEAN.
+            # A CLEAN policy decision used to report its 0.95 confidence-in-clean here, which
+            # ranked "clean" pairs above everything else in score-ordered consumers (the
+            # calibration benchmark thresholds this value).
+            final_score=0.0 if decision.verdict == "CLEAN" else decision.confidence,
             confidence=decision.confidence,
             uncertainty=1.0 - decision.confidence,
             agreement_index=decision.confidence,
             components=raw_scores,
             contributions={},
-            review_priority=1.0 if decision.verdict == "TRUE" else 0.0,
+            review_priority=review_priority,
             professor_summary=f"Policy Decision: {decision.verdict}",
-            evidence_reasons=[decision.reason],
-            evidence_guardrails=[],
+            evidence_reasons=reasons,
+            evidence_guardrails=guardrails,
             evidence_quality=self._calculate_evidence_quality(
                 raw_scores, relevant_scores
             ),
             relevant_engines=list(relevant_scores.keys()),
             verdict=decision.verdict,
+        )
+
+    def _rank(self, raw_scores: dict[str, float]):
+        """Evidence-ranker output (guardrails, reasons, review priority); None on failure."""
+        try:
+            return self._ranker.rank_pair(raw_scores)
+        except Exception as exc:  # the ranker informs the result, it must not break it
+            logger.warning("Evidence ranker failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _shared_region_overlap(features: Any) -> float:
+        """How much of the match is instructor starter code / boilerplate (0..1)."""
+        values = []
+        for name in ("starter_code_overlap", "boilerplate_overlap"):
+            value = getattr(features, name, 0.0)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                values.append(float(value))
+        return max(values, default=0.0)
+
+    def _shared_region_result(self, raw_scores: dict[str, float], ranking: Any, overlap: float) -> FusedScore:
+        return FusedScore(
+            final_score=0.5,
+            confidence=0.5,
+            uncertainty=0.5,
+            agreement_index=0.5,
+            components=raw_scores,
+            contributions={},
+            review_priority=ranking.review_priority if ranking else 0.0,
+            professor_summary="Policy Decision: REVIEW",
+            evidence_reasons=["shared_starter_or_boilerplate_overlap"]
+            + (list(ranking.reasons) if ranking else []),
+            evidence_guardrails=[
+                f"Identical text is mostly shared starter/boilerplate code ({overlap:.0%}); not escalated."
+            ]
+            + (list(ranking.guardrails) if ranking else []),
+            evidence_quality={"fingerprint": "conclusive"},
+            relevant_engines=["fingerprint"],
+            verdict="REVIEW",
         )
 
     def get_weights(self) -> dict[str, float]:

@@ -12,9 +12,8 @@ Usage:
     score = engine.compare({'raw': code_a}, {'raw': code_b})
 """
 
-import hashlib
 import logging
-import pickle
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +22,7 @@ import numpy as np
 from src.backend.domain.models import Finding
 
 from .base_similarity import BaseSimilarityAlgorithm
+from .embedding_store import DiskEmbeddingStore
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,21 @@ DEFAULT_MODEL = "microsoft/unixcoder-base"
 MAX_LENGTH = 512  # UniXcoder token limit
 BATCH_SIZE = 32  # Safe batch size for a single GPU (tune up/down as needed)
 CACHE_DIR = Path("./.unixcoder_cache")
+
+_TOKEN_FALLBACK: Any = None
+_TOKEN_FALLBACK_LOCK = threading.Lock()
+
+
+def _token_fallback_engine():
+    """One shared TokenSimilarity for the fallback path (a new one, with its own
+    8k-entry cache, was built for every short snippet)."""
+    global _TOKEN_FALLBACK
+    with _TOKEN_FALLBACK_LOCK:
+        if _TOKEN_FALLBACK is None:
+            from .token_similarity import TokenSimilarity
+
+            _TOKEN_FALLBACK = TokenSimilarity()
+        return _TOKEN_FALLBACK
 
 
 class UniXcoderSimilarity(BaseSimilarityAlgorithm):
@@ -68,13 +83,14 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         else:
             self.device = device
 
-        # Cache
+        # Cache: ``.npy`` files (never pickles), created on first write
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._store = DiskEmbeddingStore(self.model_name, directory=self.cache_dir)
 
         # Lazy-loaded
         self._tokenizer = None
         self._model = None
+        self._load_lock = threading.Lock()
 
         logger.info(
             "UniXcoderSimilarity initialised — model=%s device=%s",
@@ -105,10 +121,14 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     # ─────────────────────────────────────────
 
     def _load_model(self) -> None:
-        """Load model and tokenizer once, on first use."""
+        """Load model and tokenizer once, on first use (thread-safe)."""
         if self._model is not None:
             return
+        with self._load_lock:
+            if self._model is None:
+                self._load_model_locked()
 
+    def _load_model_locked(self) -> None:
         try:
             from transformers import AutoModel, AutoTokenizer
         except ImportError as e:
@@ -129,12 +149,11 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             )
 
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # ``trust_remote_code=True`` was removed: it executes Python from the model
+            # repository. UniXcoder is a standard RoBERTa-style checkpoint and does not
+            # need it.
             self._model = (
-                AutoModel.from_pretrained(
-                    self.model_name,
-                    ignore_mismatched_sizes=True,
-                    trust_remote_code=True,
-                )
+                AutoModel.from_pretrained(self.model_name, ignore_mismatched_sizes=True)
                 .to(self.device)
                 .eval()
             )
@@ -145,28 +164,16 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     # ─────────────────────────────────────────
 
     def _cache_key(self, text: str) -> str:
-        payload = f"{self.model_name}::{text}"
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return self._store.key(text)
 
     def _cache_path(self, text: str) -> Path:
-        return self.cache_dir / f"{self._cache_key(text)}.pkl"
+        return self._store.path(text)
 
     def _load_from_cache(self, text: str) -> np.ndarray | None:
-        p = self._cache_path(text)
-        if p.exists():
-            try:
-                with open(p, "rb") as f:
-                    return pickle.load(f)
-            except Exception:
-                p.unlink(missing_ok=True)  # evict corrupt entry
-        return None
+        return self._store.get(text)
 
     def _save_to_cache(self, text: str, embedding: np.ndarray) -> None:
-        try:
-            with open(self._cache_path(text), "wb") as f:
-                pickle.dump(embedding, f)
-        except Exception as e:
-            logger.debug("Cache write failed (non-fatal): %s", e)
+        self._store.put(text, embedding)
 
     # ─────────────────────────────────────────
     #  Core embedding
@@ -177,52 +184,54 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         Embed a list of code strings.
         Returns shape (N, hidden_size), L2-normalised rows.
         Uses Redis cache (fast) → disk cache (slower) → model (slowest).
+
+        ``torch`` is imported only when the model actually has to run: it used to be
+        imported first thing, so a machine without torch could not even serve vectors
+        that were already cached, and every such comparison fell back to tokens.
+        Identical texts in one call are embedded once.
         """
-        import torch
+        if not texts:
+            return np.zeros((0, 0))
 
-        results: list[np.ndarray | None] = [None] * len(texts)
-        uncached_indices: list[int] = []
-        uncached_texts: list[str] = []
+        unique: dict[str, int] = {}
+        for text in texts:
+            unique.setdefault(text, len(unique))
+        unique_texts = list(unique)
+        vectors: list[np.ndarray | None] = [None] * len(unique_texts)
+        missing: list[int] = []
 
-        # Try Redis cache first (10x faster than disk)
         from src.backend.infrastructure.cache import get_cache
 
         redis_cache = get_cache()
 
-        # Check cache (Redis → disk)
-        for i, text in enumerate(texts):
-            # Try Redis first
+        for i, text in enumerate(unique_texts):
             cache_key = f"unixcoder:{self._cache_key(text)}"
             if redis_cache.available:
                 cached_redis = redis_cache.get(cache_key)
                 if cached_redis is not None:
                     try:
-                        results[i] = np.array(cached_redis)
+                        vectors[i] = np.asarray(cached_redis, dtype=np.float64)
                         continue
-                    except Exception:
-                        pass  # Fall through to disk cache
-
-            # Fall back to disk cache
+                    except Exception:  # noqa: S110
+                        pass  # fall through to the disk cache
             cached_disk = self._load_from_cache(text)
             if cached_disk is not None:
-                results[i] = cached_disk
-                # Backfill Redis for future lookups
-                if redis_cache.available:
+                vectors[i] = cached_disk
+                if redis_cache.available:  # backfill Redis for future lookups
                     try:
                         redis_cache.set(cache_key, cached_disk.tolist(), ttl=86400)
-                    except Exception:
+                    except Exception:  # noqa: S110
                         pass
             else:
-                uncached_indices.append(i)
-                uncached_texts.append(text)
+                missing.append(i)
 
-        # Run model in batches for cache misses
-        if uncached_texts:
+        if missing:
+            import torch
+
             self._load_model()
-            all_embeddings: list[np.ndarray] = []
-
-            for batch_start in range(0, len(uncached_texts), self.batch_size):
-                batch = uncached_texts[batch_start : batch_start + self.batch_size]
+            for batch_start in range(0, len(missing), self.batch_size):
+                batch_idx = missing[batch_start : batch_start + self.batch_size]
+                batch = [unique_texts[i] for i in batch_idx]
                 inputs = self._tokenizer(
                     batch,
                     return_tensors="pt",
@@ -234,28 +243,22 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 with torch.no_grad():
                     output = self._model(**inputs)
 
-                # CLS token — index 0 of the sequence dimension
-                # Shape: (batch, hidden_size)
+                # CLS token, L2-normalised so dot product == cosine similarity
                 cls_embeddings = output.last_hidden_state[:, 0, :]
-
-                # L2 normalise so dot product == cosine similarity
                 norms = cls_embeddings.norm(dim=-1, keepdim=True).clamp(min=1e-8)
                 normalised = (cls_embeddings / norms).cpu().numpy()
-                all_embeddings.extend(normalised)
 
-            # Write cache (both Redis and disk) + fill results
-            for idx, text, emb in zip(uncached_indices, uncached_texts, all_embeddings):
-                self._save_to_cache(text, emb)  # Disk cache
-                # Redis cache (for faster subsequent lookups)
-                if redis_cache.available:
-                    try:
-                        cache_key = f"unixcoder:{self._cache_key(text)}"
-                        redis_cache.set(cache_key, emb.tolist(), ttl=86400)
-                    except Exception:
-                        pass
-                results[idx] = emb
+                for idx, emb in zip(batch_idx, normalised):
+                    text = unique_texts[idx]
+                    vectors[idx] = emb
+                    self._save_to_cache(text, emb)
+                    if redis_cache.available:
+                        try:
+                            redis_cache.set(f"unixcoder:{self._cache_key(text)}", emb.tolist(), ttl=86400)
+                        except Exception:  # noqa: S110
+                            pass
 
-        return np.stack(results)  # (N, hidden_size)
+        return np.stack([vectors[unique[text]] for text in texts])  # (N, hidden_size)
 
     # ─────────────────────────────────────────
     #  Public API (matches BaseSimilarityAlgorithm)
@@ -365,25 +368,26 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             for r in results:
                 print(f"{r['label_i']} ↔ {r['label_j']}: {r['score']:.3f}")
         """
-        matrix = self.similarity_matrix(codes)
         n = len(codes)
         labels = labels or [str(i) for i in range(n)]
-        pairs = []
+        if len(labels) != n:  # validate before paying for any embedding
+            raise ValueError("labels must have one entry per code string")
+        matrix = self.similarity_matrix(codes)
 
-        for i in range(n):
-            for j in range(i + 1, n):
-                score = float(matrix[i, j])
-                if score >= threshold:
-                    pairs.append(
-                        {
-                            "i": i,
-                            "j": j,
-                            "label_i": labels[i],
-                            "label_j": labels[j],
-                            "score": round(score, 4),
-                        }
-                    )
-
+        # vectorised: the O(N^2) double Python loop is one numpy selection
+        rows, cols = np.triu_indices(n, k=1)
+        scores = matrix[rows, cols]
+        keep = scores >= threshold
+        pairs = [
+            {
+                "i": int(i),
+                "j": int(j),
+                "label_i": labels[i],
+                "label_j": labels[j],
+                "score": round(float(score), 4),
+            }
+            for i, j, score in zip(rows[keep], cols[keep], scores[keep])
+        ]
         pairs.sort(key=lambda x: x["score"], reverse=True)
         return pairs
 
@@ -405,9 +409,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     def _token_fallback(parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """Fallback to token similarity when embedding is unavailable / unreliable."""
         try:
-            from .token_similarity import TokenSimilarity
-
-            return TokenSimilarity().compare(parsed_a, parsed_b)
+            return _token_fallback_engine().compare(parsed_a, parsed_b)
         except Exception:
             return Finding(
                 engine="token",

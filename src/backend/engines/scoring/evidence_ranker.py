@@ -9,19 +9,35 @@ an allegation or final misconduct probability.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+#: Accepted spellings of the same feature (the fusion layer calls them token / semantic).
+_ALIASES = {"token": "fingerprint", "semantic": "embedding"}
 
-def _clamp(value: float) -> float:
-    """Clamp numeric scores to the unit interval."""
-    return max(0.0, min(1.0, float(value)))
+
+def _clamp(value: Any) -> float:
+    """Clamp a numeric score to the unit interval.
+
+    NaN, infinities and non-numbers become 0.0. ``max(0.0, min(1.0, nan))`` is ``1.0``, so a
+    single NaN feature used to read as a perfect match; a non-numeric string raised.
+    """
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return max(0.0, min(1.0, number))
 
 
 def _get(features: Mapping[str, float], key: str) -> float:
     """Read and clamp a feature value from a sparse feature mapping."""
-    return _clamp(float(features.get(key, 0.0) or 0.0))
+    return _clamp(features.get(key, 0.0))
 
 
 @dataclass(frozen=True)
@@ -64,7 +80,10 @@ class EvidenceFusionRanker:
         base_score: float | None = None,
     ) -> EvidenceRank:
         """Rank a pair for review using multi-layer evidence and guardrails."""
-        normalized = {key: _clamp(value) for key, value in features.items()}
+        normalized = {key: _clamp(value) for key, value in (features or {}).items()}
+        for alias, canonical in _ALIASES.items():
+            if alias in normalized:
+                normalized[canonical] = max(normalized.get(canonical, 0.0), normalized[alias])
 
         token = max(_get(normalized, "fingerprint"), _get(normalized, "winnowing"))
         ast = _get(normalized, "ast")
@@ -98,34 +117,46 @@ class EvidenceFusionRanker:
         reasons: list[str] = []
         guardrails: list[str] = []
 
+        # Shared-region discounts. They apply to the base score AND to every boost below: the
+        # boosts used to be applied afterwards as absolute floors (0.86, 0.84, ...), so a "same
+        # wrong behaviour" or "same structure" boost silently undid the starter-code,
+        # boilerplate and common-solution discounts that had just been applied.
+        discount = 1.0
         if starter_overlap >= 0.70:
-            score *= 0.55
+            discount *= 0.55
             guardrails.append("Discounted shared starter-code regions.")
         if boilerplate_overlap >= 0.70:
-            score *= 0.75
+            discount *= 0.75
             guardrails.append("Discounted boilerplate overlap.")
         if common_solution >= 0.65:
-            score *= 0.70
+            discount *= 0.70
             guardrails.append(
                 "Lowered risk because the pattern matches a common solution cluster."
             )
+        score *= discount
 
-        if runtime_bug >= 0.70 or edge_case >= 0.75:
-            score = max(score, 0.86)
+        def boost(floor: float) -> float:
+            return max(score, floor * discount)
+
+        # Identical behaviour on edge cases is also what two CORRECT solutions do, so it only
+        # counts as shared-bug evidence when something concrete (tokens, AST, CFG) agrees.
+        edge_case_corroborated = max(token, ast, cfg) >= 0.45
+        if runtime_bug >= 0.70 or (edge_case >= 0.75 and edge_case_corroborated):
+            score = boost(0.86)
             reasons.append(
                 "Both submissions share the same wrong or edge-case behavior."
             )
         if previous_term >= 0.75 and (ast >= 0.60 or token >= 0.55):
-            score = max(score, 0.84)
+            score = boost(0.84)
             reasons.append("Submission is similar to a previous-semester case.")
         if token >= 0.70 and ast >= 0.65 and identifier_rename >= 0.55:
-            score = max(score, 0.82)
+            score = boost(0.82)
             reasons.append("Same structure with renamed identifiers.")
         if ast >= 0.72 and (cfg >= 0.60 or dfg >= 0.60):
-            score = max(score, 0.78)
+            score = boost(0.78)
             reasons.append("Structural and program-flow evidence agree.")
         if rare_pattern >= 0.70:
-            score = max(score, score + 0.10)
+            score = score + 0.10 * discount  # (was ``max(score, score + 0.10)``, i.e. ``+ 0.10``)
             reasons.append("Shared rare implementation pattern.")
         if style_shift >= 0.75:
             score = max(score, min(0.72, score + 0.08))
@@ -161,7 +192,7 @@ class EvidenceFusionRanker:
         """Attach ranker output to cases and sort by review priority descending."""
         ranked: list[dict[str, Any]] = []
         for case in cases:
-            features = case.get("features", {})
+            features = case.get("features") or {}
             rank = self.rank_pair(features, base_score=case.get("base_score"))
             enriched = dict(case)
             enriched["evidence_rank"] = rank

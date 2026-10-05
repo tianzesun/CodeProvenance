@@ -10,9 +10,9 @@ the ``problem_id`` grouping needed for leakage-free grouped holdout evaluation.
 
 Input (choose one):
 
-1. **CSV/JSONL** with columns ``code``, ``label`` (1 = AI, 0 = human), and
-   optional ``problem_id`` / ``llm`` / ``submission_id`` — any delimiter
-   autodetected from the filename (``.csv`` or ``.jsonl``).
+1. **CSV/JSONL** with columns ``code``, ``label`` (1 = AI, 0 = human; REQUIRED),
+   and optional ``problem_id`` / ``llm`` / ``submission_id`` / ``language`` — any
+   delimiter autodetected from the filename (``.csv`` or ``.jsonl``).
 2. **Folder layout** with an ``ai/`` and ``human/`` directory; every source file
    becomes one sample. ``problem_id`` is derived from a ``problem.txt`` next to
    the file when present, else from the file stem. When the folder already
@@ -20,6 +20,10 @@ Input (choose one):
    tool, or AIGCodeSet itself), its ``problem_id`` / ``llm`` / ``submission_id``
    are reused so re-ingesting a dataset round-trips exactly; the folder
    position stays the label authority.
+
+Without a ``problem_id`` a sample cannot be grouped, and the benchmark's
+"grouped holdout" degrades to a random split that overstates accuracy; the
+ingest warns when that happens.
 
 Output: a new dataset directory (``--output``) laid out exactly like the
 AIGCodeSet build so the benchmark consumes it with identical grouped-holdout
@@ -34,16 +38,25 @@ methodology:
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import logging
-import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from src.backend.engines.ai.dataset_utils import (
+    MIN_CODE_CHARS,
+    dedupe_records,
+    ensure_problem_ids,
+    language_for_suffix,
+    parse_label,
+    raise_csv_field_limit,
+    read_csv_rows,
+    safe_stem,
+    suffix_for_language,
+)
 
-MIN_CODE_CHARS = 20
+logger = logging.getLogger(__name__)
 
 # Supported source file extensions when ingesting a folder layout.
 _SOURCE_SUFFIXES = {
@@ -63,72 +76,81 @@ _SOURCE_SUFFIXES = {
     ".swift",
 }
 
-
-def _safe_stem(value: str, fallback: str = "sample") -> str:
-    """Sanitise an identifier for use in a file name."""
-    stem = re.sub(r"[^0-9A-Za-z_]+", "_", str(value)).strip("_")
-    return stem or fallback
+# Kept for backward compatibility with importers of the old private names.
+_safe_stem = safe_stem
 
 
 def _coerce_label(value: Any) -> Any:
-    """Coerce a record field to int, or None when missing/unparsable."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+    """Return 0/1, or None when missing/invalid (see ``parse_label``)."""
+    return parse_label(value)
+
+
+def _default_llm(label: int) -> str:
+    """Generator name for a record that does not give one.
+
+    A missing ``llm`` used to default to "STUDENT" for AI-labelled rows too.
+    """
+    return "UNKNOWN_AI" if label == 1 else "STUDENT"
+
+
+def _record_from_row(row: dict[str, Any], origin: str, skipped: dict[str, int]) -> dict[str, Any] | None:
+    code = (row.get("code") or "").strip()
+    if len(code) < MIN_CODE_CHARS:
+        skipped["too_short"] += 1
         return None
+    # The label column is REQUIRED. ``row.get("label", 0)`` silently labelled every
+    # row human when the column was missing or misnamed, producing a one-class
+    # dataset that looked valid.
+    label = parse_label(row.get("label"))
+    if label is None:
+        skipped["bad_label"] += 1
+        logger.warning("%s: skipping row with missing/invalid label %r (must be 0 or 1)", origin, row.get("label"))
+        return None
+    return {
+        "code": code,
+        "label": label,
+        "problem_id": str(row.get("problem_id") or ""),
+        "llm": (row.get("llm") or _default_llm(label)).upper(),
+        "submission_id": str(row.get("submission_id") or ""),
+        "language": str(row.get("language") or "python").lower(),
+    }
+
+
+def _new_skip_counter() -> dict[str, int]:
+    return {"too_short": 0, "bad_label": 0, "malformed": 0}
 
 
 def _records_from_csv(path: Path) -> dict[str, Any]:
     """Parse a labelled records file (CSV) into the schema list-of-dicts."""
-    records = []
-    with path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            code = (row.get("code") or "").strip()
-            if len(code) < MIN_CODE_CHARS:
-                continue
-            label = _coerce_label(row.get("label", 0))
-            if label is None:
-                logger.warning(
-                    "Skipping row with non-integer label: %r", row.get("label")
-                )
-                continue
-            records.append(
-                {
-                    "code": code,
-                    "label": label,
-                    "problem_id": row.get("problem_id", ""),
-                    "llm": (row.get("llm") or "STUDENT").upper(),
-                    "submission_id": row.get("submission_id", ""),
-                }
-            )
-    return {"source": path.name, "records": records}
+    skipped = _new_skip_counter()
+    records = [r for row in read_csv_rows(path) if (r := _record_from_row(row, path.name, skipped))]
+    return {"source": path.name, "records": records, "skipped": skipped}
+
+
+def _iter_jsonl(path: Path, skipped: dict[str, int]) -> Iterator[dict[str, Any]]:
+    for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            # One bad line used to abort the whole ingest.
+            skipped["malformed"] += 1
+            logger.warning("%s:%d: skipping malformed JSON line", path.name, number)
+            continue
+        if isinstance(row, dict):
+            yield row
+        else:
+            skipped["malformed"] += 1
 
 
 def _records_from_jsonl(path: Path) -> dict[str, Any]:
     """Parse a labelled records file (JSONL) into the schema list-of-dicts."""
-    records = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        code = (row.get("code") or "").strip()
-        if len(code) < MIN_CODE_CHARS:
-            continue
-        label = _coerce_label(row.get("label", 0))
-        if label is None:
-            logger.warning("Skipping row with non-integer label: %r", row.get("label"))
-            continue
-        records.append(
-            {
-                "code": code,
-                "label": label,
-                "problem_id": row.get("problem_id", ""),
-                "llm": (row.get("llm") or "STUDENT").upper(),
-                "submission_id": row.get("submission_id", ""),
-            }
-        )
-    return {"source": path.name, "records": records}
+    skipped = _new_skip_counter()
+    records = [
+        r for row in _iter_jsonl(path, skipped) if (r := _record_from_row(row, path.name, skipped))
+    ]
+    return {"source": path.name, "records": records, "skipped": skipped}
 
 
 def _problem_id_for_file(path: Path) -> str:
@@ -170,6 +192,7 @@ def _load_folder_index(path: Path) -> dict[str, dict[str, Any]]:
 
 def _records_from_folder(path: Path) -> dict[str, Any]:
     """Ingest an ``ai/`` + ``human/`` folder layout into labelled records."""
+    skipped = _new_skip_counter()
     records = []
     label_map = {"ai": 1, "human": 0}
     index = _load_folder_index(path)
@@ -178,10 +201,12 @@ def _records_from_folder(path: Path) -> dict[str, Any]:
         if not root.is_dir():
             continue
         for source in sorted(root.rglob("*")):
-            if not source.is_file() or source.suffix not in _SOURCE_SUFFIXES:
+            # Suffix compared case-insensitively (".PY" files were ignored).
+            if not source.is_file() or source.suffix.lower() not in _SOURCE_SUFFIXES:
                 continue
             code = source.read_text(encoding="utf-8", errors="replace").strip()
             if len(code) < MIN_CODE_CHARS:
+                skipped["too_short"] += 1
                 continue
             relative = source.relative_to(path)
             meta = index.get(source.name, {})
@@ -189,13 +214,13 @@ def _records_from_folder(path: Path) -> dict[str, Any]:
                 {
                     "code": code,
                     "label": label,
-                    "problem_id": meta.get("problem_id")
-                    or _problem_id_for_file(source),
-                    "llm": (meta.get("llm") or "STUDENT").upper(),
+                    "problem_id": str(meta.get("problem_id") or _problem_id_for_file(source)),
+                    "llm": (meta.get("llm") or _default_llm(label)).upper(),
                     "submission_id": str(meta.get("submission_id") or relative),
+                    "language": str(meta.get("language") or language_for_suffix(source.suffix)),
                 }
             )
-    return {"source": f"folder:{path}", "records": records}
+    return {"source": f"folder:{path}", "records": records, "skipped": skipped}
 
 
 def _load_records(input_path: Path) -> dict[str, Any]:
@@ -208,13 +233,8 @@ def _load_records(input_path: Path) -> dict[str, Any]:
 
 
 def _dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop duplicate (code) rows, keeping the first occurrence."""
-    seen = set()
-    for row in records:
-        if row["code"] in seen:
-            continue
-        seen.add(row["code"])
-        yield row
+    """Drop duplicate code, and code with conflicting labels (see ``dedupe_records``)."""
+    return dedupe_records(records)[0]
 
 
 def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
@@ -223,13 +243,22 @@ def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
     Files go under ``<output>/data/{ai,human}/`` with ``samples.jsonl`` — the
     exact layout the classifier benchmark expects (see ``benchmark_classifier``).
     """
+    raise_csv_field_limit()
     if not input_path.exists():
         raise RuntimeError(f"Input path does not exist: {input_path}")
 
     loaded = _load_records(input_path)
-    records = list(_dedupe_records(loaded["records"]))
+    records, stats = dedupe_records(loaded["records"])
     if not records:
         raise RuntimeError("No valid records found in the input.")
+
+    labels = {r["label"] for r in records}
+    if labels != {0, 1}:
+        raise RuntimeError(
+            "The input contains only %s samples; both AI (1) and human (0) are needed."
+            % ("AI" if labels == {1} else "human")
+        )
+    ungrouped = ensure_problem_ids(records)
 
     data_dir = out_dir / "data"
     ai_dir = data_dir / "ai"
@@ -238,14 +267,15 @@ def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
     human_dir.mkdir(parents=True, exist_ok=True)
 
     meta_lines = []
-    counts = {"ai": 0, "human": 0, "skipped": 0}
+    counts = {"ai": 0, "human": 0, "skipped": sum(loaded["skipped"].values())}
     seen_stems: dict = {}
     for idx, row in enumerate(records):
         label_dir = ai_dir if row["label"] == 1 else human_dir
         counts["ai" if row["label"] == 1 else "human"] += 1
-        stem = _safe_stem(row["problem_id"] or f"sample_{idx}")
+        stem = safe_stem(row["problem_id"] or f"sample_{idx}")
         seen_stems[stem] = seen_stems.get(stem, 0) + 1
-        filename = f"{stem}__{seen_stems[stem]:03d}__{idx:05d}.py"
+        # The extension follows the sample's language (everything used to be ``.py``).
+        filename = f"{stem}__{seen_stems[stem]:03d}__{idx:05d}{suffix_for_language(row['language'])}"
         (label_dir / filename).write_text(row["code"] + "\n", encoding="utf-8")
         meta_lines.append(
             {
@@ -255,6 +285,7 @@ def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
                 "llm": row["llm"],
                 "status": "",
                 "submission_id": row["submission_id"],
+                "language": row["language"],
             }
         )
 
@@ -262,7 +293,14 @@ def materialise(input_path: Path, out_dir: Path) -> dict[str, int]:
         "\n".join(json.dumps(line, ensure_ascii=True) for line in meta_lines) + "\n",
         encoding="utf-8",
     )
-    logger.info("Ingested from %s", loaded["source"])
+    counts.update(duplicates=stats.duplicates, conflicts=stats.conflicts, ungrouped=ungrouped)
+    logger.info(
+        "Ingested from %s (skipped %s; %d duplicates removed, %d label conflicts dropped)",
+        loaded["source"],
+        loaded["skipped"],
+        stats.duplicates,
+        stats.conflicts,
+    )
     return counts
 
 

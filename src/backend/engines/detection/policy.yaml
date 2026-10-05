@@ -1,9 +1,16 @@
 # Plagiarism Detection Policy Configuration
 # Version: 1.0
 # This file defines declarative rules for the Policy Engine.
-# Rules are evaluated in order - first match wins.
+# Rules are evaluated in ascending ``priority`` - first match wins.
+#
+# Evidence names: exact_match (bool), ast, ngram, winnowing, token_overlap, logic_flow, graph,
+# embedding (BASELINE-CORRECTED; raw cosine is ``embedding_raw``), structural (= layer-2 value),
+# lexical (= layer-1 value). A value the engines did not report is UNKNOWN and makes every
+# numeric comparison false (so "embedding: < 0.30" never holds when there is no embedding).
+# A mapping with several keys needs ALL of them; use ``and`` / ``or`` / ``not`` to combine.
+# ``decision_order`` below is documentation only: ``priority`` decides.
 
-version: "1.0"
+version: "1.1"
 
 decision_order:
   - identity_override
@@ -129,8 +136,7 @@ rules:
   # No evidence of plagiarism
   # ─────────────────────────────────────────────────────────────────────────────
   fallback:
-    if:
-      true:  # Always matches as fallback
+    if: true  # always matches (a bare ``true:`` key parses as the BOOLEAN key True and never matched)
     then:
       verdict: "CLEAN"
       confidence: 0.10

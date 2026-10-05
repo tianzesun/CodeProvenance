@@ -12,6 +12,18 @@ Confidence factors:
 from src.backend.engines.ai.agreement import calculate_signal_variance
 from src.backend.engines.ai.models import SignalScores
 
+#: Below this average reliability there is too little evidence for an "extreme score"
+#: to mean anything (a file with no measurable signals scores 0.0, which used to
+#: earn the full +0.1 "very confident it is human" bonus).
+MIN_RELIABILITY_FOR_BONUS = 0.25
+
+
+def _average_reliability(reliabilities: dict[str, float]) -> float:
+    """Mean reliability; 0.0 for an empty mapping (it used to be a ZeroDivisionError)."""
+    if not reliabilities:
+        return 0.0
+    return sum(reliabilities.values()) / len(reliabilities)
+
 
 def calibrate_confidence(
     signals: SignalScores,
@@ -30,20 +42,19 @@ def calibrate_confidence(
     Returns:
         Confidence score in [0.0, 1.0]
     """
-    # Calculate base confidence from agreement and reliability
     base_confidence = _calculate_base_confidence(reliabilities, agreement)
 
-    # Apply variance penalty
-    variance = calculate_signal_variance(signals)
+    # Variance is measured over the signals that carry evidence.
+    variance = calculate_signal_variance(signals, reliabilities)
     variance_penalty = _calculate_variance_penalty(variance)
 
-    # Apply extreme score bonus
-    extreme_bonus = _calculate_extreme_bonus(ai_probability)
+    extreme_bonus = (
+        _calculate_extreme_bonus(ai_probability)
+        if _average_reliability(reliabilities) >= MIN_RELIABILITY_FOR_BONUS
+        else 0.0
+    )
 
-    # Combine factors
     final_confidence = base_confidence - variance_penalty + extreme_bonus
-
-    # Ensure confidence is in [0.0, 1.0]
     return round(max(0.0, min(1.0, final_confidence)), 3)
 
 
@@ -59,16 +70,9 @@ def _calculate_base_confidence(
     Returns:
         Base confidence in [0.0, 1.0]
     """
-    # Average reliability
-    avg_reliability = sum(reliabilities.values()) / len(reliabilities)
-
-    # Agreement score
+    avg_reliability = _average_reliability(reliabilities)
     agreement_score = agreement["agreement_score"]
-
-    # Base confidence is average of agreement and reliability
-    base_confidence = (agreement_score + avg_reliability) / 2
-
-    return base_confidence
+    return (agreement_score + avg_reliability) / 2
 
 
 def _calculate_variance_penalty(variance: float) -> float:
@@ -80,13 +84,8 @@ def _calculate_variance_penalty(variance: float) -> float:
     Returns:
         Penalty in [0.0, 0.15]
     """
-    # Normalize variance to [0.0, 1.0]
-    normalized_variance = variance / 0.25
-
-    # Penalty increases with variance
-    penalty = normalized_variance * 0.15
-
-    return penalty
+    normalized_variance = min(1.0, max(0.0, variance / 0.25))
+    return normalized_variance * 0.15
 
 
 def _calculate_extreme_bonus(ai_probability: float) -> float:
@@ -98,17 +97,17 @@ def _calculate_extreme_bonus(ai_probability: float) -> float:
     Returns:
         Bonus in [0.0, 0.1]
     """
-    # Bonus for very high or very low scores
     if ai_probability > 0.8 or ai_probability < 0.2:
         return 0.1
     elif ai_probability > 0.7 or ai_probability < 0.3:
         return 0.05
-    else:
-        return 0.0
+    return 0.0
 
 
 def get_confidence_level(confidence: float) -> str:
     """Get confidence level label.
+
+    The single definition: ``reporting`` used to carry an identical copy.
 
     Args:
         confidence: Confidence score in [0.0, 1.0]
@@ -124,8 +123,7 @@ def get_confidence_level(confidence: float) -> str:
         return "Medium"
     elif confidence >= 0.3:
         return "Low"
-    else:
-        return "Very Low"
+    return "Very Low"
 
 
 def should_flag_low_confidence(ai_probability: float, confidence: float) -> bool:
@@ -138,14 +136,10 @@ def should_flag_low_confidence(ai_probability: float, confidence: float) -> bool
     Returns:
         True if result should be flagged, False otherwise
     """
-    # Flag if confidence is too low for the AI probability
     return bool(
-        ai_probability > 0.7
-        and confidence < 0.4
-        or ai_probability > 0.5
-        and confidence < 0.3
-        or ai_probability < 0.3
-        and confidence < 0.3
+        (ai_probability > 0.7 and confidence < 0.4)
+        or (ai_probability > 0.5 and confidence < 0.3)
+        or (ai_probability < 0.3 and confidence < 0.3)
     )
 
 
@@ -162,20 +156,15 @@ def adjust_confidence_for_code_length(confidence: float, code_length: int) -> fl
         Adjusted confidence in [0.0, 1.0]
     """
     if code_length < 100:
-        # Very short code: reduce confidence by 20%
-        adjustment = 0.2
+        adjustment = 0.2  # very short: reduce confidence by 20%
     elif code_length < 500:
-        # Short code: reduce confidence by 10%
-        adjustment = 0.1
+        adjustment = 0.1  # short: reduce confidence by 10%
     elif code_length < 2000:
-        # Medium code: no adjustment
-        adjustment = 0.0
+        adjustment = 0.0  # medium: no adjustment
     else:
-        # Long code: increase confidence by 5%
-        adjustment = -0.05
+        adjustment = -0.05  # long: increase confidence by 5%
 
-    adjusted_confidence = confidence - adjustment
-    return round(max(0.0, min(1.0, adjusted_confidence)), 3)
+    return round(max(0.0, min(1.0, confidence - adjustment)), 3)
 
 
 def get_confidence_explanation(
@@ -193,7 +182,7 @@ def get_confidence_explanation(
     Returns:
         Explanation string
     """
-    agreement_level = agreement["agreement_level"]
+    agreement_level = agreement.get("agreement_level", "unknown")
 
     if confidence >= 0.85:
         return (
@@ -208,15 +197,14 @@ def get_confidence_explanation(
     elif confidence >= 0.5:
         return (
             f"Medium confidence ({confidence:.1%}). "
-            f"Some signal disagreement or moderate reliability."
+            "Some signal disagreement or moderate reliability."
         )
     elif confidence >= 0.3:
         return (
             f"Low confidence ({confidence:.1%}). "
             f"Signals show {agreement_level} agreement with mixed reliability."
         )
-    else:
-        return (
-            f"Very low confidence ({confidence:.1%}). "
-            f"Result should be treated with caution."
-        )
+    return (
+        f"Very low confidence ({confidence:.1%}). "
+        "Result should be treated with caution."
+    )

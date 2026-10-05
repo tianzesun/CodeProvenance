@@ -26,8 +26,52 @@ and easy to unit-test.  The DB integration lives in ``PairReviewService``.
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def _unit(value: Any) -> float:
+    """A finite float clamped to [0, 1]; NaN/inf/non-numeric become 0.0.
+
+    ``max(0.0, min(1.0, nan))`` is ``1.0``: a NaN similarity used to land in the HIGH band.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, number)) if math.isfinite(number) else 0.0
+
+
+#: Engine keys that are NOT structural similarity evidence. They must never count towards
+#: "engines agree": the AI detector corroborating its own flag defeats the policy, and web
+#: matches have their own rule (Rule 3).
+NON_SIMILARITY_ENGINES: frozenset[str] = frozenset(
+    {"ai", "ai_detection", "ai_score", "ai_probability", "web", "web_match", "web_match_score"}
+)
+
+#: Assignment-mode catalog IDs (``assignment_modes``) -> the band-threshold keys below. The
+#: thresholds are keyed ``introductory/algorithms/projects/capstone`` but the rest of the
+#: product uses the catalog IDs, so every catalog ID silently fell through to ``default``.
+MODE_TO_BAND_KEY: dict[str, str] = {
+    "intro_programming": "introductory",
+    "foundations_code": "introductory",
+    "exam_mode": "introductory",
+    "data_structures_algorithms": "algorithms",
+    "algorithmic_code": "algorithms",
+    "theory_proofs": "algorithms",
+    "systems_programming": "projects",
+    "systems_projects": "projects",
+    "database_sql": "projects",
+    "sql_data_logic": "projects",
+    "web_development": "projects",
+    "ml_data_science": "projects",
+    "notebook_ai": "projects",
+    "software_engineering_large_project": "capstone",
+}
 
 # ---------------------------------------------------------------------------
 # Band threshold configuration
@@ -136,6 +180,20 @@ class BandThresholdConfig:
     engine_agree_count: int = 2
     engine_agree_min: float = 0.50
 
+    def __post_init__(self) -> None:
+        for name in ("review_min", "high_min", "ai_elevated_min", "web_match_min", "engine_agree_min"):
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be a number in [0, 1], got {value!r}")
+        if self.review_min > self.high_min:
+            raise ValueError(
+                f"review_min ({self.review_min}) must not exceed high_min ({self.high_min})"
+            )
+        # ``engine_agree_count = 0`` made "engines agree" vacuously TRUE (``0 >= 0``): an AI
+        # flag was then "corroborated" with no structural evidence at all.
+        if int(self.engine_agree_count) < 1:
+            raise ValueError("engine_agree_count must be at least 1")
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "BandThresholdConfig":
         """Build from a plain dict (e.g. from BAND_THRESHOLDS or a DB row)."""
@@ -218,7 +276,12 @@ def get_thresholds(
     if override is not None:
         return override
     mode_key = (assignment_mode or "").lower().strip()
-    raw = BAND_THRESHOLDS.get(mode_key) or BAND_THRESHOLDS["default"]
+    mode_key = MODE_TO_BAND_KEY.get(mode_key, mode_key)
+    raw = BAND_THRESHOLDS.get(mode_key)
+    if raw is None:
+        if mode_key:
+            logger.debug("No band thresholds for mode %r; using the default", assignment_mode)
+        raw = BAND_THRESHOLDS["default"]
     return BandThresholdConfig.from_dict(raw)
 
 
@@ -254,7 +317,7 @@ def compute_band(
         >>> result.band
         'low'
     """
-    score = max(0.0, min(1.0, float(similarity_score)))
+    score = _unit(similarity_score)
     cfg = get_thresholds(assignment_mode, threshold_override)
 
     if score >= cfg.high_min:
@@ -303,8 +366,9 @@ def compute_corroboration(
     **Rule 4** — AI not elevated: Standard banding applies; no AI label shown.
 
     **Rule 5** — High AI, borderline similarity: AI ≥ 0.80 and similarity is
-    non-trivially positive (≥ 0.10) but below review threshold; band is
-    elevated to Review but high-stakes dispositions are still blocked.
+    non-trivially positive (≥ 0.10) but not corroborated. It is labelled
+    "elevated priority"; this function does NOT change the band (``compute_band`` sees
+    only the similarity score), and high-stakes dispositions stay blocked.
 
     Args:
         ai_score: AI detection probability in [0.0, 1.0].
@@ -335,21 +399,40 @@ def compute_corroboration(
         >>> r.ai_flag, r.corroborated, r.rule
         (False, False, 4)
     """
-    score = max(0.0, min(1.0, float(similarity_score)))
-    ai = max(0.0, min(1.0, float(ai_score)))
+    score = _unit(similarity_score)
+    ai = _unit(ai_score)
     cfg = get_thresholds(assignment_mode, threshold_override)
-    engines = engine_scores or {}
+    # Only structural similarity engines can corroborate (never the AI detector or the web
+    # match, never booleans). A bool is an ``int``, so ``True`` used to count as a 1.0 engine.
+    engines = {
+        name: value
+        for name, value in (engine_scores or {}).items()
+        if str(name).lower() not in NON_SIMILARITY_ENGINES
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    }
 
     ai_elevated = ai >= cfg.ai_elevated_min
+    web_match_score = _unit(web_match_score)
     web_corroborates = web_match_score >= cfg.web_match_min
 
     # Count how many engines individually meet the agreement threshold
-    agreeing_engines = sum(
-        1
-        for v in engines.values()
-        if isinstance(v, (int, float)) and float(v) >= cfg.engine_agree_min
-    )
+    agreeing_engines = sum(1 for v in engines.values() if float(v) >= cfg.engine_agree_min)
     engine_agrees = agreeing_engines >= cfg.engine_agree_count
+
+    # Why similarity does not corroborate. The Rule 1/5 texts used to say "below the review
+    # threshold" even when the similarity WAS above it and only the engine agreement failed.
+    if score >= cfg.review_min:
+        shortfall = (
+            f"structural similarity ({score:.0%}) meets the review threshold for this "
+            f"assignment type, but only {agreeing_engines} engine(s) reach "
+            f"{cfg.engine_agree_min:.0%} ({cfg.engine_agree_count} required)"
+        )
+    else:
+        shortfall = (
+            f"structural similarity ({score:.0%}) is below the review threshold for this "
+            f"assignment type ({cfg.review_min:.0%})"
+        )
 
     # Rule 4 — AI not elevated (evaluated before AI rules to short-circuit)
     if not ai_elevated:
@@ -411,10 +494,9 @@ def compute_corroboration(
             corroborated=False,
             label="AI-only flag – elevated priority",
             reason=(
-                f"AI detection is high ({ai:.0%}) but structural similarity "
-                f"({score:.0%}) is below the review threshold for this assignment "
-                f"type ({cfg.review_min:.0%}). Step-up verification and formal "
-                "escalation require corroborating structural evidence."
+                f"AI detection is high ({ai:.0%}) but {shortfall}. Step-up "
+                "verification and formal escalation require corroborating structural "
+                "evidence."
             ),
             blocked_dispositions=HIGH_STAKES_DISPOSITIONS,
             rule=5,
@@ -426,11 +508,9 @@ def compute_corroboration(
         corroborated=False,
         label="AI-only flag",
         reason=(
-            f"AI detection is elevated ({ai:.0%}), but structural similarity "
-            f"({score:.0%}) is below the threshold for this assignment type "
-            f"({cfg.review_min:.0%}) and no corroborating web or structural "
-            "evidence was found. Step-up verification and formal escalation "
-            "are not available. This reflects IntegrityDesk policy: AI "
+            f"AI detection is elevated ({ai:.0%}), but {shortfall} and no "
+            "corroborating web evidence was found. Step-up verification and formal "
+            "escalation are not available. This reflects IntegrityDesk policy: AI "
             "detection alone is preliminary evidence, not proof."
         ),
         blocked_dispositions=HIGH_STAKES_DISPOSITIONS,

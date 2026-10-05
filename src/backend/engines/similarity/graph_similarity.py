@@ -10,7 +10,10 @@ Similarity is computed at multiple levels:
 3. Semantic similarity (variable naming + patterns)
 """
 
+import logging
 import math
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +30,14 @@ from src.backend.core.graph.models import (
 )
 
 from .base_similarity import BaseSimilarityAlgorithm
+
+logger = logging.getLogger(__name__)
+
+#: Graphs are built per file; every pair rebuilt both. Built graphs are treated as
+#: read-only and kept in a small LRU.
+_GRAPH_CACHE_SIZE = 64
+#: Failures that mean "this input cannot be graphed" rather than "the engine is broken".
+_UNGRAPHABLE = (SyntaxError, ValueError, RecursionError, MemoryError)
 
 
 @dataclass
@@ -59,10 +70,49 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         semantic_weight: float = 0.25,
     ) -> None:
         super().__init__(name)
-        self._structural_weight = structural_weight
-        self._dataflow_weight = dataflow_weight
-        self._semantic_weight = semantic_weight
-        self._builder: CFGDFGBuilder = CFGDFGBuilder()
+        weights = (structural_weight, dataflow_weight, semantic_weight)
+        if any(not math.isfinite(w) or w < 0 for w in weights) or sum(weights) <= 0:
+            raise ValueError("component weights must be finite, non-negative and not all zero")
+        # Normalised: custom weights that did not sum to 1.0 scaled the score
+        # (>1 was silently clamped to a perfect match).
+        total = sum(weights)
+        self._structural_weight = structural_weight / total
+        self._dataflow_weight = dataflow_weight / total
+        self._semantic_weight = semantic_weight / total
+        self._builder: CFGDFGBuilder = CFGDFGBuilder()  # kept for compatibility
+        self._cache: OrderedDict[str, CombinedGraph] = OrderedDict()
+        self._cache_lock = threading.Lock()
+
+    # ── Graph construction ─────────────────────────────────────────
+
+    def _build(self, code: str) -> CombinedGraph:
+        """Build (or fetch) the combined graph for ``code``.
+
+        A fresh builder per build: the builders carry per-build state, so one shared
+        instance is not safe when engines run in a thread pool.
+        """
+        with self._cache_lock:
+            cached = self._cache.get(code)
+            if cached is not None:
+                self._cache.move_to_end(code)
+                return cached
+        graph = CFGDFGBuilder().build(code)
+        with self._cache_lock:
+            self._cache[code] = graph
+            while len(self._cache) > _GRAPH_CACHE_SIZE:
+                self._cache.popitem(last=False)
+        return graph
+
+    @staticmethod
+    def _code_of(parsed: dict[str, Any]) -> str:
+        """Source text of a parsed dict.
+
+        Only ``"content"`` was read, while every other engine (and the engine
+        wrapper, and the visualisation endpoint) passes ``"raw"``; the graph engine
+        then saw an empty string, returned 0.0, and its 20% weight dragged the
+        combined score down.
+        """
+        return parsed.get("content") or parsed.get("raw") or ""
 
     # ── BaseSimilarityAlgorithm interface ──────────────────────────
 
@@ -76,16 +126,18 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         Returns:
             Similarity score between 0.0 and 1.0
         """
-        code_a = parsed_a.get("content", "")
-        code_b = parsed_b.get("content", "")
+        code_a = self._code_of(parsed_a)
+        code_b = self._code_of(parsed_b)
 
         if not code_a or not code_b:
             return 0.0
 
         try:
-            graph_a = self._builder.build(code_a)
-            graph_b = self._builder.build(code_b)
-        except SyntaxError:
+            graph_a = self._build(code_a)
+            graph_b = self._build(code_b)
+        except _UNGRAPHABLE as exc:
+            # (only SyntaxError used to be handled; NUL bytes, deep nesting ... raised)
+            logger.debug("Graph similarity skipped: %s", exc)
             return 0.0
 
         structural = self._structural(graph_a, graph_b)
@@ -104,9 +156,9 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
     def compare_detailed(self, code_a: str, code_b: str) -> GraphSimilarityResult:
         """Compute detailed similarity with per-component breakdown."""
         try:
-            graph_a = self._builder.build(code_a)
-            graph_b = self._builder.build(code_b)
-        except SyntaxError:
+            graph_a = self._build(code_a)
+            graph_b = self._build(code_b)
+        except _UNGRAPHABLE:
             return GraphSimilarityResult(
                 overall_score=0.0, differences=["Syntax error in input"]
             )
@@ -142,8 +194,11 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         func_b: str,
     ) -> GraphSimilarityResult | None:
         """Compare specific functions from two files."""
-        g_a = self._builder.build_for_function(code_a, func_a)
-        g_b = self._builder.build_for_function(code_b, func_b)
+        try:
+            g_a = CFGDFGBuilder().build_for_function(code_a, func_a)
+            g_b = CFGDFGBuilder().build_for_function(code_b, func_b)
+        except _UNGRAPHABLE:
+            return None
         if g_a is None or g_b is None:
             return None
         s = self._structural(g_a, g_b)
@@ -248,12 +303,18 @@ class GraphSimilarity(BaseSimilarityAlgorithm):
         )
 
     def _var_count_sim(self, a: DataFlowGraph, b: DataFlowGraph) -> float:
-        va, vb = a.variables, b.variables
-        if not va and not vb:
+        """Similarity of the NUMBER of variables.
+
+        It compared the variable NAMES (Jaccard), so renaming every variable scored 0
+        here, contradicting the engine's purpose ("detects plagiarism even with
+        variable renaming") and the method's own name.
+        """
+        na, nb = len(a.variables), len(b.variables)
+        if na == 0 and nb == 0:
             return 1.0
-        if not va or not vb:
+        if na == 0 or nb == 0:
             return 0.0
-        return len(va & vb) / len(va | vb)
+        return min(na, nb) / max(na, nb)
 
     def _dep_pattern_sim(self, a: DataFlowGraph, b: DataFlowGraph) -> float:
         if a.edge_count == 0 and b.edge_count == 0:

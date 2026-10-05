@@ -7,7 +7,8 @@ engine coefficients hidden from the normal UI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 ASSIGNMENT_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
@@ -108,7 +109,7 @@ class AppliedProfessorProfile:
     def to_dict(self) -> dict[str, Any]:
         """Serialize the applied profile for APIs and UI."""
         return {
-            "profile": self.profile.__dict__,
+            "profile": asdict(self.profile),
             "weights": dict(self.weights),
             "threshold": self.threshold,
             "result_limit": self.result_limit,
@@ -210,6 +211,7 @@ def professor_profile_catalog() -> dict[str, Any]:
             {"id": "top_10", "label": "Show top 10", "limit": 10},
             {"id": "top_25", "label": "Show top 25", "limit": 25},
             {"id": "top_50", "label": "Show top 50", "limit": 50},
+            {"id": "all", "label": "Show all", "limit": None},
         ],
     }
 
@@ -217,14 +219,15 @@ def professor_profile_catalog() -> dict[str, Any]:
 def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfile:
     """Convert persisted professor settings into internal detection policy."""
     raw = raw or {}
+    notes: list[str] = []
     profile = ProfessorProfile(
-        assignment_type=_assignment_type(
-            raw.get("assignment_type"),
-        ),
+        assignment_type=_assignment_type(raw.get("assignment_type"), notes),
         sensitivity=_valid(
             raw.get("sensitivity"),
             {"conservative": 1, "balanced": 1, "strict": 1},
             "balanced",
+            notes,
+            "sensitivity",
         ),
         starter_code_handling=_valid(
             raw.get("starter_code_handling"),
@@ -234,25 +237,37 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
                 "include_starter_code": 1,
             },
             "student_written_only",
+            notes,
+            "starter_code_handling",
         ),
         previous_term_matching=_valid(
             raw.get("previous_term_matching"),
             {"off": 1, "same_course_only": 1, "all_historical_courses": 1},
             "same_course_only",
+            notes,
+            "previous_term_matching",
         ),
         ai_rewrite_detection=_valid(
             raw.get("ai_rewrite_detection"),
             {"off": 1, "balanced": 1, "aggressive": 1},
             "balanced",
+            notes,
+            "ai_rewrite_detection",
         ),
         result_volume=_valid(
             raw.get("result_volume"),
             {"top_10": 1, "top_25": 1, "top_50": 1, "all": 1},
             "top_25",
+            notes,
+            "result_volume",
         ),
     )
 
     weights = dict(ASSIGNMENT_TYPE_WEIGHTS[profile.assignment_type])
+    if profile.previous_term_matching == "off":
+        # History evidence cannot count when previous terms are not checked (its 14-44% share
+        # was still being handed to the embedding engine).
+        weights["history"] = 0.0
     threshold = {"conservative": 0.84, "balanced": 0.75, "strict": 0.64}[
         profile.sensitivity
     ]
@@ -286,7 +301,7 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
         "high_risk_requires_concrete_evidence": True,
         **_assignment_policy(profile.assignment_type),
     }
-    warnings = []
+    warnings = list(notes)
     if profile.starter_code_handling == "include_starter_code":
         warnings.append("Including starter code can increase false positives.")
     if profile.previous_term_matching == "off":
@@ -312,14 +327,16 @@ def infer_assignment_profile(signals: AssignmentSignals | dict[str, Any]) -> str
             **{key: value for key, value in signals.items() if key in allowed}
         )
 
-    language = signals.language.lower()
+    language = str(signals.language or "").strip().lower()
+    file_count, class_count = _count(signals.file_count), _count(signals.class_count)
+    function_count, average_loc = _count(signals.function_count), _count(signals.average_lines_of_code)
     if signals.notebook_present or language in {"ipynb", "notebook", "r"}:
         return "notebook_data_analysis"
-    if signals.file_count >= 6 or signals.test_files_present:
+    if file_count >= 6 or signals.test_files_present:
         return "project_multi_file"
-    if signals.class_count >= 2 or signals.function_count >= 4:
+    if class_count >= 2 or function_count >= 4:
         return "structured_logic"
-    if signals.average_lines_of_code >= 120:
+    if average_loc >= 120:
         return "structured_logic"
     return "intro_programming"
 
@@ -344,15 +361,43 @@ def professor_profile_to_engine_weights(
     )
 
 
-def _valid(value: Any, allowed: dict[str, Any], fallback: str) -> str:
-    candidate = str(value or "")
-    return candidate if candidate in allowed else fallback
+def _count(value: Any) -> int:
+    """A non-negative int from loosely typed metadata (None / "" / NaN -> 0)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return int(number) if math.isfinite(number) and number > 0 else 0
 
 
-def _assignment_type(value: Any) -> str:
-    candidate = str(value or "")
+def _key(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _valid(
+    value: Any,
+    allowed: dict[str, Any],
+    fallback: str,
+    notes: list[str] | None = None,
+    label: str = "",
+) -> str:
+    """Case/space-insensitive choice; an unusable value falls back AND is reported."""
+    candidate = _key(value)
+    if candidate in allowed:
+        return candidate
+    if notes is not None and value not in (None, ""):
+        notes.append(f"Unrecognised {label} {value!r}; using '{fallback}'.")
+    return fallback
+
+
+def _assignment_type(value: Any, notes: list[str] | None = None) -> str:
+    candidate = _key(value)
     candidate = ASSIGNMENT_TYPE_ALIASES.get(candidate, candidate)
-    return candidate if candidate in ASSIGNMENT_TYPE_WEIGHTS else "auto_detect"
+    if candidate in ASSIGNMENT_TYPE_WEIGHTS:
+        return candidate
+    if notes is not None and value not in (None, ""):
+        notes.append(f"Unrecognised assignment type {value!r}; using 'auto_detect'.")
+    return "auto_detect"
 
 
 def _assignment_policy(assignment_type: str) -> dict[str, Any]:

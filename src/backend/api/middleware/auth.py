@@ -11,18 +11,21 @@ Features:
 Usage:
     from fastapi import FastAPI
     from src.backend.api.middleware.auth import AuthMiddleware
-    
+
     app = FastAPI()
     app.add_middleware(AuthMiddleware)
 """
 
+import functools
 import hashlib
+import inspect
 import logging
+import os
+import secrets
+import threading
 import time
-import uuid
-from collections import defaultdict
-from collections.abc import Callable
-from datetime import datetime
+from collections.abc import Callable, Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -35,19 +38,38 @@ from src.backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_KEY_PREFIX = "sk_live_"
+_MIN_CUSTOM_KEY_CHARS = 32
+_MAX_SESSION_TOKEN_CHARS = 8192
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _digest(api_key: str) -> str:
+    """SHA-256 digest used as the lookup key.
+
+    API keys are 128 random bits, so a plain digest is appropriate (unlike a
+    password). Only digests are held in memory, so a heap dump or an accidental
+    ``repr`` of the manager no longer exposes usable keys.
+    """
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
 
 class APIKeyManager:
-    """Manages API keys and their permissions."""
+    """Manages API keys and their permissions.
+
+    Thread-safe: handlers that run in worker threads may create or revoke keys
+    while the middleware is validating requests.
+    """
 
     def __init__(self) -> None:
         """Initialize the API key manager."""
+        # Both maps are keyed by the key's SHA-256 digest, never the raw key.
         self._keys: dict[str, dict[str, Any]] = {}
-        self._rate_limits: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {
-                "requests": 0,
-                "window_start": time.time(),
-            }
-        )
+        self._rate_limits: dict[str, dict[str, float]] = {}
+        self._lock = threading.RLock()
 
     def create_key(
         self,
@@ -56,6 +78,7 @@ class APIKeyManager:
         rate_limit: int = 100,
         rate_window: int = 3600,
         permissions: list | None = None,
+        api_key: str | None = None,
     ) -> str:
         """Create a new API key.
 
@@ -65,28 +88,38 @@ class APIKeyManager:
             rate_limit: Number of requests allowed per window
             rate_window: Time window in seconds
             permissions: List of allowed permissions
+            api_key: Register this exact key instead of generating one (used for a
+                known development key); must be at least 32 characters.
 
         Returns:
-            The generated API key
+            The API key. It is shown once; only a digest is retained.
         """
-        # Generate a secure random key
-        key_bytes = hashlib.sha256(
-            f"{uuid.uuid4()}{time.time()}{name}".encode()
-        ).hexdigest()
-        api_key = f"sk_live_{key_bytes[:32]}"
+        if rate_limit < 1 or rate_window < 1:
+            raise ValueError("rate_limit and rate_window must be positive")
+        if api_key is None:
+            # 128 bits from the OS CSPRNG. It used to be a hash of
+            # uuid4 + wall-clock time + name.
+            api_key = f"{_KEY_PREFIX}{secrets.token_hex(16)}"
+        elif len(api_key) < _MIN_CUSTOM_KEY_CHARS:
+            raise ValueError(
+                f"api_key must be at least {_MIN_CUSTOM_KEY_CHARS} characters"
+            )
 
-        self._keys[api_key] = {
-            "name": name,
-            "tenant_id": tenant_id,
-            "rate_limit": rate_limit,
-            "rate_window": rate_window,
-            "permissions": permissions or ["analyze", "report", "compare"],
-            "created_at": datetime.now().isoformat(),
-            "last_used": None,
-            "total_requests": 0,
-        }
+        with self._lock:
+            self._keys[_digest(api_key)] = {
+                "name": name,
+                "tenant_id": tenant_id,
+                "rate_limit": rate_limit,
+                "rate_window": rate_window,
+                "permissions": list(permissions or ["analyze", "report", "compare"]),
+                "key_prefix": api_key[:12] + "...",
+                "created_at": _now_iso(),
+                "last_used": None,
+                "total_requests": 0,
+            }
 
-        logger.info(f"Created API key '{name}' for tenant '{tenant_id}'")
+        # %r: a name containing newlines cannot forge log lines.
+        logger.info("Created API key %r for tenant %r", name, tenant_id)
         return api_key
 
     def validate_key(self, api_key: str) -> dict[str, Any] | None:
@@ -98,14 +131,16 @@ class APIKeyManager:
         Returns:
             Key metadata if valid, None otherwise
         """
-        key_data = self._keys.get(api_key)
-        if key_data:
-            key_data["last_used"] = datetime.now().isoformat()
-            return key_data
+        digest = _digest(api_key)
+        with self._lock:
+            key_data = self._keys.get(digest)
+            if key_data:
+                key_data["last_used"] = _now_iso()
+                return key_data
         return None
 
     def check_rate_limit(self, api_key: str) -> tuple[bool, int]:
-        """Check if a request is within rate limits.
+        """Check if a request is within rate limits (and count it if so).
 
         Args:
             api_key: The API key making the request
@@ -113,31 +148,37 @@ class APIKeyManager:
         Returns:
             Tuple of (allowed, retry_after_seconds)
         """
-        key_data = self._keys.get(api_key)
-        if not key_data:
-            return False, 0
+        digest = _digest(api_key)
+        with self._lock:
+            key_data = self._keys.get(digest)
+            if not key_data:
+                return False, 0
 
-        rate_limit = key_data["rate_limit"]
-        rate_window = key_data["rate_window"]
+            rate_limit = key_data["rate_limit"]
+            rate_window = key_data["rate_window"]
 
-        current_time = time.time()
-        rate_data = self._rate_limits[api_key]
+            # Monotonic: the wall clock can jump (NTP, DST) and stretch or
+            # collapse a window.
+            current_time = time.monotonic()
+            rate_data = self._rate_limits.setdefault(
+                digest, {"requests": 0, "window_start": current_time}
+            )
 
-        # Reset window if expired
-        if current_time - rate_data["window_start"] > rate_window:
-            rate_data["requests"] = 0
-            rate_data["window_start"] = current_time
+            # Reset window if expired
+            if current_time - rate_data["window_start"] > rate_window:
+                rate_data["requests"] = 0
+                rate_data["window_start"] = current_time
 
-        # Check limit
-        if rate_data["requests"] >= rate_limit:
-            retry_after = int(rate_data["window_start"] + rate_window - current_time)
-            return False, max(1, retry_after)
+            # Check limit
+            if rate_data["requests"] >= rate_limit:
+                retry_after = int(
+                    rate_data["window_start"] + rate_window - current_time
+                )
+                return False, max(1, retry_after)
 
-        # Increment counter
-        rate_data["requests"] += 1
-        key_data["total_requests"] += 1
-
-        return True, 0
+            rate_data["requests"] += 1
+            key_data["total_requests"] += 1
+            return True, 0
 
     def get_remaining_requests(self, api_key: str) -> int:
         """Get remaining requests in current window.
@@ -148,12 +189,33 @@ class APIKeyManager:
         Returns:
             Number of remaining requests
         """
-        key_data = self._keys.get(api_key)
-        if not key_data:
-            return 0
+        digest = _digest(api_key)
+        with self._lock:
+            key_data = self._keys.get(digest)
+            if not key_data:
+                return 0
+            rate_data = self._rate_limits.get(digest)
+            used = rate_data["requests"] if rate_data else 0
+            return max(0, key_data["rate_limit"] - used)
 
-        rate_data = self._rate_limits[api_key]
-        return max(0, key_data["rate_limit"] - rate_data["requests"])
+    def seconds_until_reset(self, api_key: str) -> int:
+        """Seconds until the current rate-limit window ends.
+
+        ``X-RateLimit-Reset`` used to be ``now + rate_window`` on every response,
+        i.e. always a full window away, even a second before the real reset.
+        """
+        digest = _digest(api_key)
+        with self._lock:
+            key_data = self._keys.get(digest)
+            rate_data = self._rate_limits.get(digest)
+            if not key_data:
+                return 0
+            if not rate_data:
+                return int(key_data["rate_window"])
+            remaining = (
+                rate_data["window_start"] + key_data["rate_window"] - time.monotonic()
+            )
+            return max(0, int(remaining + 0.999))
 
     def revoke_key(self, api_key: str) -> bool:
         """Revoke an API key.
@@ -164,12 +226,13 @@ class APIKeyManager:
         Returns:
             True if key was revoked, False if not found
         """
-        if api_key in self._keys:
-            del self._keys[api_key]
-            if api_key in self._rate_limits:
-                del self._rate_limits[api_key]
-            logger.info("Revoked API key")
-            return True
+        digest = _digest(api_key)
+        with self._lock:
+            if digest in self._keys:
+                del self._keys[digest]
+                self._rate_limits.pop(digest, None)
+                logger.info("Revoked API key")
+                return True
         return False
 
     def list_keys(self, tenant_id: str | None = None) -> list:
@@ -181,13 +244,10 @@ class APIKeyManager:
         Returns:
             List of key metadata (without the actual keys)
         """
-        keys = []
-        for key, data in self._keys.items():
-            if tenant_id and data["tenant_id"] != tenant_id:
-                continue
-            keys.append(
+        with self._lock:
+            return [
                 {
-                    "key_prefix": key[:12] + "...",
+                    "key_prefix": data["key_prefix"],
                     "name": data["name"],
                     "tenant_id": data["tenant_id"],
                     "created_at": data["created_at"],
@@ -195,8 +255,9 @@ class APIKeyManager:
                     "total_requests": data["total_requests"],
                     "rate_limit": data["rate_limit"],
                 }
-            )
-        return keys
+                for data in self._keys.values()
+                if not tenant_id or data["tenant_id"] == tenant_id
+            ]
 
 
 # Global API key manager instance
@@ -206,6 +267,11 @@ api_key_manager = APIKeyManager()
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
+def _normalize_path(path: str) -> str:
+    """``/health/`` -> ``/health`` (the root stays ``/``)."""
+    return path.rstrip("/") or "/"
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Authentication and rate limiting middleware."""
 
@@ -213,12 +279,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self,
         app: Any,
         excluded_paths: list | None = None,
+        excluded_prefixes: Iterable[str] = (),
     ) -> None:
         """Initialize auth middleware.
 
         Args:
             app: The ASGI application
-            excluded_paths: Paths that don't require authentication
+            excluded_paths: Exact paths that don't require authentication
+            excluded_prefixes: Path prefixes that don't require authentication.
+                Matched on a segment boundary (``/a`` covers ``/a/b`` but not
+                ``/ab``). Empty by default, so the public surface only grows
+                when you ask for it.
         """
         super().__init__(app)
         self.excluded_paths = excluded_paths or [
@@ -228,6 +299,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth",
         ]
         self.exclude_paths = self.excluded_paths
+        self.excluded_prefixes = tuple(_normalize_path(p) for p in excluded_prefixes)
+
+    def _is_public(self, path: str) -> bool:
+        """Exact-match public paths, tolerating a trailing slash.
+
+        Matching stays exact on purpose (a permissive value such as /api/upload
+        must not turn /api/upload-admin public), but ``/health/`` used to be
+        rejected while ``/health`` was allowed.
+        """
+        normalized = _normalize_path(path)
+        if path in self.excluded_paths or normalized in self.excluded_paths:
+            return True
+        return any(
+            normalized == prefix or normalized.startswith(prefix + "/")
+            for prefix in self.excluded_prefixes
+        )
 
     def _has_valid_session_cookie(self, request: Request) -> bool:
         """Return True if the request carries a valid dashboard session cookie.
@@ -238,27 +325,54 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         from src.backend.api.server import AUTH_COOKIE_NAME
 
-        if not settings.AUTH_JWT_SECRET:
+        # The guard read ``settings.AUTH_JWT_SECRET`` but the decode read
+        # ``settings.auth_jwt_secret``; if only one spelling exists the decode
+        # raised AttributeError, which is not a JWTError and surfaced as a 500
+        # on every cookie-authenticated request.
+        #
+        # Order matters. ``AUTH_JWT_SECRET`` is a ``SecretStr`` and is truthy, so
+        # probing it first makes the ``or`` short-circuit and hand jose the
+        # wrapper rather than a key -> ``JWKError: Expecting a string- or
+        # bytes-formatted key`` -> 500 on every request. ``auth_jwt_secret`` is
+        # the plain-string accessor that settings documents as the only
+        # supported form for jose.
+        secret = getattr(settings, "auth_jwt_secret", None)
+        if secret is None:
+            # Only the raw attribute exists; unwrap rather than pass the wrapper.
+            secret = getattr(settings, "AUTH_JWT_SECRET", None)
+            if hasattr(secret, "get_secret_value"):
+                secret = secret.get_secret_value()
+        if not secret or not isinstance(secret, (str, bytes)):
             return False
 
         token = request.cookies.get(AUTH_COOKIE_NAME)
-        if not token:
+        if not token or len(token) > _MAX_SESSION_TOKEN_CHARS:
             return False
 
         try:
-            payload = jwt.decode(token, settings.auth_jwt_secret, algorithms=["HS256"])
+            # Require ``exp``: python-jose only checks it when present, so a
+            # token minted without one would never expire.
+            payload = jwt.decode(
+                token, secret, algorithms=["HS256"], options={"require_exp": True}
+            )
         except JWTError:
             return False
 
-        return bool(payload.get("sub"))
+        return isinstance(payload, dict) and bool(payload.get("sub"))
 
     async def dispatch(self, request: Request, call_next: Callable) -> Any:
         """Process authentication for each request."""
         path = request.url.path
 
-        # Preserve explicit public endpoints. Match exact paths to avoid a
-        # permissive value such as /api/upload turning /api/upload-admin public.
-        if path in self.excluded_paths:
+        if self._is_public(path):
+            return await call_next(request)
+
+        # CORS preflights never carry credentials; rejecting them here breaks
+        # every cross-origin browser call before the CORS layer can answer.
+        if (
+            request.method == "OPTIONS"
+            and "access-control-request-method" in request.headers
+        ):
             return await call_next(request)
 
         # Dashboard sessions (HttpOnly cookie JWT) take precedence over API keys.
@@ -290,6 +404,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     "error": "Invalid API key",
                     "message": "The provided API key is not valid",
                 },
+                headers={"WWW-Authenticate": "ApiKey"},
             )
 
         # Check rate limit
@@ -302,7 +417,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     "message": f"You have exceeded your rate limit of {key_data['rate_limit']} requests per {key_data['rate_window']} seconds",
                     "retry_after": retry_after,
                 },
-                headers={"Retry-After": str(retry_after)},
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(key_data["rate_limit"]),
+                    "X-RateLimit-Remaining": "0",
+                },
             )
 
         # Add key data to request state
@@ -319,24 +438,53 @@ class AuthMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Limit"] = str(key_data["rate_limit"])
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_remaining)
         response.headers["X-RateLimit-Reset"] = str(
-            int(time.time() + key_data["rate_window"])
+            int(time.time() + api_key_manager.seconds_until_reset(api_key))
         )
 
         return response
 
 
+def _find_request(args: tuple, kwargs: dict) -> Request | None:
+    """Locate the Request among a handler's arguments, whatever it is named."""
+    for value in (*args, *kwargs.values()):
+        if isinstance(value, Request):
+            return value
+    return None
+
+
 def require_permission(permission: str) -> Callable:
-    """Decorator to require specific permissions."""
+    """Decorator to require specific API-key permissions.
+
+    Works on ``async`` and plain ``def`` handlers, and the handler's own
+    signature is preserved. The old wrapper hid it behind ``(request, *args,
+    **kwargs)``, so FastAPI saw ``args``/``kwargs`` as required query
+    parameters and lost every real path/body parameter; it also awaited sync
+    handlers and assumed the Request parameter was named ``request``.
+
+    Requests authenticated by a dashboard session cookie carry no API-key
+    permissions, so they are refused here; use :func:`require_user_permission`
+    for role-based checks.
+    """
 
     def decorator(func: Callable) -> Callable:
-        async def wrapper(request: Request, *args: Any, **kwargs: Any) -> Any:
+        is_async = inspect.iscoroutinefunction(func)
+
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            request = _find_request(args, kwargs)
+            if request is None:
+                raise RuntimeError(
+                    f"{func.__name__} uses require_permission but declares no Request parameter"
+                )
             permissions = getattr(request.state, "permissions", [])
             if permission not in permissions:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Permission '{permission}' required",
                 )
-            return await func(request, *args, **kwargs)
+            if is_async:
+                return await func(*args, **kwargs)
+            return func(*args, **kwargs)
 
         return wrapper
 
@@ -507,39 +655,46 @@ def require_admin(request: Request) -> dict:
     return _require_role(request, ("admin",))
 
 
-def setup_default_keys() -> None:
+def setup_default_keys() -> dict[str, str]:
     """Create default API keys for development/testing.
 
-    Only creates keys when DEBUG_MODE is enabled. Never creates
-    hardcoded keys that could be used in production.
-    """
-    from src.backend.config.settings import settings
+    Only creates keys when ALLOW_DEV_API_KEYS and DEBUG_MODE are both enabled.
+    Never creates hardcoded keys that could be used in production.
 
+    Returns:
+        ``{key name: key}`` for the keys created (empty when skipped). The keys
+        are random and only a digest is stored, so they used to be unrecoverable
+        the moment this function returned; the caller must surface them. Set
+        DEV_API_KEY (>= 32 characters) to use a fixed development key instead.
+    """
     if not settings.ALLOW_DEV_API_KEYS:
         logger.info("Skipping default API key creation (ALLOW_DEV_API_KEYS is off)")
-        return
+        return {}
 
     if not settings.DEBUG_MODE:
         logger.info("Skipping default API key creation (DEBUG_MODE is off)")
-        return
+        return {}
 
-    api_key_manager.create_key(
-        name="Development Key",
-        tenant_id="dev",
-        rate_limit=1000,
-        rate_window=60,
-        permissions=["analyze", "report", "compare", "admin"],
-    )
-
-    api_key_manager.create_key(
-        name="Demo Key",
-        tenant_id="demo",
-        rate_limit=10,
-        rate_window=60,
-        permissions=["analyze", "report", "compare"],
-    )
+    created = {
+        "Development Key": api_key_manager.create_key(
+            name="Development Key",
+            tenant_id="dev",
+            rate_limit=1000,
+            rate_window=60,
+            permissions=["analyze", "report", "compare", "admin"],
+            api_key=os.getenv("DEV_API_KEY") or None,
+        ),
+        "Demo Key": api_key_manager.create_key(
+            name="Demo Key",
+            tenant_id="demo",
+            rate_limit=10,
+            rate_window=60,
+            permissions=["analyze", "report", "compare"],
+        ),
+    }
 
     logger.warning(
         "Default API keys created for development only. "
         "These keys should NOT be used in production."
     )
+    return created

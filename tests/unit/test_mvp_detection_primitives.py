@@ -30,25 +30,60 @@ def add_numbers(first, second):
 
 
 def test_starter_code_remover_filters_template_lines() -> None:
-    """Starter-code lines should be removed before pair comparison."""
+    """Starter-code lines should be removed before pair comparison.
+
+    ``min_run_lines`` defaults to 3: a match shorter than that is treated as a
+    coincidence rather than template code, because deleting a stray line or two
+    of a student's own code before comparison is worse than leaving it in. This
+    starter is therefore a realistic multi-line template, not a two-liner.
+    """
     starter = """
 def read_input():
-    return input().strip()
+    line = input().strip()
+    if not line:
+        raise ValueError("empty input")
+    return line
 """
-    submission = """
-def read_input():
-    return input().strip()
+    submission = (
+        starter
+        + """
 
 def solve(values):
     return sum(values)
 """
+    )
 
     result = StarterCodeRemover([starter]).remove(submission)
 
     assert "read_input" not in result.filtered_source
     assert "solve" in result.filtered_source
-    assert result.removed_line_count == 2
+    assert result.removed_line_count >= 3
     assert result.starter_overlap > 0
+
+
+def test_short_coincidental_match_is_not_treated_as_starter() -> None:
+    """A one- or two-line overlap is left alone rather than deleted.
+
+    Regression guard for the ``min_run_lines`` floor: without it, boilerplate
+    two-liners like ``def main():`` / ``return 0`` would be stripped from every
+    submission and silently corrupt the code being compared.
+    """
+    starter = """
+def read_input():
+    return input().strip()
+"""
+    submission = """
+def solve(values):
+    total = 0
+    for value in values:
+        total += value
+    return total
+"""
+
+    result = StarterCodeRemover([starter]).remove(submission)
+
+    assert result.removed_line_count == 0
+    assert result.filtered_source.strip() == submission.strip()
 
 
 def test_ast_subtree_hashing_is_identifier_and_literal_resistant() -> None:
@@ -89,7 +124,7 @@ def test_same_bug_detector_boosts_shared_wrong_answer() -> None:
     assert finding.score >= 0.6
     assert finding.same_wrong_outputs == ["empty_array"]
     assert finding.same_exceptions == ["bad_type"]
-    assert "same wrong outputs" in finding.evidence
+    assert any("same wrong outputs" in e for e in finding.evidence)
 
 
 def test_precision_at_20_ranker_prioritizes_same_bug_and_discounts_starter_code() -> (
@@ -127,18 +162,39 @@ def test_precision_at_20_ranker_prioritizes_same_bug_and_discounts_starter_code(
 
 
 def test_mvp_detection_pipeline_runs_all_five_improvements() -> None:
-    """Pipeline should expose starter, token, AST, same-bug, and ranker outputs."""
+    """Pipeline should expose starter, token, AST, same-bug, and ranker outputs.
+
+    Both sides need enough *student-written* tokens to be worth comparing: the
+    pipeline refuses a pair whose remaining code is mostly (or entirely) starter,
+    because there is then nothing left to agree or disagree about.
+    """
     starter = "def read_input():\n    return input().strip()\n"
-    source_a = (
-        starter
-        + "\ndef solve(values):\n    if values == []:\n        return 1\n    return sum(values)\n"
+    body = (
+        "    if values == []:\n"
+        "        return 1\n"
+        "    total = 0\n"
+        "    for value in values:\n"
+        "        total = total + value\n"
+        "    average = total / len(values)\n"
+        "    if average > 100:\n"
+        "        return average\n"
+        "    return total\n"
     )
-    source_b = (
-        starter
-        + "\ndef answer(items):\n    if items == []:\n        return 1\n    return sum(items)\n"
-    )
-    outcomes_a = [RuntimeOutcome("empty", output="1", expected_output="0")]
-    outcomes_b = [RuntimeOutcome("empty", output="1", expected_output="0")]
+    source_a = starter + "\ndef solve(values):\n" + body
+    source_b = starter + "\ndef answer(items):\n" + body
+    # Three shared failures, not one: the same-bug score is damped by
+    # ``min(1, shared / 3)`` because a single shared failing test is a
+    # coincidence rather than evidence of a shared mistake.
+    outcomes_a = [
+        RuntimeOutcome("empty", output="1", expected_output="0"),
+        RuntimeOutcome("negative", output="-1", expected_output="1"),
+        RuntimeOutcome("large", output="0", expected_output="7"),
+    ]
+    outcomes_b = [
+        RuntimeOutcome("empty", output="1", expected_output="0"),
+        RuntimeOutcome("negative", output="-1", expected_output="1"),
+        RuntimeOutcome("large", output="0", expected_output="7"),
+    ]
 
     result = MVPDetectionPipeline([starter]).analyze_pair(
         "pair_1",
@@ -150,7 +206,11 @@ def test_mvp_detection_pipeline_runs_all_five_improvements() -> None:
         category="same_bug",
     )
 
-    assert result.features["starter_code_overlap"] > 0
+    # Starter overlap moved out of ``features`` and into ``diagnostics``: it used to
+    # be handed to the ranker, which then discounted (x0.55) a comparison whose
+    # starter code had already been removed.
+    assert result.diagnostics["starter_overlap_a"] > 0
+    assert result.diagnostics["starter_overlap_b"] > 0
     assert result.features["fingerprint"] > 0
     assert result.features["ast"] > 0
     assert result.features["runtime_bug_similarity"] == 1.0

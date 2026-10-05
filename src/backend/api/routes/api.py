@@ -24,31 +24,31 @@ from src.backend.api.routes import (
 # Create main API router
 api_router = APIRouter()
 
-# Include all route modules
-api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
-api_router.include_router(
-    submissions.router, prefix="/submissions", tags=["submissions"]
-)
-api_router.include_router(results.router, prefix="/results", tags=["results"])
-api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
-api_router.include_router(health.router, prefix="/health", tags=["health"])
-api_router.include_router(visualize.router, prefix="/visualize", tags=["visualize"])
-api_router.include_router(cases.router, prefix="/cases", tags=["cases"])
-api_router.include_router(users.router, prefix="/users", tags=["users"])
-api_router.include_router(
-    cluster_detection.router, prefix="/cluster-detection", tags=["cluster-detection"]
-)
-api_router.include_router(
-    evidence_view.router, prefix="/evidence-view", tags=["evidence-view"]
-)
-api_router.include_router(
-    historical_fingerprint.router,
-    prefix="/historical-fingerprint",
-    tags=["historical-fingerprint"],
-)
-api_router.include_router(evidence_export.router, prefix="/evidence", tags=["evidence"])
+# Routers whose route paths are relative: mounted under a prefix here.
+for _router, _prefix in (
+    (auth.router, "/auth"),
+    (jobs.router, "/jobs"),
+    (submissions.router, "/submissions"),
+    (results.router, "/results"),
+    (webhooks.router, "/webhooks"),
+    (usage.router, "/usage"),
+    (health.router, "/health"),
+):
+    api_router.include_router(_router, prefix=_prefix, tags=[_prefix.lstrip("/")])
+
+# Routers that already carry their own paths. Adding another prefix here doubled
+# them: "/cases/cases", "/users/users", "/visualize/v1/visualize" (their routes
+# are "/cases...", "/users", "/v1/visualize") and
+# "/cluster-detection/api/cluster-detection/..." (they declare an absolute
+# "/api/<name>" prefix themselves). They are included as-is, with the tags the
+# router does not declare.
+api_router.include_router(cases.router, tags=["cases"])
+api_router.include_router(users.router, tags=["users"])
+api_router.include_router(visualize.router, tags=["visualize"])
+api_router.include_router(cluster_detection.router)
+api_router.include_router(evidence_view.router)
+api_router.include_router(historical_fingerprint.router)
+api_router.include_router(evidence_export.router)
 
 
 # Root endpoint

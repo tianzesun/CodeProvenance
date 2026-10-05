@@ -21,10 +21,15 @@ Usage:
 """
 
 import ast
+import bisect
+import io
 import logging
 import math
+import pickle
 import re
+import stat
 from collections import Counter
+from pathlib import Path
 from typing import Any, ClassVar
 
 from src.backend.engines.features.code_stylometry import StylometryExtractor
@@ -86,6 +91,84 @@ _LLM_STRUCTURAL_PATTERNS: list[re.Pattern] = [
 ]
 
 _ALL_LLM_PATTERNS = _LLM_COMMENT_PATTERNS + _LLM_NAMING_PATTERNS + _LLM_STRUCTURAL_PATTERNS
+
+#: One label per ``_LLM_STRUCTURAL_PATTERNS`` entry. The indicator used to show the raw regex
+#: (``LLM structural pattern: if\s+\w+\s+is\s+None\s*:``) to the instructor.
+_STRUCTURAL_LABELS: tuple[str, ...] = (
+    "defensive `is None` check",
+    "ValueError raised with a message",
+    "TypeError raised with a message",
+    "logging call with a message",
+    "trivial list comprehension returned",
+    "Optional[...] annotation",
+    "Union[...] annotation",
+    "Dict[str, ...] annotation",
+    "List[str] annotation",
+    "return-type annotation",
+)
+assert len(_STRUCTURAL_LABELS) == len(_LLM_STRUCTURAL_PATTERNS)
+
+_MAX_CALIBRATOR_BYTES = 50 * 1024 * 1024
+_SAFE_BUILTINS = frozenset(
+    {"dict", "list", "set", "frozenset", "tuple", "int", "float", "bool", "str", "bytes",
+     "complex", "slice", "range", "object", "bytearray"}  # fmt: skip
+)
+_SAFE_MODULE_PREFIXES = ("sklearn.", "numpy.", "scipy.", "collections", "joblib.numpy_pickle")
+
+
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Unpickler that only builds scikit-learn / numpy objects and plain containers.
+
+    ``.calibrator.pkl`` was loaded with a bare ``pickle.load``: anyone able to write that file
+    got code execution in the analysis worker. This refuses every global outside an allow-list
+    (so no ``os.system``, ``eval``, ``subprocess``, ``builtins.getattr`` ...).
+    """
+
+    def find_class(self, module: str, name: str):  # noqa: D102
+        if module == "builtins" and name in _SAFE_BUILTINS:
+            return super().find_class(module, name)
+        if module.startswith(_SAFE_MODULE_PREFIXES) or module in ("sklearn", "numpy", "scipy"):
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"global {module}.{name} is not allowed in a calibrator file")
+
+
+def load_calibrator_file(path: str | Path) -> dict[str, Any]:
+    """Load a calibrator payload (``{"calibrator": ..., "sample_count": ...}``) defensively."""
+    path = Path(path)
+    info = path.stat()
+    if info.st_size > _MAX_CALIBRATOR_BYTES:
+        raise ValueError(f"calibrator file is too large ({info.st_size} bytes)")
+    if info.st_mode & stat.S_IWOTH:
+        raise PermissionError("calibrator file is world-writable; refusing to load it")
+    with open(path, "rb") as handle:
+        data = _RestrictedUnpickler(io.BytesIO(handle.read())).load()
+    if not isinstance(data, dict):
+        raise ValueError("calibrator payload is not a dict")
+    return data
+
+
+def apply_calibrator(calibrator: Any, raw: float, fallback: float) -> float:
+    """Calibrated probability for ``raw``; ``fallback`` when the calibrator is unusable.
+
+    ``predict_proba`` is preferred (``predict`` on a classifier returns a 0/1 LABEL), and the
+    result is validated: it used to be taken as-is, so a NaN or an out-of-range value went
+    straight into ``ai_probability``.
+    """
+    value: float | None = None
+    proba = getattr(calibrator, "predict_proba", None)
+    if callable(proba):
+        try:
+            value = float(proba([[raw]])[0][1])
+        except Exception:  # noqa: S110
+            value = None
+    if value is None:
+        try:
+            value = float(calibrator.predict([raw])[0])
+        except Exception:
+            return fallback
+    if not math.isfinite(value):
+        return fallback
+    return max(0.0, min(1.0, value))
 
 
 def _safe_entropy(counter: Counter) -> float:
@@ -186,31 +269,26 @@ class AIDetectionEngine:
         self._transformer_analyzer = None
         self._model_fingerprinter = None
         self._ast_analyzer = None
+        self._warned_optional: set[str] = set()
         self._load_calibrator()
 
     def _load_calibrator(self) -> None:
-        """Load calibrator from disk if available."""
+        """Load calibrator from disk if available (restricted unpickling, see above)."""
         calibrator_path = self._calibrator_path
         if not calibrator_path:
-            # Try default location
-            from pathlib import Path
-
-            default_path = (
-                Path(__file__).parent.parent.parent.parent / "backend" / ".calibrator.pkl"
-            )
+            default_path = Path(__file__).parent.parent.parent.parent / "backend" / ".calibrator.pkl"
             if default_path.exists():
                 calibrator_path = str(default_path)
 
         if calibrator_path:
             try:
-                import pickle
-
-                with open(calibrator_path, "rb") as f:
-                    data = pickle.load(f)
-                    self.calibrator = data.get("calibrator")
-                    self.calibrator_samples = int(data.get("sample_count", 0))
+                data = load_calibrator_file(calibrator_path)
+                self.calibrator = data.get("calibrator")
+                self.calibrator_samples = int(data.get("sample_count", 0))
             except Exception as e:
-                logger.warning(f"Could not load calibrator: {e}")
+                logger.warning("Could not load calibrator: %s", e)
+                self.calibrator = None
+                self.calibrator_samples = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -245,12 +323,16 @@ class AIDetectionEngine:
                 "error": "Code too short for analysis",
             }
 
+        language = (language or "python").strip().lower()
         try:
             signals = self._compute_all_signals(code, language)
+            ai_probability = self._fuse(signals)
+            # Confidence is computed BEFORE the legacy alias is added: the alias duplicates
+            # ``pattern_library``, which made that one signal count twice in the agreement
+            # (mean / variance) term.
+            confidence = self._confidence(signals, ai_probability)
             # Legacy alias so existing tests/code using "pattern_repetition" still work
             signals["pattern_repetition"] = signals.get("pattern_library", 0.0)
-            ai_probability = self._fuse(signals)
-            confidence = self._confidence(signals, ai_probability)
             indicators = self._indicators(code, signals, ai_probability)
             flagged_lines = self._flagged_lines(code)
 
@@ -289,7 +371,7 @@ class AIDetectionEngine:
     # ------------------------------------------------------------------
 
     def _compute_all_signals(self, code: str, language: str) -> dict[str, float]:
-        """Compute all eight detection signals."""
+        """Compute all eight detection signals (plus the optional ones when enabled)."""
         signals = {
             "perplexity": self._signal_perplexity(code),
             "burstiness": self._signal_burstiness(code),
@@ -305,11 +387,21 @@ class AIDetectionEngine:
         if self.use_transformer:
             signals["transformer_perplexity"] = self._signal_transformer_perplexity(code)
 
-        # Add AST structural analysis if enabled
+        # Add AST structural analysis if enabled. A failed analysis returns None and the
+        # signal is LEFT OUT (``_fuse`` renormalises over the signals present); it used to be
+        # 0.0, i.e. "human", carrying its full 0.16 weight.
         if self.use_ast:
-            signals["ast_structural"] = self._signal_ast_structural(code, language)
+            ast_signal = self._signal_ast_structural(code, language)
+            if ast_signal is not None:
+                signals["ast_structural"] = ast_signal
 
         return signals
+
+    def _warn_once(self, key: str, message: str, *args: Any) -> None:
+        """Log an optional-component failure once per engine (it was logged for EVERY file)."""
+        if key not in self._warned_optional:
+            self._warned_optional.add(key)
+            logger.warning(message, *args)
 
     def _signal_perplexity(self, code: str) -> float:
         """N-gram perplexity signal.
@@ -370,11 +462,11 @@ class AIDetectionEngine:
             result = self._transformer_analyzer.compute_normalized_score(code, max_length=1024)
             return result["ai_score"]
         except Exception as e:
-            logger.warning(f"Transformer perplexity failed, falling back to bigram: {e}")
+            self._warn_once("transformer", "Transformer perplexity unavailable, using bigram: %s", e)
             # Fall back to bigram perplexity if transformers not available
             return self._signal_perplexity(code)
 
-    def _signal_ast_structural(self, code: str, language: str) -> float:
+    def _signal_ast_structural(self, code: str, language: str) -> float | None:
         """AST-based structural analysis signal.
 
         Detects AI-typical structural patterns immune to variable renaming:
@@ -395,8 +487,8 @@ class AIDetectionEngine:
             features = self._ast_analyzer.analyze(code, language)
             return self._ast_analyzer.compute_ai_score(features)
         except Exception as e:
-            logger.warning(f"AST analysis failed: {e}")
-            return 0.0
+            self._warn_once("ast", "AST analysis unavailable: %s", e)
+            return None
 
     def _signal_burstiness(self, code: str) -> float:
         """Burstiness signal.
@@ -431,6 +523,11 @@ class AIDetectionEngine:
         try:
             features = self.stylometry_extractor.extract(code)
         except Exception:
+            return 0.0
+        # An unparseable file (other languages, syntax errors) comes back with every feature at
+        # zero, which the formula below turned into a constant 0.15 "evidence" via the
+        # ``1 - single_char_var_ratio`` term. No parse, no stylometry.
+        if getattr(features, "parse_ok", True) is False:
             return 0.0
 
         score = 0.0
@@ -495,12 +592,14 @@ class AIDetectionEngine:
 
         LLMs produce ASTs with very uniform node-type distributions.
         """
-        if language not in ("python", "py", ""):
+        if (language or "").strip().lower() not in ("python", "py", "python3", ""):
             return self._indent_block_uniformity(code)
 
         try:
             tree = ast.parse(code)
-        except SyntaxError:
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            # ValueError: NUL bytes; Recursion/MemoryError: pathological nesting. These used
+            # to escape and turn the WHOLE analysis into ai_probability 0.0 with an error.
             return self._indent_block_uniformity(code)
 
         node_types: Counter = Counter(type(n).__name__ for n in ast.walk(tree))
@@ -576,7 +675,7 @@ class AIDetectionEngine:
         """
         func_count = len(
             re.findall(
-                r"^\s*(?:def|function|func|void|public|private)\s+\w+",
+                r"^\s*(?:async\s+)?(?:def|function|func|void|public|private)\s+\w+",
                 code,
                 re.MULTILINE,
             )
@@ -599,7 +698,9 @@ class AIDetectionEngine:
     def _fuse(self, signals: dict[str, float]) -> float:
         """Weighted average fusion with optional calibration."""
         # Choose weights based on enabled features
-        if self.use_ast and self.use_transformer:
+        if self.use_ast:
+            # (``use_ast`` alone used to select the V1 weights, so the AST signal was computed
+            # and then ignored; absent signals are skipped below, so V3 serves both cases.)
             weights = self._WEIGHTS_V3
         elif self.use_transformer:
             weights = self._WEIGHTS_V2
@@ -620,12 +721,9 @@ class AIDetectionEngine:
         k = 6.0
         calibrated = 1.0 / (1.0 + math.exp(-k * (raw - 0.5)))
 
-        # Override with learned calibration if available
+        # Override with learned calibration if available (validated; falls back to the sigmoid)
         if self.calibrator is not None:
-            try:
-                calibrated = float(self.calibrator.predict([raw])[0])
-            except Exception:  # noqa: S110
-                pass  # Fall back to sigmoid calibration
+            calibrated = apply_calibrator(self.calibrator, raw, calibrated)
 
         return calibrated
 
@@ -664,10 +762,9 @@ class AIDetectionEngine:
                 items.append((0.8, f"Generic AI naming convention ({len(matches)} occurrences)"))
                 break
 
-        for pattern in _LLM_STRUCTURAL_PATTERNS:
-            matches = pattern.findall(code)
-            if matches:
-                items.append((0.75, f"LLM structural pattern: {pattern.pattern[:40]}"))
+        for pattern, label in zip(_LLM_STRUCTURAL_PATTERNS, _STRUCTURAL_LABELS):
+            if pattern.search(code):
+                items.append((0.75, f"LLM structural pattern: {label}"))
                 break
 
         if signals.get("burstiness", 0) > 0.65:
@@ -729,13 +826,17 @@ class AIDetectionEngine:
         return result
 
     def _flagged_lines(self, code: str) -> list[int]:
-        """Return 1-indexed line numbers that contain LLM fingerprints."""
-        flagged: set = set()
-        for i, line in enumerate(code.splitlines(), start=1):
-            for pattern in _ALL_LLM_PATTERNS:
-                if pattern.search(line):
-                    flagged.add(i)
-                    break
+        """Return 1-indexed line numbers that contain LLM fingerprints.
+
+        Patterns run over the whole text and each match is mapped to the line it STARTS on.
+        Matching line by line meant the templated multi-line docstring fingerprint
+        (``\"\"\"...Args:``) could never fire, although the pattern-library SIGNAL counted it.
+        """
+        newline_offsets = [i for i, ch in enumerate(code) if ch == "\n"]
+        flagged: set[int] = set()
+        for pattern in _ALL_LLM_PATTERNS:
+            for match in pattern.finditer(code):
+                flagged.add(bisect.bisect_left(newline_offsets, match.start()) + 1)
         return sorted(flagged)
 
     def _signal_labels(self, signals: dict[str, float]) -> dict[str, str]:
@@ -782,6 +883,8 @@ class AIDetectionEngine:
             "whitespace_rhythm": 0.06,
             "docstring_density": 0.06,
         }
+        if "pattern_library" in signals:
+            weights.pop("pattern_repetition")  # the alias duplicates pattern_library (counted twice)
         total = sum(signals.get(k, 0) * w for k, w in weights.items())
         weight_sum = sum(w for k, w in weights.items() if k in signals)
         return total / weight_sum if weight_sum > 0 else 0.0
@@ -811,7 +914,7 @@ class AIDetectionEngine:
             fingerprint = self._model_fingerprinter.analyze(code, language)
             return fingerprint.to_dict()
         except Exception as e:
-            logger.warning(f"Model fingerprinting failed: {e}")
+            self._warn_once("fingerprint", "Model fingerprinting unavailable: %s", e)
             return {"detected_model": None, "confidence": 0.0, "model_scores": {}, "evidence": []}
 
     def _analyze_adversarial(self, code: str, language: str) -> dict[str, Any]:
@@ -823,7 +926,7 @@ class AIDetectionEngine:
             analysis = defense.analyze(code, language)
             return analysis.to_dict()
         except Exception as e:
-            logger.warning(f"Adversarial analysis failed: {e}")
+            self._warn_once("adversarial", "Adversarial analysis unavailable: %s", e)
             return {
                 "semantic_hash": "",
                 "obfuscation_score": 0.0,

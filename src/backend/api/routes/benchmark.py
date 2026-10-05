@@ -9,17 +9,52 @@ handler to avoid circular imports — the same pattern used by routes/analyze.py
 from __future__ import annotations
 
 import csv
+import html
+import json
+import logging
+import os
+import re
+import shutil
 import threading
-from datetime import datetime
+import time
+import uuid
+from bisect import bisect_left
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
-import uuid
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Limits and constants
+# ---------------------------------------------------------------------------
+
+_MAX_FPR_FILES = 200  # all-pairs comparison is O(n^2)
+_MAX_FPR_FILE_BYTES = 1_000_000
+_MAX_FPR_RUN_PAYLOAD_BYTES = 1_000_000
+_MAX_BG_FILES = 500
+_MAX_BG_FILE_BYTES = 5_000_000
+_MAX_ACTIVE_BG_JOBS = 3
+_BG_JOB_TTL_SECONDS = 3600
+_LOW_SAMPLE_PAIRS = 30
+
+_FPR_THRESHOLDS = (
+    0.40, 0.45, 0.50, 0.52, 0.55, 0.58, 0.60, 0.62, 0.64, 0.65,
+    0.66, 0.67, 0.68, 0.69, 0.70, 0.71, 0.72, 0.73, 0.74, 0.75,
+    0.76, 0.77, 0.78, 0.80, 0.82, 0.85, 0.88, 0.90, 0.95,
+)  # fmt: skip
+
+_LOCAL_EMBEDDING_RUNTIMES = ("local_unixcoder", "local", "unixcoder")
+_ENV_LOCK = threading.Lock()
+_FINISHED_JOB_STATES = {"done", "error"}
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +71,145 @@ class FprValidationRunCreate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _failure_ref(action: str) -> str:
+    """Log the active exception and return a short reference id for the client."""
+    ref = uuid.uuid4().hex[:12]
+    logger.exception("%s failed (ref=%s)", action, ref)
+    return ref
+
+
+def _server_error(action: str) -> HTTPException:
+    """Generic 500 carrying a reference id; the details stay in the log.
+
+    Call from inside an ``except`` block.
+    """
+    return HTTPException(
+        status_code=500, detail=f"{action} failed. Reference: {_failure_ref(action)}"
+    )
+
+
+def _current_user(request: Request, *, admin_only: bool = False) -> dict[str, Any]:
+    from src.backend.api.server import _require_current_user
+
+    return _require_current_user(request, admin_only=admin_only)
+
+
+def _tenant_id_or_400(user: dict[str, Any]) -> str:
+    """Return the caller's tenant id.
+
+    A missing tenant must be rejected: ``column == None`` compiles to
+    ``IS NULL`` and would match (and let the caller read or delete) every
+    legacy row that has no tenant.
+    """
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant associated with user")
+    return tenant_id
+
+
+def _validated_dataset_id(dataset: str | None) -> str:
+    """Return a dataset id that is a single, safe path component.
+
+    The id is joined onto the benchmark data directory, so anything that could
+    climb out of it (``..``, separators, NUL) is rejected up front.
+    """
+    value = (dataset or "").strip()
+    if not value:
+        return ""
+    if value in {".", ".."} or any(ch in value for ch in ("/", "\\", "\x00")):
+        raise HTTPException(status_code=400, detail="Invalid dataset id")
+    return value
+
+
+def _safe_filename_part(value: str) -> str:
+    """Reduce an id to characters that are safe in a Content-Disposition name."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", value)[:64] or "download"
+
+
+def _csv_safe(value: Any) -> str:
+    """Neutralise spreadsheet formula injection in a CSV cell.
+
+    File names come from uploads, so a name like ``=HYPERLINK(...)`` would run
+    when an instructor opens the export in Excel.
+    """
+    text = "" if value is None else str(value)
+    if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
+async def _json_object(request: Request) -> dict[str, Any]:
+    """Parse the request body as a JSON object or raise 400."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="Request body must be valid JSON"
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+    return payload
+
+
+def _accessible_job_or_404(
+    request: Request, job_id: str, *, require_key: str | None = "pair_results"
+) -> dict[str, Any]:
+    """Load a job, enforcing authentication and the same access rules as /api/jobs.
+
+    The download and radar routes previously returned any job's data to anyone
+    who knew its id. Missing and inaccessible jobs both return 404.
+    """
+    from src.backend.api.server import _get_job, _job_is_accessible
+
+    user = _current_user(request)
+    job = _get_job(job_id)
+    if not job or not _job_is_accessible(job, user):
+        raise HTTPException(status_code=404, detail="Benchmark results not found")
+    if require_key and require_key not in job:
+        raise HTTPException(status_code=404, detail="Benchmark results not found")
+    return job
+
+
+async def _html_report_response(
+    html_content: str, *, filename_base: str, fallback_title: str
+) -> Response:
+    """Render HTML to PDF (WeasyPrint) with graceful fallbacks.
+
+    Falls back to the HTML itself when WeasyPrint is not installed, and to a
+    minimal PDF when rendering fails.  Rendering runs in a worker thread
+    because it is CPU-bound.
+    """
+    from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
+        _minimal_pdf_bytes,
+    )
+
+    try:
+        import weasyprint
+    except ImportError:
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": f"attachment; filename={filename_base}.html"},
+        )
+    try:
+        pdf = await run_in_threadpool(
+            lambda: weasyprint.HTML(string=html_content).write_pdf()
+        )
+    except Exception:
+        logger.warning("PDF export fell back to minimal PDF: %s", filename_base, exc_info=True)
+        pdf = _minimal_pdf_bytes(fallback_title)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename_base}.pdf"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Demo dataset
 # ---------------------------------------------------------------------------
 
@@ -43,15 +217,9 @@ class FprValidationRunCreate(BaseModel):
 @router.post("/api/admin/create-demo-dataset")
 async def create_demo_dataset(request: Request):
     """Create a synthetic demo dataset for testing."""
-    import time
-
     from src.backend.api.server import (
         BENCHMARK_DATA_DIR,
         _language_file_extension,
-        _require_current_user,
-        logger,
-    )
-    from src.backend.api.server import (
         apply_organization_transforms,
         apply_renaming_transforms,
         apply_semantic_transforms,
@@ -60,85 +228,96 @@ async def create_demo_dataset(request: Request):
         generate_synthetic_code,
     )
 
-    current_user = _require_current_user(request, admin_only=False)
+    # Writes into the shared benchmark data directory, so admin-only like the
+    # route's /api/admin/ prefix says.
+    current_user = _current_user(request, admin_only=True)
+    data = await _json_object(request)
+
+    dataset_name = str(data.get("name") or "").strip()[:100]
+    description = str(data.get("description") or "").strip()[:1000]
+    language = data.get("language", "python")
+    similarity_type = str(data.get("similarityType") or "plagiarism")
     try:
-        data = await request.json()
-        dataset_name = data.get("name", "").strip()
-        description = data.get("description", "").strip()
-        language = data.get("language", "python")
         num_files = min(max(int(data.get("numFiles", 10)), 5), 100)
-        similarity_type = data.get("similarityType", "plagiarism")
-        if not dataset_name:
-            raise HTTPException(status_code=400, detail="Dataset name is required")
-        supported_languages = ["python", "java", "javascript", "cpp"]
-        if language not in supported_languages:
-            language = "python"
-        dataset_dir = BENCHMARK_DATA_DIR / f"demo_{dataset_name}_{int(time.time())}"
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-        files_created = 0
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="numFiles must be an integer") from None
+    if not dataset_name:
+        raise HTTPException(status_code=400, detail="Dataset name is required")
+    if language not in ("python", "java", "javascript", "cpp"):
+        language = "python"
+
+    # The name is user input and becomes part of a directory name: reduce it to
+    # a slug so "../../x" cannot create directories outside the data dir.
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", dataset_name).strip("_")[:64] or "dataset"
+    dataset_dir = BENCHMARK_DATA_DIR / f"demo_{slug}_{int(time.time())}"
+    BENCHMARK_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        dataset_dir.mkdir()
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409, detail="A dataset with this name was just created; retry"
+        ) from None
+
+    def transform(content: str) -> str:
+        if similarity_type == "type1_exact":
+            return content
+        if similarity_type == "type2_renamed":
+            return apply_renaming_transforms(content, language)
+        if similarity_type == "type3_modified":
+            return apply_structural_transforms(content, language)
+        if similarity_type == "token_similarity":
+            return apply_token_transforms(content, language)
+        if similarity_type == "structural_similarity":
+            return apply_organization_transforms(content, language)
+        # type4_semantic and anything else. type4_semantic used to copy the
+        # original unchanged, which made it identical to type1_exact.
+        return apply_semantic_transforms(content, language)
+
+    def write_dataset() -> None:
         original_dir = dataset_dir / "original"
         plagiarized_dir = dataset_dir / "plagiarized"
         original_dir.mkdir()
         plagiarized_dir.mkdir()
-        file_extension = _language_file_extension(language)
+        extension = _language_file_extension(language)
         for i in range(num_files):
-            filepath = original_dir / f"{i:02d}{file_extension}"
-            filepath.write_text(generate_synthetic_code(i, language, similarity_type))
-            files_created += 1
-        for i in range(num_files):
-            original_file = original_dir / f"{i:02d}{file_extension}"
-            plagiarized_file = plagiarized_dir / f"{i:02d}{file_extension}"
-            if original_file.exists():
-                content = original_file.read_text()
-                if similarity_type == "type1_exact":
-                    modified_content = content
-                elif similarity_type == "type2_renamed":
-                    modified_content = apply_renaming_transforms(content, language)
-                elif similarity_type == "type3_modified":
-                    modified_content = apply_structural_transforms(content, language)
-                elif similarity_type == "type4_semantic":
-                    modified_content = content
-                elif similarity_type == "token_similarity":
-                    modified_content = apply_token_transforms(content, language)
-                elif similarity_type == "structural_similarity":
-                    modified_content = apply_organization_transforms(content, language)
-                else:
-                    modified_content = apply_semantic_transforms(content, language)
-                plagiarized_file.write_text(modified_content)
-                files_created += 1
-        import json
-        from datetime import timezone
+            filename = f"{i:02d}{extension}"
+            content = generate_synthetic_code(i, language, similarity_type)
+            (original_dir / filename).write_text(content, encoding="utf-8")
+            (plagiarized_dir / filename).write_text(transform(content), encoding="utf-8")
 
+    try:
+        await run_in_threadpool(write_dataset)
+        relative_path = str(dataset_dir.relative_to(BENCHMARK_DATA_DIR.parent))
         metadata = {
             "name": dataset_name,
             "description": description,
             "language": language,
-            "files_created": files_created,
+            "files_created": num_files * 2,
             "original_files": num_files,
             "plagiarized_files": num_files,
             "similarity_type": similarity_type,
-            "created_by": current_user["email"],
+            "created_by": current_user.get("email"),
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "dataset_path": str(dataset_dir.relative_to(BENCHMARK_DATA_DIR.parent)),
+            "dataset_path": relative_path,
             "pairs": num_files,
         }
-        (dataset_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
-        return JSONResponse(
-            status_code=201,
-            content={
-                "message": f"Demo dataset '{dataset_name}' created successfully",
-                "dataset": metadata,
-                "files_created": files_created,
-                "dataset_path": str(dataset_dir),
-            },
+        (dataset_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create demo dataset: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to create demo dataset. See server logs for details."
-        )
+    except Exception:
+        shutil.rmtree(dataset_dir, ignore_errors=True)  # no half-built datasets
+        raise _server_error("Demo dataset creation") from None
+
+    return JSONResponse(
+        status_code=201,
+        content={
+            "message": f"Demo dataset '{dataset_name}' created successfully",
+            "dataset": metadata,
+            "files_created": metadata["files_created"],
+            # Relative only: the absolute server path is not the client's business.
+            "dataset_path": relative_path,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -162,92 +341,33 @@ async def get_benchmark_tools():
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/benchmark/real-fpr")
-async def compute_real_fpr_on_clean_corpus(
-    files: list[UploadFile] = File(...),
-):
-    """Compute real False Positive Rate on a set of known-clean submissions."""
-    from src.backend.api.server import logger
-    from src.backend.application.services.batch_detection_service import BatchDetectionService
+def _fpr_label(fpr: float) -> str:
+    if fpr <= 0.015:
+        return "Excellent – very safe"
+    if fpr <= 0.03:
+        return "Good – comfortable for most courses"
+    if fpr <= 0.05:
+        return "Acceptable – use with evidence review"
+    if fpr <= 0.08:
+        return "Borderline – caution recommended"
+    return "High risk – too many false positives"
 
-    if len(files) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="At least 2 submissions are required to compute FPR.",
-        )
-    submissions: dict[str, str] = {}
-    for upload in files:
-        try:
-            content = (await upload.read()).decode("utf-8", errors="ignore")
-            if len(content.strip()) > 30:
-                submissions[upload.filename] = content
-        except Exception:
-            logger.debug("Skipping unreadable submission: %s", upload.filename, exc_info=True)
-    if len(submissions) < 2:
-        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
-    try:
-        service = BatchDetectionService(threshold=0.0)
-        pair_results = service.compare_all_pairs(submissions)
-        scores = [float(r.score) for r in pair_results]
-        num_pairs = len(scores)
-        num_submissions = len(submissions)
-    except Exception as e:
-        logger.exception("Real FPR computation failed")
-        raise HTTPException(
-            status_code=500, detail="FPR computation failed. See server logs for details."
-        ) from e
 
-    thresholds_to_evaluate = [
-        0.40,
-        0.45,
-        0.50,
-        0.52,
-        0.55,
-        0.58,
-        0.60,
-        0.62,
-        0.64,
-        0.65,
-        0.66,
-        0.67,
-        0.68,
-        0.69,
-        0.70,
-        0.71,
-        0.72,
-        0.73,
-        0.74,
-        0.75,
-        0.76,
-        0.77,
-        0.78,
-        0.80,
-        0.82,
-        0.85,
-        0.88,
-        0.90,
-        0.95,
-    ]
+def _build_fpr_report(scores: list[float], num_submissions: int) -> dict[str, Any]:
+    """Turn pairwise scores from a known-clean corpus into an FPR report."""
+    num_pairs = len(scores)
+    ordered = sorted(scores)
+
     fpr_table = []
-    for t in thresholds_to_evaluate:
-        above = sum(1 for s in scores if s >= t)
-        fpr = above / num_pairs if num_pairs > 0 else 0.0
-        if fpr <= 0.015:
-            label = "Excellent – very safe"
-        elif fpr <= 0.03:
-            label = "Good – comfortable for most courses"
-        elif fpr <= 0.05:
-            label = "Acceptable – use with evidence review"
-        elif fpr <= 0.08:
-            label = "Borderline – caution recommended"
-        else:
-            label = "High risk – too many false positives"
+    for t in _FPR_THRESHOLDS:
+        above = num_pairs - bisect_left(ordered, t)  # scores >= t
+        fpr = above / num_pairs if num_pairs else 0.0
         fpr_table.append(
             {
                 "threshold": round(t, 2),
                 "fpr": round(fpr, 4),
                 "fpr_percent": round(fpr * 100, 2),
-                "label": label,
+                "label": _fpr_label(fpr),
                 "flagged_pairs": above,
             }
         )
@@ -255,8 +375,8 @@ async def compute_real_fpr_on_clean_corpus(
     very_safe = next((row for row in fpr_table if row["fpr"] <= 0.015), None)
     balanced = next((row for row in fpr_table if row["fpr"] <= 0.03), None)
     high_recall = next((row for row in fpr_table if row["fpr"] <= 0.05), None)
-    mean_clean = sum(scores) / len(scores) if scores else 0
-    max_clean = max(scores) if scores else 0
+    mean_clean = sum(scores) / num_pairs if num_pairs else 0.0
+    max_clean = max(scores) if scores else 0.0
 
     recommendations = []
     if very_safe:
@@ -267,7 +387,7 @@ async def compute_real_fpr_on_clean_corpus(
                 "type": "very_safe",
                 "title": "Maximum Safety",
                 "advice": (
-                    f"At {very_safe['threshold']*100:.0f}% the FPR on your clean data is only "
+                    f"At {very_safe['threshold'] * 100:.0f}% the FPR on your clean data is only "
                     f"{very_safe['fpr_percent']:.1f}%. This is the most conservative setting."
                 ),
             }
@@ -280,7 +400,7 @@ async def compute_real_fpr_on_clean_corpus(
                 "type": "balanced",
                 "title": "Recommended Default",
                 "advice": (
-                    f"At {balanced['threshold']*100:.0f}% you get a good balance "
+                    f"At {balanced['threshold'] * 100:.0f}% you get a good balance "
                     f"(FPR ≈ {balanced['fpr_percent']:.1f}%). Strong choice for most courses."
                 ),
             }
@@ -293,7 +413,7 @@ async def compute_real_fpr_on_clean_corpus(
                 "type": "high_recall",
                 "title": "Higher Detection (with review)",
                 "advice": (
-                    f"At {high_recall['threshold']*100:.0f}% you catch more cases "
+                    f"At {high_recall['threshold'] * 100:.0f}% you catch more cases "
                     f"(FPR ≈ {high_recall['fpr_percent']:.1f}%). Best used when every pair "
                     "is manually reviewed."
                 ),
@@ -330,35 +450,92 @@ async def compute_real_fpr_on_clean_corpus(
 
     best = balanced or very_safe or fpr_table[-1]
     recommendation = (
-        f"Recommended starting threshold: {best['threshold']*100:.0f}% "
+        f"Recommended starting threshold: {best['threshold'] * 100:.0f}% "
         f"(FPR on your clean data ≈ {best['fpr_percent']:.1f}%). {overall_risk}"
     )
 
     bins = [0] * 10
     for s in scores:
-        idx = min(int(s * 10), 9)
-        bins[idx] += 1
-    histogram = [{"bin": f"{i/10:.1f}-{(i+1)/10:.1f}", "count": bins[i]} for i in range(10)]
+        bins[max(0, min(int(s * 10), 9))] += 1
+    histogram = [{"bin": f"{i / 10:.1f}-{(i + 1) / 10:.1f}", "count": bins[i]} for i in range(10)]
 
-    return JSONResponse(
-        content={
-            "num_submissions": num_submissions,
-            "num_pairs": num_pairs,
-            "fpr_table": fpr_table,
-            "score_histogram": histogram,
-            "recommendation": recommendation,
-            "mean_score": round(sum(scores) / len(scores), 4) if scores else 0,
-            "max_score": round(max(scores), 4) if scores else 0,
-            "recommendations": recommendations,
-            "overall_assessment": overall_risk,
-            "suggested_actions": suggested_actions,
-            "recommended_threshold": (
-                balanced["threshold"] if balanced else fpr_table[-1]["threshold"]
-            ),
-            "fpr_at_recommended_threshold": (balanced["fpr"] if balanced else fpr_table[-1]["fpr"])
-            / 100.0,
-        }
-    )
+    return {
+        "num_submissions": num_submissions,
+        "num_pairs": num_pairs,
+        "fpr_table": fpr_table,
+        "score_histogram": histogram,
+        "recommendation": recommendation,
+        "mean_score": round(mean_clean, 4),
+        "max_score": round(max_clean, 4),
+        "recommendations": recommendations,
+        "overall_assessment": overall_risk,
+        "suggested_actions": suggested_actions,
+        "recommended_threshold": best["threshold"],
+        # ``fpr`` in the table is already a fraction. This used to be divided by
+        # 100 again, so the stored value was 100x too small.
+        "fpr_at_recommended_threshold": best["fpr"],
+        "low_sample_warning": (
+            f"Only {num_pairs} pairs were compared; FPR estimates need at least "
+            f"{_LOW_SAMPLE_PAIRS} pairs to be meaningful."
+            if num_pairs < _LOW_SAMPLE_PAIRS
+            else None
+        ),
+    }
+
+
+@router.post("/api/benchmark/real-fpr")
+async def compute_real_fpr_on_clean_corpus(
+    files: list[UploadFile] = File(...),
+):
+    """Compute real False Positive Rate on a set of known-clean submissions."""
+    from src.backend.application.services.batch_detection_service import BatchDetectionService
+
+    if len(files) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="At least 2 submissions are required to compute FPR.",
+        )
+    if len(files) > _MAX_FPR_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {_MAX_FPR_FILES} submissions can be compared at once.",
+        )
+
+    submissions: dict[str, str] = {}
+    for upload in files:
+        name = upload.filename
+        if not name:
+            continue
+        try:
+            raw = await upload.read(_MAX_FPR_FILE_BYTES + 1)
+        except Exception:
+            logger.debug("Skipping unreadable submission", exc_info=True)
+            continue
+        if len(raw) > _MAX_FPR_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Each file must be at most {_MAX_FPR_FILE_BYTES // 1000} KB.",
+            )
+        content = raw.decode("utf-8", errors="ignore")
+        if len(content.strip()) > 30:
+            key, n = name, 1
+            while key in submissions:  # same filename twice must not overwrite
+                n += 1
+                key = f"{name} ({n})"
+            submissions[key] = content
+    if len(submissions) < 2:
+        raise HTTPException(status_code=400, detail="Could not load enough valid submissions.")
+
+    def compute_scores() -> list[float]:
+        service = BatchDetectionService(threshold=0.0)
+        return [float(r.score) for r in service.compare_all_pairs(submissions)]
+
+    try:
+        scores = await run_in_threadpool(compute_scores)  # CPU-bound, off the event loop
+    except Exception:
+        raise _server_error("FPR computation") from None
+
+    return JSONResponse(content=_build_fpr_report(scores, len(submissions)))
 
 
 # ---------------------------------------------------------------------------
@@ -369,22 +546,20 @@ async def compute_real_fpr_on_clean_corpus(
 @router.post("/api/fpr-validation-runs")
 async def save_fpr_validation_run(request: Request, payload: FprValidationRunCreate):
     """Save a completed FPR validation run to the database."""
-    from datetime import timezone
-
-    from src.backend.api.server import SessionLocal, _require_current_user, logger
+    from src.backend.api.server import SessionLocal
     from src.backend.models.database import FprValidationRun
 
+    current_user = _current_user(request)
+    tenant_id = _tenant_id_or_400(current_user)
+    result_data = payload.result
+    if len(json.dumps(result_data, default=str)) > _MAX_FPR_RUN_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Validation run is too large to store")
+
+    name = payload.name or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
-        user_id = current_user.get("id")
-        if not tenant_id:
-            raise HTTPException(status_code=400, detail="No tenant associated with user")
-        name = payload.name or f"FPR Run - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
-        result_data = payload.result
         run = FprValidationRun(
             tenant_id=tenant_id,
-            user_id=user_id,
+            user_id=current_user.get("id"),
             name=name,
             payload=result_data,
             num_submissions=result_data.get("num_submissions"),
@@ -401,22 +576,18 @@ async def save_fpr_validation_run(request: Request, payload: FprValidationRunCre
             db.commit()
             db.refresh(run)
         return {"id": run.id, "name": run.name, "created_at": run.created_at}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to save FPR validation run")
-        raise HTTPException(status_code=500, detail="Failed to save FPR validation run.")
+    except Exception:
+        raise _server_error("Saving the FPR validation run") from None
 
 
 @router.get("/api/fpr-validation-runs")
-async def list_fpr_validation_runs(request: Request, limit: int = 50):
+async def list_fpr_validation_runs(request: Request, limit: int = Query(50, ge=1, le=200)):
     """List historical FPR validation runs for the current tenant."""
-    from src.backend.api.server import SessionLocal, _require_current_user, logger
+    from src.backend.api.server import SessionLocal
     from src.backend.models.database import FprValidationRun
 
+    tenant_id = _tenant_id_or_400(_current_user(request))
     try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
         with SessionLocal() as db:
             runs = (
                 db.query(FprValidationRun)
@@ -441,22 +612,18 @@ async def list_fpr_validation_runs(request: Request, limit: int = 50):
                     for r in runs
                 ]
             }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to list FPR validation runs")
-        raise HTTPException(status_code=500, detail="Failed to list FPR validation runs.")
+    except Exception:
+        raise _server_error("Listing FPR validation runs") from None
 
 
 @router.get("/api/fpr-validation-runs/{run_id}")
 async def get_fpr_validation_run(run_id: str, request: Request):
     """Retrieve a single saved FPR validation run."""
-    from src.backend.api.server import SessionLocal, _require_current_user, logger
+    from src.backend.api.server import SessionLocal
     from src.backend.models.database import FprValidationRun
 
+    tenant_id = _tenant_id_or_400(_current_user(request))
     try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
         with SessionLocal() as db:
             run = (
                 db.query(FprValidationRun)
@@ -479,20 +646,18 @@ async def get_fpr_validation_run(run_id: str, request: Request):
             }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception("Failed to fetch FPR validation run")
-        raise HTTPException(status_code=500, detail="Failed to fetch FPR validation run.")
+    except Exception:
+        raise _server_error("Fetching the FPR validation run") from None
 
 
 @router.delete("/api/fpr-validation-runs/{run_id}")
 async def delete_fpr_validation_run(run_id: str, request: Request):
-    """Delete a saved FPR validation run."""
-    from src.backend.api.server import SessionLocal, _require_current_user, logger
+    """Delete a saved FPR validation run (certified runs are kept as evidence)."""
+    from src.backend.api.server import SessionLocal
     from src.backend.models.database import FprValidationRun
 
+    tenant_id = _tenant_id_or_400(_current_user(request))
     try:
-        current_user = _require_current_user(request, admin_only=False)
-        tenant_id = current_user.get("tenant_id")
         with SessionLocal() as db:
             run = (
                 db.query(FprValidationRun)
@@ -504,14 +669,17 @@ async def delete_fpr_validation_run(run_id: str, request: Request):
             )
             if not run:
                 raise HTTPException(status_code=404, detail="FPR validation run not found")
+            if run.is_certified:
+                raise HTTPException(
+                    status_code=409, detail="Certified validation runs cannot be deleted"
+                )
             db.delete(run)
             db.commit()
         return {"success": True}
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception("Failed to delete FPR validation run")
-        raise HTTPException(status_code=500, detail="Failed to delete FPR validation run.")
+    except Exception:
+        raise _server_error("Deleting the FPR validation run") from None
 
 
 # ---------------------------------------------------------------------------
@@ -569,20 +737,19 @@ async def get_benchmark_presets() -> dict[str, Any]:
 
 
 @router.get("/api/benchmark-history")
-async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
+async def get_benchmark_history(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
     """Return recent benchmark run summaries (file + DB)."""
-    from src.backend.api.server import SessionLocal, _read_benchmark_history, logger
+    from src.backend.api.server import SessionLocal, _read_benchmark_history
     from src.backend.models.database import Job
 
-    safe_limit = max(1, min(100, int(limit)))
-    runs = _read_benchmark_history()[:safe_limit]
+    runs = _read_benchmark_history()[:limit]
     try:
         with SessionLocal() as db:
             db_benchmarks = (
                 db.query(Job)
                 .filter(Job.settings.op("->>")("type") == "benchmark")
                 .order_by(Job.created_at.desc())
-                .limit(safe_limit)
+                .limit(limit)
                 .all()
             )
             for j in db_benchmarks:
@@ -590,8 +757,8 @@ async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
                 if s and not any(r.get("job_id") == j.id for r in runs):
                     runs.append(s)
     except Exception:
-        logger.warning("Failed to load benchmark runs from DB")
-    return {"runs": runs[:safe_limit]}
+        logger.warning("Failed to load benchmark runs from DB", exc_info=True)
+    return {"runs": runs[:limit]}
 
 
 # ---------------------------------------------------------------------------
@@ -602,20 +769,19 @@ async def get_benchmark_history(limit: int = 20) -> dict[str, Any]:
 @router.get("/api/error-analysis")
 async def get_error_analysis() -> dict[str, Any]:
     """Compute real error analysis from stored benchmark runs and job results."""
-    import json
-
     from src.backend.api.server import (
         BENCHMARK_RUNS_DIR,
         _build_error_analysis_from_benchmark,
         _build_error_analysis_from_jobs,
-        logger,
     )
 
-    benchmark_runs = sorted(
-        BENCHMARK_RUNS_DIR.glob("*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    def mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:  # deleted between glob and stat
+            return 0.0
+
+    benchmark_runs = sorted(BENCHMARK_RUNS_DIR.glob("*.json"), key=mtime, reverse=True)
     labeled_run: dict[str, Any] | None = None
     for run_path in benchmark_runs[:10]:
         try:
@@ -639,11 +805,11 @@ async def get_error_analysis() -> dict[str, Any]:
 async def get_benchmark_datasets() -> dict[str, Any]:
     """Get available benchmark datasets by scanning the data/datasets/ directory."""
     from src.backend.api.server import (
-        BENCHMARK_DATA_DIR,
         BUILTIN_PAIR_DATASET_IDS,
         _build_benchmark_dataset_readiness,
         _build_benchmark_quality_certificate,
         _dataset_default_language,
+        _dataset_has_pair_ground_truth,  # type: ignore[attr-defined]
         _infer_dataset_language,
         _infer_dataset_size_label,
         _iter_benchmark_dataset_roots,
@@ -652,9 +818,7 @@ async def get_benchmark_datasets() -> dict[str, Any]:
         _read_json_file,
         _resolve_benchmark_dataset_dir,
         _resolve_benchmark_dataset_root,
-        logger,
     )
-    from src.backend.api.server import _dataset_has_pair_ground_truth  # type: ignore[attr-defined]
 
     dataset_icons: dict[str, str] = {
         "demo": "🧪",
@@ -769,24 +933,54 @@ async def get_benchmark_datasets() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/benchmark")
-async def run_benchmark(
-    request: Request,
-    files: list[UploadFile] = File(default=[]),
-    tools: list[str] = Form(default=[]),
-    dataset: str = Form(default=""),
-    benchmark_type: str = Form(default="tool_comparison"),
-    preset_id: str = Form(default=""),
-):
-    """Run a full benchmark comparison."""
-    import shutil
-    from pathlib import Path as PathLib
+@contextmanager
+def _embedding_runtime_guard(configured_runtime: str):
+    """Disable the local embedding model when there is no GPU, then restore it.
 
+    ``EMBEDDING_RUNTIME`` is process-wide. The old code restored it only when
+    the comparison succeeded, so one failing benchmark left embeddings switched
+    off for the whole server. It is now always restored, and a lock stops
+    concurrent benchmarks from clobbering each other's value.
+
+    Must be used from a worker thread, not held across an ``await``.
+    """
+    disable = False
+    if configured_runtime in _LOCAL_EMBEDDING_RUNTIMES:
+        try:
+            import torch
+
+            disable = not torch.cuda.is_available()
+        except ImportError:
+            disable = True
+    if not disable:
+        yield
+        return
+    with _ENV_LOCK:
+        original = os.environ.get("EMBEDDING_RUNTIME")
+        os.environ["EMBEDDING_RUNTIME"] = "none"
+        try:
+            yield
+        finally:
+            if original is None:
+                os.environ.pop("EMBEDDING_RUNTIME", None)
+            else:
+                os.environ["EMBEDDING_RUNTIME"] = original
+
+
+async def _run_benchmark_job(
+    job_id: str,
+    job_dir: Path,
+    files: list[UploadFile],
+    tools: list[str],
+    dataset: str,
+    benchmark_type: str,
+    preset_id: str,
+) -> JSONResponse:
+    """Body of ``run_benchmark``; the caller owns cleanup of ``job_dir``."""
     from src.backend.api.server import (
         BENCHMARK_DATA_DIR,
         BENCHMARK_WORKFLOW_PRESETS,
         REAL_BENCHMARK_TOOL_IDS,
-        UPLOADS_DIR,
         _build_benchmark_quality_certificate,
         _build_regression_quality_gates,
         _compute_engine_contribution,
@@ -801,10 +995,10 @@ async def run_benchmark(
         _persist_benchmark_response,
         _select_reliable_explicit_pairs,
         _store_benchmark_uploads,
-        logger,
         settings,
     )
     from src.backend.application.services.batch_detection_service import BatchDetectionService
+    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
     selected_tools: list[str] = []
     for tool in tools:
@@ -812,13 +1006,10 @@ async def run_benchmark(
         if tool_id in REAL_BENCHMARK_TOOL_IDS and tool_id not in selected_tools:
             selected_tools.append(tool_id)
     tools = selected_tools or ["integritydesk"]
-    job_id = str(uuid.uuid4())
-    job_dir = UPLOADS_DIR / f"bench_{job_id}"
-    job_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"[BENCHMARK {job_id}] Starting benchmark job")
-    logger.info(f"[BENCHMARK {job_id}] Requested tools: {', '.join(tools)}")
-    logger.info(f"[BENCHMARK {job_id}] Dataset: {dataset if dataset else 'custom upload'}")
+    logger.info("[BENCHMARK %s] Starting benchmark job", job_id)
+    logger.info("[BENCHMARK %s] Requested tools: %s", job_id, ", ".join(tools))
+    logger.info("[BENCHMARK %s] Dataset: %s", job_id, dataset or "custom upload")
 
     normalized_protocol = _normalize_benchmark_protocol(benchmark_type)
     benchmark_type = normalized_protocol["benchmark_type"]
@@ -836,7 +1027,6 @@ async def run_benchmark(
             and _dataset_has_pair_ground_truth(dataset, dataset_root)
         )
         if not has_labeled_ground_truth:
-            shutil.rmtree(job_dir, ignore_errors=True)
             return JSONResponse(
                 status_code=400,
                 content={
@@ -867,10 +1057,9 @@ async def run_benchmark(
     else:
         submissions = await _store_benchmark_uploads(files, job_dir)
 
-    logger.info(f"[BENCHMARK {job_id}] Loaded {len(submissions)} submissions")
+    logger.info("[BENCHMARK %s] Loaded %d submissions", job_id, len(submissions))
 
     if len(submissions) < 2:
-        shutil.rmtree(job_dir, ignore_errors=True)
         return JSONResponse(status_code=400, content={"error": "At least 2 code files required"})
 
     if explicit_pairs:
@@ -889,35 +1078,19 @@ async def run_benchmark(
 
     tool_results: dict[str, Any] = {}
     tool_timings: dict[str, float] = {}
-    import time
 
     if "integritydesk" in tools:
-        import os
-
         tool_started = time.perf_counter()
-        try:
-            original_embedding_runtime = os.environ.get("EMBEDDING_RUNTIME")
-            should_disable_embedding = False
-            try:
-                import torch
 
-                has_gpu = torch.cuda.is_available()
-                if not has_gpu and settings.EMBEDDING_RUNTIME in (
-                    "local_unixcoder",
-                    "local",
-                    "unixcoder",
-                ):
-                    should_disable_embedding = True
-                    os.environ["EMBEDDING_RUNTIME"] = "none"
-            except ImportError:
-                if settings.EMBEDDING_RUNTIME in ("local_unixcoder", "local", "unixcoder"):
-                    should_disable_embedding = True
-                    os.environ["EMBEDDING_RUNTIME"] = "none"
-            service = BatchDetectionService(threshold=0.3)
-            if explicit_pairs:
-                results = service.compare_pairs(submissions, explicit_pairs)
-            else:
-                results = service.compare_all_pairs(submissions)
+        def run_integritydesk() -> list[Any]:
+            with _embedding_runtime_guard(settings.EMBEDDING_RUNTIME):
+                service = BatchDetectionService(threshold=0.3)
+                if explicit_pairs:
+                    return service.compare_pairs(submissions, explicit_pairs)
+                return service.compare_all_pairs(submissions)
+
+        try:
+            results = await run_in_threadpool(run_integritydesk)
             tool_results["integritydesk"] = {
                 "pairs": [
                     {
@@ -930,18 +1103,12 @@ async def run_benchmark(
                     for r in results
                 ]
             }
-            if should_disable_embedding:
-                if original_embedding_runtime:
-                    os.environ["EMBEDDING_RUNTIME"] = original_embedding_runtime
-                elif "EMBEDDING_RUNTIME" in os.environ:
-                    del os.environ["EMBEDDING_RUNTIME"]
-        except Exception as e:
-            logger.exception("IntegrityDesk benchmark failed")
-            tool_results["integritydesk"] = {"error": str(e)}
+        except Exception:
+            # The raw exception text used to be returned to the client.
+            ref = _failure_ref("IntegrityDesk benchmark")
+            tool_results["integritydesk"] = {"error": f"Benchmark run failed. Reference: {ref}"}
         finally:
             tool_timings["integritydesk"] = time.perf_counter() - tool_started
-
-    from src.backend.benchmark.runners.external_tool_runner import ExternalToolRunner
 
     external_tool_runner = ExternalToolRunner(moss_user_id=_get_setting_secret("moss_user_id"))
     for tool in tools:
@@ -949,11 +1116,13 @@ async def run_benchmark(
             continue
         tool_started = time.perf_counter()
         try:
-            score_data = external_tool_runner.run_tool(tool, submissions, all_pairs)
+            score_data = await run_in_threadpool(
+                external_tool_runner.run_tool, tool, submissions, all_pairs
+            )
             tool_results[tool] = score_data if score_data else {"error": f"{tool} not available"}
-        except Exception as e:
-            logger.exception(f"{tool} benchmark failed")
-            tool_results[tool] = {"error": str(e)}
+        except Exception:
+            ref = _failure_ref(f"{tool} benchmark")
+            tool_results[tool] = {"error": f"Benchmark run failed. Reference: {ref}"}
         finally:
             tool_timings[tool] = time.perf_counter() - tool_started
 
@@ -961,31 +1130,39 @@ async def run_benchmark(
         frozenset((str(p.get("file_a", "")), str(p.get("file_b", "")))): int(p.get("label", 0))
         for p in explicit_pairs
     }
+
+    # Index each tool's pairs once. Matching by scanning every tool pair for
+    # every candidate pair was O(pairs^2): ~400M comparisons for 200 files.
+    tool_pair_index: dict[str, dict[frozenset[str], dict[str, Any]]] = {
+        tool_name: {
+            frozenset((p["file_a"], p["file_b"])): p for p in tool_data["pairs"]
+        }
+        for tool_name, tool_data in tool_results.items()
+        if "pairs" in tool_data
+    }
+
     pair_results = []
     for fa, fb in all_pairs:
         entry: dict[str, Any] = {
             "file_a": fa,
             "file_b": fb,
-            "label": f"{PathLib(fa).stem} vs {PathLib(fb).stem}",
+            "label": f"{Path(fa).stem} vs {Path(fb).stem}",
             "tool_results": [],
         }
         label_key = frozenset((fa, fb))
         if label_key in explicit_pair_labels:
             entry["ground_truth_label"] = explicit_pair_labels[label_key]
-        for tool_name, tool_data in tool_results.items():
-            if "pairs" in tool_data:
-                for p in tool_data["pairs"]:
-                    if (p["file_a"] == fa and p["file_b"] == fb) or (
-                        p["file_a"] == fb and p["file_b"] == fa
-                    ):
-                        entry["tool_results"].append(
-                            {
-                                "tool": tool_name,
-                                "score": p["score"],
-                                "features": p.get("features", {}),
-                                "contributions": p.get("contributions", {}),
-                            }
-                        )
+        for tool_name, index in tool_pair_index.items():
+            p = index.get(label_key)
+            if p is not None:
+                entry["tool_results"].append(
+                    {
+                        "tool": tool_name,
+                        "score": p["score"],
+                        "features": p.get("features", {}),
+                        "contributions": p.get("contributions", {}),
+                    }
+                )
         pair_results.append(entry)
 
     ground_truth_labels = _get_ground_truth_labels(dataset, pair_results)
@@ -996,24 +1173,16 @@ async def run_benchmark(
                 continue
             scores: list[float] = []
             labels: list[int] = []
-            for entry in pair_results:
-                fa, fb = entry["file_a"], entry["file_b"]
+            # Score and label are appended together, so the two lists can no
+            # longer drift out of alignment when labels are shorter than pairs.
+            for idx, entry in enumerate(pair_results[: len(ground_truth_labels)]):
                 for tr in entry["tool_results"]:
                     if tr["tool"] == tool_name:
                         scores.append(tr["score"])
-                        idx = next(
-                            (
-                                i
-                                for i, p in enumerate(pair_results)
-                                if p["file_a"] == fa and p["file_b"] == fb
-                            ),
-                            -1,
-                        )
-                        if 0 <= idx < len(ground_truth_labels):
-                            labels.append(ground_truth_labels[idx])
+                        labels.append(ground_truth_labels[idx])
                         break
             if scores and labels:
-                metrics = _compute_evaluation_metrics(
+                evaluation_results[tool_name] = _compute_evaluation_metrics(
                     scores,
                     labels,
                     tool_name,
@@ -1026,11 +1195,9 @@ async def run_benchmark(
                         else "calibration_holdout"
                     ),
                 )
-                evaluation_results[tool_name] = metrics
 
-    id_avg = sum(p["score"] for p in tool_results.get("integritydesk", {}).get("pairs", [])) / max(
-        1, len(tool_results.get("integritydesk", {}).get("pairs", []))
-    )
+    id_pairs = tool_results.get("integritydesk", {}).get("pairs", [])
+    id_avg = sum(p["score"] for p in id_pairs) / max(1, len(id_pairs))
     comp_scores_all = [
         p["score"]
         for t, d in tool_results.items()
@@ -1043,14 +1210,11 @@ async def run_benchmark(
         if dataset and dataset != "custom"
         else None
     )
-    shutil.rmtree(job_dir, ignore_errors=True)
 
     response: dict[str, Any] = {
         "job_id": job_id,
         "preset_id": preset_id,
-        "preset_name": next(
-            (p["name"] for p in BENCHMARK_WORKFLOW_PRESETS if p["id"] == preset_id), ""
-        ),
+        "preset_name": next((p["name"] for p in BENCHMARK_WORKFLOW_PRESETS if p["id"] == preset_id), ""),
         "requested_tools": tools,
         "tool_scores": {
             k: {
@@ -1126,6 +1290,32 @@ async def run_benchmark(
     return JSONResponse(content=response)
 
 
+@router.post("/api/benchmark")
+async def run_benchmark(
+    request: Request,
+    files: list[UploadFile] = File(default=[]),
+    tools: list[str] = Form(default=[]),
+    dataset: str = Form(default=""),
+    benchmark_type: str = Form(default="tool_comparison"),
+    preset_id: str = Form(default=""),
+):
+    """Run a full benchmark comparison."""
+    from src.backend.api.server import UPLOADS_DIR
+
+    dataset = _validated_dataset_id(dataset)
+    job_id = str(uuid.uuid4())
+    job_dir = UPLOADS_DIR / f"bench_{job_id}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        return await _run_benchmark_job(
+            job_id, job_dir, files, tools, dataset, benchmark_type, preset_id
+        )
+    finally:
+        # Previously only the happy path and two early returns cleaned up, so
+        # any exception left the uploaded student code on disk.
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+
 @router.post("/api/benchmark/stream")
 async def stream_benchmark(
     request: Request,
@@ -1150,18 +1340,21 @@ async def stream_benchmark(
 # Background benchmark jobs
 # ---------------------------------------------------------------------------
 
-# Background benchmark job store — shared with server._run_benchmark_background.
-# Imported lazily inside handlers to avoid a circular import at module load time.
-# All handlers that touch BENCHMARK_JOBS do so via _benchmark_job_set (server) or
-# by reading from the dict returned by `from src.backend.api.server import BENCHMARK_JOBS`.
+# The job store (BENCHMARK_JOBS / BENCHMARK_JOBS_LOCK) lives in server and is
+# shared with server._run_benchmark_background; it is imported lazily to avoid
+# a circular import at module load time.
 
 
 def _benchmark_job_set(job_id: str, updates: dict[str, Any]) -> None:
-    """Thread-safe update of a background benchmark job's state dict."""
+    """Thread-safe update of a background benchmark job's state dict.
+
+    The previous version referenced BENCHMARK_JOBS and BENCHMARK_JOBS_LOCK as
+    module globals that were never defined here, so any call raised NameError.
+    """
+    from src.backend.api.server import BENCHMARK_JOBS, BENCHMARK_JOBS_LOCK
+
     with BENCHMARK_JOBS_LOCK:
-        if job_id not in BENCHMARK_JOBS:
-            BENCHMARK_JOBS[job_id] = {}
-        BENCHMARK_JOBS[job_id].update(updates)
+        BENCHMARK_JOBS.setdefault(job_id, {}).update(updates)
 
 
 @router.post("/api/benchmark/start")
@@ -1177,35 +1370,68 @@ async def start_benchmark_job(
     from src.backend.api.server import (
         BENCHMARK_JOBS,
         BENCHMARK_JOBS_LOCK,
-        _benchmark_job_set,
         _run_benchmark_background,
     )
 
-    job_id = str(uuid.uuid4())
-    file_bytes: list[tuple] = []
+    user = _current_user(request)
+    dataset = _validated_dataset_id(dataset)
+    if len(files) > _MAX_BG_FILES:
+        raise HTTPException(status_code=400, detail=f"At most {_MAX_BG_FILES} files allowed")
+
+    file_bytes: list[tuple[str, bytes]] = []
     for f in files:
         if f.filename:
-            content = await f.read()
+            content = await f.read(_MAX_BG_FILE_BYTES + 1)
+            if len(content) > _MAX_BG_FILE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Each file must be at most {_MAX_BG_FILE_BYTES // 1_000_000} MB",
+                )
             file_bytes.append((f.filename, content))
-    tool_list = list(tools)
-    _benchmark_job_set(job_id, {"status": "queued", "progress": []})
-    t = threading.Thread(
+
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    with BENCHMARK_JOBS_LOCK:
+        # The store never shrank, and any caller could start unlimited threads.
+        for jid in [
+            jid
+            for jid, j in BENCHMARK_JOBS.items()
+            if j.get("status") in _FINISHED_JOB_STATES
+            and j.get("created_at") is not None
+            and now - j["created_at"] > _BG_JOB_TTL_SECONDS
+        ]:
+            del BENCHMARK_JOBS[jid]
+        active = sum(1 for j in BENCHMARK_JOBS.values() if j.get("status") not in _FINISHED_JOB_STATES)
+        if active >= _MAX_ACTIVE_BG_JOBS:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many benchmarks are running. Try again when one finishes.",
+            )
+        BENCHMARK_JOBS[job_id] = {
+            "status": "queued",
+            "progress": [],
+            "owner_id": str(user.get("id")),
+            "created_at": now,
+        }
+
+    threading.Thread(
         target=_run_benchmark_background,
-        args=(job_id, tool_list, dataset, benchmark_type, preset_id, file_bytes),
+        args=(job_id, list(tools), dataset, benchmark_type, preset_id, file_bytes),
         daemon=True,
-    )
-    t.start()
+    ).start()
     return JSONResponse(content={"job_id": job_id, "status": "queued"})
 
 
 @router.get("/api/benchmark/status/{job_id}")
-async def get_benchmark_job_status(job_id: str):
+async def get_benchmark_job_status(job_id: str, request: Request):
     """Poll the status and progress of a background benchmark job."""
     from src.backend.api.server import BENCHMARK_JOBS, BENCHMARK_JOBS_LOCK
 
+    user = _current_user(request)
     with BENCHMARK_JOBS_LOCK:
         job = BENCHMARK_JOBS.get(job_id)
-    if not job:
+    # Jobs record their owner at start; another user's job looks like a missing one.
+    if not job or (job.get("owner_id") and job["owner_id"] != str(user.get("id"))):
         raise HTTPException(status_code=404, detail="Benchmark job not found")
     return JSONResponse(
         content={
@@ -1221,19 +1447,23 @@ async def get_benchmark_job_status(job_id: str):
 @router.post("/api/benchmark/apply-optimization")
 async def apply_benchmark_optimization(request: Request) -> dict[str, Any]:
     """Apply proposed benchmark optimization changes to engine_weights.yaml."""
-    from src.backend.api.server import _apply_engine_optimization_changes, _require_current_user
+    from src.backend.api.server import _apply_engine_optimization_changes
     from src.backend.engines.scoring.fusion_engine import load_engine_config, save_engine_config
 
-    _require_current_user(request, admin_only=False)
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Invalid optimization payload")
+    # engine_weights.yaml is global to every tenant, so this is admin-only.
+    user = _current_user(request, admin_only=True)
+    payload = await _json_object(request)
     changes = payload.get("config_changes")
     if not isinstance(changes, list) or not changes:
         raise HTTPException(status_code=400, detail="No optimization changes provided")
     current_config = load_engine_config()
     applied = _apply_engine_optimization_changes(current_config, changes)
     save_engine_config(applied["config"])
+    logger.warning(
+        "Engine optimization applied by admin %s (%d changes)",
+        user.get("id"),
+        len(applied["applied_changes"]),
+    )
     return {
         "success": True,
         "message": "Proposed optimization applied to engine_weights.yaml",
@@ -1248,43 +1478,64 @@ async def apply_benchmark_optimization(request: Request) -> dict[str, Any]:
 
 
 @router.get("/benchmark/{job_id}/download-csv")
-async def download_benchmark_csv(job_id: str):
+async def download_benchmark_csv(job_id: str, request: Request):
     """Download benchmark results as CSV."""
-    from src.backend.api.server import _get_job
+    job = _accessible_job_or_404(request, job_id)
+    pair_results = job["pair_results"]
 
-    job = _get_job(job_id)
-    if not job or "pair_results" not in job:
-        raise HTTPException(status_code=404, detail="Benchmark results not found")
+    # Columns come from every tool seen, not just the first pair's: a pair
+    # missing a tool used to shift its scores into the wrong column.
+    tool_order: list[str] = []
+    for pair in pair_results:
+        for tr in pair.get("tool_results", []):
+            if tr["tool"] not in tool_order:
+                tool_order.append(tr["tool"])
+
     si = StringIO()
     writer = csv.writer(si)
-    headers = ["Pair 1", "Pair 2", "Label"]
-    if job["pair_results"] and job["pair_results"][0].get("tool_results"):
-        for tool in [t["tool"] for t in job["pair_results"][0]["tool_results"]]:
-            headers.append(f"{tool} Score")
-    writer.writerow(headers)
-    for pair in job["pair_results"]:
-        row = [pair["file_a"], pair["file_b"], pair["label"]]
-        for tool_result in pair["tool_results"]:
-            row.append(f"{tool_result['score']:.3f}")
+    writer.writerow(["Pair 1", "Pair 2", "Label", *[f"{t} Score" for t in tool_order]])
+    for pair in pair_results:
+        scores = {tr["tool"]: tr.get("score") for tr in pair.get("tool_results", [])}
+        row = [
+            _csv_safe(pair.get("file_a")),
+            _csv_safe(pair.get("file_b")),
+            _csv_safe(pair.get("label")),
+        ]
+        for tool in tool_order:
+            score = scores.get(tool)
+            row.append(f"{score:.3f}" if isinstance(score, (int, float)) else "")
         writer.writerow(row)
-    response = Response(content=si.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = f"attachment; filename=benchmark_results_{job_id}.csv"
-    return response
+    return Response(
+        content=si.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=benchmark_results_{_safe_filename_part(job_id)}.csv"
+            )
+        },
+    )
 
 
 @router.get("/benchmark/{job_id}/download-pdf")
-async def download_benchmark_pdf(job_id: str):
+async def download_benchmark_pdf(job_id: str, request: Request):
     """Download benchmark results as PDF (falls back to HTML if WeasyPrint unavailable)."""
-    from src.backend.api.server import _get_job, logger
-    from src.backend.infrastructure.reporting.evidence_pdf_exporter import _minimal_pdf_bytes
+    job = _accessible_job_or_404(request, job_id, require_key=None)
 
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Benchmark job not found")
+    # File names are untrusted uploads; they were interpolated into the HTML
+    # unescaped (stored XSS in the HTML fallback, markup injection in the PDF).
+    rows = "".join(
+        f"<tr><td>{html.escape(str(pair.get('file_a', '')))}</td>"
+        f"<td>{html.escape(str(pair.get('file_b', '')))}</td>"
+        f"<td>{html.escape(str(tr.get('tool', '')))}</td>"
+        f"<td>{float(tr.get('score', 0.0)):.3f}</td></tr>\n"
+        for pair in job.get("pair_results", [])
+        for tr in pair.get("tool_results", [])
+    )
+    safe_id = html.escape(job_id)
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Benchmark Results {job_id}</title>
+    <title>Benchmark Results {safe_id}</title>
     <style>
         body {{ font-family: Arial, sans-serif; padding: 20px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
@@ -1296,59 +1547,35 @@ async def download_benchmark_pdf(job_id: str):
 </head>
 <body>
     <h1>Benchmark Results</h1>
-    <div class="meta">Job ID: {job_id}<br>Generated: {datetime.now().isoformat()}</div>
+    <div class="meta">Job ID: {safe_id}<br>Generated: {datetime.now(timezone.utc).isoformat()}</div>
     <table>
         <thead>
             <tr><th>Pair 1</th><th>Pair 2</th><th>Tool</th><th>Score</th></tr>
         </thead>
         <tbody>
-"""
-    for pair in job.get("pair_results", []):
-        for tr in pair.get("tool_results", []):
-            html_content += (
-                f"<tr><td>{pair['file_a']}</td><td>{pair['file_b']}</td>"
-                f"<td>{tr['tool']}</td><td>{tr['score']:.3f}</td></tr>\n"
-            )
-    html_content += "        </tbody>\n    </table>\n</body>\n</html>"
-    try:
-        import weasyprint
-
-        pdf = weasyprint.HTML(string=html_content).write_pdf()
-        resp = Response(content=pdf, media_type="application/pdf")
-        resp.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
-        return resp
-    except ImportError:
-        return Response(
-            content=html_content,
-            media_type="text/html",
-            headers={"Content-Disposition": f"attachment; filename=benchmark_{job_id}.html"},
-        )
-    except Exception as exc:
-        logger.warning("Benchmark PDF export fell back to minimal PDF for %s: %s", job_id, exc)
-        resp = Response(
-            content=_minimal_pdf_bytes(f"Benchmark {job_id}"),
-            media_type="application/pdf",
-        )
-        resp.headers["Content-Disposition"] = f"attachment; filename=benchmark_{job_id}.pdf"
-        return resp
+{rows}        </tbody>
+    </table>
+</body>
+</html>"""
+    return await _html_report_response(
+        html_content,
+        filename_base=f"benchmark_{_safe_filename_part(job_id)}",
+        fallback_title=f"Benchmark {job_id}",
+    )
 
 
 @router.post("/api/benchmark/export-pdf")
 async def export_benchmark_pdf(request: Request):
     """Export a benchmark evaluation scorecard as PDF."""
-    import html
-
     from src.backend.api.server import (
+        _build_benchmark_report_lines,
         _build_detailed_evaluation_scorecard,
         _generate_detailed_scorecard_pdf,
-        _build_benchmark_report_lines,
         _simple_text_pdf_bytes,
-        logger,
     )
-    from src.backend.infrastructure.reporting.evidence_pdf_exporter import _minimal_pdf_bytes
 
-    payload = await request.json()
-    dataset_name = (
+    payload = await _json_object(request)
+    dataset_name = str(
         payload.get("datasetName")
         or (payload.get("summary") or {}).get("dataset_name")
         or "Benchmark"
@@ -1356,16 +1583,16 @@ async def export_benchmark_pdf(request: Request):
 
     if payload.get("format") == "detailed_scorecard":
         scorecard = _build_detailed_evaluation_scorecard(payload)
-        pdf = _generate_detailed_scorecard_pdf(scorecard)
-        resp = Response(content=pdf, media_type="application/pdf")
-        resp.headers["Content-Disposition"] = (
-            "attachment; filename=benchmark_evaluation_scorecard.pdf"
+        pdf = await run_in_threadpool(_generate_detailed_scorecard_pdf, scorecard)
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": "attachment; filename=benchmark_evaluation_scorecard.pdf"
+            },
         )
-        return resp
 
-    pair_results = payload.get("pair_results") or []
-    summary = payload.get("summary") or {}
-    generated_at = payload.get("runAt") or datetime.now().isoformat()
+    generated_at = payload.get("runAt") or datetime.now(timezone.utc).isoformat()
     benchmark_type_val = payload.get("benchmark_type") or payload.get("benchmarkMode")
     evaluation = payload.get("evaluation") or {}
 
@@ -1440,17 +1667,21 @@ async def export_benchmark_pdf(request: Request):
         ]
         rows = ""
         for name, value, why, action in metrics:
-            display = f"{value:.3f}s" if name == "Avg Runtime" else f"{value * 100:.1f}%"
-            if name == "Granularity":
+            if name == "Avg Runtime":
+                display = f"{value:.3f}s"
+            elif name == "Granularity":
                 display = f"{value:.3f}"
+            else:
+                display = f"{value * 100:.1f}%"
             rows += (
                 f"<tr><td>{html.escape(name)}</td><td><strong>{html.escape(display)}</strong>"
                 f"</td><td>{html.escape(why)}</td><td>{html.escape(action)}</td></tr>\n"
             )
+        title = f"{html.escape(dataset_name)} PAN Optimization Report"
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>{html.escape(dataset_name)} PAN Optimization Report</title>
+    <title>{title}</title>
     <style>
         body {{ font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }}
         h1 {{ font-size: 24px; margin-bottom: 8px; }}
@@ -1462,7 +1693,7 @@ async def export_benchmark_pdf(request: Request):
     </style>
 </head>
 <body>
-    <h1>{html.escape(dataset_name)} PAN Optimization Report</h1>
+    <h1>{title}</h1>
     <div class="meta">Generated: {html.escape(str(generated_at))}</div>
     <table>
         <thead>
@@ -1472,36 +1703,20 @@ async def export_benchmark_pdf(request: Request):
     </table>
 </body>
 </html>"""
-        try:
-            import weasyprint
-
-            pdf = weasyprint.HTML(string=html_content).write_pdf()
-            resp = Response(content=pdf, media_type="application/pdf")
-            resp.headers["Content-Disposition"] = "attachment; filename=pan_optimization_report.pdf"
-            return resp
-        except ImportError:
-            return Response(
-                content=html_content,
-                media_type="text/html",
-                headers={
-                    "Content-Disposition": "attachment; filename=pan_optimization_report.html"
-                },
-            )
-        except Exception as exc:
-            logger.warning("PAN PDF export fell back to minimal PDF: %s", exc)
-            resp = Response(
-                content=_minimal_pdf_bytes(f"{dataset_name} PAN Optimization Report"),
-                media_type="application/pdf",
-            )
-            resp.headers["Content-Disposition"] = "attachment; filename=pan_optimization_report.pdf"
-            return resp
+        return await _html_report_response(
+            html_content,
+            filename_base="pan_optimization_report",
+            fallback_title=f"{dataset_name} PAN Optimization Report",
+        )
 
     # Legacy format
     report_lines = _build_benchmark_report_lines(payload)
     pdf = _simple_text_pdf_bytes(f"{dataset_name} Benchmark Report", report_lines)
-    resp = Response(content=pdf, media_type="application/pdf")
-    resp.headers["Content-Disposition"] = "attachment; filename=benchmark_evaluation_scorecard.pdf"
-    return resp
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=benchmark_evaluation_scorecard.pdf"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1510,15 +1725,17 @@ async def export_benchmark_pdf(request: Request):
 
 
 @router.get("/benchmark/{job_id}/radar")
-async def get_tool_radar_data(job_id: str):
-    """Return radar-chart data for benchmark tool comparison."""
-    from src.backend.api.server import _get_job
+async def get_tool_radar_data(job_id: str, request: Request):
+    """Return radar-chart data for benchmark tool comparison.
 
-    job = _get_job(job_id)
-    if not job or "pair_results" not in job:
-        raise HTTPException(status_code=404, detail="Benchmark results not found")
+    The first four axes are derived from the score distribution. ``speed`` and
+    ``scalability`` are fixed placeholders (0.65 / 0.70) because no
+    runtime data is read here; they are listed under ``synthetic_axes`` so the
+    UI can label or hide them instead of presenting them as measurements.
+    """
+    job = _accessible_job_or_404(request, job_id)
     pair_results = job["pair_results"]
-    tools = {tr["tool"] for pair in pair_results for tr in pair["tool_results"]}
+    tools = sorted({tr["tool"] for pair in pair_results for tr in pair.get("tool_results", [])})
     axes = [
         {"id": "classic_plagiarism", "name": "Copy+Rename", "axis": 0},
         {"id": "near_miss", "name": "Refactored", "axis": 1},
@@ -1533,16 +1750,15 @@ async def get_tool_radar_data(job_id: str):
         all_scores = [
             tr["score"]
             for pair in pair_results
-            for tr in pair["tool_results"]
+            for tr in pair.get("tool_results", [])
             if tr["tool"] == tool
         ]
         if all_scores:
+            mid_band = [s for s in all_scores if 0.3 < s < 0.7]
             scores[0] = max(all_scores)
             scores[1] = sorted(all_scores)[len(all_scores) // 2]
             scores[2] = min(all_scores)
-            scores[3] = sum(s for s in all_scores if 0.3 < s < 0.7) / max(
-                1, sum(1 for s in all_scores if 0.3 < s < 0.7)
-            )
+            scores[3] = sum(mid_band) / max(1, len(mid_band))
         tool_scores[tool] = scores
     return JSONResponse(
         content={
@@ -1551,7 +1767,8 @@ async def get_tool_radar_data(job_id: str):
             "metadata": {
                 "job_id": job_id,
                 "pairs_analyzed": len(pair_results),
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "synthetic_axes": ["speed", "scalability"],
             },
         }
     )
@@ -1574,6 +1791,9 @@ async def get_benchmark_audit(dataset_id: str) -> dict[str, Any]:
         _read_generated_pair_items,
     )
 
+    dataset_id = _validated_dataset_id(dataset_id)
+    if not dataset_id:
+        raise HTTPException(status_code=404, detail="Benchmark dataset not found")
     dataset_root = BENCHMARK_DATA_DIR / dataset_id
     if not dataset_root.exists() and dataset_id not in BUILTIN_PAIR_DATASET_IDS:
         raise HTTPException(status_code=404, detail="Benchmark dataset not found")

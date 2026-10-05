@@ -11,14 +11,53 @@ the extractor falls back to lexical features so the pipeline never crashes.
 
 from __future__ import annotations
 
+import keyword
 import logging
 import math
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
+
+_LANGUAGE_ALIASES = {
+    "py": "python",
+    "python3": "python",
+    "js": "javascript",
+    "jsx": "javascript",
+    "ts": "typescript",
+    "tsx": "typescript",
+    "c++": "cpp",
+    "cc": "cpp",
+    "cxx": "cpp",
+    "cs": "csharp",
+    "c#": "csharp",
+    "golang": "go",
+    "rs": "rust",
+}
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_FEATURE_NAMES = (
+    "node_type_entropy",
+    "cyclomatic_complexity",
+    "avg_identifier_length",
+    "identifier_length_std",
+    "identifier_naming_entropy",
+    "comment_to_code_ratio",
+    "blank_line_ratio",
+    "avg_function_length",
+    "avg_class_length",
+    "indentation_consistency",
+    "whitespace_entropy",
+)
+
+
+def normalize_language(language: str | None) -> str:
+    """Lower-case a language name and resolve aliases (``js`` -> ``javascript``)."""
+    name = (language or "python").strip().lower()
+    return _LANGUAGE_ALIASES.get(name, name)
 
 
 @dataclass
@@ -26,8 +65,11 @@ class ASTFeatureVector:
     """Fixed-length feature vector describing the structural style of code.
 
     All values are normalised to [0, 1] where meaningful so the vector can be
-    passed directly to machine learning classifiers. ``node_type_entropy`` is
-    the exception (bits) — it is capped and scaled in ``to_vector``.
+    passed directly to machine learning classifiers. ``node_type_entropy`` is the
+    NORMALISED Shannon entropy of the node-type distribution (1.0 = uniform).
+    (The docstring used to call it "bits", and ``to_vector`` and the ensemble
+    divided it by 9 as if it were; that squashed the value into [0, 0.11].)
+    ``avg_function_length`` / ``avg_class_length`` are in lines.
     """
 
     node_type_entropy: float = 0.0
@@ -43,30 +85,21 @@ class ASTFeatureVector:
     whitespace_entropy: float = 0.0
     function_count: int = 0
     class_count: int = 0
+    #: True only for a clean tree-sitter parse. A tree containing syntax errors,
+    #: or the lexical fallback, is False; consumers skip the structural features
+    #: that are placeholders in that case.
     parse_success: bool = True
     extra: dict[str, float] = field(default_factory=dict)
 
-    FEATURE_MEANINGFUL = (
-        "node_type_entropy",
-        "cyclomatic_complexity",
-        "avg_identifier_length",
-        "identifier_length_std",
-        "identifier_naming_entropy",
-        "comment_to_code_ratio",
-        "blank_line_ratio",
-        "avg_function_length",
-        "avg_class_length",
-        "indentation_consistency",
-        "whitespace_entropy",
-    )
+    FEATURE_MEANINGFUL: ClassVar[tuple[str, ...]] = _FEATURE_NAMES
 
     def to_vector(self) -> list[float]:
         """Return a fixed-length numeric vector for ML consumption."""
         values = [
-            min(1.0, self.node_type_entropy / 9.0),
+            min(1.0, self.node_type_entropy),
             min(1.0, self.cyclomatic_complexity),
             self.avg_identifier_length,
-            min(1.0, self.identifier_length_std / 5.0),
+            min(1.0, self.identifier_length_std),
             self.identifier_naming_entropy,
             self.comment_to_code_ratio,
             self.blank_line_ratio,
@@ -79,39 +112,20 @@ class ASTFeatureVector:
 
     def feature_names(self) -> list[str]:
         """Ordered feature names matching ``to_vector``."""
-        return [
-            "node_type_entropy",
-            "cyclomatic_complexity",
-            "avg_identifier_length",
-            "identifier_length_std",
-            "identifier_naming_entropy",
-            "comment_to_code_ratio",
-            "blank_line_ratio",
-            "avg_function_length",
-            "avg_class_length",
-            "indentation_consistency",
-            "whitespace_entropy",
-        ]
+        return list(_FEATURE_NAMES)
 
     def as_dict(self) -> dict[str, Any]:
         """Serialisable representation including derived stats."""
-        return {
-            "node_type_entropy": round(self.node_type_entropy, 4),
-            "cyclomatic_complexity": round(self.cyclomatic_complexity, 4),
-            "avg_identifier_length": round(self.avg_identifier_length, 4),
-            "identifier_length_std": round(self.identifier_length_std, 4),
-            "identifier_naming_entropy": round(self.identifier_naming_entropy, 4),
-            "comment_to_code_ratio": round(self.comment_to_code_ratio, 4),
-            "blank_line_ratio": round(self.blank_line_ratio, 4),
-            "avg_function_length": round(self.avg_function_length, 4),
-            "avg_class_length": round(self.avg_class_length, 4),
-            "indentation_consistency": round(self.indentation_consistency, 4),
-            "whitespace_entropy": round(self.whitespace_entropy, 4),
-            "function_count": self.function_count,
-            "class_count": self.class_count,
-            "parse_success": self.parse_success,
-            "extra": self.extra,
+        data: dict[str, Any] = {
+            name: round(getattr(self, name), 4) for name in _FEATURE_NAMES
         }
+        data.update(
+            function_count=self.function_count,
+            class_count=self.class_count,
+            parse_success=self.parse_success,
+            extra=self.extra,
+        )
+        return data
 
 
 def _safe_entropy(counter: Counter) -> float:
@@ -131,13 +145,77 @@ def _safe_entropy(counter: Counter) -> float:
 
 def _uniq_preserving(items: list[str]) -> list[str]:
     """Deduplicate items preserving order."""
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
+    return list(dict.fromkeys(items))
+
+
+def _mean(values: list[float]) -> float:
+    """Mean of a list, 0.0 for empty input."""
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 4)
+
+
+# ---------------------------------------------------------------------------
+# Process-wide tree-sitter language cache
+# ---------------------------------------------------------------------------
+
+# A ``Language`` is immutable and safe to share; building one imports a binding
+# package, so it is done once per process instead of once per extractor (and an
+# extractor is created per analysis job). Parsers are NOT thread-safe and stay
+# per-extractor, guarded by a lock.
+_LANGUAGE_CACHE: dict[str, Any] = {}
+_LANGUAGE_CACHE_LOCK = threading.Lock()
+
+_LANGUAGE_MODULES = {
+    "python": "tree_sitter_python",
+    "java": "tree_sitter_java",
+    "cpp": "tree_sitter_cpp",
+    "c": "tree_sitter_cpp",
+    "csharp": "tree_sitter_c_sharp",
+    "javascript": "tree_sitter_javascript",
+    "typescript": "tree_sitter_typescript",
+    "go": "tree_sitter_go",
+    "rust": "tree_sitter_rust",
+}
+
+
+def _language_symbol_candidates(language: str) -> list[str]:
+    """Ordered attribute names to try when building a Language object.
+
+    ``tree_sitter_typescript`` exports ``language_typescript`` and
+    ``language_tsx`` rather than ``language``.
+    """
+    return ["language", f"language_{language}", "language_typescript", "language_tsx"]
+
+
+def _load_language_object(language: str) -> Any | None:
+    """Return a cached tree-sitter ``Language`` or None when unavailable."""
+    with _LANGUAGE_CACHE_LOCK:
+        if language in _LANGUAGE_CACHE:
+            return _LANGUAGE_CACHE[language]
+        module_name = _LANGUAGE_MODULES.get(language)
+        lang = None
+        if module_name is not None:
+            try:
+                from tree_sitter import Language
+
+                module = __import__(module_name, fromlist=["language"])
+                symbol = next(
+                    (c for c in _language_symbol_candidates(language) if hasattr(module, c)),
+                    None,
+                )
+                if symbol is None:
+                    logger.info(
+                        "Tree-sitter module %s has no language symbol (tried %s)",
+                        module_name,
+                        _language_symbol_candidates(language),
+                    )
+                else:
+                    lang = Language(getattr(module, symbol)())
+            except Exception as exc:  # pragma: no cover - import failures vary by env
+                logger.info("Tree-sitter unavailable for %s: %s", language, exc)
+        _LANGUAGE_CACHE[language] = lang
+        return lang
 
 
 class TreeSitterASTExtractor:
@@ -222,163 +300,124 @@ class TreeSitterASTExtractor:
         ],
     }
 
-    _COMMENT_NODE_TYPES = (
-        "comment",
-        "line_comment",
-        "block_comment",
-        "comment_block",
-        "doc_comment",
-        "attribute_item",
+    #: Node types that are comments. (Rust's ``attribute_item`` is ``#[derive(..)]``,
+    #: not a comment, and used to be listed here.)
+    _COMMENT_NODE_TYPES = frozenset(
+        {"comment", "line_comment", "block_comment", "comment_block", "doc_comment"}
     )
+    _IDENTIFIER_NODE_TYPES = frozenset({"identifier", "property_identifier", "object", "field"})
+    _HASH_COMMENT_LANGUAGES = frozenset({"python", "perl", "ruby"})
 
     def __init__(self) -> None:
-        self._loaded: dict[str, Any] = {}
-        self._attempted: set = set()
+        self._parsers: dict[str, Any] = {}
+        self._lock = threading.Lock()
 
+    # Kept for backward compatibility with callers/tests.
     def _language_module_name(self, language: str) -> str | None:
-        """Return the tree-sitter language package name for a language.
-
-        Maps each supported language to its tree-sitter package. The package
-        may expose the ``Language`` under a different attribute than ``language``
-        (e.g. ``tree_sitter_typescript`` exports ``language_typescript`` and
-        ``language_tsx``), so the loader tries ``language``, ``language_<lang>``
-        and the tree-sitter standard name.
-        """
-        mapping = {
-            "python": "tree_sitter_python",
-            "java": "tree_sitter_java",
-            "cpp": "tree_sitter_cpp",
-            "c": "tree_sitter_cpp",
-            "csharp": "tree_sitter_c_sharp",
-            "javascript": "tree_sitter_javascript",
-            "typescript": "tree_sitter_typescript",
-            "go": "tree_sitter_go",
-            "rust": "tree_sitter_rust",
-        }
-        return mapping.get(language)
+        """Return the tree-sitter language package name for a language."""
+        return _LANGUAGE_MODULES.get(language)
 
     def _language_symbol_candidates(self, language: str) -> list[str]:
         """Ordered attribute names to try when building a Language object."""
-        return [
-            "language",
-            f"language_{language}",
-            "language_typescript",
-            "language_tsx",
-        ]
+        return _language_symbol_candidates(language)
 
     def _load_language(self, language: str) -> Any | None:
-        """Lazily load a tree-sitter Language object or None on failure."""
-        if language in self._loaded:
-            return self._loaded[language]
-        if language in self._attempted:
+        """Return ``(Language, Parser)`` for a language or None on failure."""
+        language = normalize_language(language)
+        if language in self._parsers:
+            return self._parsers[language]
+        lang = _load_language_object(language)
+        if lang is None:
+            self._parsers[language] = None
             return None
-
-        self._attempted.add(language)
-        module_name = self._language_module_name(language)
-        if module_name is None:
-            self._loaded[language] = None
-            return None
-
         try:
-            from tree_sitter import Language, Parser
+            from tree_sitter import Parser
 
-            module = __import__(module_name, fromlist=["language"])
-            symbol = next(
-                (
-                    candidate
-                    for candidate in self._language_symbol_candidates(language)
-                    if hasattr(module, candidate)
-                ),
-                None,
-            )
-            if symbol is None:
-                logger.info(
-                    "Tree-sitter module %s has no language symbol (tried %s)",
-                    module_name,
-                    self._language_symbol_candidates(language),
-                )
-                self._loaded[language] = None
-                return None
-            lang = Language(getattr(module, symbol)())
-            parser = Parser(lang)
-            self._loaded[language] = (lang, parser)
-            return self._loaded[language]
-        except Exception as exc:  # pragma: no cover - import failures vary by env
-            logger.info("Tree-sitter unavailable for %s: %s", language, exc)
-            self._loaded[language] = None
-            return None
+            self._parsers[language] = (lang, Parser(lang))
+        except Exception as exc:  # pragma: no cover
+            logger.info("Tree-sitter parser unavailable for %s: %s", language, exc)
+            self._parsers[language] = None
+        return self._parsers[language]
 
     def extract(self, code: str, language: str = "python") -> ASTFeatureVector:
         """Extract an :class:`ASTFeatureVector` for the given code."""
+        language = normalize_language(language)
         loaded = self._load_language(language)
         if loaded is None:
-            return self._lexical_fallback(code)
+            return self._lexical_fallback(code, language)
 
         _lang, parser = loaded
+        source = code.encode("utf-8")
         try:
-            tree = parser.parse(code.encode("utf-8"))
+            with self._lock:  # a tree-sitter Parser must not be used concurrently
+                tree = parser.parse(source)
         except Exception as exc:  # pragma: no cover - parse errors depend on input
             logger.info("Tree-sitter parse failed for %s: %s", language, exc)
-            return self._lexical_fallback(code)
+            return self._lexical_fallback(code, language)
+
+        node_types = self._NODE_TYPES[language]
+        func_type, class_type = node_types[0], node_types[1]
+        # if / for / while. The old slice stopped at ``for``, so ``while`` loops
+        # never counted towards cyclomatic complexity.
+        branch_types = frozenset(node_types[2:5])
+        source_lines = source.splitlines()
 
         node_counts: Counter = Counter()
-        for node in self._walk(tree.root_node):
-            node_counts[node.type] += 1
+        identifiers: list[str] = []
+        func_lengths: list[float] = []
+        class_lengths: list[float] = []
+        comment_rows: set[int] = set()
+        branches = 0
 
-        # Node-type distribution entropy (lower = more uniform = more AI-like)
-        node_type_entropy = _safe_entropy(node_counts)
+        # ONE traversal. The tree used to be walked five separate times
+        # (node counts, identifiers, function/class counts, branches, lengths).
+        stack = [tree.root_node]
+        while stack:
+            node = stack.pop()
+            kind = node.type
+            node_counts[kind] += 1
+            stack.extend(node.children)
 
-        # Identifier-related features
-        identifiers = self._collect_identifiers(tree.root_node, language)
+            if kind in self._IDENTIFIER_NODE_TYPES:
+                text = (node.text or b"").decode("utf-8", errors="replace").strip()
+                if text and _IDENTIFIER_RE.match(text):
+                    identifiers.append(text)
+            elif kind == func_type:
+                func_lengths.append(max(1, node.end_point[0] - node.start_point[0] + 1))
+            elif kind == class_type:
+                class_lengths.append(max(1, node.end_point[0] - node.start_point[0] + 1))
+            elif kind in self._COMMENT_NODE_TYPES:
+                start_row, start_col = node.start_point
+                prefix = source_lines[start_row][:start_col] if start_row < len(source_lines) else b""
+                if not prefix.strip():  # whole-line comment, not a trailing one
+                    comment_rows.update(range(start_row, node.end_point[0] + 1))
+            if kind in branch_types:
+                branches += 1
+
         identifier_stats = self._identifier_stats(identifiers)
-
-        # Functions / classes
-        func_ids = self._count_node_types(
-            tree.root_node, self._NODE_TYPES.get(language, ())[:2]
-        )
-        function_count, class_count = func_ids
-
-        # Whitespace / structural features from raw source
         blank_line_ratio, indentation_consistency, whitespace_entropy = (
             self._whitespace_features(code)
         )
+        non_blank = sum(1 for line in code.splitlines() if line.strip())
+        cyclomatic = 1 + branches
 
-        # Comment ratio
-        comment_lines = self._count_comments(code, language)
-
-        # Cyclomatic complexity (approximate using branch nodes)
-        branch_types = set(self._NODE_TYPES.get(language, ())[2:4])
-        cyclomatic = 1 + sum(
-            1 for node in self._walk(tree.root_node) if node.type in branch_types
-        )
-
-        vector = ASTFeatureVector(
-            node_type_entropy=node_type_entropy,
+        return ASTFeatureVector(
+            node_type_entropy=_safe_entropy(node_counts),
             cyclomatic_complexity=min(1.0, cyclomatic / 50.0),
             avg_identifier_length=identifier_stats["avg_length"],
             identifier_length_std=identifier_stats["length_std"],
             identifier_naming_entropy=identifier_stats["naming_entropy"],
-            comment_to_code_ratio=comment_lines,
+            comment_to_code_ratio=round(len(comment_rows) / max(1, non_blank), 4),
             blank_line_ratio=blank_line_ratio,
-            avg_function_length=0.0,  # filled below
-            avg_class_length=0.0,
+            avg_function_length=_mean(func_lengths),
+            avg_class_length=_mean(class_lengths),
             indentation_consistency=indentation_consistency,
             whitespace_entropy=whitespace_entropy,
-            function_count=function_count,
-            class_count=class_count,
-            parse_success=True,
+            function_count=len(func_lengths),
+            class_count=len(class_lengths),
+            parse_success=not tree.root_node.has_error,
+            extra={"cyclomatic": cyclomatic},
         )
-
-        # Average function / class length computed from node byte spans
-        func_node_types = self._NODE_TYPES.get(language, ())[:2]
-        class_node_types = self._NODE_TYPES.get(language, ())[1:2]
-        func_lengths, class_lengths = self._structure_lengths(
-            tree.root_node, func_node_types, class_node_types
-        )
-        vector.avg_function_length = _mean(func_lengths)
-        vector.avg_class_length = _mean(class_lengths)
-        vector.extra = {"cyclomatic": cyclomatic}
-        return vector
 
     def _walk(self, node: Any):
         """Yield all nodes under the given tree-sitter node depth-first."""
@@ -389,49 +428,6 @@ class TreeSitterASTExtractor:
                 continue
             yield current
             stack.extend(current.children)
-
-    def _count_node_types(self, node: Any, types: tuple[str, ...]) -> tuple[int, int]:
-        """Count function and class node occurrences."""
-        function_count = 0
-        class_count = 0
-        for current in self._walk(node):
-            if current.type == types[0] if types else False:
-                function_count += 1
-            if len(types) > 1 and current.type == types[1]:
-                class_count += 1
-        return function_count, class_count
-
-    def _structure_lengths(
-        self,
-        node: Any,
-        func_types: tuple[str, ...],
-        class_types: tuple[str, ...],
-    ) -> tuple[list[float], list[float]]:
-        """Approximate average function and class length (lines)."""
-        func_lengths: list[float] = []
-        class_lengths: list[float] = []
-        func_type = func_types[0] if func_types else ""
-        class_type = class_types[0] if class_types else ""
-        for current in self._walk(node):
-            if current.type == func_type:
-                start = current.start_point[0]
-                end = current.end_point[0]
-                func_lengths.append(max(1, end - start + 1))
-            if class_type and current.type == class_type:
-                start = current.start_point[0]
-                end = current.end_point[0]
-                class_lengths.append(max(1, end - start + 1))
-        return func_lengths, class_lengths
-
-    def _collect_identifiers(self, node: Any, language: str) -> list[str]:
-        """Collect identifier text from identifier nodes in the AST."""
-        identifiers: list[str] = []
-        for current in self._walk(node):
-            if current.type in ("identifier", "property_identifier", "object", "field"):
-                text = current.text.decode("utf-8", errors="replace").strip()
-                if text and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", text):
-                    identifiers.append(text)
-        return identifiers
 
     def _identifier_stats(self, identifiers: list[str]) -> dict[str, float]:
         """Compute average length, std dev, and naming-style entropy."""
@@ -458,8 +454,7 @@ class TreeSitterASTExtractor:
                 style_counter["other"] += 1
 
         # Scaled so 1.0 = one dominant style (AI-like), 0.0 = perfectly mixed
-        distribution_entropy = _safe_entropy(style_counter)
-        naming_entropy = 1.0 - distribution_entropy
+        naming_entropy = 1.0 - _safe_entropy(style_counter)
 
         return {
             "avg_length": min(1.0, avg_length / 12.0),
@@ -468,18 +463,19 @@ class TreeSitterASTExtractor:
         }
 
     def _count_comments(self, code: str, language: str) -> float:
-        """Return comment-to-code line ratio."""
+        """Whole-line comment-to-code line ratio, for the lexical fallback."""
         lines = code.splitlines()
         if not lines:
             return 0.0
-        line_comment = re.compile(
-            r"^\s*(#|//|/\*.*\*/|(\*.*))"
-            if language in ("python", "perl", "ruby")
-            else r"^\s*(//|/\*.*\*/|(\*.*))"
-        )
+        if language in self._HASH_COMMENT_LANGUAGES:
+            line_comment = re.compile(r"^\s*#")
+        else:
+            # ``*`` only counts as a block-comment continuation when followed by
+            # whitespace; ``*args`` / ``*ptr = 1`` are code.
+            line_comment = re.compile(r"^\s*(//|/\*|\*/|\*(\s|$))")
         comment_count = sum(1 for line in lines if line_comment.match(line))
-        non_blank = [line for line in lines if line.strip()]
-        return round(comment_count / max(1, len(non_blank)), 4)
+        non_blank = sum(1 for line in lines if line.strip())
+        return round(comment_count / max(1, non_blank), 4)
 
     def _whitespace_features(self, code: str) -> tuple[float, float, float]:
         """Compute blank-line ratio, indentation consistency, and whitespace entropy."""
@@ -491,53 +487,57 @@ class TreeSitterASTExtractor:
         blank = sum(1 for line in lines if not line.strip())
         blank_ratio = round(blank / total, 4)
 
-        # Indentation consistency: fraction of non-blank lines with 4-space multiples
         non_blank = [line for line in lines if line.strip()]
-        consistent = sum(
-            1 for line in non_blank if len(line) - len(line.lstrip(" \t")) % 4 == 0
-        )
-        indentation_consistency = round(consistent / max(1, len(non_blank)), 4)
-
-        # Whitespace entropy: variability of leading-whitespace run lengths
+        consistent = 0
         lead_lengths: Counter = Counter()
         for line in non_blank:
-            lead = len(line) - len(line.lstrip(" \t"))
-            lead_lengths[lead] += 1
-        whitespace_entropy = _safe_entropy(lead_lengths)
-        return blank_ratio, indentation_consistency, whitespace_entropy
+            lead = line[: len(line) - len(line.lstrip(" \t"))]
+            lead_lengths[len(lead)] += 1
+            # Consistent: no indentation, only tabs, or spaces in multiples of 4.
+            # The test was ``len(line) - len(line.lstrip()) % 4 == 0``; ``%``
+            # binds tighter than ``-`` so it compared the line LENGTH to a
+            # remainder and was almost never true, leaving this feature at ~0.
+            if not lead or set(lead) == {"\t"} or (set(lead) == {" "} and len(lead) % 4 == 0):
+                consistent += 1
+        indentation_consistency = round(consistent / max(1, len(non_blank)), 4)
+        return blank_ratio, indentation_consistency, _safe_entropy(lead_lengths)
 
-    def _lexical_fallback(self, code: str) -> ASTFeatureVector:
+    def _lexical_fallback(self, code: str, language: str = "python") -> ASTFeatureVector:
         """Produce a best-effort vector when tree-sitter is unavailable.
 
         Uses pure lexical analysis so the pipeline still works for languages
         without a tree-sitter binding or when the library is missing.
+        ``parse_success`` is False: ``node_type_entropy`` and the complexity are
+        placeholders here and consumers must not read them as measurements.
         """
         lines = code.splitlines()
         if not lines:
             return ASTFeatureVector(parse_success=False)
 
-        identifiers = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", code)
+        # Keywords are not identifiers; counting them skewed length and naming stats.
+        identifiers = [
+            word
+            for word in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", code)
+            if not keyword.iskeyword(word)
+        ]
         identifier_stats = self._identifier_stats(identifiers)
         blank_ratio, indentation_consistency, whitespace_entropy = (
             self._whitespace_features(code)
         )
 
-        # Approximate function count by heuristic patterns
         function_count = len(
             re.findall(
                 r"\b(def|function|func|public\s+static\s+\w+\s+\w+|static\s+\w+\s+\w+)\s+\w+",
                 code,
             )
         )
-        comment_lines = self._count_comments(code, "python")
-
         return ASTFeatureVector(
             node_type_entropy=0.5,
             cyclomatic_complexity=0.0,
             avg_identifier_length=identifier_stats["avg_length"],
             identifier_length_std=identifier_stats["length_std"],
             identifier_naming_entropy=identifier_stats["naming_entropy"],
-            comment_to_code_ratio=comment_lines,
+            comment_to_code_ratio=self._count_comments(code, language),
             blank_line_ratio=blank_ratio,
             avg_function_length=0.0,
             avg_class_length=0.0,
@@ -547,13 +547,6 @@ class TreeSitterASTExtractor:
             class_count=0,
             parse_success=False,
         )
-
-
-def _mean(values: list[float]) -> float:
-    """Mean of a list, 0.0 for empty input."""
-    if not values:
-        return 0.0
-    return round(sum(values) / len(values), 4)
 
 
 def get_ast_features(code: str, language: str = "python") -> ASTFeatureVector:

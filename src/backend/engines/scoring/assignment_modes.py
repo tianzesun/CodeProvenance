@@ -7,8 +7,14 @@ matter for each assignment type, and which evidence views should be surfaced.
 
 from __future__ import annotations
 
+import logging
+import os
+import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 MODE_CATALOG_VERSION = "2026.04.phase2"
 DEFAULT_ASSIGNMENT_MODE_ID = "intro_programming"
@@ -153,7 +159,21 @@ def universal_preprocessing_policy() -> UniversalPreprocessingPolicy:
 
 
 def get_assignment_modes() -> dict[str, AssignmentMode]:
-    """Return the complete professor-facing mode catalog."""
+    """Return the complete professor-facing mode catalog.
+
+    The catalog is built once and cached: it used to be rebuilt (17 modes, hundreds of
+    strings) on every call, including once per engine-config load. The dict is a fresh copy
+    per call; the ``AssignmentMode`` objects are frozen and shared.
+    """
+    return dict(_cached_catalog())
+
+
+@lru_cache(maxsize=1)
+def _cached_catalog() -> dict[str, AssignmentMode]:
+    return _build_assignment_modes()
+
+
+def _build_assignment_modes() -> dict[str, AssignmentMode]:
     modes = [
         AssignmentMode(
             mode_id="intro_programming",
@@ -1027,8 +1047,14 @@ def assignment_modes_payload(include_advanced: bool = True) -> dict[str, Any]:
 def get_assignment_mode(mode_id: str | None) -> AssignmentMode:
     """Return a mode by ID, falling back to the default mode."""
     modes = get_assignment_modes()
-    if mode_id and mode_id in modes:
-        return modes[mode_id]
+    key = (mode_id or "").strip()
+    if key in modes:
+        return modes[key]
+    if key.lower() in modes:
+        return modes[key.lower()]
+    if key:
+        # A stale or misspelt stored mode id used to become the default mode with no trace.
+        logger.warning("Unknown assignment mode %r; falling back to %s", mode_id, DEFAULT_ASSIGNMENT_MODE_ID)
     return modes[DEFAULT_ASSIGNMENT_MODE_ID]
 
 
@@ -1044,8 +1070,11 @@ def recommend_assignment_mode(
     haystack = " ".join(
         [assignment_name, course_name, *filenames, *content_samples]
     ).lower()
+    # Extension of the BASE NAME ("dir.v2/Makefile" has none; it used to yield ".v2/makefile").
     extensions = {
-        f".{name.lower().rsplit('.', 1)[-1]}" for name in filenames if "." in name
+        ext.lower()
+        for ext in (os.path.splitext(os.path.basename(str(name)))[1] for name in filenames)
+        if ext
     }
 
     scores = {
@@ -1192,23 +1221,26 @@ def recommend_assignment_mode(
         ],
     )
 
-    extension_rules = {
-        "database_sql": {".sql"},
-        "ml_data_science": {".ipynb", ".rmd"},
-        "web_development": {".html", ".css", ".jsx", ".tsx", ".vue"},
-        "research_report_essay": {".md", ".txt", ".docx", ".pdf"},
-        "software_engineering_large_project": {
-            ".json",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".gradle",
-        },
-    }
-    for mode_id, mode_extensions in extension_rules.items():
+    code_extensions = {
+        ".py", ".java", ".c", ".cc", ".cpp", ".h", ".hpp", ".js", ".ts", ".go", ".rs",
+        ".rb", ".php", ".cs", ".kt", ".swift", ".scala", ".hs", ".pl", ".r", ".m",
+    }  # fmt: skip
+    has_code = bool(extensions & code_extensions)
+    # (mode, extensions, weight). README.md / requirements.txt / config.json are in nearly
+    # every CODE project, so with a flat +2.0 they pushed ordinary programming assignments
+    # to "research report" or "large project". Document types only count when there is no
+    # code at all, and config files are a weak hint.
+    extension_rules = (
+        ("database_sql", {".sql"}, 2.0),
+        ("ml_data_science", {".ipynb", ".rmd"}, 2.0),
+        ("web_development", {".html", ".css", ".jsx", ".tsx", ".vue"}, 2.0),
+        ("research_report_essay", {".md", ".txt", ".docx", ".pdf"}, 0.0 if has_code else 2.0),
+        ("software_engineering_large_project", {".json", ".yaml", ".yml", ".toml", ".gradle"}, 1.0),
+    )
+    for mode_id, mode_extensions, weight in extension_rules:
         matched = sorted(extensions.intersection(mode_extensions))
-        if matched:
-            scores[mode_id] += 2.0
+        if matched and weight > 0:
+            scores[mode_id] += weight
             reasons[mode_id].append(f"matched file types: {', '.join(matched)}")
 
     if len(extensions) >= 4:
@@ -1303,7 +1335,14 @@ def _score_keywords(
     keywords: list[str],
 ) -> None:
     """Increase a mode score for matching assignment/content keywords."""
-    matched = [keyword for keyword in keywords if keyword in haystack]
+    # Whole-word matching (plural / -ing / -ed allowed). Substring matching made "search" fire
+    # inside "research", "tree" inside "street", "api" inside "capital", "exec" inside
+    # "executive": a research essay scored as an algorithms assignment.
+    matched = [
+        keyword
+        for keyword in keywords
+        if re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?:s|es|ing|ed)?(?![a-z0-9])", haystack)
+    ]
     if not matched:
         return
     scores[mode_id] += float(len(matched))

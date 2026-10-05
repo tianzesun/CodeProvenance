@@ -1,9 +1,23 @@
-import logging
-from typing import Any
+"""Compatibility layers around the heuristic AI detector.
 
-import numpy as np
+The CodeBERT fine-tuned detector was never checked in and the zero-shot centroids
+were never trained, so these classes delegate to the shipped detection engines
+instead of fabricating constant scores that would corrupt fusion results.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # numpy is only needed for a type hint; do not import it eagerly
+    import numpy as np
 
 logger = logging.getLogger(__name__)
+
+#: ``is_ai_generated`` is True only above this probability: a deliberately
+#: stricter bar than the "likely AI" band.
+DEFINITE_AI_PROBABILITY = 0.85
 
 
 def _engine_analyze(code: str) -> dict[str, Any]:
@@ -25,7 +39,6 @@ class ZeroShotAIDetector:
     Uses CodeBERT embeddings and cosine similarity against a known
     'Human-Baseline' and 'AI-Template' set to classify code without
     extensive fine-tuning.
-    Target: 90%+ Accuracy for GPT-4/Claude patterns.
     """
 
     def __init__(self, model_name: str = "microsoft/codebert-base"):
@@ -37,7 +50,7 @@ class ZeroShotAIDetector:
         self._human_centroid = None
         self._ai_centroid = None
 
-    def _load_model(self):
+    def _load_model(self) -> bool:
         if self._tokenizer is None:
             try:
                 import torch
@@ -55,15 +68,21 @@ class ZeroShotAIDetector:
         return True
 
     def get_embedding(self, code: str) -> np.ndarray:
-        """Extract mean-pooled CodeBERT embedding."""
+        """Extract mean-pooled CodeBERT embedding.
+
+        Raises:
+            RuntimeError: if torch/transformers are not installed (this used to
+                fail with an opaque ``'NoneType' object is not callable``).
+        """
+        if not self._load_model():
+            raise RuntimeError("transformers/torch are not installed; cannot embed code")
         import torch
 
         inputs = self._tokenizer(
-            code, return_tensors="pt", truncation=True, max_length=512, padding=True
+            code, return_tensors="pt", truncation=True, max_length=512
         ).to(self._device)
         with torch.no_grad():
             outputs = self._model(**inputs)
-            # Use [CLS] token or mean pooling
             embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()[0]
         return embeddings
 
@@ -80,33 +99,38 @@ class ZeroShotAIDetector:
 
     def _detect_ai_patterns(self, code: str) -> float:
         """
-        Detects 'AI-Fingerprints' in code:
-        - Perfect PEP8 adherence (too perfect)
-        - Descriptive but generic variable names (input_data, result_list)
-        - Balanced cyclomatic complexity
-        - High presence of standard library idioms
+        Cheap stylistic cues, in [0, 1]. Not used by the fusion path.
+
+        Two defects are fixed here:
+
+        * The indentation test was ``len(line) - len(line.lstrip()) % 4 == 0``;
+          ``%`` binds tighter than ``-`` so it compared the line length to a
+          remainder and was effectively never true.
+        * ``return score + 0.4  # Baseline for modern LLMs`` handed EVERY file
+          at least 0.40 (the medium-risk threshold). A constant offset is not
+          evidence, so it is gone.
         """
-        score = 0.0
         lines = code.splitlines()
         if not lines:
             return 0.0
 
-        # 1. Structural Entropy (AI is often lower entropy/more predictable)
-        # 2. Comment Pattern (AI uses very specific docstring/comment styles)
+        score = 0.0
+        # Standard docstrings
         if '"""' in code and ":" in code:
-            score += 0.2  # Standard docstrings
+            score += 0.2
 
-        # 3. List Comprehension / Functional Density
-        if ".map(" in code or "[" in code and "for" in code:
+        # List comprehension / functional density
+        if ".map(" in code or ("[" in code and "for" in code):
             score += 0.1
 
-        # 4. Perfect Indentation
-        if all(
-            len(line) - len(line.lstrip()) % 4 == 0 for line in lines if line.strip()
+        # Perfectly regular indentation (multiples of four)
+        code_lines = [line for line in lines if line.strip()]
+        if code_lines and all(
+            (len(line) - len(line.lstrip())) % 4 == 0 for line in code_lines
         ):
             score += 0.2
 
-        return score + 0.4  # Baseline for modern LLMs
+        return min(1.0, score)
 
 
 class CodeBERTDetector:
@@ -150,25 +174,48 @@ class AIDetectionLayer:
 
         self._orchestrator = AIDetectionOrchestrator()
 
-    def analyze(self, code: str) -> dict[str, Any]:
-        """Deep forensic analysis for AI presence."""
-        result = self._orchestrator.analyze(code)
+    @staticmethod
+    def _thresholds() -> tuple[float, float]:
+        """(medium, high) risk cut-offs from ai_ensemble_config.yaml.
+
+        They were hard-coded as 0.4 / 0.7 here, so editing the config moved
+        every other consumer but not this one.
+        """
+        try:
+            from src.backend.engines.ai.ensemble import AIEnsembleConfig
+
+            config = AIEnsembleConfig.get_instance()
+            return config.threshold("medium_risk", 0.40), config.threshold("high_risk", 0.70)
+        except Exception:
+            return 0.40, 0.70
+
+    def analyze(self, code: str, language: str = "python") -> dict[str, Any]:
+        """Deep forensic analysis for AI presence.
+
+        ``language`` is passed through (it was dropped, so every file was
+        analysed as Python).
+        """
+        result = self._orchestrator.analyze(code, language=language)
         ai_prob = result.get("ai_probability", 0.0)
         confidence = result.get("confidence", 0.0)
 
-        if ai_prob >= 0.7:
+        medium, high = self._thresholds()
+        if ai_prob >= high:
             decision = "likely_ai"
-        elif ai_prob >= 0.4:
+        elif ai_prob >= medium:
             decision = "review"
         else:
             decision = "likely_human"
 
         return {
             "ai_probability": round(ai_prob, 4),
-            "is_ai_generated": ai_prob > 0.85,
+            "is_ai_generated": ai_prob > DEFINITE_AI_PROBABILITY,
             "confidence": round(confidence, 4),
             "decision": decision,
-            "methodology": "Heuristic signal ensemble",
+            # Reports the layers that actually ran (it always said "Heuristic
+            # signal ensemble", even when Binoculars or the classifier was used).
+            "methodology": result.get("model") or "Heuristic signal ensemble",
+            "method": result.get("method", "heuristic"),
             "indicators": result.get("indicators", []),
             "signals": result.get("signals", {}),
             "forensic_markers": result.get("signal_labels", {}),

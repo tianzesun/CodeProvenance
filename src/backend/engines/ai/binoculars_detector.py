@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,10 +40,58 @@ DEFAULT_PERFORMER_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 BINOCULARS_FPR_THRESHOLD = 0.8536432310785527
 BINOCULARS_ACCURACY_THRESHOLD = 0.9015310749276843
 
+# The thresholds above were fitted on the Falcon-7B observer/performer pair. A
+# different pair (such as the small default below) produces scores on a
+# different scale, so applying them there would label text with numbers that
+# were never calibrated for it. Either supply thresholds fitted for your pair
+# (BINOCULARS_FPR_THRESHOLD / BINOCULARS_ACCURACY_THRESHOLD) or accept that the
+# result is reported as uncalibrated and its influence is reduced.
+PUBLISHED_PAIR = ("tiiuae/falcon-7b", "tiiuae/falcon-7b-instruct")
+#: How far an uncalibrated probability is pulled toward 0.5 (1.0 = no shrinkage).
+UNCALIBRATED_SHRINK = 0.4
+UNCALIBRATED_MAX_CONFIDENCE = 0.3
+
 # Probability assigned at (and beyond) each anchor, so the mapped value uses
 # the same semantics as the rest of the ensemble: 1.0 = certainly AI.
 AI_ANCHOR_PROBABILITY = 0.95
 HUMAN_ANCHOR_PROBABILITY = 0.05
+
+def _env_float(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Ignoring non-numeric %s=%r", name, raw)
+        return None
+
+
+def resolve_thresholds() -> tuple[float, float, bool]:
+    """Return ``(fpr_threshold, accuracy_threshold, overridden)``.
+
+    Environment overrides are honoured only as a consistent pair with
+    ``fpr < accuracy``; anything else falls back to the published values.
+    """
+    fpr = _env_float("BINOCULARS_FPR_THRESHOLD")
+    acc = _env_float("BINOCULARS_ACCURACY_THRESHOLD")
+    if fpr is not None and acc is not None and fpr < acc:
+        return fpr, acc, True
+    if fpr is not None or acc is not None:
+        logger.warning(
+            "BINOCULARS_FPR_THRESHOLD and BINOCULARS_ACCURACY_THRESHOLD must both "
+            "be set with fpr < accuracy; using the published thresholds"
+        )
+    return BINOCULARS_FPR_THRESHOLD, BINOCULARS_ACCURACY_THRESHOLD, False
+
+
+def is_calibrated(observer: str, performer: str) -> bool:
+    """Whether the active thresholds were fitted for this model pair."""
+    _fpr, _acc, overridden = resolve_thresholds()
+    if overridden or os.environ.get("BINOCULARS_TRUST_DEFAULT_THRESHOLDS") == "1":
+        return True
+    return (observer.lower(), performer.lower()) == PUBLISHED_PAIR
+
 
 # Process-wide cache of the loaded observer/performer pair.
 #
@@ -55,6 +104,12 @@ HUMAN_ANCHOR_PROBABILITY = 0.05
 # callers wait for one load instead of racing to start several.
 _BINOCULARS_CACHE: dict[tuple[str, str, bool, int], Any] = {}
 _BINOCULARS_CACHE_LOCK = threading.Lock()
+
+# Failed loads, so a deployment WITHOUT the package (the default) does not
+# re-attempt the import, re-log a warning and take the global lock on every job.
+# A missing package is permanent; any other failure is retried after a delay.
+_LOAD_FAILURES: dict[tuple[str, str], tuple[float, bool]] = {}
+_RETRY_AFTER_SECONDS = 300.0
 
 # Result of the one-time /proc/cpuinfo probe; None until first checked.
 _NATIVE_BF16: bool | None = None
@@ -99,7 +154,11 @@ def _bfloat16_enabled() -> bool:
     return _cpu_has_native_bf16()
 
 
-def binoculars_score_to_probability(raw_score: float) -> float:
+def binoculars_score_to_probability(
+    raw_score: float,
+    fpr_threshold: float | None = None,
+    accuracy_threshold: float | None = None,
+) -> float:
     """Map a raw Binoculars score to an AI probability in [0, 1].
 
     The raw score is a positive ``perplexity / cross_entropy`` ratio where
@@ -112,19 +171,25 @@ def binoculars_score_to_probability(raw_score: float) -> float:
 
     Args:
         raw_score: Value returned by ``Binoculars.compute_score``.
+        fpr_threshold: Low-FPR cutoff (defaults to the published value).
+        accuracy_threshold: Accuracy cutoff (defaults to the published value).
 
     Returns:
         Probability that the input is AI-generated, clamped to [0, 1].
     """
+    fpr_threshold = BINOCULARS_FPR_THRESHOLD if fpr_threshold is None else fpr_threshold
+    accuracy_threshold = (
+        BINOCULARS_ACCURACY_THRESHOLD if accuracy_threshold is None else accuracy_threshold
+    )
     if raw_score != raw_score:  # NaN guard
         return 0.5
-    if raw_score <= BINOCULARS_FPR_THRESHOLD:
+    if raw_score <= fpr_threshold:
         return AI_ANCHOR_PROBABILITY
-    if raw_score >= BINOCULARS_ACCURACY_THRESHOLD:
+    if raw_score >= accuracy_threshold:
         return HUMAN_ANCHOR_PROBABILITY
-    span = BINOCULARS_ACCURACY_THRESHOLD - BINOCULARS_FPR_THRESHOLD
+    span = accuracy_threshold - fpr_threshold
     # 0 at the FPR threshold, 1 at the accuracy threshold.
-    position = (raw_score - BINOCULARS_FPR_THRESHOLD) / span
+    position = (raw_score - fpr_threshold) / span
     return AI_ANCHOR_PROBABILITY - position * (
         AI_ANCHOR_PROBABILITY - HUMAN_ANCHOR_PROBABILITY
     )
@@ -193,13 +258,23 @@ class BinocularsDetector:
         if os.environ.get("BINOCULARS_ENABLED", "1") != "1":
             return False
 
+        failure_key = (self.model, self.performer)
         with _BINOCULARS_CACHE_LOCK:
+            failure = _LOAD_FAILURES.get(failure_key)
+            if failure is not None:
+                failed_at, permanent = failure
+                if permanent or time.monotonic() - failed_at < _RETRY_AFTER_SECONDS:
+                    return False
             try:
                 # bf16 halves memory but is emulated (100x+ slower) on CPUs
                 # without native support, so default to fp32 there; the env
                 # var forces either path.
                 use_bfloat16 = _bfloat16_enabled()
-                max_token_observed = int(os.environ.get("BINOCULARS_MAX_TOKENS", "512"))
+                try:
+                    max_token_observed = int(os.environ.get("BINOCULARS_MAX_TOKENS", "512"))
+                except ValueError:
+                    logger.warning("Ignoring non-integer BINOCULARS_MAX_TOKENS; using 512")
+                    max_token_observed = 512
                 cache_key = (
                     self.model,
                     self.performer,
@@ -221,6 +296,7 @@ class BinocularsDetector:
                     max_token_observed=max_token_observed,
                 )
                 self._available = True
+                _LOAD_FAILURES.pop(failure_key, None)
                 _BINOCULARS_CACHE[cache_key] = self._bino
                 logger.info(
                     "BinocularsDetector loaded (observer=%s, performer=%s)",
@@ -228,6 +304,7 @@ class BinocularsDetector:
                     self.performer,
                 )
             except Exception as exc:
+                _LOAD_FAILURES[failure_key] = (time.monotonic(), isinstance(exc, ImportError))
                 logger.warning(
                     "BinocularsDetector could not be loaded: %s. "
                     "Falling back to heuristic signals only. "
@@ -252,7 +329,7 @@ class BinocularsDetector:
         """
         threshold = getattr(self._bino, "threshold", None)
         if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
-            threshold = BINOCULARS_FPR_THRESHOLD
+            threshold = resolve_thresholds()[0]
         if raw_score < float(threshold):
             return "Most likely AI-generated"
         return "Most likely human-generated"
@@ -279,18 +356,20 @@ class BinocularsDetector:
             return {
                 "ai_probability": 0.5,
                 "confidence": 0.0,
-                "raw_score": 0.5,
+                "raw_score": None,  # no score was computed (it was a fabricated 0.5)
                 "label": "UNCERTAIN",
                 "available": False,
+                "calibrated": False,
             }
 
         if not self._load():
             return {
                 "ai_probability": 0.5,
                 "confidence": 0.0,
-                "raw_score": 0.5,
+                "raw_score": None,  # no score was computed (it was a fabricated 0.5)
                 "label": "UNCERTAIN",
                 "available": False,
+                "calibrated": False,
             }
 
         try:
@@ -301,23 +380,38 @@ class BinocularsDetector:
             # through both models); the label is derived from this score.
             label = self._label_from_score(raw_score)
 
-            ai_probability = binoculars_score_to_probability(raw_score)
+            fpr_threshold, accuracy_threshold, _ = resolve_thresholds()
+            ai_probability = binoculars_score_to_probability(
+                raw_score, fpr_threshold, accuracy_threshold
+            )
 
             # Confidence reflects how far the score sits from the decision
             # band, not an assumed model property.
-            midpoint = (BINOCULARS_FPR_THRESHOLD + BINOCULARS_ACCURACY_THRESHOLD) / 2
+            midpoint = (fpr_threshold + accuracy_threshold) / 2
             distance = abs(raw_score - midpoint)
-            half_band = (BINOCULARS_ACCURACY_THRESHOLD - BINOCULARS_FPR_THRESHOLD) / 2
+            half_band = (accuracy_threshold - fpr_threshold) / 2
             confidence = (
                 min(0.9, 0.4 + 2.0 * (distance / half_band)) if half_band else 0.5
             )
+            confidence = min(0.9, max(0.1, confidence))
+
+            calibrated = is_calibrated(self.model, self.performer)
+            if not calibrated:
+                # The thresholds belong to a different model pair, so the score
+                # cannot be trusted to mean what the cut-offs say. Report it, but
+                # pull it toward "no opinion" instead of letting it carry the
+                # 0.40 fusion weight with 0.95/0.05 anchors.
+                ai_probability = 0.5 + (ai_probability - 0.5) * UNCALIBRATED_SHRINK
+                confidence = min(confidence, UNCALIBRATED_MAX_CONFIDENCE)
+                label = "UNCERTAIN (thresholds not calibrated for this model pair)"
 
             return {
                 "ai_probability": round(ai_probability, 4),
-                "confidence": round(min(0.9, max(0.1, confidence)), 4),
+                "confidence": round(confidence, 4),
                 "raw_score": round(raw_score, 4),
                 "label": label,
                 "available": True,
+                "calibrated": calibrated,
             }
 
         except Exception:
@@ -325,9 +419,10 @@ class BinocularsDetector:
             return {
                 "ai_probability": 0.5,
                 "confidence": 0.0,
-                "raw_score": 0.5,
+                "raw_score": None,  # no score was computed (it was a fabricated 0.5)
                 "label": "UNCERTAIN",
                 "available": False,
+                "calibrated": False,
             }
 
     def is_available(self) -> bool:

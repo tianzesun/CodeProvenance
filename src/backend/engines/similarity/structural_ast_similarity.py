@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import _tree_utils as tu
 from .base_similarity import BaseSimilarityAlgorithm
+
+#: The pairwise tree kernel is O(N^2) node pairs (each with a recursive child kernel).
+#: Above this many nodes in either tree a linear subtree-hash kernel is used instead.
+MAX_KERNEL_NODES = 300
 
 # ============================================================================
 # Data Structures
@@ -43,39 +48,37 @@ class ASTStructuralNode:
             child.parent = self
 
     def to_tuple(self) -> tuple:
-        """Convert to tuple for hashing and comparison."""
-        return (
-            self.node_type,
-            self.value,
-            tuple(child.to_tuple() for child in self.children),
-        )
+        """Convert to tuple for hashing and comparison (built iteratively)."""
+        built: dict[int, tuple] = {}
+        for node in tu.postorder(self):
+            built[id(node)] = (
+                node.node_type,
+                node.value,
+                tuple(built[id(c)] for c in node.children),
+            )
+        return built[id(self)]
 
     def subtree_size(self) -> int:
         """Count total nodes in subtree."""
-        return 1 + sum(child.subtree_size() for child in self.children)
+        return len(tu.preorder(self))
 
     def tree_depth(self) -> int:
         """Calculate maximum depth of subtree."""
-        if not self.children:
-            return 0
-        return 1 + max(child.tree_depth() for child in self.children)
+        return tu.max_depth(self)
 
     def get_all_subtrees(self, min_size: int = 1) -> list[ASTStructuralNode]:
-        """Get all subtrees with minimum node count."""
-        subtrees: list[ASTStructuralNode] = []
-
-        def _collect(node: ASTStructuralNode):
-            if node.subtree_size() >= min_size:
-                subtrees.append(node)
-            for child in node.children:
-                _collect(child)
-
-        _collect(self)
-        return subtrees
+        """Get all subtrees with minimum node count (sizes computed once)."""
+        sizes = tu.subtree_sizes(self)
+        return [n for n in tu.preorder(self) if sizes[id(n)] >= min_size]
 
     def subtree_hash(self) -> str:
-        """Generate SHA256 hash of subtree structure."""
-        return hashlib.sha256(repr(self.to_tuple()).encode()).hexdigest()
+        """SHA-256 hash of the subtree structure (bottom-up; ``repr`` of a deep
+        nested tuple raised RecursionError)."""
+        out: dict[int, str] = {}
+        for node in tu.postorder(self):
+            payload = f"{node.node_type}|{node.value}|" + ",".join(out[id(c)] for c in node.children)
+            out[id(node)] = hashlib.sha256(payload.encode()).hexdigest()
+        return out[id(self)]
 
     def normalize_identifiers(self) -> dict[str, str]:
         """Normalize identifier names for renaming resistance."""
@@ -125,39 +128,31 @@ class ASTStructuralNode:
             "cls",
         }
 
-        var_counter = [0]
         var_map: dict[str, str] = {}
-
-        def _normalize(node: ASTStructuralNode):
+        for node in tu.preorder(self):
             if (
                 node.node_type in ("IDENTIFIER", "NAME", "VARIABLE")
                 and node.value
                 and node.value not in keywords
             ):
                 if node.value not in var_map:
-                    var_map[node.value] = f"VAR_{var_counter[0]}"
-                    var_counter[0] += 1
+                    var_map[node.value] = f"VAR_{len(var_map)}"
                 node.value = var_map[node.value]
-            for child in node.children:
-                _normalize(child)
-
-        _normalize(self)
         return var_map
 
     def extract_paths(self, max_length: int = 8) -> list[list[str]]:
-        """Extract all paths up to max_length in the AST."""
+        """Extract all paths up to max_length in the AST (iterative)."""
         paths: list[list[str]] = []
-
-        def _dfs(node: ASTStructuralNode, current_path: list[str]):
-            current_path.append(f"{node.node_type}:{node.value}")
+        stack: list[tuple[ASTStructuralNode, list[str]]] = [(self, [])]
+        while stack:
+            node, prefix = stack.pop()
+            current_path = [*prefix, f"{node.node_type}:{node.value}"]
             if len(current_path) >= max_length or not node.children:
                 if len(current_path) >= 2:
-                    paths.append(list(current_path))
+                    paths.append(current_path)
             else:
-                for child in node.children:
-                    _dfs(child, current_path.copy())
-
-        _dfs(self, [])
+                for child in reversed(node.children):
+                    stack.append((child, current_path))
         return paths
 
 
@@ -253,15 +248,21 @@ class TreeKernel:
 
     def compute(self, tree_a: ASTStructuralNode, tree_b: ASTStructuralNode) -> float:
         """Compute tree kernel similarity normalized to [0, 1]."""
-        subtrees_a = tree_a.get_all_subtrees(min_size=2)
-        subtrees_b = tree_b.get_all_subtrees(min_size=2)
+        sizes_a, sizes_b = tu.subtree_sizes(tree_a), tu.subtree_sizes(tree_b)
+        if len(sizes_a) > MAX_KERNEL_NODES or len(sizes_b) > MAX_KERNEL_NODES:
+            return self._hashed_kernel(tree_a, tree_b)
+
+        subtrees_a = [n for n in tu.preorder(tree_a) if sizes_a[id(n)] >= 2]
+        subtrees_b = [n for n in tu.preorder(tree_b) if sizes_b[id(n)] >= 2]
 
         if not subtrees_a or not subtrees_b:
             return 0.0
 
-        k_aa = self._kernel_norm(subtrees_a, subtrees_a)
-        k_bb = self._kernel_norm(subtrees_b, subtrees_b)
-        k_ab = self._kernel_cross(subtrees_a, subtrees_b)
+        # Node sizes are looked up, not recomputed inside the double loop.
+        sizes = {**sizes_a, **sizes_b}
+        k_aa = self._kernel_norm(subtrees_a, subtrees_a, sizes)
+        k_bb = self._kernel_norm(subtrees_b, subtrees_b, sizes)
+        k_ab = self._kernel_cross(subtrees_a, subtrees_b, sizes)
 
         denominator = math.sqrt(k_aa * k_bb) if k_aa > 0 and k_bb > 0 else 1.0
         if denominator == 0:
@@ -269,8 +270,31 @@ class TreeKernel:
 
         return min(1.0, k_ab / denominator)
 
+    @staticmethod
+    def _hashed_kernel(tree_a: ASTStructuralNode, tree_b: ASTStructuralNode) -> float:
+        """Linear-time subtree kernel for large trees: cosine of the counts of identical
+        (type-only) subtrees. The decayed pairwise kernel is quadratic and, for trees of
+        a few hundred nodes, its ``decay ** size`` terms underflow to 0 so the result
+        collapsed to 0.0 even for identical trees."""
+
+        def counts(root: ASTStructuralNode) -> Counter:
+            sizes = tu.subtree_sizes(root)
+            hashes = tu.subtree_hashes(root, lambda n: n.node_type)
+            return Counter(hashes[i] for i, n in sizes.items() if n >= 2)
+
+        ca, cb = counts(tree_a), counts(tree_b)
+        if not ca or not cb:
+            return 0.0
+        dot = sum(v * cb.get(k, 0) for k, v in ca.items())
+        na = math.sqrt(sum(v * v for v in ca.values()))
+        nb = math.sqrt(sum(v * v for v in cb.values()))
+        return min(1.0, dot / (na * nb)) if na and nb else 0.0
+
     def _kernel_norm(
-        self, trees_a: list[ASTStructuralNode], trees_b: list[ASTStructuralNode]
+        self,
+        trees_a: list[ASTStructuralNode],
+        trees_b: list[ASTStructuralNode],
+        sizes: dict[int, int],
     ) -> float:
         """Compute kernel value K(T_a, T_b)."""
         score = 0.0
@@ -281,13 +305,14 @@ class TreeKernel:
                         children_score = self._children_kernel(ta.children, tb.children)
                     else:
                         children_score = self._subset_kernel(ta.children, tb.children)
-                    score += self.decay_factor ** (
-                        ta.subtree_size() + tb.subtree_size()
-                    ) * (1 + children_score)
+                    score += self.decay_factor ** (sizes[id(ta)] + sizes[id(tb)]) * (1 + children_score)
         return score
 
     def _kernel_cross(
-        self, trees_a: list[ASTStructuralNode], trees_b: list[ASTStructuralNode]
+        self,
+        trees_a: list[ASTStructuralNode],
+        trees_b: list[ASTStructuralNode],
+        sizes: dict[int, int],
     ) -> float:
         """Compute cross kernel K(T_a, T_b)."""
         score = 0.0
@@ -298,9 +323,7 @@ class TreeKernel:
                         children_score = self._children_kernel(ta.children, tb.children)
                     else:
                         children_score = self._subset_kernel(ta.children, tb.children)
-                    score += self.decay_factor ** (
-                        (ta.subtree_size() + tb.subtree_size()) / 2
-                    ) * (1 + children_score)
+                    score += self.decay_factor ** ((sizes[id(ta)] + sizes[id(tb)]) / 2) * (1 + children_score)
         return score
 
     def _nodes_match(self, a: ASTStructuralNode, b: ASTStructuralNode) -> bool:
@@ -395,13 +418,14 @@ class WeightedTreeEditDistance:
         if not forest_b:
             return len(forest_a) * self.deletion_cost
 
-        tuples_a = [n.to_tuple() for n in forest_a]
-        tuples_b = [n.to_tuple() for n in forest_b]
+        # one bottom-up hash per node (the forest is post-order, so its last node is the
+        # root); ``to_tuple()`` per node was quadratic in the tree size
+        label = lambda n: f"{n.node_type}|{n.value}"  # noqa: E731
+        hashes_a = tu.subtree_hashes(forest_a[-1], label)
+        hashes_b = tu.subtree_hashes(forest_b[-1], label)
+        set_a = {hashes_a[id(n)] for n in forest_a}
+        set_b = {hashes_b[id(n)] for n in forest_b}
 
-        set_a = set(tuples_a)
-        set_b = set(tuples_b)
-
-        len(set_a & set_b)
         only_a = len(set_a - set_b)
         only_b = len(set_b - set_a)
 
@@ -418,16 +442,9 @@ class WeightedTreeEditDistance:
         return cost + depth_penalty
 
     def _linearize_postorder(self, node: ASTStructuralNode) -> list[ASTStructuralNode]:
-        result: list[ASTStructuralNode] = []
-
-        def _postorder(n: ASTStructuralNode, depth: int):
-            n.depth_level = depth
-            for child in n.children:
-                _postorder(child, depth + 1)
-            result.append(n)
-
-        _postorder(node, 0)
-        return result
+        for current, depth in tu.with_depths(node):
+            current.depth_level = depth
+        return tu.postorder(node)
 
 
 class CFGComparator:
@@ -614,66 +631,84 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
         if ast_a is None or ast_b is None:
             return 0.0
 
+        tokens_a, tokens_b = self._graph_tokens(parsed_a), self._graph_tokens(parsed_b)
+
         if self.normalize_identifiers:
             ast_a.normalize_identifiers()
             ast_b.normalize_identifiers()
 
-        ted_score = self.ted_comparator.compute_similarity(ast_a, ast_b)
-        kernel_score = self.tree_kernel.compute(ast_a, ast_b)
-        cfg_score = self._compute_cfg_similarity(parsed_a, parsed_b)
-        dfg_score = self._compute_dfg_similarity(parsed_a, parsed_b)
-        pattern_score = self._compute_pattern_similarity(ast_a, ast_b)
-        path_score = self._compute_path_similarity(ast_a, ast_b)
+        scores: dict[str, tuple[float, float]] = {
+            "ted": (self.ted_comparator.compute_similarity(ast_a, ast_b), self.ted_weight),
+            "kernel": (self.tree_kernel.compute(ast_a, ast_b), self.tree_kernel_weight),
+            "pattern": (self._compute_pattern_similarity(ast_a, ast_b), self.pattern_weight),
+            "path": (self._compute_path_similarity(ast_a, ast_b), self.path_weight),
+        }
+        # CFG / DFG: when NEITHER side has any control-flow edge (or any variable) the
+        # comparison has no evidence. Two empty graphs used to score 1.0 ("identical"),
+        # adding their whole weight to every pair of simple files.
+        cfg_a, cfg_b = self._extract_cfg(parsed_a, tokens_a), self._extract_cfg(parsed_b, tokens_b)
+        if cfg_a.edge_count() or cfg_b.edge_count():
+            scores["cfg"] = (self.cfg_comparator.compare(cfg_a, cfg_b), self.cfg_weight)
+        dfg_a, dfg_b = self._extract_dfg(parsed_a, tokens_a), self._extract_dfg(parsed_b, tokens_b)
+        if dfg_a.variable_count() or dfg_b.variable_count():
+            scores["dfg"] = (self.dfg_comparator.compare(dfg_a, dfg_b), self.dfg_weight)
 
-        total_weight = (
-            self.ted_weight
-            + self.tree_kernel_weight
-            + self.cfg_weight
-            + self.dfg_weight
-            + self.pattern_weight
-            + self.path_weight
-        )
-
+        total_weight = sum(w for _, w in scores.values())
         if total_weight == 0:
             return 0.0
 
-        combined = (
-            ted_score * self.ted_weight
-            + kernel_score * self.tree_kernel_weight
-            + cfg_score * self.cfg_weight
-            + dfg_score * self.dfg_weight
-            + pattern_score * self.pattern_weight
-            + path_score * self.path_weight
-        ) / total_weight
-
+        combined = sum(v * w for v, w in scores.values()) / total_weight
         return max(0.0, min(1.0, combined))
 
+    def _graph_tokens(self, parsed: dict[str, Any]) -> list[dict]:
+        """Token dicts for the CFG/DFG extractors (raw source is tokenised on demand;
+        ``parsed["tokens"]`` alone meant raw-source input produced empty graphs)."""
+        tokens = parsed.get("tokens")
+        if tokens:
+            return [t for t in tokens if isinstance(t, dict)]
+        raw = parsed.get("raw")
+        if raw:
+            from .ast_similarity import tokenize_raw_for_ast
+
+            return tokenize_raw_for_ast(raw, parsed.get("language"))
+        return []
+
     def _extract_ast(self, parsed: dict[str, Any]) -> ASTStructuralNode | None:
-        if "ast" in parsed:
+        if parsed.get("ast"):
             return self._convert_to_structural_ast(parsed["ast"])
-        if "tokens" in parsed:
-            return self._build_ast_from_tokens(parsed["tokens"])
+        tokens = self._graph_tokens(parsed)
+        if tokens:
+            return self._build_ast_from_tokens(tokens)
         return None
 
     def _convert_to_structural_ast(self, ast_data: Any) -> ASTStructuralNode:
+        """Convert nested dict/list AST data to nodes (iterative)."""
         if isinstance(ast_data, dict):
-            node_type = ast_data.get("type", "UNKNOWN")
-            value = ast_data.get("value", "")
-            children_data = ast_data.get("children", ast_data.get("body", []))
-            children = [
-                self._convert_to_structural_ast(c)
-                for c in children_data
-                if isinstance(c, (dict, list))
-            ]
-            return ASTStructuralNode(
-                node_type=node_type, value=value, children=children
-            )
+            root = ASTStructuralNode(node_type=ast_data.get("type", "UNKNOWN"), value=ast_data.get("value", ""))
         elif isinstance(ast_data, list):
-            return ASTStructuralNode(
-                node_type="SEQUENCE",
-                children=[self._convert_to_structural_ast(c) for c in ast_data],
-            )
-        return ASTStructuralNode(node_type="LITERAL", value=str(ast_data))
+            root = ASTStructuralNode(node_type="SEQUENCE")
+        else:
+            return ASTStructuralNode(node_type="LITERAL", value=str(ast_data))
+
+        stack: list[tuple[Any, ASTStructuralNode]] = [(ast_data, root)]
+        while stack:
+            data, node = stack.pop()
+            kids = data if isinstance(data, list) else data.get("children", data.get("body", []))
+            for child_data in kids or []:
+                if isinstance(child_data, dict):
+                    child = ASTStructuralNode(node_type=child_data.get("type", "UNKNOWN"), value=child_data.get("value", ""))
+                elif isinstance(child_data, list):
+                    child = ASTStructuralNode(node_type="SEQUENCE")
+                else:
+                    if isinstance(data, list):
+                        child = ASTStructuralNode(node_type="LITERAL", value=str(child_data))
+                        child.parent = node
+                        node.children.append(child)
+                    continue
+                child.parent = node
+                node.children.append(child)
+                stack.append((child_data, child))
+        return root
 
     def _build_ast_from_tokens(self, tokens: list[dict]) -> ASTStructuralNode:
         root = ASTStructuralNode(node_type="ROOT")
@@ -688,20 +723,21 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
         return root
 
     def _compute_cfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
-        cfg_a = self._extract_cfg(parsed_a)
-        cfg_b = self._extract_cfg(parsed_b)
+        cfg_a = self._extract_cfg(parsed_a, self._graph_tokens(parsed_a))
+        cfg_b = self._extract_cfg(parsed_b, self._graph_tokens(parsed_b))
         return self.cfg_comparator.compare(cfg_a, cfg_b)
 
-    def _extract_cfg(self, parsed: dict) -> ControlFlowGraph:
+    def _extract_cfg(self, parsed: dict, tokens: list[dict] | None = None) -> ControlFlowGraph:
         cfg = ControlFlowGraph()
         block_id = 0
 
-        if "tokens" not in parsed:
+        if tokens is None:
+            tokens = parsed.get("tokens")
+        if not tokens:
             cfg.add_node(0, block_type="entry")
             cfg.entry_node = 0
             return cfg
 
-        tokens = parsed["tokens"]
         cfg.add_node(block_id, block_type="entry")
         cfg.entry_node = block_id
         current_block = block_id
@@ -749,25 +785,33 @@ class StructuralASTSimilarity(BaseSimilarityAlgorithm):
         return cfg
 
     def _compute_dfg_similarity(self, parsed_a: dict, parsed_b: dict) -> float:
-        dfg_a = self._extract_dfg(parsed_a)
-        dfg_b = self._extract_dfg(parsed_b)
+        dfg_a = self._extract_dfg(parsed_a, self._graph_tokens(parsed_a))
+        dfg_b = self._extract_dfg(parsed_b, self._graph_tokens(parsed_b))
         return self.dfg_comparator.compare(dfg_a, dfg_b)
 
-    def _extract_dfg(self, parsed: dict) -> DataFlowGraph:
+    def _extract_dfg(self, parsed: dict, tokens: list[dict] | None = None) -> DataFlowGraph:
+        """Variable-sequence data-flow graph.
+
+        Names are replaced by order of first appearance when identifier normalisation is
+        on; the AST was normalised but this graph used the raw names, so renaming every
+        variable still dropped its similarity to zero.
+        """
         dfg = DataFlowGraph()
-        if "tokens" not in parsed:
+        if tokens is None:
+            tokens = parsed.get("tokens")
+        if not tokens:
             return dfg
 
-        tokens = parsed["tokens"]
-        defined_vars: set[str] = set()
+        canonical: dict[str, str] = {}
         last_var: str | None = None
 
         for i, token in enumerate(tokens):
             token_type = token.get("type", "")
             value = token.get("value", "")
 
-            if token_type in ("VARIABLE", "NAME", "IDENTIFIER"):
-                defined_vars.add(value)
+            if token_type in ("VARIABLE", "NAME", "IDENTIFIER") and value:
+                if self.normalize_identifiers:
+                    value = canonical.setdefault(value, f"VAR_{len(canonical)}")
                 if last_var is not None:
                     dfg.add_dependency(last_var, value)
                 last_var = value

@@ -12,6 +12,12 @@ import ast
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+_FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+_FOR_NODES = (ast.For, ast.AsyncFor)
+_TRY_NODES = tuple(t for t in (getattr(ast, "Try", None), getattr(ast, "TryStar", None)) if t)
+#: Only the first calls of a file are kept as the "helper call pattern".
+MAX_HELPER_CALLS = 16
+
 
 @dataclass(frozen=True)
 class StructuralProfile:
@@ -38,10 +44,17 @@ class StructuralEvidence:
 
 
 def extract_structural_profile(source: str) -> StructuralProfile:
-    """Extract normalized Python AST structure facts from source text."""
+    """Extract normalized Python AST structure facts from source text.
+
+    Traversal is iterative: the recursive visitor raised RecursionError on deeply
+    nested code, and only ``SyntaxError`` was caught, so such a file (or one with a
+    NUL byte) failed the whole comparison instead of yielding an empty profile.
+    ``async`` functions/loops and ``try``/``except*`` are included, and function
+    shape counts every parameter kind, not just positional ones.
+    """
     try:
         tree = ast.parse(source or "")
-    except SyntaxError:
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return StructuralProfile()
 
     function_shapes: list[int] = []
@@ -50,14 +63,20 @@ def extract_structural_profile(source: str) -> StructuralProfile:
     helper_calls: list[str] = []
     max_loop_nesting = 0
 
-    def visit(node: ast.AST, loop_depth: int = 0) -> None:
-        nonlocal exception_handlers, max_loop_nesting
+    # (node, loop_depth); children are pushed reversed so they pop in source order
+    stack: list[tuple[ast.AST, int]] = [(tree, 0)]
+    while stack:
+        node, loop_depth = stack.pop()
 
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            function_shapes.append(len(node.args.args))
+        if isinstance(node, _FUNCTION_NODES):
+            a = node.args
+            function_shapes.append(
+                len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs)
+                + (a.vararg is not None) + (a.kwarg is not None)
+            )
         if isinstance(node, ast.If):
             branch_order.append("if")
-        elif isinstance(node, ast.For):
+        elif isinstance(node, _FOR_NODES):
             branch_order.append("for")
             loop_depth += 1
             max_loop_nesting = max(max_loop_nesting, loop_depth)
@@ -65,23 +84,22 @@ def extract_structural_profile(source: str) -> StructuralProfile:
             branch_order.append("while")
             loop_depth += 1
             max_loop_nesting = max(max_loop_nesting, loop_depth)
-        elif isinstance(node, ast.Try):
+        elif _TRY_NODES and isinstance(node, _TRY_NODES):
             branch_order.append("try")
             exception_handlers += len(node.handlers)
-        elif isinstance(node, ast.Call):
+        elif isinstance(node, ast.Call) and len(helper_calls) < MAX_HELPER_CALLS:
             helper_calls.append(_normalize_call(node))
 
-        for child in ast.iter_child_nodes(node):
-            visit(child, loop_depth)
+        for child in reversed(list(ast.iter_child_nodes(node))):
+            stack.append((child, loop_depth))
 
-    visit(tree)
     return StructuralProfile(
         function_count=len(function_shapes),
         function_shapes=function_shapes,
         branch_order=branch_order,
         max_loop_nesting=max_loop_nesting,
         exception_handlers=exception_handlers,
-        helper_call_pattern=helper_calls[:16],
+        helper_call_pattern=helper_calls,
     )
 
 

@@ -10,10 +10,10 @@ Handles:
 
 Strategy:
 1. Parse to AST
-2. Normalize all identifiers to __ID__
-3. Build Control Flow Graph (CFG)
-4. Build Program Dependency Graph (PDG)
-5. Compute structural hash of CFG + PDG
+2. Remove dead code (statements after return/raise/break/continue, constant ``if``)
+3. Hash the AST structure with every identifier normalized
+4. Build a Control Flow Graph (CFG)
+5. Build a Program Dependency Graph (PDG)
 6. Compare CFG/PDG similarity
 
 This approach is robust because obfuscation that changes surface text
@@ -24,8 +24,8 @@ will NOT change the CFG/PDG structure.
 import ast
 import hashlib
 import logging
-import re
-from collections import defaultdict
+import threading
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,10 +40,16 @@ MAX_CFG_NODES = 200_000
 
 
 #: Maximum number of live exit nodes carried between consecutive statements.
-#: Without this cap, a statement returning k exits is rebuilt k times for the
-#: next statement, so a function with nested branches grows the graph
-#: multiplicatively rather than linearly.
+#: A safety net only: statements are now built ONCE and joined, so exit lists
+#: stay short (see ``CFGBuilder._build_block``).
 MAX_PENDING_EXITS = 32
+
+#: Total weight (roughly "graph elements") the normalization cache may hold.
+_CACHE_MAX_WEIGHT = 2_000_000
+
+_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+_TERMINATORS = (ast.Return, ast.Raise, ast.Continue, ast.Break)
+_MATCH = getattr(ast, "Match", None)  # Python 3.10+
 
 
 class CFGTooLargeError(RuntimeError):
@@ -53,12 +59,6 @@ class CFGTooLargeError(RuntimeError):
 def _cap_exits(exits: list[int]) -> list[int]:
     """De-duplicate and cap a pending-exit list.
 
-    The statement following a compound one is rebuilt once per pending exit, so
-    an unbounded exit list makes graph size grow multiplicatively with nesting
-    depth instead of linearly. Deduplicate first (exit lists are usually highly
-    repetitive), then truncate: the exits that remain are a representative
-    subset, which is all the structural comparison downstream consumes.
-
     Args:
         exits: Exit node ids collected while building one statement.
 
@@ -67,6 +67,90 @@ def _cap_exits(exits: list[int]) -> list[int]:
     """
     unique = list(dict.fromkeys(exits))
     return unique[:MAX_PENDING_EXITS]
+
+
+def _weighted_jaccard(left: Counter, right: Counter) -> float:
+    """Multiset Jaccard: sum of minima over sum of maxima (0.0 when both empty)."""
+    keys = left.keys() | right.keys()
+    if not keys:
+        return 0.0
+    numerator = sum(min(left[k], right[k]) for k in keys)
+    denominator = sum(max(left[k], right[k]) for k in keys)
+    return numerator / denominator if denominator else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Structure hashing
+# ---------------------------------------------------------------------------
+
+_CLOSE = object()
+
+
+def _structure_hash(root: ast.AST, digest_size: int = 16) -> str:
+    """Hash an AST's shape with identifiers normalized (iterative, non-mutating).
+
+    Replaces two older approaches:
+
+    * ``ast.parse(ast.dump(tree))`` — it re-parsed the *dump text* as Python
+      source, so the "normalized" tree was a tree of ``Call`` nodes: identifiers
+      survived as string constants (renamed code hashed differently), node names
+      collapsed, and deep trees raised RecursionError.
+    * ``ast.dump`` + regexes + MD5 — recursive, and MD5.
+
+    This walks the tree once with an explicit stack, so depth is not limited by
+    the interpreter recursion limit. Literal values stay in the hash on purpose
+    (a changed constant changes the program); names do not.
+    """
+    digest = hashlib.blake2b(digest_size=digest_size)
+    update = digest.update
+    stack: list[Any] = [root]
+    while stack:
+        item = stack.pop()
+        if item is _CLOSE:
+            update(b")")
+            continue
+        if isinstance(item, str):  # a field label pushed below
+            update(item.encode())
+            continue
+
+        node: ast.AST = item
+        kind = type(node).__name__
+        update(b"(" + kind.encode())
+        children: list[Any] = []
+        for field_name, value in ast.iter_fields(node):
+            if isinstance(value, ast.AST):
+                children.append(("." + field_name + "=", [value]))
+            elif isinstance(value, list):
+                nodes = [v for v in value if isinstance(v, ast.AST)]
+                scalars = [v for v in value if not isinstance(v, ast.AST)]
+                if scalars:
+                    update(f"[{field_name}:{scalars!r}]".encode())
+                if nodes:
+                    children.append(("." + field_name + "[]=", nodes))
+            elif field_name in ("id", "arg"):
+                update(b"|__ID__")
+            elif field_name == "attr":
+                update(b"|__ATTR__")
+            elif field_name == "name" and isinstance(node, (*_FUNC_NODES,)):
+                update(b"|__FUNC__")
+            elif field_name == "name" and isinstance(node, ast.ClassDef):
+                update(b"|__CLASS__")
+            elif field_name == "name" and isinstance(node, ast.ExceptHandler):
+                update(b"|__ID__")
+            elif value is not None:
+                update(f"|{field_name}={value!r}".encode())
+        stack.append(_CLOSE)
+        # Push in reverse so children pop in source order.
+        for label, nodes in reversed(children):
+            for child in reversed(nodes):
+                stack.append(child)
+            stack.append(label)
+    return digest.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -107,15 +191,23 @@ class NormalizedProgram:
 
     @property
     def structural_fingerprint(self) -> str:
-        """Compute a fingerprint robust to obfuscation."""
+        """Compute a fingerprint robust to obfuscation.
+
+        Variable names are NOT part of it: it used to include each PDG node's
+        variable name, so renaming a variable changed the "obfuscation-robust"
+        fingerprint and ``exact_structural_match`` could never survive a rename.
+        """
         parts = [self.ast_structure_hash]
-        # CFG edge list (sorted for determinism)
-        cfg_sorted = sorted(self.cfg_edges)
-        parts.append(str(cfg_sorted))
-        # PDG structure
-        pdg_deps = sorted((n.variable, sorted(n.dep_from)) for n in self.pdg_nodes)
-        parts.append(str(pdg_deps))
+        parts.append(str(sorted(self.cfg_edges)))
+        parts.append(
+            str([tuple(sorted(n.node_id - d for d in n.dep_from)) for n in self.pdg_nodes])
+        )
         return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Dead code removal
+# ---------------------------------------------------------------------------
 
 
 class DeadCodeRemover:
@@ -123,14 +215,12 @@ class DeadCodeRemover:
     Detects and removes unreachable dead code.
 
     Dead code patterns:
-    - Code after unconditional return
-    - Code in always-false conditions
-    - Unused variable assignments
-    - Unreachable branches
+    - Code after unconditional return/raise/break/continue
+    - Branches guarded by a constant condition (``if False:``, ``while 0:``)
     """
 
     def visit(self, node: ast.AST) -> None:
-        """Mark dead code nodes."""
+        """Kept for backward compatibility; removal lives in the visitor."""
 
     @staticmethod
     def remove_dead_code(tree: ast.AST) -> ast.AST:
@@ -139,93 +229,110 @@ class DeadCodeRemover:
 
 
 class DeadCodeRemoverVisitor(ast.NodeTransformer):
-    """AST visitor that removes unreachable code after return statements."""
+    """AST visitor that removes unreachable code.
 
-    def __init__(self):
-        self._in_dead_code = False
+    Stateless: it used to carry an ``_in_dead_code`` flag that leaked between
+    blocks. After ``if x: return 1`` the flag was left set, so the *else* branch
+    was judged dead and deleted, and later blocks were emptied the same way.
+    Each block is now truncated on its own.
+    """
 
-    def _is_dead(self, node: ast.AST) -> bool:
-        """Check if a node is dead code."""
-        if isinstance(node, (ast.Return, ast.Raise)):
-            return False  # These are the terminating statements, not dead
-        return self._in_dead_code
+    def __init__(self) -> None:
+        self._in_dead_code = False  # unused; kept for backward compatibility
 
-    def _mark_dead_after(self, body: list[ast.AST]) -> list[ast.AST]:
-        """Remove statements after a return/raise/continue/break."""
-        result = []
+    @staticmethod
+    def _truncate(body: list[ast.stmt]) -> list[ast.stmt]:
+        """Cut a block after its first terminating statement."""
+        result: list[ast.stmt] = []
         for stmt in body:
-            if self._is_dead(stmt):
-                break  # Everything after is dead
             result.append(stmt)
-            # Check if this statement terminates the block
-            if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
-                self._in_dead_code = True
+            if isinstance(stmt, _TERMINATORS):
                 break
         return result
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
-        """Process function body, removing dead code."""
-        old_dead = self._in_dead_code
-        self._in_dead_code = False
-        new_body = self._mark_dead_after(node.body)
-        self._in_dead_code = old_dead
-        node.body = [self.generic_visit(stmt) for stmt in new_body]
+    def _mark_dead_after(self, body: list[ast.AST]) -> list[ast.AST]:
+        """Remove statements after a return/raise/continue/break."""
+        return self._truncate(body)  # type: ignore[arg-type]
+
+    def _visit_block(self, body: list[ast.stmt]) -> list[ast.stmt]:
+        """Visit every statement of a block, flatten hoisted lists, truncate."""
+        out: list[ast.stmt] = []
+        for stmt in self._truncate(body):
+            result = self.visit(stmt)
+            if result is None:
+                continue
+            if isinstance(result, list):
+                out.extend(result)
+            else:
+                out.append(result)
+        return self._truncate(out)  # a hoisted branch may end in a terminator
+
+    def _prune_blocks(self, node: ast.AST) -> ast.AST:
+        """Clean every statement block owned by ``node``.
+
+        Previously only the top-level body of a function was cleaned, and each
+        statement was passed to ``generic_visit`` (which visits a statement's
+        *children*, never the statement itself), so dead code directly inside an
+        ``if``/loop/``try`` body was never removed.
+        """
+        for name in ("body", "orelse", "finalbody"):
+            block = getattr(node, name, None)
+            if isinstance(block, list):
+                setattr(node, name, self._visit_block(block))
+        for handler in getattr(node, "handlers", None) or []:
+            handler.body = self._visit_block(handler.body)
+        for case in getattr(node, "cases", None) or []:
+            case.body = self._visit_block(case.body)
         return node
 
-    def visit_If(self, node: ast.If) -> ast.If:
-        """Process if/else branches."""
-        node = self.generic_visit(node)
-        # Remove empty branches
-        node.body = self._mark_dead_after(node.body)
-        node.orelse = self._mark_dead_after(node.orelse)
-        # Remove if both branches are empty
+    visit_Module = _prune_blocks
+    visit_ClassDef = _prune_blocks
+    visit_FunctionDef = _prune_blocks
+    visit_AsyncFunctionDef = _prune_blocks
+    visit_For = _prune_blocks
+    visit_AsyncFor = _prune_blocks
+    visit_With = _prune_blocks
+    visit_AsyncWith = _prune_blocks
+    visit_Try = _prune_blocks
+    visit_TryStar = _prune_blocks
+    visit_Match = _prune_blocks
+
+    def visit_If(self, node: ast.If) -> Any:
+        """Prune branches; collapse ``if <constant>`` to the branch that runs."""
+        self._prune_blocks(node)
+        if isinstance(node.test, ast.Constant):
+            live = node.body if node.test.value else node.orelse
+            return live or [ast.Pass()]
         if not node.body and not node.orelse:
-            return ast.Expr(
-                value=ast.Constant(value=None)
-            )  # Replace with pass equivalent
+            return ast.Pass()
         return node
 
-    def visit_For(self, node: ast.For) -> ast.For:
-        """Process for loop body and else."""
-        old_dead = self._in_dead_code
-        self._in_dead_code = False
-        node.body = self._mark_dead_after(node.body)
-        self._in_dead_code = False
-        node.orelse = self._mark_dead_after(node.orelse)
-        self._in_dead_code = old_dead
-        return self.generic_visit(node)
+    def visit_While(self, node: ast.While) -> Any:
+        """Prune the loop; ``while <falsy constant>`` only ever runs its else."""
+        self._prune_blocks(node)
+        if isinstance(node.test, ast.Constant) and not node.test.value:
+            return node.orelse or [ast.Pass()]
+        return node
 
-    def visit_While(self, node: ast.While) -> ast.While:
-        """Process while loop body and else."""
-        old_dead = self._in_dead_code
-        self._in_dead_code = False
-        node.body = self._mark_dead_after(node.body)
-        self._in_dead_code = False
-        node.orelse = self._mark_dead_after(node.orelse)
-        self._in_dead_code = old_dead
-        return self.generic_visit(node)
 
-    def visit_Try(self, node: ast.Try) -> ast.Try:
-        """Process try/except/finally blocks."""
-        old_dead = self._in_dead_code
-        self._in_dead_code = False
-        node.body = self._mark_dead_after(node.body)
-        self._in_dead_code = False
-        for handler in node.handlers:
-            handler.body = self._mark_dead_after(handler.body)
-        self._in_dead_code = False
-        node.orelse = self._mark_dead_after(node.orelse)
-        self._in_dead_code = False
-        node.finalbody = self._mark_dead_after(node.finalbody)
-        self._in_dead_code = old_dead
-        return self.generic_visit(node)
+# ---------------------------------------------------------------------------
+# Control flow graph
+# ---------------------------------------------------------------------------
 
 
 class CFGBuilder:
     """
     Builds a Control Flow Graph from a Python AST.
 
-    CFG nodes represent basic blocks; edges represent possible control flow.
+    CFG nodes represent statements; edges represent possible control flow.
+
+    Each statement is built exactly once. When several paths reach it (the end
+    of an ``if``/``else``, loop exits, ``break``s) all of them are joined onto
+    its first node. The old builder rebuilt the *next* statement once per
+    pending exit — duplicating nodes, growing the graph multiplicatively with
+    branching, and making node counts depend on branching style rather than on
+    the program — and it attached an edge from every simple statement to the
+    function exit while giving ``return`` none.
     """
 
     def build(self, tree: ast.AST) -> tuple[list[CFGNode], list[tuple[int, int]]]:
@@ -240,18 +347,17 @@ class CFGBuilder:
         self._nodes_by_id: dict[int, CFGNode] = {}
         self._edges: list[tuple[int, int]] = []
         self._edge_keys: set[tuple[int, int]] = set()
+        self._loops: list[tuple[int, list[int]]] = []  # (header id, break node ids)
 
         entry = self._make_node("Entry", is_entry=True)
         exit_node = self._make_node("Exit", is_exit=True)
 
-        # Build CFG for each function
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                self._build_function_cfg(node, entry, exit_node)
-            elif isinstance(node, ast.Module) and not any(
-                isinstance(n, ast.FunctionDef) for n in ast.walk(node)
-            ):
-                self._build_module_body_cfg(node, entry, exit_node)
+        functions = [n for n in ast.walk(tree) if isinstance(n, _FUNC_NODES)]
+        if functions:
+            for func in functions:
+                self._build_function_cfg(func, entry, exit_node)
+        elif isinstance(tree, ast.Module):
+            self._build_module_body_cfg(tree, entry, exit_node)
 
         return self._nodes, self._edges
 
@@ -268,14 +374,10 @@ class CFGBuilder:
         node_id = self._node_counter
         self._node_counter += 1
 
-        stmt_hash = ""
-        if source_node:
-            stmt_hash = self._hash_stmt(source_node)
-
         cfg_node = CFGNode(
             node_id=node_id,
             node_type=node_type,
-            stmt_hash=stmt_hash,
+            stmt_hash=self._hash_stmt(source_node) if source_node else "",
             is_entry=is_entry,
             is_exit=is_exit,
         )
@@ -284,22 +386,11 @@ class CFGBuilder:
         return cfg_node
 
     def _hash_stmt(self, node: ast.AST) -> str:
-        """Hash a statement with identifier normalization."""
-        # Normalize identifiers
-        normalized = ast.dump(node)
-        normalized = re.sub(r'arg=[\'"]\w+[\'"]', 'arg="__ID__"', normalized)
-        normalized = re.sub(r'name=[\'"]\w+[\'"]', 'name="__ID__"', normalized)
-        normalized = re.sub(r'id=[\'"]\w+[\'"]', 'id="__ID__"', normalized)
-        return hashlib.md5(normalized.encode()).hexdigest()[:8]
+        """Hash a statement with identifier normalization (8 hex chars)."""
+        return _structure_hash(node, digest_size=4)
 
     def _add_edge(self, from_id: int, to_id: int) -> None:
-        """Add a CFG edge.
-
-        Edge de-duplication and successor/predecessor bookkeeping go through a
-        set and an id-indexed node map. The previous list-membership test plus
-        full ``_nodes`` scan made a build O(nodes x edges), which is what turned
-        a few thousand statements into minutes of CPU.
-        """
+        """Add a CFG edge (set-based de-duplication, id-indexed bookkeeping)."""
         key = (from_id, to_id)
         if key in self._edge_keys:
             return
@@ -314,186 +405,195 @@ class CFGBuilder:
             target.predecessors.append(from_id)
 
     def _build_function_cfg(
-        self, func: ast.FunctionDef, entry: CFGNode, exit_node: CFGNode
+        self, func: ast.FunctionDef | ast.AsyncFunctionDef, entry: CFGNode, exit_node: CFGNode
     ) -> None:
         """Build CFG for a function definition."""
-        # Entry → function body
-        func_body_entry = self._make_node("FunctionDef", func)
-        self._add_edge(entry.node_id, func_body_entry.node_id)
-
-        # Build body statements
-        last_nodes = [func_body_entry.node_id]
-        for stmt in func.body:
-            new_last = []
-            for last_id in last_nodes:
-                exits = self._build_stmt_cfg(stmt, last_id, exit_node.node_id)
-                new_last.extend(exits)
-            last_nodes = _cap_exits(new_last) or [exit_node.node_id]
-
-        # Last → Exit
-        for lid in last_nodes:
-            self._add_edge(lid, exit_node.node_id)
+        self._loops = []
+        head = self._make_node("FunctionDef", func)
+        self._add_edge(entry.node_id, head.node_id)
+        exits = self._build_block(func.body, [head.node_id], exit_node.node_id)
+        for node_id in exits:  # falling off the end of the function
+            self._add_edge(node_id, exit_node.node_id)
 
     def _build_module_body_cfg(
         self, module: ast.Module, entry: CFGNode, exit_node: CFGNode
     ) -> None:
-        """Build CFG for module-level statements."""
-        last_id = entry.node_id
-        for stmt in module.body:
-            exits = self._build_stmt_cfg(stmt, last_id, exit_node.node_id)
-            last_id = exits[-1] if exits else last_id
-        self._add_edge(last_id, exit_node.node_id)
+        """Build CFG for module-level statements.
 
-    def _build_stmt_cfg(self, stmt: ast.AST, entry_id: int, exit_id: int) -> list[int]:
-        """Build CFG for a single statement. Returns list of exit node IDs."""
-        if isinstance(stmt, ast.Assign):
-            node = self._make_node("Assign", stmt)
+        Uses the same block builder as functions. It used to follow only the
+        LAST exit of each statement, silently dropping every other branch.
+        """
+        self._loops = []
+        exits = self._build_block(module.body, [entry.node_id], exit_node.node_id)
+        for node_id in exits:
+            self._add_edge(node_id, exit_node.node_id)
+
+    def _build_block(self, stmts: list[ast.stmt], entries: list[int], func_exit: int) -> list[int]:
+        """Build a statement sequence; return the node ids that fall through its end."""
+        current = _cap_exits(list(entries))
+        for stmt in stmts:
+            if not current:
+                break  # nothing reaches here (after return/break): unreachable
+            first_id = self._node_counter  # the statement's head node gets this id
+            exits = self._build_stmt(stmt, current[0], func_exit)
+            for extra in current[1:]:  # join the other incoming paths
+                self._add_edge(extra, first_id)
+            current = _cap_exits(exits)
+        return current
+
+    def _build_stmt(self, stmt: ast.stmt, entry_id: int, func_exit: int) -> list[int]:
+        """Build one statement; return its fall-through exit node ids.
+
+        The first node created is always the statement's own node.
+        """
+        if isinstance(stmt, (ast.Return, ast.Raise)):
+            node = self._make_node(type(stmt).__name__, stmt)
             self._add_edge(entry_id, node.node_id)
-            self._add_edge(node.node_id, exit_id)
+            self._add_edge(node.node_id, func_exit)
+            return []
+
+        if isinstance(stmt, ast.Break):
+            node = self._make_node("Break", stmt)
+            self._add_edge(entry_id, node.node_id)
+            if self._loops:
+                self._loops[-1][1].append(node.node_id)  # joins the loop's exits
+                return []
             return [node.node_id]
 
-        elif isinstance(stmt, ast.AugAssign):
-            node = self._make_node("AugAssign", stmt)
+        if isinstance(stmt, ast.Continue):
+            node = self._make_node("Continue", stmt)
             self._add_edge(entry_id, node.node_id)
-            self._add_edge(node.node_id, exit_id)
+            if self._loops:
+                self._add_edge(node.node_id, self._loops[-1][0])  # back to the header
+                return []
             return [node.node_id]
 
-        elif isinstance(stmt, ast.Expr):
-            node = self._make_node("Expr", stmt)
-            self._add_edge(entry_id, node.node_id)
-            self._add_edge(node.node_id, exit_id)
-            return [node.node_id]
-
-        elif isinstance(stmt, ast.Return):
-            node = self._make_node("Return", stmt)
-            self._add_edge(entry_id, node.node_id)
-            # No edge to exit_id (return terminates flow)
-            return [node.node_id]
-
-        elif isinstance(stmt, ast.If):
+        if isinstance(stmt, ast.If):
             if_node = self._make_node("If", stmt)
             self._add_edge(entry_id, if_node.node_id)
 
-            # True branch
             true_entry = self._make_node("IfBody", None)
             self._add_edge(if_node.node_id, true_entry.node_id)
-            true_exits = [true_entry.node_id]
-            for s in stmt.body:
-                new_exits = []
-                for eid in true_exits:
-                    exits = self._build_stmt_cfg(s, eid, exit_id)
-                    new_exits.extend(exits)
-                true_exits = new_exits
+            exits = self._build_block(stmt.body, [true_entry.node_id], func_exit)
 
-            # False branch (else/orelse)
-            false_exits = []
             if stmt.orelse:
                 false_entry = self._make_node("ElseBody", None)
                 self._add_edge(if_node.node_id, false_entry.node_id)
-                for s in stmt.orelse:
-                    exits = self._build_stmt_cfg(s, false_entry.node_id, exit_id)
-                    false_exits.extend(exits)
+                exits += self._build_block(stmt.orelse, [false_entry.node_id], func_exit)
             else:
-                false_exits = [if_node.node_id]
+                exits.append(if_node.node_id)  # condition false: skip the body
+            return _cap_exits(exits)
 
-            # Merge
-            merge_exits = _cap_exits(true_exits + false_exits)
-            return merge_exits if merge_exits else [if_node.node_id]
+        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            is_while = isinstance(stmt, ast.While)
+            loop_node = self._make_node("While" if is_while else "For", stmt)
+            self._add_edge(entry_id, loop_node.node_id)
+            body_entry = self._make_node("WhileBody" if is_while else "ForBody", None)
+            self._add_edge(loop_node.node_id, body_entry.node_id)
 
-        elif isinstance(stmt, ast.For):
-            for_node = self._make_node("For", stmt)
-            self._add_edge(entry_id, for_node.node_id)
+            breaks: list[int] = []
+            self._loops.append((loop_node.node_id, breaks))
+            body_exits = self._build_block(stmt.body, [body_entry.node_id], func_exit)
+            self._loops.pop()
+            for node_id in body_exits:  # back edge
+                self._add_edge(node_id, loop_node.node_id)
 
-            # Loop body
-            body_entry = self._make_node("ForBody", None)
-            self._add_edge(for_node.node_id, body_entry.node_id)
+            # Normal termination runs the ``else`` clause if there is one;
+            # ``break`` skips it. (``orelse`` used to be ignored.)
+            if stmt.orelse:
+                exits = self._build_block(stmt.orelse, [loop_node.node_id], func_exit)
+            else:
+                exits = [loop_node.node_id]
+            return _cap_exits(exits + breaks)
 
-            body_exits = [body_entry.node_id]
-            for s in stmt.body:
-                new_exits = []
-                for eid in body_exits:
-                    exits = self._build_stmt_cfg(s, eid, for_node.node_id)
-                    new_exits.extend(exits)
-                body_exits = _cap_exits(new_exits) or [body_entry.node_id]
-
-            # Back edge
-            if body_exits:
-                for eid in body_exits:
-                    self._add_edge(eid, for_node.node_id)
-
-            # Exit edge (loop termination)
-            self._add_edge(for_node.node_id, exit_id)
-            return [for_node.node_id]
-
-        elif isinstance(stmt, ast.While):
-            while_node = self._make_node("While", stmt)
-            self._add_edge(entry_id, while_node.node_id)
-
-            # Loop body
-            body_entry = self._make_node("WhileBody", None)
-            self._add_edge(while_node.node_id, body_entry.node_id)
-
-            body_exits = [body_entry.node_id]
-            for s in stmt.body:
-                new_exits = []
-                for eid in body_exits:
-                    exits = self._build_stmt_cfg(s, eid, while_node.node_id)
-                    new_exits.extend(exits)
-                body_exits = _cap_exits(new_exits) or [body_entry.node_id]
-
-            # Back edge
-            if body_exits:
-                for eid in body_exits:
-                    self._add_edge(eid, while_node.node_id)
-
-            # Exit edge
-            self._add_edge(while_node.node_id, exit_id)
-            return [while_node.node_id]
-
-        elif isinstance(stmt, ast.Try):
+        if isinstance(stmt, ast.Try) or type(stmt).__name__ == "TryStar":
             try_node = self._make_node("Try", stmt)
             self._add_edge(entry_id, try_node.node_id)
 
-            # Try body
-            try_exits = [try_node.node_id]
-            for s in stmt.body:
-                new_exits = []
-                for eid in try_exits:
-                    exits = self._build_stmt_cfg(s, eid, exit_id)
-                    new_exits.extend(exits)
-                try_exits = _cap_exits(new_exits) or [try_node.node_id]
-
-            # Except handlers
+            body_exits = self._build_block(stmt.body, [try_node.node_id], func_exit)
+            normal = (
+                self._build_block(stmt.orelse, body_exits, func_exit)
+                if stmt.orelse and body_exits
+                else body_exits
+            )
             for handler in stmt.handlers:
                 handler_entry = self._make_node("Except", handler)
                 self._add_edge(try_node.node_id, handler_entry.node_id)
-                for s in handler.body:
-                    exits = self._build_stmt_cfg(s, handler_entry.node_id, exit_id)
+                # Handler exits used to be dropped, cutting the code after a
+                # try/except off from every path through a handler.
+                normal = normal + self._build_block(handler.body, [handler_entry.node_id], func_exit)
+            normal = _cap_exits(normal)
 
-            # Both try and except can reach exit
-            results = _cap_exits(try_exits)
-            return results if results else [try_node.node_id]
+            if stmt.finalbody:  # ``finally`` used to be ignored entirely
+                finally_exits = self._build_block(
+                    stmt.finalbody, normal or [try_node.node_id], func_exit
+                )
+                return _cap_exits(finally_exits) if normal else []
+            return normal
 
-        elif isinstance(stmt, (ast.Break, ast.Continue)):
-            node = self._make_node(type(stmt).__name__, stmt)
+        if isinstance(stmt, (ast.With, ast.AsyncWith)):
+            # The body used to be invisible: a generic node swallowed the whole
+            # ``with`` block, so loops and branches inside it never reached the graph.
+            node = self._make_node("With", stmt)
             self._add_edge(entry_id, node.node_id)
-            # Flow continues at loop level (handled by caller)
-            return [node.node_id]
+            return self._build_block(stmt.body, [node.node_id], func_exit)
 
-        else:
-            # Generic statement
-            node = self._make_node(type(stmt).__name__, stmt)
-            self._add_edge(entry_id, node.node_id)
-            self._add_edge(node.node_id, exit_id)
-            return [node.node_id]
+        if _MATCH is not None and isinstance(stmt, _MATCH):
+            match_node = self._make_node("Match", stmt)
+            self._add_edge(entry_id, match_node.node_id)
+            exits = [match_node.node_id]  # no case matched
+            for case in stmt.cases:
+                case_entry = self._make_node("Case", None)
+                self._add_edge(match_node.node_id, case_entry.node_id)
+                exits += self._build_block(case.body, [case_entry.node_id], func_exit)
+            return _cap_exits(exits)
+
+        # Simple statement (assignment, expression, import, def, ...).
+        node = self._make_node(type(stmt).__name__, stmt)
+        self._add_edge(entry_id, node.node_id)
+        return [node.node_id]
+
+
+# ---------------------------------------------------------------------------
+# Program dependency graph
+# ---------------------------------------------------------------------------
+
+
+def _loads(expr: ast.AST | None) -> set[str]:
+    """Names read anywhere inside ``expr``."""
+    if expr is None:
+        return set()
+    return {
+        n.id for n in ast.walk(expr) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+    }
+
+
+def _stored_names(target: ast.AST) -> list[str]:
+    """Names assigned by an assignment/for/with target (handles tuple unpacking)."""
+    return [
+        n.id for n in ast.walk(target) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+    ]
 
 
 class PDGBuilder:
     """
     Builds a Program Dependency Graph from a Python AST.
 
-    PDG captures data dependencies (which statement's output feeds
-    which other statement's input).
+    A node is a variable definition; ``dep_from`` lists the definitions whose
+    values flow into it (read-after-write data dependencies).
+
+    Differences from the earlier version, which only linked a variable to its
+    own previous definition:
+
+    * real data dependencies: ``y = x + 1`` depends on the current definitions
+      of ``x``;
+    * definitions are tracked per scope, in program order (it shared one table
+      across all functions and walked breadth-first, so same-named variables in
+      different functions were linked together);
+    * ``AugAssign``, ``AnnAssign``, tuple unpacking, ``for`` and ``with`` targets
+      are definitions;
+    * a script with no functions is analysed as one scope, as the CFG builder
+      already does (it previously produced an empty PDG).
     """
 
     def build(self, tree: ast.AST) -> list[PDGNode]:
@@ -504,62 +604,105 @@ class PDGBuilder:
             List of PDGNode with dependency relationships
         """
         self._pdg_nodes: list[PDGNode] = []
-        self._definitions: dict[str, list[int]] = defaultdict(
-            list
-        )  # var → [PDG node IDs]
         self._node_counter = 0
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                self._process_function(node)
-
+        functions = [n for n in ast.walk(tree) if isinstance(n, _FUNC_NODES)]
+        if functions:
+            for func in functions:
+                self._process_function(func)
+        elif isinstance(tree, ast.Module):
+            self._visit_body(tree.body, {})
         return self._pdg_nodes
 
     def _make_pdg_node(self, variable: str, line: int) -> PDGNode:
         """Create a new PDG node."""
-        node = PDGNode(
-            node_id=self._node_counter,
-            variable=variable,
-            definition_line=line,
-        )
+        node = PDGNode(node_id=self._node_counter, variable=variable, definition_line=line)
         self._node_counter += 1
         self._pdg_nodes.append(node)
         return node
 
-    def _process_function(self, func: ast.FunctionDef) -> None:
-        """Process a function for data dependencies."""
-        # Function args are definitions
-        for arg in func.args.args:
-            def_node = self._make_pdg_node(arg.arg, func.lineno)
-            self._definitions[arg.arg].append(def_node.node_id)
+    def _process_function(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Process one function scope."""
+        defs: dict[str, list[int]] = {}
+        args = func.args
+        params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+        params += [a for a in (args.vararg, args.kwarg) if a is not None]
+        for arg in params:
+            defs[arg.arg] = [self._make_pdg_node(arg.arg, func.lineno).node_id]
+        self._visit_body(func.body, defs)
 
-        # Walk body for definitions and uses
-        for stmt in ast.walk(func):
+    def _define(self, name: str, line: int, uses: set[str], defs: dict[str, list[int]]) -> None:
+        node = self._make_pdg_node(name, line)
+        node.dep_from = sorted({i for used in uses for i in defs.get(used, ())})
+        defs[name] = [node.node_id]  # this definition kills the previous ones
+
+    @staticmethod
+    def _merge(base: dict[str, list[int]], *branches: dict[str, list[int]]) -> dict[str, list[int]]:
+        """Union of the definitions that may reach the join point of several branches."""
+        merged: dict[str, list[int]] = defaultdict(list)
+        for table in branches:
+            for name, ids in table.items():
+                merged[name].extend(ids)
+        return {name: list(dict.fromkeys(ids)) for name, ids in merged.items()}
+
+    def _visit_body(self, stmts: list[ast.stmt], defs: dict[str, list[int]]) -> None:
+        for stmt in stmts:
+            line = getattr(stmt, "lineno", 0)
             if isinstance(stmt, ast.Assign):
-                # Definition: left side targets
+                uses = _loads(stmt.value)
                 for target in stmt.targets:
-                    if isinstance(target, ast.Name):
-                        def_node = self._make_pdg_node(
-                            target.id, getattr(stmt, "lineno", 0)
-                        )
-                        new_defs = [def_node.node_id]
+                    if not isinstance(target, ast.Name):
+                        uses |= _loads(target)  # ``a[i] = v`` reads ``a`` and ``i``
+                for target in stmt.targets:
+                    for name in _stored_names(target):
+                        self._define(name, line, uses, defs)
+            elif isinstance(stmt, ast.AnnAssign):
+                if stmt.value is not None and isinstance(stmt.target, ast.Name):
+                    self._define(stmt.target.id, line, _loads(stmt.value), defs)
+            elif isinstance(stmt, ast.AugAssign):
+                if isinstance(stmt.target, ast.Name):
+                    uses = _loads(stmt.value) | {stmt.target.id}
+                    self._define(stmt.target.id, line, uses, defs)
+            elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+                uses = _loads(stmt.iter)
+                for name in _stored_names(stmt.target):
+                    self._define(name, line, uses, defs)
+                self._visit_body(stmt.body, defs)
+                self._visit_body(stmt.orelse, defs)
+            elif isinstance(stmt, ast.While):
+                self._visit_body(stmt.body, defs)
+                self._visit_body(stmt.orelse, defs)
+            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+                for item in stmt.items:
+                    if item.optional_vars is not None:
+                        for name in _stored_names(item.optional_vars):
+                            self._define(name, line, _loads(item.context_expr), defs)
+                self._visit_body(stmt.body, defs)
+            elif isinstance(stmt, ast.If):
+                then_defs = {k: list(v) for k, v in defs.items()}
+                self._visit_body(stmt.body, then_defs)
+                else_defs = {k: list(v) for k, v in defs.items()}
+                self._visit_body(stmt.orelse, else_defs)
+                defs.clear()
+                defs.update(self._merge(defs, then_defs, else_defs))
+            elif isinstance(stmt, ast.Try) or type(stmt).__name__ == "TryStar":
+                self._visit_body(stmt.body, defs)
+                branches = [{k: list(v) for k, v in defs.items()}]
+                for handler in stmt.handlers:
+                    handler_defs = {k: list(v) for k, v in defs.items()}
+                    self._visit_body(handler.body, handler_defs)
+                    branches.append(handler_defs)
+                merged = self._merge(defs, *branches)
+                defs.clear()
+                defs.update(merged)
+                self._visit_body(stmt.orelse, defs)
+                self._visit_body(stmt.finalbody, defs)
+            # Nested function/class bodies are separate scopes, handled by ``build``.
 
-                        # Find where this variable was defined before (data dep)
-                        old_defs = self._definitions.get(target.id, [])
-                        for old_id in old_defs:
-                            def_node.dep_from.append(old_id)
 
-                        self._definitions[target.id] = new_defs
-
-            elif isinstance(stmt, ast.Name) and isinstance(stmt.ctx, ast.Load):
-                # Use: record dependency
-                pass  # Uses are implicit in the AST walk
-
-            elif isinstance(stmt, ast.For) and isinstance(stmt.target, ast.Name):
-                # Loop variable is a definition
-                def_node = self._make_pdg_node(
-                    stmt.target.id, getattr(stmt, "lineno", 0)
-                )
+# ---------------------------------------------------------------------------
+# Normalizer
+# ---------------------------------------------------------------------------
 
 
 class ASTNormalizer:
@@ -573,8 +716,11 @@ class ASTNormalizer:
     - Comment/whitespace/formatting changes
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.dead_code_remover = DeadCodeRemoverVisitor()
+        # Kept as attributes for compatibility. ``normalize`` builds fresh
+        # builders per call, because they hold per-build state and a shared
+        # instance is not safe across threads.
         self.cfg_builder = CFGBuilder()
         self.pdg_builder = PDGBuilder()
 
@@ -590,19 +736,27 @@ class ASTNormalizer:
         """
         try:
             tree = ast.parse(source)
-        except SyntaxError:
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            # ValueError: NUL bytes. RecursionError/MemoryError: pathological
+            # nesting. None of them is a reason to fail a whole comparison.
             return None
 
         # Step 1: Remove dead code
         tree = self.dead_code_remover.visit(tree)
         ast.fix_missing_locations(tree)
 
-        # Step 2: Compute AST structure hash (with identifier normalization)
-        ast_hash = self._compute_ast_hash(tree)
+        try:
+            # Step 2: AST structure hash (identifiers normalized)
+            ast_hash = _structure_hash(tree, digest_size=32)
+            token_seq = self._extract_tokens(tree)
+            func_sigs = self._extract_function_signatures(tree)
+            complexity = self._compute_complexity(tree)
+        except RecursionError:
+            return None
 
         # Step 3: Build CFG
         try:
-            cfg_nodes, cfg_edges = self.cfg_builder.build(tree)
+            cfg_nodes, cfg_edges = CFGBuilder().build(tree)
         except CFGTooLargeError as exc:
             # The graph is the expensive half of structural scoring. When it is
             # refused, keep the AST/token evidence and report no CFG/PDG signal
@@ -613,22 +767,13 @@ class ASTNormalizer:
                 cfg_nodes=[],
                 cfg_edges=[],
                 pdg_nodes=[],
-                token_sequence=self._extract_tokens(tree),
-                function_signatures=self._extract_function_signatures(tree),
-                complexity_scores=self._compute_complexity(tree),
+                token_sequence=token_seq,
+                function_signatures=func_sigs,
+                complexity_scores=complexity,
             )
 
         # Step 4: Build PDG
-        pdg_nodes = self.pdg_builder.build(tree)
-
-        # Step 5: Extract normalized token sequence
-        token_seq = self._extract_tokens(tree)
-
-        # Step 6: Extract function signatures
-        func_sigs = self._extract_function_signatures(tree)
-
-        # Step 7: Compute complexity scores
-        complexity = self._compute_complexity(tree)
+        pdg_nodes = PDGBuilder().build(tree)
 
         return NormalizedProgram(
             ast_structure_hash=ast_hash,
@@ -641,38 +786,33 @@ class ASTNormalizer:
         )
 
     def _compute_ast_hash(self, tree: ast.AST) -> str:
-        """Compute AST hash with all identifiers normalized."""
+        """AST hash with all identifiers normalized (does not modify ``tree``)."""
+        return _structure_hash(tree, digest_size=32)
 
-        class Normalizer(ast.NodeTransformer):
-            def visit_Name(self, node):
-                node.id = "__ID__"
-                return node
-
-            def visit_FunctionDef(self, node):
-                node.name = "__FUNC__"
-                return self.generic_visit(node)
-
-            def visit_arg(self, node):
-                node.arg = "__ID__"
-                return node
-
-            def visit_Attribute(self, node):
-                node.attr = "__ATTR__"
-                return self.generic_visit(node)
-
-        normalized = Normalizer().visit(ast.parse(ast.dump(tree)))
-        return hashlib.sha256(ast.dump(normalized).encode()).hexdigest()
+    @staticmethod
+    def _literal_token(value: Any) -> str:
+        if isinstance(value, str):
+            return "__STR__"
+        if isinstance(value, bytes):
+            return "__BYTES__"
+        return "__LIT__"
 
     def _extract_tokens(self, tree: ast.AST) -> list[str]:
-        """Extract normalized token sequence."""
-        tokens = []
+        """Extract normalized token sequence.
+
+        ``ast.Num``/``ast.Str`` were removed in Python 3.14 (referencing them
+        raised AttributeError and silently zeroed the whole comparison), and the
+        ``(Num, Constant)`` test matched *every* constant, so ``__STR__`` was
+        never produced.
+        """
+        tokens: list[str] = []
         for node in ast.walk(tree):
             tokens.append(type(node).__name__)
             if isinstance(node, ast.Name):
                 tokens.append("__ID__")
-            elif isinstance(node, (ast.Num, ast.Constant)):
-                tokens.append("__LIT__")
-            elif isinstance(node, ast.Str):
+            elif isinstance(node, ast.Constant):
+                tokens.append(self._literal_token(node.value))
+            elif isinstance(node, ast.JoinedStr):
                 tokens.append("__STR__")
         return tokens
 
@@ -680,54 +820,58 @@ class ASTNormalizer:
         """Extract function signatures with normalized names."""
         sigs = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                arg_types = []
-                for arg in node.args.args:
-                    arg_types.append("__ID__")
-                sigs.append(f"def({len(arg_types)}args)")
+            if isinstance(node, _FUNC_NODES):
+                a = node.args
+                count = len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs)
+                count += (a.vararg is not None) + (a.kwarg is not None)
+                sigs.append(f"def({count}args)")
         return sigs
 
     def _compute_complexity(self, tree: ast.AST) -> dict[str, float]:
         """Compute cyclomatic and other complexity metrics."""
-        counts = {
-            "branches": 0,
-            "loops": 0,
-            "functions": 0,
-            "statements": 0,
-        }
+        branches = loops = functions = statements = extra_paths = 0
         for node in ast.walk(tree):
+            if isinstance(node, ast.stmt):
+                # One definition of "statement". It used to count Expr AND the
+                # Call inside it (twice) and skip With/Try/AnnAssign/etc.
+                statements += 1
             if isinstance(node, ast.If):
-                counts["branches"] += 1
-            elif isinstance(node, (ast.For, ast.While)):
-                counts["loops"] += 1
-            elif isinstance(node, ast.FunctionDef):
-                counts["functions"] += 1
-            elif isinstance(
-                node, (ast.Assign, ast.Expr, ast.AugAssign, ast.Return, ast.Call)
-            ):
-                counts["statements"] += 1
+                branches += 1
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+                loops += 1
+            elif isinstance(node, ast.ExceptHandler):
+                extra_paths += 1
+            elif isinstance(node, ast.IfExp):
+                extra_paths += 1
+            elif isinstance(node, ast.BoolOp):
+                extra_paths += len(node.values) - 1
+            if isinstance(node, _FUNC_NODES):
+                functions += 1
 
-        # Cyclomatic complexity = edges - nodes + 2*P
-        # Approximation: 1 + branches + loops
-        cyclomatic = 1 + counts["branches"] + counts["loops"]
-
+        # Cyclomatic complexity ~ 1 + decision points
+        cyclomatic = 1 + branches + loops + extra_paths
         return {
             "cyclomatic_complexity": float(cyclomatic),
-            "num_functions": float(counts["functions"]),
-            "num_statements": float(counts["statements"]),
-            "branch_density": counts["branches"] / max(1, counts["statements"]),
-            "loop_density": counts["loops"] / max(1, counts["statements"]),
+            "num_functions": float(functions),
+            "num_statements": float(statements),
+            "branch_density": branches / max(1, statements),
+            "loop_density": loops / max(1, statements),
         }
+
+
+# ---------------------------------------------------------------------------
+# Comparators
+# ---------------------------------------------------------------------------
 
 
 class CFGComparator:
     """
     Compares two CFGs for structural similarity.
 
-    Uses graph edit distance approximation:
-    1. Compare node type distributions
-    2. Compare edge patterns (branch density, loop count)
-    3. Compare longest path (critical program path)
+    Combines:
+    1. Node type distribution (multiset, not just the set of types seen)
+    2. Edge count and in/out-degree distribution (independent of node numbering)
+    3. Complexity metrics
     """
 
     @staticmethod
@@ -741,29 +885,27 @@ class CFGComparator:
         if not cfg1 or not cfg2:
             return 0.0
         # An empty graph means structural evidence is unavailable (refused as
-        # oversized), not that the two graphs agree. Comparing two empty edge
-        # sets would otherwise report a perfect edge-pattern match.
+        # oversized), not that the two graphs agree.
         if not cfg1.cfg_nodes or not cfg2.cfg_nodes:
             return 0.0
 
         # 1. Node type distribution similarity
-        types1 = {n.node_type for n in cfg1.cfg_nodes}
-        types2 = {n.node_type for n in cfg2.cfg_nodes}
-        type_sim = (
-            len(types1 & types2) / len(types1 | types2) if (types1 | types2) else 0
+        type_sim = _weighted_jaccard(
+            Counter(n.node_type for n in cfg1.cfg_nodes),
+            Counter(n.node_type for n in cfg2.cfg_nodes),
         )
 
-        # 2. Edge pattern similarity
-        edges1 = set(cfg1.cfg_edges)
-        edges2 = set(cfg2.cfg_edges)
-        # Normalize by size
-        edge_sim = 1.0 - abs(len(edges1) - len(edges2)) / max(
-            len(edges1), len(edges2), 1
+        # 2. Edge pattern similarity: edge-count ratio plus degree histograms
+        edges1, edges2 = set(cfg1.cfg_edges), set(cfg2.cfg_edges)
+        count_sim = 1.0 - abs(len(edges1) - len(edges2)) / max(len(edges1), len(edges2), 1)
+        degree_sim = _weighted_jaccard(
+            Counter((len(n.predecessors), len(n.successors)) for n in cfg1.cfg_nodes),
+            Counter((len(n.predecessors), len(n.successors)) for n in cfg2.cfg_nodes),
         )
+        edge_sim = 0.5 * count_sim + 0.5 * degree_sim
 
         # 3. Complexity similarity
-        c1 = cfg1.complexity_scores
-        c2 = cfg2.complexity_scores
+        c1, c2 = cfg1.complexity_scores, cfg2.complexity_scores
         if c1 and c2:
             diffs = []
             for key in c1:
@@ -774,12 +916,22 @@ class CFGComparator:
         else:
             complexity_sim = 0
 
-        # Weighted combination
         return 0.3 * type_sim + 0.3 * edge_sim + 0.4 * complexity_sim
 
 
 class PDGComparator:
     """Compares two PDGs for data dependency similarity."""
+
+    @staticmethod
+    def _signatures(nodes: list[PDGNode]) -> Counter:
+        """Per-node dependency shape that does not depend on absolute node ids.
+
+        The old comparison used sets of raw node-id tuples, so two programs only
+        matched if their numbering happened to coincide — adding one earlier
+        function shifted every id and zeroed the match. Dependencies are now
+        expressed as distances back from the node.
+        """
+        return Counter(tuple(sorted(n.node_id - d for d in n.dep_from)) for n in nodes)
 
     @staticmethod
     def compare(pdgs1: list[PDGNode], pdgs2: list[PDGNode]) -> float:
@@ -792,52 +944,106 @@ class PDGComparator:
         if not pdgs1 or not pdgs2:
             return 0.0
 
-        # Compare dependency structures - IGNORE variable names, only use structure
-        deps1 = set()
-        for node in pdgs1:
-            deps1.add(tuple(sorted(node.dep_from)))
-
-        deps2 = set()
-        for node in pdgs2:
-            deps2.add(tuple(sorted(node.dep_from)))
-
-        dep_sim = len(deps1 & deps2) / len(deps1 | deps2) if (deps1 | deps2) else 0
-
-        # Variable count similarity (not names, just how many variables)
+        dep_sim = _weighted_jaccard(PDGComparator._signatures(pdgs1), PDGComparator._signatures(pdgs2))
         count_sim = 1.0 - abs(len(pdgs1) - len(pdgs2)) / max(len(pdgs1), len(pdgs2), 1)
-
         return 0.8 * dep_sim + 0.2 * count_sim
 
 
-# Module-level convenience function
-def compare_robust(code1: str, code2: str) -> dict[str, float]:
+# ---------------------------------------------------------------------------
+# Cached normalization + public entry point
+# ---------------------------------------------------------------------------
+
+_MISSING = object()
+
+
+class _ProgramCache:
+    """Small thread-safe LRU of normalized programs, bounded by total weight.
+
+    Comparing every pair of N files normalized each file N-1 times. Programs are
+    treated as read-only by the comparators.
+    """
+
+    def __init__(self, max_weight: int = _CACHE_MAX_WEIGHT) -> None:
+        self._max_weight = max_weight
+        self._data: OrderedDict[str, tuple[NormalizedProgram | None, int]] = OrderedDict()
+        self._weight = 0
+        self._lock = threading.Lock()
+
+    def get(self, source: str) -> Any:
+        with self._lock:
+            entry = self._data.get(source)
+            if entry is None:
+                return _MISSING
+            self._data.move_to_end(source)
+            return entry[0]
+
+    def put(self, source: str, program: NormalizedProgram | None) -> None:
+        weight = len(source) // 16 + 1
+        if program is not None:
+            weight += (
+                len(program.token_sequence)
+                + 2 * len(program.cfg_nodes)
+                + len(program.cfg_edges)
+                + len(program.pdg_nodes)
+            )
+        if weight > self._max_weight // 4:  # never let one huge file evict everything
+            return
+        with self._lock:
+            if source in self._data:
+                self._weight -= self._data.pop(source)[1]
+            self._data[source] = (program, weight)
+            self._weight += weight
+            while self._weight > self._max_weight and self._data:
+                _, (_, evicted) = self._data.popitem(last=False)
+                self._weight -= evicted
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+            self._weight = 0
+
+
+_program_cache = _ProgramCache()
+
+
+def normalize_cached(source: str) -> NormalizedProgram | None:
+    """Normalize ``source``, reusing a previous result for identical text."""
+    cached = _program_cache.get(source)
+    if cached is not _MISSING:
+        return cached
+    program = ASTNormalizer().normalize(source)
+    _program_cache.put(source, program)
+    return program
+
+
+def compare_robust(code1: str, code2: str) -> dict[str, Any]:
     """
     Robust code comparison resistant to advanced obfuscation.
 
     Returns:
-        {"similarity": float, "ast_sim": float, "cfg_sim": float, "pdg_sim": float}
+        {"similarity", "ast_sim", "cfg_sim", "pdg_sim"} as floats plus
+        ``exact_structural_match`` (bool).
     """
-    normalizer = ASTNormalizer()
-    prog1 = normalizer.normalize(code1)
-    prog2 = normalizer.normalize(code2)
+    prog1 = normalize_cached(code1)
+    prog2 = normalize_cached(code2)
 
     if prog1 is None or prog2 is None:
-        return {"similarity": 0.0, "ast_sim": 0.0, "cfg_sim": 0.0, "pdg_sim": 0.0}
+        return {
+            "similarity": 0.0,
+            "ast_sim": 0.0,
+            "cfg_sim": 0.0,
+            "pdg_sim": 0.0,
+            "exact_structural_match": False,
+        }
 
     # Structural fingerprint match
     exact_match = prog1.structural_fingerprint == prog2.structural_fingerprint
 
-    # AST token similarity
-    tokens1 = set(prog1.token_sequence)
-    tokens2 = set(prog2.token_sequence)
-    ast_sim = (
-        len(tokens1 & tokens2) / len(tokens1 | tokens2) if (tokens1 | tokens2) else 0
-    )
+    # AST token similarity: multiset overlap. The set of node-type NAMES is only
+    # ~60 elements, so almost any two Python programs scored close to 1.
+    ast_sim = _weighted_jaccard(Counter(prog1.token_sequence), Counter(prog2.token_sequence))
 
-    # CFG comparison
     cfg_sim = CFGComparator.compare(prog1, prog2)
-
-    # PDG comparison
     pdg_sim = PDGComparator.compare(prog1.pdg_nodes, prog2.pdg_nodes)
 
     # Combined: weighted

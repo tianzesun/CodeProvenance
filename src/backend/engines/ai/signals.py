@@ -23,6 +23,26 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
+# Compiled once. They were rebuilt (and, for the generic-name list, run as ten
+# separate full-text scans) on every call.
+_TOKEN_RE = re.compile(r"\b\w+\b|[+\-*/=<>!&|]+|[{}()\[\],;:]")
+_GENERIC_NAMES_RE = re.compile(
+    r"\b(?:result|output|data|value|temp|final|new|processed|formatted|cleaned)\b"
+)
+_ASSIGNMENT_RE = re.compile(r"\b[a-zA-Z_]\w*\s*=")
+_DOCSTRING_RE = re.compile(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'')
+_TYPE_HINT_RE = re.compile(r"->\s*(?:None|bool|int|str|float|List|Dict|Optional|Union)")
+_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+\w+", re.MULTILINE)
+_SINGLE_CHAR_RE = re.compile(r"\b[a-z]\b")
+_TRY_RE = re.compile(r"^\s*try\s*:", re.MULTILINE)
+_LIST_COMP_RE = re.compile(r"\[.*for.*in.*\]")
+_FOR_LOOP_RE = re.compile(r"^\s*for\s+\w+\s+in\s+", re.MULTILINE)
+
+
+def _clamp01(value: float) -> float:
+    """Clamp to [0, 1]."""
+    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+
 
 # ============================================================================
 # SIGNAL 1: PERPLEXITY (Token-level entropy)
@@ -38,8 +58,7 @@ def _tokenize(code: str) -> list[str]:
     Returns:
         List of lowercase tokens
     """
-    tokens = re.findall(r"\b\w+\b|[+\-*/=<>!&|]+|[{}()\[\],;:]", code)
-    return [t.lower() for t in tokens if t]
+    return [t.lower() for t in _TOKEN_RE.findall(code) if t]
 
 
 def _safe_entropy(counter: Counter) -> float:
@@ -200,49 +219,26 @@ def compute_stylometry_signal(code: str) -> float:
     Returns:
         Stylometry score in [0.0, 1.0]
     """
-    # Count generic variable names (LLM-like)
-    generic_names = [
-        "result",
-        "output",
-        "data",
-        "value",
-        "temp",
-        "final",
-        "new",
-        "processed",
-        "formatted",
-        "cleaned",
-    ]
-    generic_count = sum(len(re.findall(rf"\b{name}\b", code)) for name in generic_names)
+    # Ratios are clamped to [0, 1]. They are not bounded by construction (the
+    # single-character count is a count of *tokens*, the denominator a count of
+    # *assignments*), and an unclamped ``single_char_ratio > 1`` made the
+    # ``(1 - ratio)`` term NEGATIVE, so code full of ``i``/``x`` subtracted from
+    # the score.
+    generic_count = len(_GENERIC_NAMES_RE.findall(code))
+    var_count = len(_ASSIGNMENT_RE.findall(code))
+    generic_ratio = _clamp01(generic_count / max(var_count, 1))
 
-    # Count all variable assignments
-    var_count = len(re.findall(r"\b[a-zA-Z_]\w*\s*=", code))
-    generic_ratio = generic_count / max(var_count, 1)
-
-    # Count docstrings
-    docstring_count = len(re.findall(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', code))
     lines = code.splitlines()
-    docstring_ratio = docstring_count / max(len(lines), 1)
+    docstring_ratio = _clamp01(len(_DOCSTRING_RE.findall(code)) / max(len(lines), 1))
 
-    # Count type hints
-    type_hint_count = len(
-        re.findall(r"->\s*(?:None|bool|int|str|float|List|Dict|Optional|Union)", code)
+    func_count = len(_DEF_RE.findall(code))
+    type_hint_ratio = _clamp01(len(_TYPE_HINT_RE.findall(code)) / max(func_count, 1))
+
+    single_char_ratio = _clamp01(len(_SINGLE_CHAR_RE.findall(code)) / max(var_count, 1))
+    except_ratio = _clamp01(len(_TRY_RE.findall(code)) / max(func_count, 1))
+    list_comp_ratio = _clamp01(
+        len(_LIST_COMP_RE.findall(code)) / max(len(_FOR_LOOP_RE.findall(code)), 1)
     )
-    func_count = len(re.findall(r"^\s*def\s+\w+", code, re.MULTILINE))
-    type_hint_ratio = type_hint_count / max(func_count, 1)
-
-    # Count single-char variables
-    single_char_count = len(re.findall(r"\b[a-z]\b", code))
-    single_char_ratio = single_char_count / max(var_count, 1)
-
-    # Count exception handling
-    try_count = len(re.findall(r"^\s*try\s*:", code, re.MULTILINE))
-    except_ratio = try_count / max(func_count, 1)
-
-    # Count list comprehensions
-    list_comp_count = len(re.findall(r"\[.*for.*in.*\]", code))
-    loop_count = len(re.findall(r"^\s*for\s+\w+\s+in\s+", code, re.MULTILINE))
-    list_comp_ratio = list_comp_count / max(loop_count, 1)
 
     # Combine features with weights
     score = (
@@ -251,7 +247,7 @@ def compute_stylometry_signal(code: str) -> float:
         + type_hint_ratio * 0.20
         + (1.0 - single_char_ratio) * 0.15
         + except_ratio * 0.10
-        + min(1.0, list_comp_ratio) * 0.10
+        + list_comp_ratio * 0.10
     )
 
     return round(max(0.0, min(1.0, score)), 3)
@@ -328,9 +324,15 @@ def compute_pattern_library_signal(code: str) -> float:
     3. Normalize by code length: density = match_count / max(1, total_lines)
     4. Map to score: score = max(0.0, min(1.0, density * 5.0))
 
-    Calibration:
-    - Human code: 0–2 matches per 10 lines (score 0.0–0.4)
-    - LLM code: 3–8 matches per 10 lines (score 0.6–1.0)
+    NOTE: the factor 5.0 means the score SATURATES at one match per five lines
+    (density 0.2). The older calibration text claimed human code at "0-2
+    matches per 10 lines" scores 0.0-0.4, which would need a factor of 2.0;
+    at 5.0 that same density already scores 1.0. Several of the patterns are
+    common in ordinary human code (capitalised "# Calculate the total"
+    comments, words like ``value``/``result``), so this signal should only be
+    trusted when an independent signal corroborates it (as the orchestrator
+    does). Re-calibrate the factor against a labelled corpus before relying on
+    it alone.
 
     Args:
         code: Source code to analyze
@@ -342,7 +344,7 @@ def compute_pattern_library_signal(code: str) -> float:
     match_count = sum(len(pattern.findall(code)) for pattern in _ALL_LLM_PATTERNS)
     density = match_count / total_lines
 
-    # Map density to score: 0 matches/line → 0.0, 5+ matches/line → 1.0
+    # Map density to score: 0 matches/line → 0.0, >= 0.2 matches/line → 1.0
     score = max(0.0, min(1.0, density * 5.0))
     return round(score, 3)
 
@@ -382,8 +384,9 @@ def compute_structural_entropy_signal(code: str, language: str = "python") -> fl
 
     try:
         tree = ast.parse(code)
-    except SyntaxError:
-        # Fallback to indent-level uniformity on parse error
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        # Fallback to indent-level uniformity on parse error (ValueError: NUL
+        # bytes; RecursionError/MemoryError: pathological nesting)
         return _indent_block_uniformity(code)
 
     # Count node types
@@ -563,10 +566,9 @@ def compute_docstring_density_signal(code: str) -> float:
     Returns:
         Docstring density score in [0.0, 1.0]
     """
-    func_count = len(re.findall(r"^\s*def\s+\w+", code, re.MULTILINE))
-    # Match triple-quoted strings (both """ and ''')
-    docstring_pattern = r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\''
-    docstring_count = len(re.findall(docstring_pattern, code))
+    # ``async def`` counts as a function (it was missed, inflating the ratio).
+    func_count = len(_DEF_RE.findall(code))
+    docstring_count = len(_DOCSTRING_RE.findall(code))
 
     if func_count == 0:
         # No functions: compute relative to code length

@@ -27,9 +27,10 @@ Anti-Patterns Explicitly Forbidden:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from src.backend.engines.detection._text import score as _unit
 from src.backend.engines.detection.policy_engine import PolicyEngine
 
 
@@ -78,11 +79,11 @@ class EvidenceModel:
             ),
             "semantic": cls(
                 semantic_meaning="Meaning-level code similarity",
-                valid_range=(0.0, 0.95),
+                valid_range=(0.0, 0.90),
                 reliability_constraints=[
                     "NEVER standalone verdict source",
                     "Requires L1 or L2 corroboration",
-                    "Embedding capped at 0.90 to prevent false positives",
+                    "Baseline-corrected, then capped at 0.90 to prevent false positives",
                 ],
             ),
             "behavioral": cls(
@@ -112,6 +113,10 @@ class FEDSDecision:
     layer_values: dict[str, float]  # L1, L2, L3 values
     thresholds_used: dict[str, float]  # Actual thresholds applied
     audit_record: dict[str, Any] = field(default_factory=dict)  # Full audit trail
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-compatible form (the audit record's evidence snapshot is included as is)."""
+        return asdict(self)
 
 
 class FEDS:
@@ -143,7 +148,7 @@ class FEDS:
         Evaluate evidence and produce a deterministic verdict.
 
         Args:
-            layer1_value: Deterministic layer score (0.0-1.0)
+            layer1_value: Deterministic layer score (0.0-1.0; NaN/None count as 0)
             layer2_value: Statistical layer score (0.0-1.0)
             layer3_value: Semantic layer score (0.0-0.95)
             evidence: Detailed evidence breakdown by layer
@@ -152,6 +157,11 @@ class FEDS:
         Returns:
             FEDSDecision with verdict and audit trail
         """
+        layer1_value, layer2_value, layer3_value = (
+            _unit(layer1_value),
+            _unit(layer2_value),
+            _unit(layer3_value),
+        )
         # Get policy decision
         policy_decision = self.policy_engine.evaluate(
             layer1_value, layer2_value, layer3_value, evidence, audit_info
@@ -171,7 +181,7 @@ class FEDS:
                 "layer2": round(layer2_value, 4),
                 "layer3": round(layer3_value, 4),
             },
-            thresholds_used={},  # Thresholds now in policy.yaml
+            thresholds_used=self.policy_engine.rule_thresholds(),  # every numeric threshold in policy.yaml
             audit_record=audit_record,
         )
 
@@ -179,20 +189,27 @@ class FEDS:
 # ═══════════════════════════════════════════════════════════════════════════
 # EXAMPLE DECISION CASES
 # ═══════════════════════════════════════════════════════════════════════════
-
+# The examples used to carry only layer values. Most rules key on ENGINE evidence (exact_match,
+# logic_flow, ...), so with those inputs the engine returned CLEAN for every case and the
+# documented "expected" verdicts were fiction. Each case now includes the evidence that triggers
+# its rule, and run_example_cases() checks them against the real engine.
 EXAMPLE_CASES = [
     {
         "name": "Identical Files",
         "description": "Two files with exact same content",
         "input": {"l1": 1.0, "l2": 0.95, "l3": 0.90},
+        "evidence": {
+            "layer1": {"has_exact_file_match": True, "engine_scores": {"ast": 1.0}}
+        },
         "expected_verdict": "TRUE",
         "rule_triggered": "identity_override",
-        "explanation": "Token sequence match indicates identical files. No semantic analysis needed.",
+        "explanation": "The files are identical. No semantic analysis needed.",
     },
     {
         "name": "Heavily Plagiarized",
-        "description": "Files with structural and statistical similarity",
-        "input": {"l1": 0.88, "l2": 0.90, "l3": 0.85},
+        "description": "Files with near-identical control/logic flow",
+        "input": {"l1": 0.88, "l2": 0.97, "l3": 0.85},
+        "evidence": {"layer2": {"engine_scores": {"logic_flow": 0.97}}},
         "expected_verdict": "TRUE",
         "rule_triggered": "structural_dominance",
         "explanation": "Strong structural equivalence detected.",
@@ -201,24 +218,62 @@ EXAMPLE_CASES = [
         "name": "Semantic-Only Similarity",
         "description": "Files with high semantic similarity but different structure",
         "input": {"l1": 0.30, "l2": 0.25, "l3": 0.92},
-        "expected_verdict": "FLAG",
-        "rule_triggered": "semantic_only_warning",
-        "explanation": "High embedding similarity alone — review required. Semantic similarity may be coincidental.",
+        "evidence": {
+            "layer3": {
+                "engine_scores": {"embedding": 0.99, "embedding_corrected": 0.92}
+            }
+        },
+        # Semantic evidence is declared "NEVER standalone verdict source", and the
+        # policy enforces it: a high embedding score with no structural match
+        # corroborates nothing and must not raise a verdict on its own. This case
+        # used to expect FLAG, which contradicted that constraint.
+        "expected_verdict": "CLEAN",
+        "rule_triggered": "no_structural_support",
+        "explanation": (
+            "High embedding similarity alone is not evidence of copying - embedding "
+            "models score unrelated files highly too. With no structural or lexical "
+            "match to corroborate it, there is nothing to review."
+        ),
     },
     {
         "name": "Borderline Case",
         "description": "Files with moderate signals across layers",
         "input": {"l1": 0.55, "l2": 0.45, "l3": 0.35},
+        "evidence": {"layer1": {"engine_scores": {"token": 0.55}}},
         "expected_verdict": "REVIEW",
         "rule_triggered": "review_zone",
-        "explanation": "Borderline signals detected — too weak for automated action, too strong to ignore.",
+        "explanation": "Borderline signals - too weak for automated action, too strong to ignore.",
     },
     {
         "name": "Clean Files",
         "description": "Two unrelated files with no significant similarity",
         "input": {"l1": 0.10, "l2": 0.15, "l3": 0.20},
+        "evidence": {},
         "expected_verdict": "CLEAN",
         "rule_triggered": "fallback",
-        "explanation": "All layers below minimum thresholds — no evidence of plagiarism.",
+        "explanation": "All layers below minimum thresholds - no evidence of plagiarism.",
     },
 ]
+
+
+def run_example_cases(feds: FEDS | None = None) -> list[dict[str, Any]]:
+    """Evaluate every example against the real policy and report whether it behaves as documented."""
+    feds = feds or FEDS()
+    report = []
+    for case in EXAMPLE_CASES:
+        decision = feds.evaluate(
+            case["input"]["l1"],
+            case["input"]["l2"],
+            case["input"]["l3"],
+            case["evidence"],
+        )
+        report.append(
+            {
+                "name": case["name"],
+                "ok": decision.verdict == case["expected_verdict"]
+                and decision.decision_path == [case["rule_triggered"]],
+                "verdict": decision.verdict,
+                "rule": decision.decision_path,
+            }
+        )
+    return report

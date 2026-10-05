@@ -45,7 +45,14 @@ class TestMaterialiseFolder:
         """Files land under <out>/data/{ai,human} with an index."""
         out = tmp_path / "out"
         counts = builder.materialise(sample_folder, out)
-        assert counts == {"ai": 1, "human": 1, "skipped": 0}
+        assert counts == {
+            "ai": 1,
+            "human": 1,
+            "skipped": 0,
+            "duplicates": 0,
+            "conflicts": 0,
+            "ungrouped": 0,
+        }
         assert (out / "data" / "ai").is_dir()
         assert (out / "data" / "human").is_dir()
         assert (out / "data" / "samples.jsonl").exists()
@@ -147,11 +154,15 @@ class TestMaterialiseRecords:
             writer.writerow(["code", "label"])
             writer.writerow([HUMAN_CODE, "maybe"])
             writer.writerow([AI_CODE, 1])
+            # A second human row so the materialised set still has both classes:
+            # the builder refuses to emit a one-class dataset, and this test is
+            # about the bad row being dropped, not about that guard.
+            writer.writerow([HUMAN_CODE + "\n\n# another\n", 0])
         out = tmp_path / "out"
         builder.materialise(path, out)
         meta = _read_meta(out)
-        assert len(meta) == 1
-        assert meta[0]["label"] == 1
+        assert {entry["label"] for entry in meta} == {0, 1}
+        assert len(meta) == 2
 
     def test_dedupe_by_code(self, tmp_path: Path) -> None:
         """Duplicate code is materialised once."""
@@ -163,9 +174,10 @@ class TestMaterialiseRecords:
             writer.writerow(["code", "label"])
             writer.writerow([HUMAN_CODE, 0])
             writer.writerow([HUMAN_CODE, 0])
+            writer.writerow([AI_CODE, 1])
         out = tmp_path / "out"
         builder.materialise(path, out)
-        assert len(_read_meta(out)) == 1
+        assert len(_read_meta(out)) == 2
 
     def test_missing_input_raises(self, tmp_path: Path) -> None:
         """A non-existent input path raises a clear error."""
@@ -205,7 +217,10 @@ class TestBenchmarkDatasetDir:
         codes, labels, problems, llms = bench.load_dataset()
         assert len(codes) == 2
         assert set(labels) == {0, 1}
-        assert all(llm == "STUDENT" for llm in llms)
+        # An AI-labelled row that names no generator is "UNKNOWN_AI", not
+        # "STUDENT": the old default claimed a human wrote code that was labelled
+        # machine-generated, which poisons any per-generator breakdown.
+        assert dict(zip(labels, llms)) == {0: "STUDENT", 1: "UNKNOWN_AI"}
 
 
 class TestFolderIndexRoundTrip:
@@ -258,6 +273,10 @@ class TestFolderIndexRoundTrip:
         folder = tmp_path / "dataset_data"
         (folder / "ai").mkdir(parents=True)
         (folder / "ai" / "gen_a.py").write_text(AI_CODE, encoding="utf-8")
+        # A human/ file too: the builder refuses a one-class dataset, and this
+        # test is about the folder winning over a contradictory index label.
+        (folder / "human").mkdir(parents=True)
+        (folder / "human" / "stud_b.py").write_text(HUMAN_CODE, encoding="utf-8")
         (folder / "samples.jsonl").write_text(
             json.dumps({"file": "gen_a.py", "label": 0, "problem_id": "p1"}) + "\n",
             encoding="utf-8",
@@ -266,8 +285,13 @@ class TestFolderIndexRoundTrip:
         out = tmp_path / "out"
         builder.materialise(folder, out)
         meta = _read_meta(out)
-        assert len(meta) == 1
-        assert meta[0]["label"] == 1
+        assert len(meta) == 2
+        # gen_a.py lives in ai/, so it is labelled 1 despite the index saying 0.
+        # (Files are renamed to <problem_id>__... on materialise, so match on the
+        # label count rather than the name: if the index had won, there would be
+        # no label-0 row at all.)
+        assert {entry["label"] for entry in meta} == {0, 1}
+        assert sum(1 for entry in meta if entry["label"] == 1) == 1
 
     def test_reingestion_preserves_grouping(self, tmp_path: Path) -> None:
         """materialise(output) keeps every (problem, label, llm, submission) key."""

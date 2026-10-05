@@ -34,6 +34,8 @@ DEFAULT_FEATURE_NAMES: Tuple[str, ...] = (
 
 def _sigmoid(value: float) -> float:
     """Logistic sigmoid clipped for numeric stability."""
+    if value != value:  # NaN
+        return 0.5
     clipped = max(-30.0, min(30.0, value))
     return 1.0 / (1.0 + math.exp(-clipped))
 
@@ -94,9 +96,18 @@ class LearnedFusionScorer:
                     "unsupported artifact version "
                     f"{payload.get('version')} != {ARTIFACT_VERSION}"
                 )
-            self._feature_names = [str(name) for name in features]
-            self._coefficients = [float(value) for value in coefficients]
-            self._intercept = float(intercept)
+            names = [str(name) for name in features]
+            if len(set(names)) != len(names):
+                raise ValueError("artifact feature_names contains duplicates")
+            values = [float(value) for value in coefficients]
+            bias = float(intercept)
+            # JSON written by Python may contain NaN/Infinity. ``_sigmoid`` clamps its input with
+            # ``min(30, nan)``, which is 30, so one NaN coefficient made EVERY pair score 1.0.
+            if not all(math.isfinite(v) and abs(v) <= 1e4 for v in [*values, bias]):
+                raise ValueError("artifact contains non-finite or implausibly large coefficients")
+            self._feature_names = names
+            self._coefficients = values
+            self._intercept = bias
             self._metadata = payload.get("metadata", {})
             self._available = True
             logger.info(
@@ -124,7 +135,18 @@ class LearnedFusionScorer:
         linear = self._intercept
         for name, coefficient in zip(self._feature_names, self._coefficients):
             value = features.get(name)
-            if value is None:
-                value = 0.0
-            linear += coefficient * float(value)
+            try:
+                number = float(value) if value is not None else 0.0
+            except (TypeError, ValueError):
+                number = 0.0
+            if not math.isfinite(number):
+                number = 0.0  # a NaN feature must not become a NaN (then 1.0) probability
+            linear += coefficient * max(0.0, min(1.0, number))  # features are unit-scale scores
         return _sigmoid(linear)
+
+    def try_score(self, features: Dict[str, float]) -> Optional[float]:
+        """Like :meth:`score`, but ``None`` when no model is loaded.
+
+        ``score`` returns 0.0 when unavailable, which a caller that forgets to check
+        ``available`` reads as "no plagiarism"."""
+        return self.score(features) if self._available else None

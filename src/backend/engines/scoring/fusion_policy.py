@@ -8,6 +8,7 @@ must be auditable against benchmark validation results.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -44,9 +45,14 @@ class ScoreNormalizationRule:
             raw = float(value)
         except (TypeError, ValueError):
             raw = 0.0
+        if not math.isfinite(raw):
+            # NaN used to clamp to 1.0 (``min(1.0, nan)``), i.e. "identical". Unknown is 0.
+            return 0.0
 
         if self.method == "percent":
-            scaled = raw / 100.0 if raw > 1.0 else raw
+            # A percent engine reports 0-100. The old ``raw / 100 if raw > 1 else raw`` read a
+            # MOSS/JPlag score of 1 (meaning 1%) as 100%, and 0.8 (0.8%) as 80%.
+            scaled = raw / 100.0
         elif self.method == "min_max":
             span = max(self.maximum - self.minimum, 1e-9)
             scaled = (raw - self.minimum) / span
@@ -312,7 +318,10 @@ def evaluate_weight_change_governance(
 ) -> WeightGovernanceResult:
     """Check whether default engine-weight changes have validation evidence."""
     evidence = evidence or {}
-    changed_engines = _changed_weight_keys(current_weights, proposed_weights)
+    # Compare NORMALISED weights: {a: 2, b: 2} and {a: .5, b: .5} are the same configuration.
+    changed_engines = _changed_weight_keys(
+        _sum_normalized(current_weights), _sum_normalized(proposed_weights)
+    )
 
     if not changed_engines:
         return WeightGovernanceResult(
@@ -351,6 +360,19 @@ def evaluate_weight_change_governance(
         changed_engines=changed_engines,
         warnings=warnings,
     )
+
+
+def _sum_normalized(weights: dict[str, float]) -> dict[str, float]:
+    """Weights scaled to sum to 1 (non-finite and negative values count as 0)."""
+    clean = {}
+    for key, value in weights.items():
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = 0.0
+        clean[key] = number if math.isfinite(number) and number > 0 else 0.0
+    total = sum(clean.values())
+    return {key: value / total for key, value in clean.items()} if total > 0 else clean
 
 
 def _changed_weight_keys(

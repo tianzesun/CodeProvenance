@@ -6,7 +6,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+#: YYYY-MM with a real month. ``\d{2}`` accepted "2026-00" and "2026-99".
+PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
 class UsageBase(BaseModel):
@@ -25,23 +28,27 @@ class UsageBase(BaseModel):
 
 class UsageCreate(UsageBase):
     tenant_id: uuid.UUID
-    period: str = Field(..., regex=r"^\d{4}-\d{2}$")  # YYYY-MM format
+    # ``regex=`` was removed in Pydantic v2 and raises PydanticUserError when the
+    # class is defined, so importing this module failed outright.
+    period: str = Field(..., pattern=PERIOD_PATTERN)  # YYYY-MM format
 
 
 class UsageResponse(UsageBase):
+    # Also needed for UsageSummary(usage=<ORM row>): a nested model only accepts
+    # an arbitrary object when its own config enables from_attributes.
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     tenant_id: uuid.UUID
     period: str
     created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        orm_mode = True
+    updated_at: datetime | None = None
 
 
 class UsageSummary(BaseModel):
     tenant_id: uuid.UUID
     current_period: str
     usage: UsageResponse
-    limits: dict[str, Any]
-    remaining: dict[str, Any]
+    # Metric name -> number (the tier table and remaining quota are numeric).
+    limits: dict[str, int | float]
+    remaining: dict[str, int | float]

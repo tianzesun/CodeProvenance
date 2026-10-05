@@ -11,119 +11,56 @@ Implements comprehensive Abstract Syntax Tree analysis with:
 """
 
 import hashlib
-import re
+import logging
 from collections import Counter, defaultdict
+from functools import lru_cache
 from typing import Any
 
-from src.backend.utils.hash_utils import fast_hash64
+# ``Finding`` and ``EvidenceBlock`` were re-declared here as look-alike classes. Every
+# other engine returns the domain models, so ``isinstance`` checks and ``to_dict()``
+# consumers saw two different ``Finding`` types depending on the engine. The domain
+# classes are used (and still importable from this module under the same names).
+from src.backend.domain.models import EvidenceBlock, Finding
 
+from . import _tree_utils as tu
 from .base_similarity import BaseSimilarityAlgorithm
+from .code_scan import scan
+
+logger = logging.getLogger(__name__)
+
+#: Relative weights of the score components in ``ASTSimilarity.compare``. They are
+#: NORMALISED before use. The constants that were inlined summed to 1.25 (0.60 + 0.10
+#: + 0.10 + 0.10 + 0.05 + 0.05 + 0.25), so any pair whose components averaged 0.8
+#: scored a perfect 1.0, and ``self.weights`` (which did sum to ~1) was never read.
+SCORE_WEIGHTS: dict[str, float] = {
+    "winnowing": 0.60,
+    "jplag": 0.10,
+    "ted": 0.10,
+    "pdg": 0.10,
+    "pattern": 0.05,
+    "complexity": 0.05,
+    "control_abstraction": 0.25,
+}
+
+#: Pairs of dependency edges are built over at most this many variables.
+_MAX_DFG_VARIABLES = 200
 
 
-class Finding:
-    """Simple finding result for AST comparison."""
-
-    def __init__(
-        self,
-        engine: str = "",
-        score: float = 0.0,
-        confidence: float = 0.0,
-        evidence: list | None = None,
-        evidence_blocks: list | None = None,
-        methodology: str = "",
-        details: str = "",
-    ):
-        self.engine = engine
-        self.score = score
-        self.confidence = confidence
-        self.evidence = evidence or []
-        self.evidence_blocks = evidence_blocks or []
-        self.methodology = methodology
-        self.details = details
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "engine": self.engine,
-            "score": self.score,
-            "confidence": self.confidence,
-            "evidence_blocks": [block.to_dict() for block in self.evidence_blocks],
-            "methodology": self.methodology,
-            "details": self.details,
-        }
-
-    def _other_score(self, other: Any) -> float | None:
-        if isinstance(other, Finding):
-            return other.score
-        if isinstance(other, (int, float)):
-            return float(other)
-        return None
-
-    def __float__(self) -> float:
-        return self.score
-
-    def __eq__(self, other: object) -> bool:
-        other_score = self._other_score(other)
-        if other_score is None:
-            return NotImplemented
-        return self.score == other_score
-
-    def __lt__(self, other: Any) -> bool:
-        other_score = self._other_score(other)
-        if other_score is None:
-            return NotImplemented
-        return self.score < other_score
-
-    def __le__(self, other: Any) -> bool:
-        other_score = self._other_score(other)
-        if other_score is None:
-            return NotImplemented
-        return self.score <= other_score
-
-    def __gt__(self, other: Any) -> bool:
-        other_score = self._other_score(other)
-        if other_score is None:
-            return NotImplemented
-        return self.score > other_score
-
-    def __ge__(self, other: Any) -> bool:
-        other_score = self._other_score(other)
-        if other_score is None:
-            return NotImplemented
-        return self.score >= other_score
-
-
-class EvidenceBlock:
-    """Evidence block for AST finding."""
-
-    def __init__(
-        self,
-        engine: str = "",
-        score: float = 0.0,
-        confidence: float = 0.0,
-        a_snippet: str = "",
-        b_snippet: str = "",
-        transformation_notes: list | None = None,
-    ):
-        self.engine = engine
-        self.score = score
-        self.confidence = confidence
-        self.a_snippet = a_snippet
-        self.b_snippet = b_snippet
-        self.transformation_notes = transformation_notes or []
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "engine": self.engine,
-            "score": self.score,
-            "confidence": self.confidence,
-            "a_snippet": self.a_snippet,
-            "b_snippet": self.b_snippet,
-            "transformation_notes": self.transformation_notes,
-        }
+_SKIP_KEYWORDS = frozenset(
+    "if else elif for while switch case default do return def class import from try except "
+    "finally with as yield lambda pass break continue raise assert del global nonlocal in not "
+    "and or is True False None self cls range len print list dict set str int float bool object "
+    "type enumerate zip map filter all any sum min max sorted".split()
+)
+_IDENTIFIER_NODES = frozenset({"IDENTIFIER", "VARIABLE", "FUNCTION_NAME", "CLASS_NAME", "PARAMETER"})
 
 
 class ASTNode:
-    """Represents a node in an Abstract Syntax Tree."""
+    """Represents a node in an Abstract Syntax Tree.
+
+    All traversals are iterative (see ``_tree_utils``): the token-built trees nest one
+    level per keyword, so recursion overflowed on files of a few hundred statements.
+    """
 
     def __init__(
         self,
@@ -149,137 +86,49 @@ class ASTNode:
         return f"ASTNode({self.node_type}, {self.value!r})"
 
     def to_tuple(self) -> tuple:
-        """Convert node to tuple for hashing."""
-        return (
-            self.node_type,
-            self.value,
-            tuple(child.to_tuple() for child in self.children),
-        )
+        """Convert node to a nested tuple for hashing (built iteratively)."""
+        built: dict[int, tuple] = {}
+        for node in tu.postorder(self):
+            built[id(node)] = (
+                node.node_type,
+                node.value,
+                tuple(built[id(c)] for c in node.children),
+            )
+        return built[id(self)]
 
     def subtree_size(self) -> int:
         """Count total nodes in subtree."""
-        return 1 + sum(child.subtree_size() for child in self.children)
+        return len(tu.preorder(self))
 
     def depth(self) -> int:
         """Calculate depth of this node from root."""
-        if self.parent is None:
-            return 0
-        return 1 + self.parent.depth()
+        depth, node = 0, self
+        while node.parent is not None:
+            depth += 1
+            node = node.parent
+        return depth
 
     def normalize_variable_names(self):
         """
         Thoroughly normalize identifier names for renaming resistance.
         Handles variables, functions, arguments, and class names.
         """
-        var_counter = [0]
         var_map: dict[str, str] = {}
-
-        # Comprehensive keywords to skip
-        skip_keywords = {
-            "if",
-            "else",
-            "elif",
-            "for",
-            "while",
-            "switch",
-            "case",
-            "default",
-            "do",
-            "return",
-            "def",
-            "class",
-            "import",
-            "from",
-            "try",
-            "except",
-            "finally",
-            "with",
-            "as",
-            "yield",
-            "lambda",
-            "pass",
-            "break",
-            "continue",
-            "raise",
-            "assert",
-            "del",
-            "global",
-            "nonlocal",
-            "in",
-            "not",
-            "and",
-            "or",
-            "is",
-            "True",
-            "False",
-            "None",
-            "self",
-            "cls",
-            "range",
-            "len",
-            "print",
-            "list",
-            "dict",
-            "set",
-            "str",
-            "int",
-            "float",
-            "bool",
-            "object",
-            "type",
-            "enumerate",
-            "zip",
-            "map",
-            "filter",
-            "all",
-            "any",
-            "sum",
-            "min",
-            "max",
-            "sorted",
-        }
-
-        # Node types that represent user-defined identifiers
-        identifier_nodes = {
-            "IDENTIFIER",
-            "VARIABLE",
-            "FUNCTION_NAME",
-            "CLASS_NAME",
-            "PARAMETER",
-        }
-
-        def _normalize(node: "ASTNode"):
-            if (
-                node.node_type in identifier_nodes
-                and node.value
-                and node.value not in skip_keywords
-            ):
+        for node in tu.preorder(self):
+            if node.node_type in _IDENTIFIER_NODES and node.value and node.value not in _SKIP_KEYWORDS:
                 if node.value not in var_map:
-                    var_map[node.value] = f"var_{var_counter[0]}"
-                    var_counter[0] += 1
+                    var_map[node.value] = f"var_{len(var_map)}"
                 node.value = var_map[node.value]
-            for child in node.children:
-                _normalize(child)
-
-        _normalize(self)
 
     def normalize_control_flow_constructs(self):
         """Normalize equivalent control-flow constructs before structural matching."""
-        loop_node_types = {
-            "ForStatement",
-            "WhileStatement",
-            "DoWhileStatement",
-            "ForEachStatement",
-        }
-        decision_node_types = {
-            "IfStatement",
-            "SwitchStatement",
-        }
+        loop_node_types = {"ForStatement", "WhileStatement", "DoWhileStatement", "ForEachStatement"}
+        decision_node_types = {"IfStatement", "SwitchStatement"}
         loop_values = {"for", "while", "do"}
         decision_values = {"if", "switch"}
         branch_values = {"else", "elif", "case", "default"}
 
-        def _normalize(node: "ASTNode"):
+        for node in tu.preorder(self):
             if node.node_type in loop_node_types:
                 node.node_type = "IterativeBlock"
             elif node.node_type in decision_node_types:
@@ -290,27 +139,28 @@ class ASTNode:
                 node.value = "DECISION_BLOCK"
             elif node.value in branch_values:
                 node.value = "BRANCH_BLOCK"
-            for child in node.children:
-                _normalize(child)
-
-        _normalize(self)
 
     def get_subtrees(self, min_size: int = 1) -> list["ASTNode"]:
-        """Get all subtrees with minimum size."""
-        subtrees: list[ASTNode] = []
-
-        def _collect(node: "ASTNode"):
-            if node.subtree_size() >= min_size:
-                subtrees.append(node)
-            for child in node.children:
-                _collect(child)
-
-        _collect(self)
-        return subtrees
+        """Get all subtrees with minimum size (sizes computed once, not per node)."""
+        sizes = tu.subtree_sizes(self)
+        return [n for n in tu.preorder(self) if sizes[id(n)] >= min_size]
 
     def hash_subtree(self) -> str:
         """Generate hash of subtree for quick comparison."""
-        return hashlib.sha256(repr(self.to_tuple()).encode()).hexdigest()
+        return _subtree_hex_hashes(self)[id(self)]
+
+
+def _subtree_hex_hashes(root: ASTNode) -> dict[int, str]:
+    """``id(node) -> SHA-256 hex`` of every node's subtree in ONE bottom-up pass.
+
+    ``hash_subtree`` used to ``repr`` the whole nested tuple per node: quadratic, and
+    ``repr`` of a deep tuple raises RecursionError.
+    """
+    out: dict[int, str] = {}
+    for node in tu.postorder(root):
+        payload = f"{node.node_type}|{node.value}|" + ",".join(out[id(c)] for c in node.children)
+        out[id(node)] = hashlib.sha256(payload.encode()).hexdigest()
+    return out
 
 
 class JPlagNormalizer:
@@ -323,76 +173,8 @@ class JPlagNormalizer:
     def __init__(self):
         self.var_counter = 0
         self.var_map: dict[str, str] = {}
-        self.skip_keywords = {
-            "if",
-            "else",
-            "elif",
-            "for",
-            "while",
-            "switch",
-            "case",
-            "default",
-            "do",
-            "return",
-            "def",
-            "class",
-            "import",
-            "from",
-            "try",
-            "except",
-            "finally",
-            "with",
-            "as",
-            "yield",
-            "lambda",
-            "pass",
-            "break",
-            "continue",
-            "raise",
-            "assert",
-            "del",
-            "global",
-            "nonlocal",
-            "in",
-            "not",
-            "and",
-            "or",
-            "is",
-            "True",
-            "False",
-            "None",
-            "self",
-            "cls",
-            "range",
-            "len",
-            "print",
-            "list",
-            "dict",
-            "set",
-            "str",
-            "int",
-            "float",
-            "bool",
-            "object",
-            "type",
-            "enumerate",
-            "zip",
-            "map",
-            "filter",
-            "all",
-            "any",
-            "sum",
-            "min",
-            "max",
-            "sorted",
-        }
-        self.identifier_nodes = {
-            "IDENTIFIER",
-            "VARIABLE",
-            "FUNCTION_NAME",
-            "CLASS_NAME",
-            "PARAMETER",
-        }
+        self.skip_keywords = set(_SKIP_KEYWORDS)
+        self.identifier_nodes = set(_IDENTIFIER_NODES)
 
     def normalize(self, node: ASTNode) -> None:
         """Normalize identifiers in the entire subtree in-place."""
@@ -401,17 +183,16 @@ class JPlagNormalizer:
         self._traverse(node)
 
     def _traverse(self, node: ASTNode) -> None:
-        if (
-            node.node_type in self.identifier_nodes
-            and node.value
-            and node.value not in self.skip_keywords
-        ):
-            if node.value not in self.var_map:
-                self.var_map[node.value] = f"v{self.var_counter}"
-                self.var_counter += 1
-            node.value = self.var_map[node.value]
-        for child in node.children:
-            self._traverse(child)
+        for current in tu.preorder(node):
+            if (
+                current.node_type in self.identifier_nodes
+                and current.value
+                and current.value not in self.skip_keywords
+            ):
+                if current.value not in self.var_map:
+                    self.var_map[current.value] = f"v{self.var_counter}"
+                    self.var_counter += 1
+                current.value = self.var_map[current.value]
 
 
 class JPlagSubtreeHasher:
@@ -436,32 +217,21 @@ class JPlagSubtreeHasher:
         self._postorder(root)
         return list(self.hashes)
 
-    def _postorder(self, node: ASTNode) -> tuple[int, int]:
-        """Post-order traversal for bottom-up hash calculation."""
-        child_hashes = []
-        total_size = 1
+    def _postorder(self, root: ASTNode) -> tuple[int, int]:
+        """Bottom-up hash calculation (iterative)."""
+        for node in tu.postorder(root):
+            child_hashes = [self.hash_cache[c] for c in node.children]
+            total_size = 1 + sum(self.size_cache[c] for c in node.children)
 
-        for child in node.children:
-            ch, sz = self._postorder(child)
-            child_hashes.append(ch)
-            total_size += sz
+            # Node hash combines type and SORTED child hashes (order invariant)
+            hash_input = f"{node.node_type}|{node.value}|{sorted(child_hashes)}".encode()
+            node_hash = tu.hash64(hash_input)
 
-        # Compute node hash combining type and sorted child hashes (order invariant)
-        sorted_child_hashes = sorted(child_hashes)
-        hash_input = f"{node.node_type}|{node.value}|{sorted_child_hashes}".encode()
-        try:
-            node_hash = fast_hash64(hash_input)
-        except Exception:
-            node_hash = hash(hash_input) & ((1 << 64) - 1)
-
-        self.hash_cache[node] = node_hash
-        self.size_cache[node] = total_size
-
-        # Collect hash if within size bounds
-        if self.min_subtree_size <= total_size <= self.max_subtree_size:
-            self.hashes.append(node_hash)
-
-        return node_hash, total_size
+            self.hash_cache[node] = node_hash
+            self.size_cache[node] = total_size
+            if self.min_subtree_size <= total_size <= self.max_subtree_size:
+                self.hashes.append(node_hash)
+        return self.hash_cache[root], self.size_cache[root]
 
 
 def multiset_jaccard_similarity(hashes_a: list[int], hashes_b: list[int]) -> float:
@@ -494,36 +264,22 @@ def multiset_jaccard_similarity(hashes_a: list[int], hashes_b: list[int]) -> flo
 
 def collect_hash_sequence(root: ASTNode, min_size: int = 3) -> list[int]:
     """
-    Collect ordered sequence of subtree hashes using pre-order traversal.
-    Preserves structural ordering while only including subtrees of minimum size.
+    Collect the sequence of subtree hashes (children before parents) for subtrees of at
+    least ``min_size`` nodes. Order-sensitive: the hash of a node covers its ordered
+    child hashes.
 
     Returns:
-        Ordered list of xxh3 64-bit integer hashes for valid subtrees
+        Ordered list of 64-bit integer hashes for valid subtrees
     """
-    hashes = []
-    size_cache = {}
-
-    def _preorder(node: ASTNode) -> int:
-        size = 1
-        child_hashes = []
-
-        for child in node.children:
-            child_size = _preorder(child)
-            size += child_size
-            child_hashes.append(size_cache[child][0])
-
-        # Compute node hash with type and ordered child hashes (order sensitive)
-        hash_input = f"{node.node_type}|{node.value}|{child_hashes}".encode()
-        node_hash = fast_hash64(hash_input)
-
-        size_cache[node] = (node_hash, size)
-
+    hashes: list[int] = []
+    cache: dict[int, tuple[int, int]] = {}
+    for node in tu.postorder(root):
+        child_hashes = [cache[id(c)][0] for c in node.children]
+        size = 1 + sum(cache[id(c)][1] for c in node.children)
+        node_hash = tu.hash64(f"{node.node_type}|{node.value}|{child_hashes}".encode())
+        cache[id(node)] = (node_hash, size)
         if size >= min_size:
             hashes.append(node_hash)
-
-        return size
-
-    _preorder(root)
     return hashes
 
 
@@ -725,44 +481,20 @@ class TreeEditDistance:
 
     def _compute_node_weights(self, root: ASTNode) -> dict[ASTNode, float]:
         """Compute identity weights for each node based on depth and context."""
-        weights = {}
-        function_stack = []
-
-        def _traverse(node: ASTNode, depth: int = 0):
-            # Track function entry/exit for depth context
-            if node.node_type in ["FunctionDeclaration", "def", "function"]:
-                function_stack.append(node)
-
-            # Base weight increases with depth
+        weights: dict[ASTNode, float] = {}
+        function_types = {"FunctionDeclaration", "def", "function"}
+        control_types = {
+            "IfStatement", "ForStatement", "WhileStatement", "TryStatement",
+            "ReturnStatement", "if", "for", "while",
+        }  # fmt: skip
+        for node, depth in tu.with_depths(root):
             depth_weight = 1.0 + (depth * 0.15)
-
-            # Function declarations have strict identity requirements
-            if node.node_type in ["FunctionDeclaration", "def", "function"]:
-                node_weight = 3.0 * depth_weight
-            # Control flow nodes have higher weight
-            elif node.node_type in [
-                "IfStatement",
-                "ForStatement",
-                "WhileStatement",
-                "TryStatement",
-                "ReturnStatement",
-                "if",
-                "for",
-                "while",
-            ]:
-                node_weight = 2.0 * depth_weight
+            if node.node_type in function_types:
+                weights[node] = 3.0 * depth_weight  # strict identity requirements
+            elif node.node_type in control_types:
+                weights[node] = 2.0 * depth_weight
             else:
-                node_weight = 1.0 * depth_weight
-
-            weights[node] = node_weight
-
-            for child in node.children:
-                _traverse(child, depth + 1)
-
-            if node.node_type in ["FunctionDeclaration", "def", "function"]:
-                function_stack.pop()
-
-        _traverse(root)
+                weights[node] = 1.0 * depth_weight
         return weights
 
     def _identity_aware_ted(
@@ -783,8 +515,13 @@ class TreeEditDistance:
         deletion_cost = 0.0
         insertion_cost = 0.0
 
-        tuples_a = [node.to_tuple() for node in forest_a]
-        tuples_b = [node.to_tuple() for node in forest_b]
+        # One bottom-up hash per node (the forest is in post-order, so its last node
+        # is the root). ``to_tuple()`` per node was quadratic in the tree size.
+        label = lambda n: f"{n.node_type}|{n.value}"  # noqa: E731
+        hashes_a = tu.subtree_hashes(forest_a[-1], label)
+        hashes_b = tu.subtree_hashes(forest_b[-1], label)
+        tuples_a = [hashes_a[id(node)] for node in forest_a]
+        tuples_b = [hashes_b[id(node)] for node in forest_b]
 
         set_a = set(tuples_a)
         set_b = set(tuples_b)
@@ -838,15 +575,7 @@ class TreeEditDistance:
 
     def _postorder_linearize(self, node: ASTNode) -> list[ASTNode]:
         """Linearize tree using post-order traversal."""
-        result: list[ASTNode] = []
-
-        def _postorder(n: ASTNode):
-            for child in n.children:
-                _postorder(child)
-            result.append(n)
-
-        _postorder(node)
-        return result
+        return tu.postorder(node)
 
 
 class ProgramDependencyGraph:
@@ -870,6 +599,10 @@ class ProgramDependencyGraph:
         combined = f"cfg:{cfg_sig};dfg:{dfg_sig}"
         return hashlib.sha256(combined.encode()).hexdigest()
 
+    def has_data(self) -> bool:
+        """True when at least one graph has an edge/dependency to compare."""
+        return bool(self.cfg.edges or self.dfg.dependencies)
+
     def compare(self, other: "ProgramDependencyGraph") -> float:
         """Compare two PDGs for structural similarity."""
         # Weighted average of CFG and DFG similarity
@@ -885,6 +618,39 @@ class ProgramDependencyGraph:
         common = len(set_a.intersection(set_b))
         total = len(set_a.union(set_b))
         return common / total if total > 0 else 0.0
+
+
+def tokenize_raw_for_ast(source: str, language: str | None = None) -> list[dict[str, str]]:
+    """Build coarse AST tokens from raw source when a parser is unavailable.
+
+    Uses the comment/string-aware scanner: stripping ``//`` before strings both
+    destroyed Python floor division and cut lines at any ``//`` or ``#`` inside a
+    string, and string contents were tokenised as code.
+    """
+    class_keywords = {"class", "interface", "enum", "struct"}
+    function_keywords = {"def", "func", "function"}
+    control_keywords = {
+        "if", "else", "for", "while", "switch", "case", "return", "break", "continue",
+        "try", "catch", "finally", "throw", "do", "elif", "except",
+    }  # fmt: skip
+    tokens: list[dict[str, str]] = []
+    for kind, token in scan(source, language):
+        if kind == "ident":
+            if token in class_keywords:
+                token_type = "CLASS"
+            elif token in function_keywords:
+                token_type = "FUNCTION"
+            elif token in control_keywords:
+                token_type = "KEYWORD"
+            else:
+                token_type = "IDENTIFIER"
+        elif kind in ("number", "string"):
+            token_type = "LITERAL"
+            token = "STR" if kind == "string" else token
+        else:
+            token_type = "OPERATOR"
+        tokens.append({"type": token_type, "value": token})
+    return tokens
 
 
 class ASTSimilarity(BaseSimilarityAlgorithm):
@@ -931,6 +697,9 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             "jplag": 0.65,
         }
         self.normalize_variables = normalize_variables
+        # Kept for compatibility. ``compare`` builds its own normaliser/hasher per call:
+        # both carry per-call state (``var_map``, ``hashes``), so sharing them across a
+        # thread pool corrupted each other's results.
         self.jplag_normalizer = JPlagNormalizer()
         self.jplag_hasher = JPlagSubtreeHasher(min_subtree_size=2, max_subtree_size=32)
         self.use_jplag_fast_path = True
@@ -946,24 +715,20 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         Returns:
             A Finding object containing scores and evidence.
         """
-        from src.backend.engines.features.stylometry import (
-            StylometryExtractor,
-            compare_stylometry,
-        )
-
-        if (
-            not parsed_a.get("tokens")
-            and not parsed_a.get("raw")
-            and not parsed_b.get("tokens")
-            and not parsed_b.get("raw")
+        # (A pre-parsed ``ast`` counts as data: an input with only an AST was rejected
+        # here as "empty" and scored 0.0.)
+        if not any(
+            parsed.get(key) for parsed in (parsed_a, parsed_b) for key in ("ast", "tokens", "raw")
         ):
             return Finding(engine=self.name, score=0.0, confidence=1.0)
 
         ast_a = self._extract_ast(parsed_a)
         ast_b = self._extract_ast(parsed_b)
+        ast_tokens_a = self._tokens_for_graphs(parsed_a)
+        ast_tokens_b = self._tokens_for_graphs(parsed_b)
 
-        raw_a = parsed_a.get("raw", "")
-        raw_b = parsed_b.get("raw", "")
+        raw_a = parsed_a.get("raw", "") or ""
+        raw_b = parsed_b.get("raw", "") or ""
 
         if ast_a is None or ast_b is None:
             return Finding(engine=self.name, score=0.0, confidence=1.0)
@@ -1009,11 +774,13 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             ast_a_jplag = self._deep_copy_ast(ast_a)
             ast_b_jplag = self._deep_copy_ast(ast_b)
 
-            self.jplag_normalizer.normalize(ast_a_jplag)
-            self.jplag_normalizer.normalize(ast_b_jplag)
+            normalizer = JPlagNormalizer()
+            normalizer.normalize(ast_a_jplag)
+            normalizer.normalize(ast_b_jplag)
 
-            hashes_a = self.jplag_hasher.compute_hashes(ast_a_jplag)
-            hashes_b = self.jplag_hasher.compute_hashes(ast_b_jplag)
+            hasher = JPlagSubtreeHasher(min_subtree_size=2, max_subtree_size=32)
+            hashes_a = hasher.compute_hashes(ast_a_jplag)
+            hashes_b = hasher.compute_hashes(ast_b_jplag)
 
             jplag_score = multiset_jaccard_similarity(hashes_a, hashes_b)
 
@@ -1043,37 +810,40 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         # 1. AST Metrics
         ted_score = self._tree_edit_distance_similarity(ast_a, ast_b)
 
-        cfg_a = self._extract_cfg(parsed_a)
-        cfg_b = self._extract_cfg(parsed_b)
-        dfg_a = self._extract_dfg(parsed_a)
-        dfg_b = self._extract_dfg(parsed_b)
+        cfg_a = self._extract_cfg(parsed_a, ast_tokens_a)
+        cfg_b = self._extract_cfg(parsed_b, ast_tokens_b)
+        dfg_a = self._extract_dfg(parsed_a, ast_tokens_a)
+        dfg_b = self._extract_dfg(parsed_b, ast_tokens_b)
 
         pdg_a = ProgramDependencyGraph(cfg_a, dfg_a)
         pdg_b = ProgramDependencyGraph(cfg_b, dfg_b)
 
-        pdg_score = pdg_a.compare(pdg_b)
+        # With no control-flow edges and no dependencies on EITHER side the PDG says
+        # nothing. It used to report 1.0 ("identical": two empty sets), and for raw-source
+        # input (the usual case) that was every pair: +0.10 on every score, and it also
+        # satisfied the ``pdg_score >= 0.5`` clause of the 0.56 floor below.
+        pdg_score: float | None = pdg_a.compare(pdg_b) if (pdg_a.has_data() or pdg_b.has_data()) else None
 
         pattern_score = self._pattern_similarity(ast_a, ast_b)
         complexity_score = self._complexity_similarity(ast_a, ast_b)
         control_abstraction_score = self._control_abstraction_similarity(ast_a, ast_b)
 
-        # 2. Stylometry (New Feature)
-        stylometry_extractor = StylometryExtractor()
-        feat_a = stylometry_extractor.extract(raw_a)
-        feat_b = stylometry_extractor.extract(raw_b)
-        stylometry_score = compare_stylometry(feat_a, feat_b)
+        # 2. Stylometry adjustment input (per-file features are cached)
+        stylometry_score = self._stylometry_similarity(raw_a, raw_b)
 
-        # 3. Weighted Sum
-        score = (
-            winnowing_score * 0.60
-            + jplag_score  # Winnowing has highest weight (fastest, high accuracy)
-            * 0.10
-            + ted_score * 0.10
-            + pdg_score * 0.10
-            + pattern_score * 0.05
-            + complexity_score * 0.05
-            + control_abstraction_score * 0.25
-        )
+        # 3. Weighted mean over the components that have a value, with weights normalised.
+        components = {
+            "winnowing": winnowing_score,
+            "jplag": jplag_score,
+            "ted": ted_score,
+            "pdg": pdg_score,
+            "pattern": pattern_score,
+            "complexity": complexity_score,
+            "control_abstraction": control_abstraction_score,
+        }
+        active = {k: v for k, v in components.items() if v is not None}
+        total_weight = sum(SCORE_WEIGHTS[k] for k in active)
+        score = sum(SCORE_WEIGHTS[k] * v for k, v in active.items()) / total_weight
 
         # 4. Stylometry Adjustment (Boost/Penalty)
         # If stylometry is very different, reduce the score to avoid FP
@@ -1082,6 +852,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         if (
             control_abstraction_score >= 0.55
+            and pdg_score is not None
             and pdg_score >= 0.50
             and complexity_score >= 0.75
         ):
@@ -1111,7 +882,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
     def _extract_ast(self, parsed: dict[str, Any]) -> ASTNode | None:
         """Extract AST from parsed code representation."""
-        if "ast" in parsed:
+        if parsed.get("ast"):
             return self._convert_to_ast_nodes(parsed["ast"])
 
         tokens = parsed.get("tokens")
@@ -1120,68 +891,58 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         raw = parsed.get("raw", "")
         if raw:
-            return self._build_ast_from_tokens(self._tokenize_raw_for_ast(raw))
+            return self._build_ast_from_tokens(
+                self._tokenize_raw_for_ast(raw, parsed.get("language"))
+            )
 
         return None
 
-    def _tokenize_raw_for_ast(self, source: str) -> list[dict[str, str]]:
-        """Build coarse AST tokens from raw source when a parser is unavailable."""
-        source = re.sub(r"//.*?$", "", source, flags=re.MULTILINE)
-        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
-        source = re.sub(r"#.*?$", "", source, flags=re.MULTILINE)
-        raw_tokens = re.findall(
-            r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|&&|\|\||\+\+|--|\S",
-            source,
-        )
-        class_keywords = {"class", "interface", "enum", "struct"}
-        function_keywords = {"def", "func", "function"}
-        control_keywords = {
-            "if",
-            "else",
-            "for",
-            "while",
-            "switch",
-            "case",
-            "return",
-            "break",
-            "continue",
-            "try",
-            "catch",
-            "finally",
-            "throw",
-            "do",
-        }
-        tokens = []
-        for token in raw_tokens:
-            if token in class_keywords:
-                token_type = "CLASS"
-            elif token in function_keywords:
-                token_type = "FUNCTION"
-            elif token in control_keywords:
-                token_type = "KEYWORD"
-            elif token.isdigit():
-                token_type = "LITERAL"
-            elif re.match(r"^[A-Za-z_]\w*$", token):
-                token_type = "IDENTIFIER"
-            else:
-                token_type = "OPERATOR"
-            tokens.append({"type": token_type, "value": token})
-        return tokens
+    def _tokens_for_graphs(self, parsed: dict[str, Any]) -> list[dict]:
+        """Token dicts used by the CFG/DFG extractors.
+
+        They read ``parsed["tokens"]`` only, so for raw-source input they saw nothing and
+        every pair was reported as having an identical (empty) CFG and DFG.
+        """
+        tokens = parsed.get("tokens")
+        if tokens:
+            return [t for t in tokens if isinstance(t, dict)]
+        raw = parsed.get("raw", "")
+        return self._tokenize_raw_for_ast(raw, parsed.get("language")) if raw else []
+
+    def _tokenize_raw_for_ast(self, source: str, language: str | None = None) -> list[dict[str, str]]:
+        """Coarse AST tokens from raw source (see :func:`tokenize_raw_for_ast`)."""
+        return tokenize_raw_for_ast(source, language)
 
     def _deep_copy_ast(self, node: ASTNode) -> ASTNode:
-        """Create deep copy of ASTNode subtree."""
-        children_copy = [self._deep_copy_ast(child) for child in node.children]
-        return ASTNode(node.node_type, node.value, children_copy, node.line, node.col)
+        """Create deep copy of ASTNode subtree (iterative)."""
+        copies: dict[int, ASTNode] = {}
+        for current in tu.postorder(node):
+            copies[id(current)] = ASTNode(
+                current.node_type,
+                current.value,
+                [copies[id(c)] for c in current.children],
+                current.line,
+                current.col,
+            )
+        return copies[id(node)]
 
     def _convert_to_ast_nodes(self, ast_data: Any) -> ASTNode:
-        """Convert parsed AST data to ASTNode structure."""
-        if isinstance(ast_data, dict):
-            node_type = ast_data.get("type", "UNKNOWN")
-            value = ast_data.get("value", "")
-            children_data = ast_data.get("children", [])
-            children = [self._convert_to_ast_nodes(child) for child in children_data]
-            return ASTNode(node_type, value, children)
-        return ASTNode("LITERAL", str(ast_data))
+        """Convert parsed AST data (nested dicts) to ASTNode structure, iteratively."""
+        if not isinstance(ast_data, dict):
+            return ASTNode("LITERAL", str(ast_data))
+        root = ASTNode(ast_data.get("type", "UNKNOWN"), ast_data.get("value", ""))
+        stack: list[tuple[dict, ASTNode]] = [(ast_data, root)]
+        while stack:
+            data, node = stack.pop()
+            for child_data in data.get("children", []) or []:
+                if isinstance(child_data, dict):
+                    child = ASTNode(child_data.get("type", "UNKNOWN"), child_data.get("value", ""))
+                    stack.append((child_data, child))
+                else:
+                    child = ASTNode("LITERAL", str(child_data))
+                node.children.append(child)
+                child.parent = node
+        return root
 
     def _build_ast_from_tokens(self, tokens: list[dict]) -> ASTNode:
         """Build simplified AST from token stream."""
@@ -1189,15 +950,16 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         current_node = root
 
         for token in tokens:
+            if not isinstance(token, dict):
+                continue
             token_type = token.get("type", "UNKNOWN")
             value = token.get("value", "")
 
-            if token_type in ["KEYWORD", "FUNCTION", "CLASS"]:
-                new_node = ASTNode(token_type, value)
-                current_node.children.append(new_node)
+            new_node = ASTNode(token_type, value)
+            new_node.parent = current_node
+            current_node.children.append(new_node)
+            if token_type in ("KEYWORD", "FUNCTION", "CLASS"):
                 current_node = new_node
-            else:
-                current_node.children.append(ASTNode(token_type, value))
 
         return root
 
@@ -1234,14 +996,15 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return common / total if total > 0 else 0.0
 
-    def _extract_cfg(self, parsed: dict) -> ControlFlowGraph | None:
+    def _extract_cfg(self, parsed: dict, tokens: list[dict] | None = None) -> ControlFlowGraph | None:
         """Extract Control Flow Graph from parsed code."""
         cfg = ControlFlowGraph()
 
-        if "tokens" not in parsed:
-            return cfg
+        if tokens is None:
+            if "tokens" not in parsed:
+                return cfg
+            tokens = parsed["tokens"]
 
-        tokens = parsed["tokens"]
         current_block = cfg.add_block([])
         block_stack = [current_block]
         loop_stack: list[int] = []
@@ -1257,7 +1020,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
                 cfg.add_edge(block_stack[-1], new_block, "conditional")
                 block_stack.append(new_block)
 
-            elif value in {"else", "case", "default"}:
+            elif value in {"else", "case", "default", "elif"}:
                 if len(block_stack) > 1:
                     block_stack.pop()
                 new_block = cfg.add_block([])
@@ -1286,7 +1049,7 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
                 cfg.add_edge(block_stack[-1], new_block, "try")
                 block_stack.append(new_block)
 
-            elif value == "except":
+            elif value in {"except", "catch"}:
                 if block_stack:
                     block_stack.pop()
                 new_block = cfg.add_block([])
@@ -1314,27 +1077,37 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
         return common / total if total > 0 else 0.0
 
-    def _extract_dfg(self, parsed: dict) -> DataFlowGraph | None:
-        """Extract Data Flow Graph from parsed code."""
+    def _extract_dfg(self, parsed: dict, tokens: list[dict] | None = None) -> DataFlowGraph | None:
+        """Extract Data Flow Graph from parsed code.
+
+        Variables are renamed by order of first appearance (so renaming does not change
+        the graph) and kept in that order. The dependency pairs used to be built from
+        iterating a ``set``, whose order differs between runs, so the (a, b) and (b, a)
+        edge directions were arbitrary.
+        """
         dfg = DataFlowGraph()
 
-        if "tokens" not in parsed:
-            return dfg
+        if tokens is None:
+            if "tokens" not in parsed:
+                return dfg
+            tokens = parsed["tokens"]
 
-        tokens = parsed["tokens"]
-        defined_vars: set[str] = set()
-
+        order: dict[str, str] = {}
         for token in tokens:
-            if token.get("type") == "VARIABLE":
-                value = token.get("value", "")
-                if value not in defined_vars:
-                    defined_vars.add(value)
-                    dfg.variables[value].append("definition")
+            if token.get("type") in ("VARIABLE", "IDENTIFIER", "NAME"):
+                name = token.get("value", "")
+                if not name or name in _SKIP_KEYWORDS:
+                    continue
+                canonical = order.get(name)
+                if canonical is None:
+                    canonical = order[name] = f"v{len(order)}" if self.normalize_variables else name
+                    dfg.variables[canonical].append("definition")
                 else:
-                    dfg.variables[value].append("use")
+                    dfg.variables[canonical].append("use")
 
-        # Infer dependencies from sequential variable usage
-        var_list = list(defined_vars)
+        # Infer dependencies from sequential variable usage (capped: all pairs of
+        # thousands of names would be tens of millions of tuples)
+        var_list = list(dfg.variables)[:_MAX_DFG_VARIABLES]
         for i, var in enumerate(var_list):
             for other_var in var_list[i + 1 :]:
                 dfg.add_dependency(var, other_var, "sequential")
@@ -1343,14 +1116,10 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
     def _pattern_similarity(self, ast_a: ASTNode, ast_b: ASTNode) -> float:
         """Calculate similarity based on subtree pattern matching."""
-        subtrees_a = ast_a.get_subtrees(min_size=2)
-        subtrees_b = ast_b.get_subtrees(min_size=2)
-
-        if not subtrees_a and not subtrees_b:
-            return 1.0
-
-        hashes_a = {st.hash_subtree() for st in subtrees_a}
-        hashes_b = {st.hash_subtree() for st in subtrees_b}
+        sizes_a, sizes_b = tu.subtree_sizes(ast_a), tu.subtree_sizes(ast_b)
+        hashes_a_all, hashes_b_all = _subtree_hex_hashes(ast_a), _subtree_hex_hashes(ast_b)
+        hashes_a = {hashes_a_all[i] for i, n in sizes_a.items() if n >= 2}
+        hashes_b = {hashes_b_all[i] for i, n in sizes_b.items() if n >= 2}
 
         if not hashes_a and not hashes_b:
             return 1.0
@@ -1362,27 +1131,17 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
 
     def _control_abstraction_similarity(self, ast_a: ASTNode, ast_b: ASTNode) -> float:
         """Compare normalized control-flow intent without requiring identical shape."""
+        marker_values = {
+            "ITERATIVE_BLOCK", "DECISION_BLOCK", "BRANCH_BLOCK", "return", "break", "continue", "throw",
+        }  # fmt: skip
 
         def _tokens(root: ASTNode) -> list[str]:
             tokens = []
-
-            def _collect(node: ASTNode):
-                if node.value in {
-                    "ITERATIVE_BLOCK",
-                    "DECISION_BLOCK",
-                    "BRANCH_BLOCK",
-                    "return",
-                    "break",
-                    "continue",
-                    "throw",
-                }:
+            for node in tu.preorder(root):
+                if node.value in marker_values:
                     tokens.append(node.value)
                 elif node.node_type in {"OPERATOR", "NUMBER", "LITERAL"}:
                     tokens.append(node.node_type)
-                for child in node.children:
-                    _collect(child)
-
-            _collect(root)
             return tokens
 
         tokens_a = _tokens(ast_a)
@@ -1424,64 +1183,28 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
         """Compute complexity metrics from AST with logic density and function depth."""
         total_nodes = ast.subtree_size()
 
-        # Count specific node types
         node_types: dict[str, int] = defaultdict(int)
         function_depths = []
+        max_depth = 0
 
-        def _count(node: ASTNode, depth: int = 0):
+        for node, depth in tu.with_depths(ast):
             node_types[node.node_type] += 1
-
-            # Track function declaration depths
+            max_depth = max(max_depth, depth)
             if node.node_type == "FunctionDeclaration" or node.node_type == "def":
                 function_depths.append(depth)
 
-            for child in node.children:
-                _count(child, depth + 1)
-
-        _count(ast)
-
         # Cyclomatic complexity approximation
-        decision_points = sum(
-            node_types.get(t, 0)
-            for t in ["if", "for", "while", "elif", "case", "catch"]
-        )
+        decision_points = sum(node_types.get(t, 0) for t in ["if", "for", "while", "elif", "case", "catch"])
         cyclomatic = decision_points + 1
-
-        # Nesting depth
-        max_depth = 0
-
-        def _max_depth(node: ASTNode, current_depth: int):
-            nonlocal max_depth
-            max_depth = max(max_depth, current_depth)
-            for child in node.children:
-                _max_depth(child, current_depth + 1)
-
-        _max_depth(ast, 0)
 
         # Logic density: ratio of control flow nodes to total nodes
         control_flow_nodes = sum(
             node_types.get(t, 0)
-            for t in [
-                "if",
-                "for",
-                "while",
-                "elif",
-                "case",
-                "catch",
-                "return",
-                "break",
-                "continue",
-            ]
+            for t in ["if", "for", "while", "elif", "case", "catch", "return", "break", "continue"]
         )
         logic_density = control_flow_nodes / max(total_nodes, 1)
 
-        # Average function depth
-        avg_function_depth = (
-            sum(function_depths) / len(function_depths) if function_depths else 0.0
-        )
-
-        # Function count
-        function_count = len(function_depths)
+        avg_function_depth = sum(function_depths) / len(function_depths) if function_depths else 0.0
 
         return {
             "total_nodes": float(total_nodes),
@@ -1490,5 +1213,20 @@ class ASTSimilarity(BaseSimilarityAlgorithm):
             "branching_factor": (total_nodes - 1) / max(max_depth, 1),
             "logic_density": float(logic_density),
             "avg_function_depth": float(avg_function_depth),
-            "function_count": float(function_count),
+            "function_count": float(len(function_depths)),
         }
+
+    def _stylometry_similarity(self, raw_a: str, raw_b: str) -> float:
+        """Stylometry similarity of two sources; per-file features are cached."""
+        from src.backend.engines.features.stylometry import compare_stylometry
+
+        return compare_stylometry(_style_features(raw_a), _style_features(raw_b))
+
+
+@lru_cache(maxsize=128)
+def _style_features(raw: str) -> dict[str, Any]:
+    """Stylometry features of one source (cached: they were re-extracted, with a full
+    ``ast.parse``, for both files of every pair)."""
+    from src.backend.engines.features.stylometry import StylometryExtractor
+
+    return StylometryExtractor().extract(raw)

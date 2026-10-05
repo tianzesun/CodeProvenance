@@ -15,8 +15,11 @@ Only modes with explicit YAML weights in engine_weights.yaml are used:
 
 from __future__ import annotations
 
+import re
+from types import MappingProxyType
+
 # Mapping from UTSC course code to assignment mode ID with explicit YAML weights
-UTSC_COURSE_MODE_MAP: dict[str, str] = {
+_UTSC_COURSE_MODE_MAP: dict[str, str] = {
     # A-level (introductory) -> foundations_code
     "CSCA08H3": "foundations_code",      # Introduction to Computer Science I
     "CSCA48H3": "foundations_code",      # Introduction to Computer Science II
@@ -65,19 +68,31 @@ UTSC_COURSE_MODE_MAP: dict[str, str] = {
 }
 
 
-def get_mode_for_course(course_code: str) -> str | None:
+#: Read-only view: the mapping used to be a mutable module global.
+UTSC_COURSE_MODE_MAP = MappingProxyType(_UTSC_COURSE_MODE_MAP)
+
+_BARE_CODE = re.compile(r"^CSC[A-D]\d{2}$")
+
+
+def normalize_course_code(course_code: str | None) -> str:
+    """Canonical form: upper case, no spaces/hyphens/underscores; "CSC A08" -> "CSCA08H3"."""
+    code = re.sub(r"[\s\-_]+", "", str(course_code or "")).upper()
+    return code + "H3" if _BARE_CODE.match(code) else code
+
+
+def get_mode_for_course(course_code: str | None) -> str | None:
     """
     Return the assignment mode ID for a given UTSC course code.
 
-    Args:
-        course_code: UTSC course code (e.g., "CSCA08H3")
+    Accepts "CSCA08H3", "csca08h3", "CSC A08", "CSCA08" (``None`` returns None, it used to
+    raise AttributeError).
 
     Returns:
         Assignment mode ID, or None if not found.
     """
-    return UTSC_COURSE_MODE_MAP.get(course_code.upper())
+    return _UTSC_COURSE_MODE_MAP.get(normalize_course_code(course_code))
 
 
 def get_all_mapped_courses() -> list[str]:
     """Return a sorted list of all mapped course codes."""
-    return sorted(UTSC_COURSE_MODE_MAP.keys())
+    return sorted(_UTSC_COURSE_MODE_MAP)

@@ -74,12 +74,17 @@ def long_function(a, b, c, d):
         assert features2.function_length_cv > 0.3  # High CV = varied
 
     def test_import_clustering(self):
-        """Test detection of perfect import organization."""
-        # Perfect clustering (AI-typical)
+        """Test detection of import-block tidiness.
+
+        The score now rewards both placement *and* ordering, so the "perfect"
+        fixture has to be genuinely alphabetical -- ``os, sys, pathlib`` is not,
+        and scores 0.75 rather than 1.0.
+        """
+        # Perfect clustering: three imports, contiguous, alphabetical (AI-typical)
         perfect_code = """
 import os
+import pathlib
 import sys
-from pathlib import Path
 
 def main():
     pass
@@ -103,6 +108,34 @@ from pathlib import Path
 """
         features2 = analyze_ast(scattered_code)
         assert features2.import_clustering_score < 0.9
+
+    def test_import_clustering_ignores_a_leading_module_docstring(self):
+        """A docstring above the imports is normal style, not scattered code."""
+        with_docstring = '''"""Module summary."""
+import os
+import pathlib
+import sys
+
+
+def main():
+    pass
+'''
+        without = analyze_ast(with_docstring).import_clustering_score
+        stripped = analyze_ast(with_docstring.split('"""', 2)[2]).import_clustering_score
+
+        assert without == stripped
+
+    def test_fewer_than_three_imports_is_no_evidence(self):
+        """One or two imports cannot establish tidiness, so they score 0.0.
+
+        Previously "no imports at all" returned a perfect 1.0, handing a flat
+        +0.20 AI-score bonus to every file that simply imported nothing.
+        """
+        assert analyze_ast("def main():\n    pass\n").import_clustering_score == 0.0
+        assert (
+            analyze_ast("import os\n\n\ndef main():\n    pass\n").import_clustering_score
+            == 0.0
+        )
 
     def test_defensive_patterns(self):
         """Test detection of excessive defensive programming."""

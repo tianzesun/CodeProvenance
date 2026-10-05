@@ -1,13 +1,18 @@
-"""Layer 3: Semantic Detection — AI-generated code and deep paraphrase detection.
+"""Layer 3: Semantic Detection - AI-generated code and deep paraphrase detection.
 
-High-recall layer for catching meaning-level similarity. Deliberately capped
-to prevent false-positive dominance. Must NEVER be the sole evidence for a
-plagiarism verdict.
+High-recall layer for meaning-level similarity. Deliberately capped; it must NEVER be the sole
+evidence for a plagiarism verdict (the decision engines enforce that).
 
 Engines:
-  - embedding:      CodeBERT/UniXcoder embedding cosine similarity
-  - transformer:    Transformer-based encoder scoring
+  - embedding:       CodeBERT/UniXcoder embedding cosine similarity
+  - transformer:     Transformer-based encoder scoring
   - concept_overlap: High-level concept/topic similarity
+
+Changes: an engine that did not report is UNAVAILABLE, not 0.0 (a missing transformer used to
+halve ``concept_overlap`` and take 40% off ``semantic_similarity``); the combined scores are
+renormalised over the engines that are present; ``max_signal`` / ``mean_signal`` use the corrected
+signals (they included the RAW embedding, which sits near 0.70 for any two files); scores are read
+defensively (None / NaN); baselines are configurable.
 """
 
 from __future__ import annotations
@@ -16,7 +21,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._text import first_score
+
 logger = logging.getLogger(__name__)
+
+#: engine_scores keys that carry corrected (decision-grade) signals
+_SIGNAL_KEYS = ("embedding_corrected", "transformer_corrected", "concept_overlap", "semantic_similarity")
 
 
 @dataclass
@@ -31,15 +41,15 @@ class Layer3Result:
 
     @property
     def max_signal(self) -> float:
-        values = [v for v in self.engine_scores.values() if isinstance(v, (int, float))]
+        values = [self.engine_scores[k] for k in _SIGNAL_KEYS if isinstance(self.engine_scores.get(k), (int, float))]
         return max(values) if values else 0.0
 
     @property
     def mean_signal(self) -> float:
         values = [
-            v
-            for v in self.engine_scores.values()
-            if isinstance(v, (int, float)) and v > 0
+            self.engine_scores[k]
+            for k in _SIGNAL_KEYS
+            if isinstance(self.engine_scores.get(k), (int, float)) and self.engine_scores[k] > 0
         ]
         return sum(values) / len(values) if values else 0.0
 
@@ -56,23 +66,27 @@ class Layer3Result:
 
 
 class Layer3Semantic:
-    """Semantic detection layer — catches meaning-level similarity.
+    """Semantic detection layer - catches meaning-level similarity.
 
-    Embedding similarity is deliberately NOT used as a standalone signal.
-    It only contributes when corroborated by Layers 1 and 2.
+    Embedding similarity is deliberately NOT a standalone signal: it only counts when the policy
+    finds structural support.
     """
 
-    # High baseline for embedding: UniXcoder sees "this is Python code"
-    # for any two Python files at ~0.70 cosine similarity.
+    # UniXcoder gives ~0.70 cosine similarity for any two Python files.
     EMBEDDING_BASELINE: float = 0.70
     TRANSFORMER_BASELINE: float = 0.65
 
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
-        self._embedding_cap = float(self.config.get("embedding_max_cap", 0.90))
-        self._baseline_correction = bool(
-            self.config.get("embedding_baseline_correction", True)
-        )
+        self._embedding_cap = min(1.0, max(0.0, float(self.config.get("embedding_max_cap", 0.90))))
+        self._baseline_correction = bool(self.config.get("embedding_baseline_correction", True))
+        self._embedding_baseline = min(0.99, float(self.config.get("embedding_baseline", self.EMBEDDING_BASELINE)))
+        self._transformer_baseline = min(0.99, float(self.config.get("transformer_baseline", self.TRANSFORMER_BASELINE)))
+
+    def _correct(self, raw: float, baseline: float) -> float:
+        if self._baseline_correction:
+            raw = max(0.0, raw - baseline) / max(0.01, 1.0 - baseline)
+        return min(raw, self._embedding_cap)
 
     def evaluate(
         self,
@@ -81,70 +95,36 @@ class Layer3Semantic:
         engine_scores: dict[str, float] | None = None,
         engine_details: dict[str, Any] | None = None,
     ) -> Layer3Result:
-        """Run semantic detection on a pair of code files.
-
-        Args:
-            code_a: Source code of first file.
-            code_b: Source code of second file.
-            engine_scores: Pre-computed engine scores (keys: embedding, etc.)
-            engine_details: Optional full engine output for rich evidence.
-
-        Returns:
-            Layer3Result with semantic signals.
-        """
+        """Run semantic detection; absent engines are left out of the result."""
         scores = engine_scores or {}
+        embedding_raw = first_score(scores, "embedding", "semantic")
+        transformer_raw = first_score(scores, "transformer", "codebert", "unixcoder")
 
-        # --- Embedding similarity ---
-        embedding_raw = float(scores.get("embedding", scores.get("semantic", 0.0)))
+        embedding = self._correct(embedding_raw, self._embedding_baseline) if embedding_raw is not None else None
+        transformer = self._correct(transformer_raw, self._transformer_baseline) if transformer_raw is not None else None
 
-        # Apply baseline correction: subtract the "same language" noise floor
-        if self._baseline_correction:
-            embedding_corrected = max(0.0, embedding_raw - self.EMBEDDING_BASELINE)
-            embedding_corrected /= max(0.01, 1.0 - self.EMBEDDING_BASELINE)
+        present = [v for v in (embedding, transformer) if v is not None]
+        concept_overlap = sum(present) / len(present) if present else 0.0
+        if embedding is not None and transformer is not None:
+            semantic_similarity = embedding * 0.6 + transformer * 0.4
         else:
-            embedding_corrected = embedding_raw
+            semantic_similarity = present[0] if present else 0.0  # the one engine that reported
 
-        # Apply hard cap — embedding alone can never exceed this threshold
-        # This prevents semantic scores from single-handedly causing false positives
-        embedding_score = min(embedding_corrected, self._embedding_cap)
-
-        # --- Transformer score (if available) ---
-        transformer_raw = float(
-            scores.get(
-                "transformer", scores.get("codebert", scores.get("unixcoder", 0.0))
-            )
-        )
-        if self._baseline_correction:
-            transformer_corrected = max(
-                0.0, transformer_raw - self.TRANSFORMER_BASELINE
-            )
-            transformer_corrected /= max(0.01, 1.0 - self.TRANSFORMER_BASELINE)
-        else:
-            transformer_corrected = transformer_raw
-        transformer_score = min(transformer_corrected, self._embedding_cap)
-
-        # --- Concept overlap (from embedding + transformer) ---
-        # High-level topic similarity: if both embedding and transformer
-        # agree on semantic similarity, it's a stronger signal
-        concept_overlap = (embedding_score + transformer_score) / 2.0
-
-        # --- Combined semantic similarity ---
-        # Weighted: embedding is primary, transformer supports
-        semantic_similarity = embedding_score * 0.6 + transformer_score * 0.4
-
-        engine_scores_out = {
-            "embedding": embedding_raw,
-            "embedding_corrected": embedding_score,
-            "transformer": transformer_raw,
-            "transformer_corrected": transformer_score,
-            "concept_overlap": concept_overlap,
-            "semantic_similarity": semantic_similarity,
-        }
+        out: dict[str, float] = {}
+        if embedding is not None:
+            out["embedding"] = embedding_raw  # RAW: the decision engines apply their own baseline
+            out["embedding_corrected"] = embedding
+        if transformer is not None:
+            out["transformer"] = transformer_raw
+            out["transformer_corrected"] = transformer
+        if present:
+            out["concept_overlap"] = concept_overlap
+            out["semantic_similarity"] = semantic_similarity
 
         return Layer3Result(
-            embedding_similarity=round(embedding_score, 4),
-            transformer_score=round(transformer_score, 4),
+            embedding_similarity=round(embedding or 0.0, 4),
+            transformer_score=round(transformer or 0.0, 4),
             concept_overlap_score=round(concept_overlap, 4),
             semantic_similarity_score=round(semantic_similarity, 4),
-            engine_scores=engine_scores_out,
+            engine_scores=out,
         )

@@ -18,8 +18,14 @@ from typing import Any
 from src.backend.domain.models import EvidenceBlock, Finding
 
 from .base_similarity import BaseSimilarityAlgorithm
+from .code_scan import scan
 
 logger = logging.getLogger(__name__)
+
+#: ``SequenceMatcher`` is quadratic; evidence is only extracted from this much text.
+MAX_EVIDENCE_CHARS = 20_000
+_PUNCTUATION = frozenset("()[]{}:;,.")
+_IDENT_START = re.compile(r"[A-Za-z_$]")
 
 
 class TokenSimilarity(BaseSimilarityAlgorithm):
@@ -57,7 +63,8 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
 
         self._token_cache = TokenCache(maxsize=8192)
 
-        # Programming language keywords
+        # Programming language keywords (lower-case: lookups are case-insensitive;
+        # "None"/"NaN" used to be stored capitalised and so never matched)
         self.keywords: set[str] = {
             "if",
             "else",
@@ -130,6 +137,9 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             "implements",
             "with",
         }
+        self.keywords = {k.lower() for k in self.keywords}
+        self._operator_chars = frozenset("+-*/%=<>&|^~!?:")
+        self._single_punct = frozenset("+-*/%=<>&|^~!?:;,.()[]{}")
 
     def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """Compare two parsed code representations based on token similarity.
@@ -137,8 +147,8 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         Returns:
             A Finding object containing scores and evidence
         """
-        raw_a = parsed_a.get("raw", "")
-        raw_b = parsed_b.get("raw", "")
+        raw_a = parsed_a.get("raw", "") or ""
+        raw_b = parsed_b.get("raw", "") or ""
 
         tokens_a = self._extract_tokens(parsed_a)
         tokens_b = self._extract_tokens(parsed_b)
@@ -180,7 +190,9 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         evidence = []
         if final_score > 0.8:  # Only create evidence for high similarity
             # Find the longest matching substring in the original code
-            matcher = SequenceMatcher(None, raw_a, raw_b)
+            raw_a = raw_a[:MAX_EVIDENCE_CHARS]
+            raw_b = raw_b[:MAX_EVIDENCE_CHARS]
+            matcher = SequenceMatcher(None, raw_a, raw_b, autojunk=False)
             match = matcher.find_longest_match(0, len(raw_a), 0, len(raw_b))
             if match.size > 10:  # Only if match is substantial
                 a_snippet = raw_a[match.a : match.a + match.size]
@@ -238,40 +250,47 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
                 return [t.get("value", "") for t in tokens if t.get("value")]
             return [str(t) for t in tokens]
         if "raw" in parsed:
-            raw = parsed["raw"]
-            return self._token_cache.get_or_compute(raw, self._tokenize_cached)
+            raw = parsed["raw"] or ""
+            language = parsed.get("language")
+            return self._token_cache.get_or_compute(
+                raw, lambda text: self._tokenize_cached(text, language)
+            )
         return []
 
-    def _tokenize_cached(self, text: str) -> list[str]:
-        """Tokenize source code text (called by cache on misses)."""
-        # Remove strings and comments
-        text = re.sub(r'["\'].*?["\']', "STR", text, flags=re.DOTALL)
-        text = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
-        text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-        text = re.sub(r"#.*?$", "", text, flags=re.MULTILINE)
+    def _tokenize_cached(self, text: str, language: str | None = None) -> list[str]:
+        """Tokenize source code text (called by cache on misses).
 
-        # Tokenize
-        tokens = re.findall(r"[a-zA-Z_]\w*|[0-9]+|[+\-*/%=<>&|^~!?:;,.()\[\]{}]", text)
-        return [t for t in tokens if t]
+        Comments are dropped and strings become ``STR`` in a single pass. The old
+        ``re.sub`` chain replaced strings first, so an apostrophe in a comment
+        paired with the next quote below it and erased the code between them, and
+        ``//`` was stripped as a comment even in Python, where it is floor division.
+        """
+        tokens: list[str] = []
+        for kind, value in scan(text, language):
+            tokens.append("STR" if kind == "string" else value)
+        return tokens
+
+    def _is_identifier(self, token: str) -> bool:
+        return bool(_IDENT_START.match(token))
 
     def _normalize_identifiers(self, tokens: list[str]) -> list[str]:
         """Normalize identifiers by replacing them with sequential placeholders (var1, var2, etc.)"""
-        identifier_map = {}
-        counter = 1
+        identifier_map: dict[str, str] = {}
         normalized = []
 
         for token in tokens:
-            if token in self.keywords:
+            lower = token.lower()
+            if lower in self.keywords:
                 normalized.append(token)
             elif token[0].isdigit():
                 normalized.append("__NUM__")
-            elif token in set("+-*/%=<>&|^~!?:;,.()[]{}"):
+            elif not self._is_identifier(token):
+                # operators and punctuation, including multi-character ones such as
+                # ``==``, which used to be mistaken for identifiers
                 normalized.append(token)
             else:
-                # This is an identifier
                 if token not in identifier_map:
-                    identifier_map[token] = f"__VAR{counter}__"
-                    counter += 1
+                    identifier_map[token] = f"__VAR{len(identifier_map) + 1}__"
                 normalized.append(identifier_map[token])
 
         return normalized
@@ -337,7 +356,11 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
         return dot_product / (norm_a * norm_b)
 
     def _get_token_distribution(self, tokens: list[str]) -> dict[str, float]:
-        """Get distribution of token types."""
+        """Get distribution of token types.
+
+        Single-character identifiers (``i``, ``x``) were counted as punctuation
+        because the test was ``len(token) == 1``; tokens are now classified by kind.
+        """
         categories: dict[str, int] = {
             "identifier": 0,
             "keyword": 0,
@@ -346,20 +369,17 @@ class TokenSimilarity(BaseSimilarityAlgorithm):
             "punctuation": 0,
         }
 
-        operators = set("+-*/%=<>&|^~!")
-        set("()[]{}:;,.")
-
         for token in tokens:
-            if token in self.keywords:
+            if token.lower() in self.keywords:
                 categories["keyword"] += 1
-            elif token[0].isdigit():
+            elif token[0].isdigit() or token == "STR":
                 categories["literal"] += 1
-            elif token in operators or len(token) == 1:
-                categories["punctuation"] += 1
-            elif any(c in token for c in operators):
-                categories["operator"] += 1
-            else:
+            elif self._is_identifier(token):
                 categories["identifier"] += 1
+            elif token in _PUNCTUATION:
+                categories["punctuation"] += 1
+            else:
+                categories["operator"] += 1
 
         total = sum(categories.values())
         if total == 0:

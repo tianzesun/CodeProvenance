@@ -8,9 +8,16 @@ Algorithm:
 2. Apply weights: weighted = adjusted * weight
 3. Sum: final = Σ(weighted)
 4. Normalize: final = final / Σ(reliability * weight)
+
+i.e. the final score is the reliability-weighted mean of the signals. A signal
+with zero reliability contributes nothing to either side of the division.
 """
 
 from src.backend.engines.ai.models import SignalScores
+
+#: Adjustment applied by agreement level when the signals cluster on one side.
+HIGH_AGREEMENT_ADJUSTMENT = 0.05
+MEDIUM_AGREEMENT_ADJUSTMENT = 0.02
 
 
 def aggregate_signals(signals: SignalScores, reliabilities: dict[str, float]) -> float:
@@ -21,36 +28,43 @@ def aggregate_signals(signals: SignalScores, reliabilities: dict[str, float]) ->
         reliabilities: Dictionary mapping signal names to reliability scores
 
     Returns:
-        Final AI probability score in [0.0, 1.0]
+        Final AI probability score in [0.0, 1.0]. When no signal has any
+        reliability there is no evidence and the score is 0.0.
     """
-    signal_dict = signals.to_dict()
     weights = SignalScores.WEIGHTS
 
-    # Calculate weighted sum with reliability adjustments
     weighted_sum = 0.0
     normalization_factor = 0.0
-
-    for signal_name, score in signal_dict.items():
+    for signal_name, score in signals.to_dict().items():
         reliability = reliabilities.get(signal_name, 0.5)
         weight = weights.get(signal_name, 0.0)
-
-        # Adjust signal by reliability
-        adjusted_score = score * reliability
-
-        # Apply weight
-        weighted_score = adjusted_score * weight
-
-        weighted_sum += weighted_score
+        weighted_sum += score * reliability * weight
         normalization_factor += reliability * weight
 
-    # Normalize
-    if normalization_factor > 0:
-        final_score = weighted_sum / normalization_factor
-    else:
-        final_score = 0.0
-
-    # Ensure score is in [0.0, 1.0]
+    final_score = weighted_sum / normalization_factor if normalization_factor > 0 else 0.0
     return round(max(0.0, min(1.0, final_score)), 3)
+
+
+def _agreement_adjustment(agreement: dict) -> float:
+    """Score adjustment toward the direction the signals agree on."""
+    level = agreement["agreement_level"]
+    supporting = agreement["supporting_count"]
+    contradicting = agreement["contradicting_count"]
+
+    if level == "high":
+        magnitude = HIGH_AGREEMENT_ADJUSTMENT
+    elif level == "medium":
+        magnitude = MEDIUM_AGREEMENT_ADJUSTMENT
+    else:
+        return 0.0
+
+    # A tie pushes toward neither side. It used to fall into the "else" branch and
+    # nudge the score toward human on every 4-4 split.
+    if supporting > contradicting:
+        return magnitude
+    if contradicting > supporting:
+        return -magnitude
+    return 0.0
 
 
 def aggregate_signals_with_agreement(
@@ -68,33 +82,7 @@ def aggregate_signals_with_agreement(
     Returns:
         Final AI probability score in [0.0, 1.0]
     """
-    # Get base aggregation
-    base_score = aggregate_signals(signals, reliabilities)
-
-    # Apply agreement-based adjustment
-    agreement_level = agreement["agreement_level"]
-    supporting_count = agreement["supporting_count"]
-    contradicting_count = agreement["contradicting_count"]
-
-    if agreement_level == "high":
-        # High agreement: boost score toward direction
-        if supporting_count > contradicting_count:
-            # Boost toward AI-like
-            adjustment = 0.05
-        else:
-            # Boost toward human-like
-            adjustment = -0.05
-    elif agreement_level == "medium":
-        # Medium agreement: slight adjustment
-        if supporting_count > contradicting_count:
-            adjustment = 0.02
-        else:
-            adjustment = -0.02
-    else:
-        # Low agreement: no adjustment
-        adjustment = 0.0
-
-    final_score = base_score + adjustment
+    final_score = aggregate_signals(signals, reliabilities) + _agreement_adjustment(agreement)
     return round(max(0.0, min(1.0, final_score)), 3)
 
 
@@ -103,7 +91,10 @@ def get_signal_contribution(
     signal_score: float,
     reliability: float,
 ) -> float:
-    """Calculate the contribution of a single signal to final score.
+    """Calculate the RAW contribution of a single signal (score * reliability * weight).
+
+    This is not normalised by the reliability-weighted weight total, so values from
+    different files are not comparable; see :func:`get_all_signal_contributions`.
 
     Args:
         signal_name: Name of the signal
@@ -111,38 +102,46 @@ def get_signal_contribution(
         reliability: Reliability of the signal [0.0, 1.0]
 
     Returns:
-        Contribution to final score
+        Raw contribution
     """
-    weights = SignalScores.WEIGHTS
-    weight = weights.get(signal_name, 0.0)
-
-    # Contribution = signal * reliability * weight
-    contribution = signal_score * reliability * weight
-
-    return round(contribution, 4)
+    weight = SignalScores.WEIGHTS.get(signal_name, 0.0)
+    return round(signal_score * reliability * weight, 4)
 
 
 def get_all_signal_contributions(
-    signals: SignalScores, reliabilities: dict[str, float]
+    signals: SignalScores,
+    reliabilities: dict[str, float],
+    normalize: bool = True,
 ) -> dict[str, float]:
     """Calculate contributions of all signals.
+
+    With ``normalize`` (the default) each contribution is divided by
+    Σ(reliability * weight), so the contributions SUM TO the base aggregate score
+    and each one is that signal's share of it. The raw values summed to less than
+    the score (by a file-dependent factor), and the indicator text built from them
+    ("Token Entropy: 12.0%") understated every signal.
 
     Args:
         signals: SignalScores object
         reliabilities: Dictionary of reliability scores
+        normalize: Return shares of the aggregate score instead of raw products
 
     Returns:
         Dictionary mapping signal names to contributions
     """
-    signal_dict = signals.to_dict()
-
-    contributions = {}
-    for signal_name, score in signal_dict.items():
+    weights = SignalScores.WEIGHTS
+    raw: dict[str, float] = {}
+    total_weight = 0.0
+    for signal_name, score in signals.to_dict().items():
         reliability = reliabilities.get(signal_name, 0.5)
-        contribution = get_signal_contribution(signal_name, score, reliability)
-        contributions[signal_name] = contribution
+        raw[signal_name] = score * reliability * weights.get(signal_name, 0.0)
+        total_weight += reliability * weights.get(signal_name, 0.0)
 
-    return contributions
+    if normalize:
+        if total_weight <= 0:
+            return {name: 0.0 for name in raw}
+        return {name: round(value / total_weight, 4) for name, value in raw.items()}
+    return {name: round(value, 4) for name, value in raw.items()}
 
 
 def get_most_influential_signals(
@@ -159,10 +158,4 @@ def get_most_influential_signals(
         List of (signal_name, contribution) tuples, sorted by contribution
     """
     contributions = get_all_signal_contributions(signals, reliabilities)
-
-    # Sort by absolute contribution
-    sorted_signals = sorted(
-        contributions.items(), key=lambda x: abs(x[1]), reverse=True
-    )
-
-    return sorted_signals[:top_n]
+    return sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)[:top_n]

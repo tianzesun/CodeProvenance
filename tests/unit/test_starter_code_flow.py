@@ -42,11 +42,17 @@ def test_read_files_from_dir_excludes_reserved_starter_dir(tmp_path):
     assert not any("starter" in name for name in submissions)
 
 
+#: Two import lines are below ``min_run_lines`` (3) on purpose in the unit tests
+#: that check short matches survive; the removal tests need a template the
+#: remover will actually treat as starter code.
+TEMPLATE = "import numpy as np\nimport pandas as pd\nimport scipy as sp\n\n"
+
+
 def test_starter_removal_applied_in_compare_all_pairs(monkeypatch):
     """Shared starter lines must be stripped before scoring so they do not
     inflate similarity between otherwise-independent submissions."""
     _install_no_embedding(monkeypatch)
-    starter = "import numpy as np\nimport pandas as pd\n\n"
+    starter = TEMPLATE
     submissions = {
         "A.py": starter + "def solve_a(x):\n    return x + 1\n",
         "B.py": starter + "def solve_b(x):\n    return x * 2\n",
@@ -64,7 +70,7 @@ def test_starter_removal_applied_in_compare_all_pairs(monkeypatch):
 def test_starter_removal_applied_in_compare_pairs(monkeypatch):
     """Explicit benchmark pairs also strip starter lines."""
     _install_no_embedding(monkeypatch)
-    starter = "import numpy as np\nimport pandas as pd\n\n"
+    starter = TEMPLATE
     submissions = {
         "A.py": starter + "def solve_a(x):\n    return x + 1\n",
         "B.py": starter + "def solve_b(x):\n    return x * 2\n",
@@ -84,7 +90,9 @@ def test_starter_removal_applied_in_compare_pairs(monkeypatch):
 
 def test_ingest_folder_applies_starter_removal_filtered_source(tmp_path):
     """ingest_folder returns starter-stripped content via filtered_source."""
-    starter = "print('template')\n"
+    starter = (
+        "print('template header')\nprint('template banner')\nprint('template setup')\n"
+    )
     folder = tmp_path / "subs"
     folder.mkdir()
     (folder / "A.py").write_text(starter + "x = 1\n", encoding="utf-8")

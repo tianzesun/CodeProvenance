@@ -8,11 +8,31 @@ Generates comprehensive, instructor-facing reports with:
 - Limitations and caveats
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.backend.engines.ai.agreement import analyze_signal_agreement
+from src.backend.engines.ai.confidence import get_confidence_level
+from src.backend.engines.ai.fp_baseline import band_caveat_with_interval
+from src.backend.engines.ai.fusion import SIGNAL_LABELS
 from src.backend.engines.ai.models import AIDetectionResult, SignalScores
 from src.backend.engines.ai.reliability import assess_all_signal_reliabilities
+
+#: Below this confidence a result is inconclusive whatever its risk label says.
+LOW_CONFIDENCE = 0.4
+
+#: ``AIDetectionResult.risk_level`` is "Low" / "Medium" / "High", but the report text
+#: below is written for a five-level scale. A real "Medium" matched none of the
+#: "Very Low" / "Low" / "Moderate" / "Elevated" branches and fell through to the
+#: final ``else`` ("strong indicators ... immediate instructor review", and "No
+#: action needed" in the recommendations): the opposite of what a mid-range score
+#: means. "Medium" is the report's "Moderate".
+_RISK_ALIASES = {"Medium": "Moderate"}
+
+
+def _risk(result: AIDetectionResult) -> str:
+    """The result's risk label on the report's scale."""
+    level = result.risk_level
+    return _RISK_ALIASES.get(level, level)
 
 
 def generate_detection_report(
@@ -32,11 +52,11 @@ def generate_detection_report(
     """
     signals = result.signals
     reliabilities = assess_all_signal_reliabilities(code, language)
-    agreement = analyze_signal_agreement(signals)
+    agreement = analyze_signal_agreement(signals, reliabilities)
 
     report = {
         "metadata": {
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "language": language,
             "code_length": len(code),
             "code_lines": len(code.splitlines()),
@@ -46,11 +66,38 @@ def generate_detection_report(
         "signal_breakdown": generate_signal_breakdown(signals, reliabilities),
         "agreement_analysis": generate_agreement_analysis(agreement),
         "evidence_summary": generate_evidence_summary(result, code),
+        "false_positive_context": generate_false_positive_context(result),
         "limitations": generate_limitations_section(),
         "recommendations": generate_recommendations(result),
     }
 
     return report
+
+
+def _fp_band(result: AIDetectionResult) -> str | None:
+    """Measured-baseline band ("high" >= 0.70, "medium" >= 0.40) for a result."""
+    if result.ai_probability >= 0.70:
+        return "high"
+    if result.ai_probability >= 0.40:
+        return "medium"
+    return None
+
+
+def generate_false_positive_context(result: AIDetectionResult) -> dict:
+    """Measured human false-positive rate for the band this result falls in.
+
+    The FP baseline exists to be shown next to AI evidence (its docstring says
+    so), but this report never used it, so an instructor saw "High risk" without
+    being told that a measured share of real student submissions score there.
+
+    Args:
+        result: Detection result
+
+    Returns:
+        ``{"band": str | None, "caveat": str}``; the caveat is empty for low scores.
+    """
+    band = _fp_band(result)
+    return {"band": band, "caveat": band_caveat_with_interval(band) if band else ""}
 
 
 def generate_executive_summary(result: AIDetectionResult) -> dict:
@@ -80,22 +127,33 @@ def _get_risk_summary(result: AIDetectionResult) -> str:
     Returns:
         Summary string
     """
-    if result.risk_level == "Very Low":
+    summary = _risk_summary_text(result)
+    if _risk(result) in ("Elevated", "High") and result.confidence < LOW_CONFIDENCE:
+        summary += (
+            " However, confidence is low, so this should not be treated as "
+            "evidence on its own."
+        )
+    return summary
+
+
+def _risk_summary_text(result: AIDetectionResult) -> str:
+    """Risk-level wording (no confidence qualifier)."""
+    if _risk(result) == "Very Low":
         return (
             "This submission shows minimal indicators of AI-generated code. "
             "The code exhibits characteristics typical of human-written work."
         )
-    elif result.risk_level == "Low":
+    elif _risk(result) == "Low":
         return (
             "This submission shows few indicators of AI-generated code. "
             "While some signals are present, they are not conclusive."
         )
-    elif result.risk_level == "Moderate":
+    elif _risk(result) == "Moderate":
         return (
             "This submission shows moderate indicators of AI-generated code. "
             "Further investigation may be warranted."
         )
-    elif result.risk_level == "Elevated":
+    elif _risk(result) == "Elevated":
         return (
             "This submission shows elevated indicators of AI-generated code. "
             "Instructor review is recommended."
@@ -126,7 +184,7 @@ def generate_overall_assessment(result: AIDetectionResult) -> dict:
 
 
 def _get_confidence_level(confidence: float) -> str:
-    """Get confidence level label.
+    """Get confidence level label (the shared definition in ``confidence``).
 
     Args:
         confidence: Confidence score
@@ -134,16 +192,7 @@ def _get_confidence_level(confidence: float) -> str:
     Returns:
         Confidence level string
     """
-    if confidence >= 0.85:
-        return "Very High"
-    elif confidence >= 0.7:
-        return "High"
-    elif confidence >= 0.5:
-        return "Medium"
-    elif confidence >= 0.3:
-        return "Low"
-    else:
-        return "Very Low"
+    return get_confidence_level(confidence)
 
 
 def _get_recommendation(result: AIDetectionResult) -> str:
@@ -155,14 +204,21 @@ def _get_recommendation(result: AIDetectionResult) -> str:
     Returns:
         Recommendation string
     """
-    if result.risk_level == "High" and result.confidence >= 0.7:
-        return "Strong evidence of AI generation. Recommend immediate review."
-    elif result.risk_level in ["Elevated", "Moderate"] and result.confidence >= 0.6:
-        return "Moderate evidence of AI generation. Recommend review."
-    elif result.risk_level == "Low" or result.confidence < 0.4:
+    if _risk(result) in ("Very Low", "Low"):
         return "Insufficient evidence of AI generation. No action needed."
-    else:
-        return "Mixed signals. Manual review recommended."
+    # Previously ``confidence < 0.4`` fell into "No action needed" even for a
+    # HIGH risk level, contradicting the executive summary on the same page
+    # ("immediate instructor review is recommended").
+    if result.confidence < LOW_CONFIDENCE:
+        return (
+            "Inconclusive: the signals do not support a conclusion. Do not act on "
+            "this result alone; review only if there are other concerns."
+        )
+    if _risk(result) == "High" and result.confidence >= 0.7:
+        return "Strong evidence of AI generation. Recommend immediate review."
+    if result.confidence >= 0.6:
+        return "Moderate evidence of AI generation. Recommend review."
+    return "Mixed signals. Manual review recommended."
 
 
 def generate_signal_breakdown(
@@ -179,16 +235,7 @@ def generate_signal_breakdown(
         Signal breakdown dictionary
     """
     signal_dict = signals.to_dict()
-    signal_labels = {
-        "perplexity": "Token Entropy",
-        "burstiness": "Line Complexity",
-        "stylometry": "Code Style",
-        "pattern_library": "LLM Patterns",
-        "structural_entropy": "AST Uniformity",
-        "vocabulary_richness": "Token Diversity",
-        "whitespace_rhythm": "Spacing Rhythm",
-        "docstring_density": "Documentation",
-    }
+    signal_labels = SIGNAL_LABELS
 
     breakdown = {}
     for signal_name, score in signal_dict.items():
@@ -346,7 +393,15 @@ def generate_recommendations(result: AIDetectionResult) -> dict:
     """
     recommendations = []
 
-    if result.risk_level == "High":
+    if _risk(result) in ("Elevated", "High") and result.confidence < LOW_CONFIDENCE:
+        recommendations.append(
+            "Treat this result as inconclusive; confidence in the score is low."
+        )
+        recommendations.append(
+            "Look for independent evidence (the student's previous work, version "
+            "history, a short conversation about the code) before taking any step."
+        )
+    elif _risk(result) == "High":
         recommendations.append(
             "Schedule a meeting with the student to discuss the submission."
         )
@@ -357,7 +412,7 @@ def generate_recommendations(result: AIDetectionResult) -> dict:
             "Consider requesting a code walkthrough or live coding demonstration."
         )
 
-    elif result.risk_level == "Elevated":
+    elif _risk(result) == "Elevated":
         recommendations.append(
             "Review the submission more carefully for signs of AI generation."
         )
@@ -366,7 +421,7 @@ def generate_recommendations(result: AIDetectionResult) -> dict:
         )
         recommendations.append("Consider asking clarifying questions about the code.")
 
-    elif result.risk_level == "Moderate":
+    elif _risk(result) == "Moderate":
         recommendations.append(
             "Note the moderate indicators but do not take action without additional evidence."
         )
@@ -460,6 +515,14 @@ def format_report_as_text(report: dict) -> str:
         for indicator in evidence["indicators"][:5]:
             lines.append(f"  - {indicator}")
     lines.append("")
+
+    # Measured false-positive context
+    fp_context = report.get("false_positive_context") or {}
+    if fp_context.get("caveat"):
+        lines.append("FALSE-POSITIVE CONTEXT")
+        lines.append("-" * 80)
+        lines.append(fp_context["caveat"])
+        lines.append("")
 
     # Limitations
     lines.append("IMPORTANT LIMITATIONS")

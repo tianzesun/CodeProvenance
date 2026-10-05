@@ -20,12 +20,15 @@ class TestTransformerPerplexity:
     """Test transformer-based perplexity calculation."""
 
     def test_basic_perplexity_computation(self):
-        """Test that perplexity can be computed for valid code."""
-        code = """
-def hello_world():
-    print("Hello, world!")
-    return True
-"""
+        """Test that perplexity can be computed for code long enough to score.
+
+        ``compute_perplexity`` returns ``None`` below ``MIN_TOKENS`` (32) rather
+        than a fabricated number, so a real value needs a real amount of code.
+        """
+        code = "\n".join(
+            f"def helper_{i}(value):\n    total = value + {i}\n    return total"
+            for i in range(8)
+        )
         perplexity = compute_perplexity(code)
         assert isinstance(perplexity, float)
         assert 0 < perplexity < 500  # Reasonable range
@@ -86,18 +89,36 @@ def helper(a, b):
         assert 0 < result["raw_perplexity"] < 200
 
     def test_empty_code_handling(self):
-        """Empty/tiny code should return default score."""
-        assert compute_perplexity("") == 100.0
-        assert compute_perplexity("x = 1") >= 50.0  # Too short for reliable analysis
+        """Too-short input reports "unavailable" instead of a made-up number.
+
+        The old behaviour returned a hardcoded ``100.0`` for empty input, which
+        is indistinguishable from a genuinely measured perplexity. Callers then
+        treated unavailability as "human", so a short or unscoreable submission
+        silently read as clean. ``None`` forces them to say so instead.
+        """
+        assert compute_perplexity("") is None
+        assert compute_perplexity("x = 1") is None
+
+    def test_short_code_is_reported_unavailable_not_scored(self):
+        """``compute_ai_score`` mirrors that: available=False, ai_score=None."""
+        result = compute_ai_score("def tiny(): pass")
+
+        assert result["available"] is False
+        assert result["ai_score"] is None
+        assert result["raw_perplexity"] is None
+        assert "unavailable" in result["interpretation"].lower()
 
     def test_batch_analysis(self):
         """Test batch processing of multiple samples."""
         analyzer = TransformerPerplexityAnalyzer()
-        codes = ["def foo(): pass", "def bar(): return 42", "print('hello')"]
+        codes = [f"def fn_{i}(x):\n    return x + {i}\n" for i in range(6)]
         results = analyzer.batch_analyze(codes)
-        assert len(results) == 3
+        assert len(results) == 6
         assert all("ai_score" in r for r in results)
-        assert all(0 <= r["ai_score"] <= 1 for r in results)
+        # ai_score is None when the sample could not be scored; where it is a
+        # number it must be a probability.
+        for r in results:
+            assert r["ai_score"] is None or 0 <= r["ai_score"] <= 1
 
     def test_analyzer_singleton(self):
         """Test that analyzer is cached (singleton pattern)."""
@@ -109,7 +130,9 @@ def helper(a, b):
 
     def test_normalized_score_structure(self):
         """Test that normalized score has expected structure."""
-        code = "def test(): return 1"
+        code = "\n".join(
+            f"def fn_{i}(value):\n    return value * {i + 1}" for i in range(8)
+        )
         result = compute_ai_score(code)
 
         assert "raw_perplexity" in result

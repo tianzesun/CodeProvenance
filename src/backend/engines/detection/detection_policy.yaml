@@ -1,54 +1,57 @@
-# Detection Policy Configuration — Three-layer decision tree thresholds (v2)
+# Detection Policy Configuration (v3)
 #
-# This replaces engine_weights.yaml as the primary configuration for
-# detection decisions. Each threshold has a clear semantic meaning.
+# These are the thresholds the Evidence Hierarchy Engine ACTUALLY uses; the report prints exactly
+# these values. (v1/v2 listed L1/L2/L3 tree thresholds that no code applied.)
 #
-# Decision Tree (v2 — fixed issues from code review):
-#   IF L1 > 0.90                       → TRUE (hard match)
-#   ELIF L1 > 0.85 AND L2 > 0.85      → TRUE (high-confidence combined)
-#   ELIF L1 > 0.70 AND L2 > 0.60      → TRUE (strong structural)
-#   ELIF L2 > 0.80 AND L3 > 0.80      → PROBABLE (likely, needs review)
-#   ELIF L3 > 0.90                     → FLAG (semantic-only, must review)
-#   ELIF L1 > 0.50 OR L2 > 0.50       → REVIEW (borderline, human check)
-#   ELSE                                → CLEAN
+# Decision rules, in order (first match wins):
+#   0. identity           files identical                                         -> TRUE
+#   1. strong_structural  one structural engine  >= structural_hard_match        -> TRUE
+#   2. corroborated       structural >= structural_strong AND at least
+#                         min_agreeing_engines engines >= structural_agree_min    -> TRUE
+#                         (otherwise, one engine alone)                           -> PROBABLE
+#   3. semantic support   semantic >= semantic_dominance AND structural >= medium -> PROBABLE
+#   4. medium structural  structural >= structural_medium AND graph >= statistical_strong -> PROBABLE
+#   5. semantic only      semantic >= semantic_flag, structural < medium          -> FLAG
+#   6. conflict           |structural - semantic| > conflict_gap (both measured)  -> REVIEW
+#   7. borderline         baseline-corrected structural/graph >= borderline       -> REVIEW
+#   8. otherwise                                                                  -> CLEAN
 #
-# Fixes:
-#   - Layer 1 uses max() not weighted avg (no dilution)
-#   - Added high-confidence path (L1=0.85 AND L2=0.85 → TRUE)
-#   - Added REVIEW verdict for human review zone
-#   - Domain presets for CS code, essays, math
+# Semantic = embedding after baseline correction. Style similarity never counts.
 
-thresholds:
-  # Layer 1 — Deterministic (hard match)
-  hard_match_threshold: 0.90 # L1 ≥ 90% → conclusive plagiarism
-  high_confidence_l1: 0.85 # L1 ≥ 85% AND L2 ≥ 85% → TRUE
-  high_confidence_l2: 0.85
-  strong_structural_l1: 0.70 # L1 ≥ 70% AND L2 ≥ 60% → TRUE
-  strong_structural_l2: 0.60
-
-  # Layer 2 — Statistical
-  probable_l2: 0.80 # L2 ≥ 80% AND L3 ≥ 80% → PROBABLE
-  probable_l3: 0.80
-  review_l2_threshold: 0.50 # L2 ≥ 50% → REVIEW zone
-
-  # Layer 3 — Semantic (review only, never standalone verdict)
-  flag_l3_threshold: 0.90 # L3 ≥ 90% → FLAG for manual review
-
-  # Review zone (borderline — too weak for auto-action, too strong to ignore)
-  review_l1_threshold: 0.50 # L1 ≥ 50% → REVIEW
+ehe:
+  structural_hard_match: 0.90
+  structural_strong: 0.75
+  structural_agree_min: 0.60
+  min_agreeing_engines: 2      # set to 1 to restore the old single-engine TRUE at 0.75
+  structural_medium: 0.50
+  statistical_strong: 0.70
+  semantic_dominance: 0.95
+  semantic_flag: 0.85
+  semantic_cap: 0.99
+  conflict_gap: 0.50
+  borderline: 0.30
   review_enabled: true
 
-  # Course-specific multipliers (applied to layer computations, not fusion)
-  cs_code_ast_weight: 1.2 # CS courses: boost AST dominance
-  essay_semantic_weight: 1.5 # Essays: boost semantic
-  math_structure_weight: 1.3 # Math: boost structure
+# Per-domain overrides, applied on top of ``ehe`` for that course type. Omit a domain to use the
+# built-in preset; list a domain to replace it. (Keys restated under ``ehe`` apply to EVERY domain.)
+domains:
+  essay: {semantic_flag: 0.75, semantic_dominance: 0.90, structural_strong: 0.70}
+  math: {structural_strong: 0.70, statistical_strong: 0.65}
 
-# Per-engine baseline (noise floor for unrelated files in same language)
+# Noise floor of unrelated files in the same language (per engine). ``embedding`` is the
+# semantic baseline; the others are used for the borderline tier.
 baselines:
   token: 0.12
   winnowing: 0.16
   ast: 0.25
   ngram: 0.10
   graph: 0.20
+  logic_flow: 0.20
   embedding: 0.70
   static_rules: 0.20
+
+# DISPLAY ONLY: scale the displayed layer-1 value for course types. They never change a verdict.
+display_weights:
+  cs_code_ast_weight: 1.2
+  essay_semantic_weight: 1.5
+  math_structure_weight: 1.3

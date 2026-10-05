@@ -5,30 +5,46 @@ Usage:
     from src.backend.engines.similarity.codebert_similarity import CodeBERTSimilarity
     similarity = CodeBERTSimilarity(device='cuda')
     score = similarity.compare({'raw': code_a}, {'raw': code_b})
+
+NOTE: ``unixcoder_similarity.UniXcoderSimilarity`` is the maintained UniXcoder engine
+(CLS pooling, disk/Redis caches, batching). The ``UniXcoderSimilarity`` defined
+at the bottom of THIS module is a thin mean-pooling variant kept for compatibility;
+it shares a name but not a constructor or pooling with that one.
 """
 
 import logging
+import threading
 from typing import Any
+
+import numpy as np
+
+from .base_similarity import BaseSimilarityAlgorithm
 
 logger = logging.getLogger(__name__)
 
 
-class CodeBERTSimilarity:
+class CodeBERTSimilarity(BaseSimilarityAlgorithm):
     """Compute code similarity using a CodeBERT or similar transformer model.
 
     Embeddings are cached by content hash so the same code snippet is
     only encoded once regardless of how many pairs it participates in.
+
+    It now subclasses :class:`BaseSimilarityAlgorithm`: it had no ``name`` or
+    ``get_name()``, so ``SimilarityEngine.add_algorithm`` raised AttributeError.
+    ``compare`` still returns a plain float, which the engine accepts.
     """
 
     def __init__(
         self, model_name: str = "microsoft/codebert-base", device: str = "auto"
     ) -> None:
+        super().__init__("codebert")
         self.model_name = model_name
         if device == "auto":
             device = "cuda" if self._has_gpu() else "cpu"
         self.device = device
         self._model: Any = None
         self._tokenizer: Any = None
+        self._load_lock = threading.Lock()
 
         # Per-instance embedding cache
         from src.backend.engines.cache import EmbeddingCache
@@ -50,23 +66,27 @@ class CodeBERTSimilarity:
             return False
 
     def _load_model(self) -> None:
-        """Lazy-load the transformer model and tokenizer."""
+        """Lazy-load the transformer model and tokenizer (thread-safe)."""
         if self._model is not None:
             return
-        try:
-            from transformers import AutoModel, AutoTokenizer
+        with self._load_lock:
+            if self._model is not None:
+                return
+            try:
+                from transformers import AutoModel, AutoTokenizer
 
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
-            self._model.eval()
-        except ImportError as exc:
-            logger.error("transformers library not installed: %s", exc)
-            raise
-        except Exception as exc:
-            logger.error(
-                "Failed to load model %s on %s: %s", self.model_name, self.device, exc
-            )
-            raise
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                model = AutoModel.from_pretrained(self.model_name).to(self.device)
+                model.eval()
+                self._tokenizer, self._model = tokenizer, model
+            except ImportError as exc:
+                logger.error("transformers library not installed: %s", exc)
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Failed to load model %s on %s: %s", self.model_name, self.device, exc
+                )
+                raise
 
     def _encode(self, code: str) -> list[float]:
         """Encode a single source snippet to a dense vector (cached)."""
@@ -82,7 +102,7 @@ class CodeBERTSimilarity:
         ).to(self.device)
         with torch.no_grad():
             outputs = self._model(**inputs)
-        return outputs.last_hidden_state.mean(dim=1).squeeze().tolist()
+        return outputs.last_hidden_state.mean(dim=1).reshape(-1).tolist()
 
     def compare(self, a: Any, b: Any) -> float:
         """Return cosine similarity in [0, 1] for two code inputs.
@@ -101,22 +121,24 @@ class CodeBERTSimilarity:
             return 0.0
 
         try:
-            ea, eb = self._encode(ca), self._encode(cb)
+            ea = np.asarray(self._encode(ca), dtype=np.float64)
+            eb = np.asarray(self._encode(cb), dtype=np.float64)
         except Exception as exc:
             logger.error("Embedding encoding failed for code pair: %s", exc)
             return 0.0
 
-        dot = sum(x * y for x, y in zip(ea, eb))
-        na = sum(x * x for x in ea) ** 0.5
-        nb = sum(x * x for x in eb) ** 0.5
-
+        if ea.shape != eb.shape:
+            return 0.0
+        na, nb = float(np.linalg.norm(ea)), float(np.linalg.norm(eb))
         if na == 0 or nb == 0:
             return 0.0
-        return max(0.0, min(1.0, dot / (na * nb)))
+        # (a pure-Python ``sum(x * y ...)`` over 768 floats per comparison before)
+        return max(0.0, min(1.0, float(np.dot(ea, eb) / (na * nb))))
 
 
 class UniXcoderSimilarity(CodeBERTSimilarity):
-    """UniXcoder variant using microsoft/unixcoder-base."""
+    """UniXcoder variant using microsoft/unixcoder-base (mean pooling; see module note)."""
 
     def __init__(self, device: str = "auto") -> None:
         super().__init__("microsoft/unixcoder-base", device)
+        self.name = "unixcoder_meanpool"

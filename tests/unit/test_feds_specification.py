@@ -30,9 +30,14 @@ class TestEvidenceModel:
         assert "behavioral" in models
 
     def test_semantic_has_capped_range(self) -> None:
-        """Semantic evidence range is capped at 0.95."""
+        """Semantic evidence range is capped at 0.90.
+
+        The cap sits below 1.0 because embedding similarity is the noisiest of
+        the three layers, and it is enforced in the declared valid_range so the
+        evidence model and the policy agree on the ceiling.
+        """
         models = EvidenceModel.get_models()
-        assert models["semantic"].valid_range == (0.0, 0.95)
+        assert models["semantic"].valid_range == (0.0, 0.90)
 
     def test_semantic_never_standalone(self) -> None:
         """Semantic evidence has constraint against standalone verdicts."""
@@ -52,7 +57,7 @@ class TestPolicyEngine:
     def test_load_policy(self, engine: PolicyEngine) -> None:
         """Policy loads successfully."""
         assert engine.config is not None
-        assert str(engine.version) == "1.0"
+        assert str(engine.version) == "1.1"
 
     def test_rules_parsed(self, engine: PolicyEngine) -> None:
         """Rules are parsed and sorted by priority."""
@@ -116,23 +121,36 @@ class TestFEDS:
         decision = feds.evaluate(0.88, 0.90, 0.50, evidence)
         assert decision.verdict == "TRUE"
 
-    def test_probable_returns_probable(self, feds: FEDS) -> None:
-        """Mixed evidence produces PROBABLE."""
+    def test_probable_returns_review_not_probable(self, feds: FEDS) -> None:
+        """Semantic-only evidence stops short of PROBABLE.
+
+        Semantic similarity alone used to reach PROBABLE ("likely plagiarism").
+        It now tops out at REVIEW because embedding distance is weak evidence on
+        its own -- UniXcoder returns ~0.70 cosine for *any* two Python files --
+        so it may corroborate a structural finding but never stand as one.
+        """
         evidence = {
             "layer1": {"engine_scores": {"ngram": 0.85}},
             "layer3": {"engine_scores": {"embedding": 0.80}},
         }
         decision = feds.evaluate(0.40, 0.60, 0.85, evidence)
-        assert decision.verdict == "PROBABLE"
+        assert decision.verdict == "REVIEW"
+        assert decision.verdict != "PROBABLE"
 
-    def test_semantic_flag_returns_flag(self, feds: FEDS) -> None:
-        """Semantic-only similarity produces FLAG."""
+    def test_semantic_only_never_flags(self, feds: FEDS) -> None:
+        """A high embedding score with no structural match is not a FLAG.
+
+        Same principle as above: ``semantic`` is declared "NEVER standalone
+        verdict source" in the evidence model, so high similarity on its own
+        must fall through to CLEAN rather than accuse.
+        """
         evidence = {
             "layer3": {"engine_scores": {"embedding": 0.92}},
         }
         # L2 is low (0.20), so structural < 0.50
         decision = feds.evaluate(0.30, 0.20, 0.92, evidence)
-        assert decision.verdict == "FLAG"
+        assert decision.verdict == "CLEAN"
+        assert decision.verdict != "FLAG"
 
     def test_conflict_resolution_returns_review(self, feds: FEDS) -> None:
         """Contradictory evidence produces REVIEW."""
@@ -232,8 +250,10 @@ class TestAntiPatterns:
         }
         decision = engine.evaluate(0.20, 0.20, 0.95, evidence)
         assert decision.verdict != "TRUE"
-        # Should be FLAG (semantic-only warning)
-        assert decision.verdict == "FLAG"
+        # Nor FLAG: embedding similarity cannot accuse on its own. It is
+        # corroborating evidence only, so with nothing structural behind it the
+        # decision falls through to CLEAN.
+        assert decision.verdict == "CLEAN"
 
     def test_no_weighted_averaging(self) -> None:
         """Decision is rule-based, not weighted average."""

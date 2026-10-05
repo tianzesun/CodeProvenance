@@ -59,11 +59,13 @@ def blend_ml_heuristic(
     full_lines = float(conf["ml_full_lines"])
     if line_count <= min_lines:
         length_factor = 0.2
-    elif line_count >= full_lines:
+    elif line_count >= full_lines or full_lines <= min_lines:
+        # ``full_lines <= min_lines`` is a misconfiguration; the ramp below would
+        # divide by zero, so treat it as "full weight above min_lines".
         length_factor = 1.0
     else:
         length_factor = 0.2 + 0.8 * (line_count - min_lines) / (full_lines - min_lines)
-    weight = float(conf["ml_base_weight"]) * length_factor
+    weight = max(0.0, min(1.0, float(conf["ml_base_weight"]) * length_factor))
     blended = weight * ml_score + (1.0 - weight) * heuristic_score
 
     capped = False
@@ -75,8 +77,18 @@ def blend_ml_heuristic(
     return blended, capped
 
 
+DEFAULT_SAFEGUARDS: dict[str, float] = {
+    "variance_threshold": 0.10,
+    "low_confidence_floor": 0.20,
+    "low_confidence_cap": 0.66,
+}
+
+
 def apply_fp_safeguards(
-    ai_probability: float, confidence: float, signals: dict[str, float]
+    ai_probability: float,
+    confidence: float,
+    signals: dict[str, float],
+    config: dict[str, Any] | None = None,
 ) -> tuple[float, float, list[str]]:
     """False-positive safeguards for the live fusion path.
 
@@ -88,8 +100,15 @@ def apply_fp_safeguards(
     capped at 0.25 but the threshold was 0.3); here 0.10 is used so extreme
     spread actually triggers.
 
+    The thresholds come from the ``safeguards`` section of ai_ensemble_config.yaml
+    (``config``), defaulting to the values below.
+
     Returns (probability, confidence, notes).
     """
+    conf = {**DEFAULT_SAFEGUARDS, **(config or {})}
+    variance_threshold = float(conf["variance_threshold"])
+    low_floor = float(conf["low_confidence_floor"])
+    low_cap = float(conf["low_confidence_cap"])
     notes: list[str] = []
     penalty = 0.0
     values = [value for value in signals.values() if isinstance(value, (int, float))]
@@ -106,25 +125,49 @@ def apply_fp_safeguards(
             notes.append("Signal contradiction — confidence reduced")
         mean = sum(values) / len(values)
         variance = sum((value - mean) ** 2 for value in values) / len(values)
-        if variance > 0.10:
+        if variance > variance_threshold:
             penalty += 0.15
             notes.append("Extreme signal variance — confidence reduced")
 
     adjusted = max(0.0, min(1.0, confidence - penalty))
     if 0.4 <= ai_probability <= 0.6:
         adjusted = max(adjusted, 0.3)
-    if adjusted < 0.2:
+    if adjusted < low_floor:
         if ai_probability >= 0.70:
             # Low-confidence calls must not land in the high band. The human
             # FP baseline showed flagged-innocent student files carried mean
             # confidence 0.06, yet the old 0.8x+0.1 damper left them at ~0.75
             # — still red. Cap them just below the high threshold instead:
             # "uncertain" must beat "confident and wrong".
-            ai_probability = min(ai_probability, 0.66)
+            ai_probability = min(ai_probability, low_cap)
         else:
             ai_probability = ai_probability * 0.8 + 0.1
         notes.append("Low confidence — score damped toward neutral")
     return round(ai_probability, 3), round(adjusted, 3), notes
+
+
+def apply_calibrator(calibrator: Any, probability: float) -> float:
+    """Map a fused probability through the learned calibrator, defensively.
+
+    Prefers ``predict_proba`` when the calibrator is a classifier (``predict`` on
+    a classifier returns a hard 0/1 label, not a probability). Any failure, or a
+    non-finite / out-of-range output, returns the input unchanged.
+    """
+    value: float | None = None
+    proba = getattr(calibrator, "predict_proba", None)
+    if callable(proba):
+        try:
+            value = float(proba([[probability]])[0][1])
+        except Exception:  # noqa: S110
+            value = None
+    if value is None:
+        try:
+            value = float(calibrator.predict([probability])[0])
+        except Exception:
+            return probability
+    if not math.isfinite(value):
+        return probability
+    return max(0.0, min(1.0, value))
 
 
 class AIDetectionOrchestrator:
@@ -267,6 +310,15 @@ class AIDetectionOrchestrator:
         else:
             fused_probability = self._heuristic_fuse(signals)
 
+        # Apply the learned calibrator (trained via /api/ai-detect/retrain) to the
+        # fused score so shared calibration feedback affects the live path. It
+        # runs BEFORE the false-positive safeguards: it used to run after them,
+        # so a calibrated score could climb back above the cap the safeguards had
+        # just imposed on a low-confidence result.
+        calibrator = getattr(self.legacy_engine, "calibrator", None)
+        if calibrator is not None:
+            fused_probability = apply_calibrator(calibrator, fused_probability)
+
         # Combine confidence over the layers that actually ran, then apply the
         # false-positive safeguards. A layer that did not run must not
         # contribute a phantom confidence value, and no artificial floor is
@@ -278,19 +330,10 @@ class AIDetectionOrchestrator:
             raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
         else:
             raw_confidence = legacy_conf
-        fused_probability, safeguarded_confidence, safeguard_notes = (
-            apply_fp_safeguards(fused_probability, raw_confidence, signals)
+        fused_probability, safeguarded_confidence, safeguard_notes = apply_fp_safeguards(
+            fused_probability, raw_confidence, signals, self._safeguards_config()
         )
         combined_confidence = safeguarded_confidence
-
-        # Apply the learned calibrator (trained via /api/ai-detect/retrain) to
-        # the fused score so shared calibration feedback affects the live path.
-        calibrator = getattr(self.legacy_engine, "calibrator", None)
-        if calibrator is not None and callable(getattr(calibrator, "predict", None)):
-            try:
-                fused_probability = float(calibrator.predict([fused_probability])[0])
-            except Exception:  # pragma: no cover  # noqa: S110
-                pass  # Keep the sigmoid-calibrated score on failure
 
         # Merge indicators (prefer Binoculars evidence when strong)
         indicators = list(legacy_result.get("indicators", []))
@@ -322,6 +365,7 @@ class AIDetectionOrchestrator:
                 "mode": ensemble_result.get("mode"),
                 "signals": ensemble_result.get("signals", {}),
                 "classifier": ensemble_result.get("classifier"),
+                "classifier_status": ensemble_result.get("classifier_status"),
             }
         if fusion_debug:
             layers["fusion"] = fusion_debug
@@ -365,6 +409,15 @@ class AIDetectionOrchestrator:
             "calibration": calibration,
             "layers": layers,
         }
+
+    def _safeguards_config(self) -> dict[str, Any]:
+        """Load false-positive safeguard thresholds from the shared config."""
+        try:
+            from src.backend.engines.ai.ensemble import AIEnsembleConfig
+
+            return AIEnsembleConfig.get_instance().safeguards_config()
+        except Exception:  # pragma: no cover
+            return dict(DEFAULT_SAFEGUARDS)
 
     def _blend_config(self) -> dict[str, Any]:
         """Load safe-blend settings from the shared ensemble config."""

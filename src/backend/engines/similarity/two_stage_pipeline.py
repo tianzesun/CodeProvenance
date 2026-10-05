@@ -15,9 +15,9 @@ import logging
 import time
 from typing import Any
 
-from .boilerplate_filter import global_boilerplate_filter
+from .boilerplate_filter import BoilerplateFilter, global_boilerplate_filter
 from .deep_analysis import DeepVerify
-from .winnowing_similarity import WinnowingSimilarity
+from .winnowing_similarity import EnhancedWinnowingSimilarity
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +30,57 @@ class TwoStageSimilarityPipeline:
     Stage 2: Deep heavy verification on Top-10 candidates (>90% precision)
     """
 
-    def __init__(self, top_n_candidates: int = 10):
+    def __init__(
+        self,
+        top_n_candidates: int = 10,
+        stage2_verifier: DeepVerify | None = None,
+        boilerplate_filter: BoilerplateFilter | None = None,
+    ):
         """
         Initialize pipeline.
 
         Args:
             top_n_candidates: Number of candidates to pass from stage 1 to stage 2
+            stage2_verifier: Optional verifier (default: a new :class:`DeepVerify`)
+            boilerplate_filter: Optional filter (default: the process-wide one; pass
+                ``global_boilerplate_filter.copy()`` for per-job template isolation)
         """
-        self.stage1_engine = WinnowingSimilarity(window_size=13, k_gram_size=5)
-        self.stage2_verifier = DeepVerify()
-        self.top_n = top_n_candidates
-        self.boilerplate_filter = global_boilerplate_filter
+        # Stage 1 used ``WinnowingSimilarity(window_size=13, k_gram_size=5)``, a class
+        # that does not exist, so importing this module raised ImportError. Plain
+        # single-pass winnowing with k=5, t=13 is what that call asked for.
+        self.stage1_engine = EnhancedWinnowingSimilarity(
+            k=5, t=13, multi_pass=False, adaptive=False, ai_detection=False
+        )
+        self.stage2_verifier = stage2_verifier or DeepVerify()
+        self.top_n = max(1, int(top_n_candidates))
+        self.boilerplate_filter = boilerplate_filter or global_boilerplate_filter
+
+    def _stage1_score(self, content_a: str, content_b: str) -> float:
+        """Fast fingerprint similarity of two sources as a float.
+
+        The engine takes parsed dicts and returns a ``Finding``; this pipeline used to
+        pass raw strings (``AttributeError`` on ``.get``) and then sort the Findings.
+        """
+        result = self.stage1_engine.compare({"raw": content_a or ""}, {"raw": content_b or ""})
+        return float(getattr(result, "score", result))
+
+    @property
+    def confidence_floor(self) -> float:
+        # ``DeepVerify.VERIFICATION_THRESHOLDS`` did not exist (AttributeError); the
+        # effective value also honours the engine-weights configuration.
+        return float(self.stage2_verifier.thresholds["final_confidence_floor"])
+
+    def _apply_boilerplate(self, query_parsed: dict[str, Any], result: dict[str, Any], reject_into: dict[str, Any]) -> bool:
+        """Discount boilerplate overlap; return True if the result was demoted."""
+        adjusted = self.boilerplate_filter.adjust_similarity_score(
+            result["final_score"], query_parsed, result.get("parsed", {})
+        )
+        result["final_score"] = adjusted
+        if adjusted < self.confidence_floor:
+            result["verified"] = False
+            reject_into["rejection_reason"] = "BOILERPLATE_ADJUSTMENT_FAIL"
+            return True
+        return False
 
     def analyze_submission(
         self,
@@ -77,39 +117,27 @@ class TwoStageSimilarityPipeline:
         # ------------------------------
         stage1_start = time.perf_counter()
 
-        stage1_results = []
+        query_filename = str(query_submission.get("filename", ""))
+        filtered_results: list[dict[str, Any]] = []
+        semantic_filtered = 0
         for candidate in corpus:
-            # Fast winnowing similarity - this runs on ALL pairs
-            score = self.stage1_engine.compare(
-                query_submission["content"], candidate["content"]
-            )
+            # The file-type filter compared the candidate's ID against the query's
+            # FILE NAME (and called ``.lower()`` on it, failing for non-string ids).
+            candidate_filename = str(candidate.get("filename") or candidate.get("id", ""))
+            if self.boilerplate_filter.should_skip_comparison(query_filename, candidate_filename):
+                semantic_filtered += 1
+                logger.debug("Skipped semantic-incompatible pair: %s vs %s", query_filename, candidate_filename)
+                continue
 
-            stage1_results.append(
+            # Fast winnowing similarity: runs on every remaining pair
+            filtered_results.append(
                 {
                     "candidate_id": candidate["id"],
-                    "score": score,
+                    "score": self._stage1_score(query_submission["content"], candidate["content"]),
                     "content": candidate["content"],
                     "parsed": candidate.get("parsed", {}),
                 }
             )
-
-        # Apply semantic filtering to remove inappropriate comparisons
-        query_filename = query_submission.get("filename", "").lower()
-        filtered_results = []
-        semantic_filtered = 0
-        for result in stage1_results:
-            candidate_filename = result.get("candidate_id", "").lower()
-            if not self.boilerplate_filter.should_skip_comparison(
-                query_filename, candidate_filename
-            ):
-                filtered_results.append(result)
-            else:
-                semantic_filtered += 1
-                logger.debug(
-                    "Skipped semantic-incompatible pair: %s vs %s",
-                    query_filename,
-                    candidate_filename,
-                )
 
         metrics["semantic_filtered"] = semantic_filtered
 
@@ -125,37 +153,19 @@ class TwoStageSimilarityPipeline:
         # ------------------------------
         stage2_start = time.perf_counter()
 
+        query_parsed = query_submission.get("parsed", {})
         verified_results = self.stage2_verifier.verify_top_candidates(
-            query_submission.get("parsed", {}), top_candidates, language, self.top_n
+            query_parsed, top_candidates, language, self.top_n
         )
 
-        # Apply boilerplate filtering
         for result in verified_results:
-            if result["verified"]:
-                # Adjust score by removing boilerplate overlap
-                adjusted_score = self.boilerplate_filter.adjust_similarity_score(
-                    result["final_score"],
-                    query_submission.get("parsed", {}),
-                    result["parsed"],
-                )
-                result["final_score"] = adjusted_score
-
-                # Re-check threshold after adjustment
-                if (
-                    adjusted_score
-                    < DeepVerify.VERIFICATION_THRESHOLDS["final_confidence_floor"]
-                ):
-                    result["verified"] = False
-                    result["deep_verification"][
-                        "rejection_reason"
-                    ] = "BOILERPLATE_ADJUSTMENT_FAIL"
-                    metrics["rejected_candidates"] += 1
+            if result["verified"] and self._apply_boilerplate(query_parsed, result, result["deep_verification"]):
+                metrics["rejected_candidates"] += 1
 
         metrics["stage2_time_ms"] = int((time.perf_counter() - stage2_start) * 1000)
         metrics["total_time_ms"] = int((time.perf_counter() - total_start) * 1000)
         metrics["verified_matches"] = sum(1 for r in verified_results if r["verified"])
 
-        # Log performance
         logger.info(
             "Two-stage pipeline completed: %d candidates -> %d verified matches. "
             "Stage1: %dms, Stage2: %dms, Total: %dms",
@@ -179,10 +189,7 @@ class TwoStageSimilarityPipeline:
 
         For use when you already know exactly which pair to verify.
         """
-        # Fast stage 1 first
-        stage1_score = self.stage1_engine.compare(
-            submission_a["content"], submission_b["content"]
-        )
+        stage1_score = self._stage1_score(submission_a["content"], submission_b["content"])
 
         # Always run deep verification for explicit pair comparison
         verification = self.stage2_verifier.verify_pair(
@@ -192,19 +199,14 @@ class TwoStageSimilarityPipeline:
             language,
         )
 
-        # Apply boilerplate adjustment
         if verification["verified"]:
-            adjusted_score = self.boilerplate_filter.adjust_similarity_score(
+            adjusted = self.boilerplate_filter.adjust_similarity_score(
                 verification["final_score"],
                 submission_a.get("parsed", {}),
                 submission_b.get("parsed", {}),
             )
-            verification["final_score"] = adjusted_score
-
-            if (
-                adjusted_score
-                < DeepVerify.VERIFICATION_THRESHOLDS["final_confidence_floor"]
-            ):
+            verification["final_score"] = adjusted
+            if adjusted < self.confidence_floor:
                 verification["verified"] = False
                 verification["rejection_reason"] = "BOILERPLATE_ADJUSTMENT_FAIL"
 

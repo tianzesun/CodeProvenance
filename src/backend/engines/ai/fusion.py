@@ -20,8 +20,21 @@ from src.backend.engines.ai.false_positive_reduction import (
     apply_false_positive_reduction,
     get_all_false_positive_checks,
 )
-from src.backend.engines.ai.models import AIDetectionResult, SignalScores
+from src.backend.engines.ai.models import AIDetectionResult, SignalScores, categorize_risk
 from src.backend.engines.ai.reliability import assess_all_signal_reliabilities
+
+#: Display names for the eight signals. This table was duplicated in fusion,
+#: pipeline and reporting; they now share this one.
+SIGNAL_LABELS: dict[str, str] = {
+    "perplexity": "Token Entropy",
+    "burstiness": "Line Complexity",
+    "stylometry": "Code Style",
+    "pattern_library": "LLM Patterns",
+    "structural_entropy": "AST Uniformity",
+    "vocabulary_richness": "Token Diversity",
+    "whitespace_rhythm": "Spacing Rhythm",
+    "docstring_density": "Documentation",
+}
 
 
 def fuse_signals(
@@ -50,8 +63,10 @@ def fuse_signals(
     # Step 1: Assess signal reliability
     reliabilities = assess_all_signal_reliabilities(code, language)
 
-    # Step 2: Analyze signal agreement
-    agreement = analyze_signal_agreement(signals)
+    # Step 2: Analyze signal agreement over the signals that carry evidence
+    # (a signal that cannot be measured on a short file returns 0.0, which used to
+    # count as a unanimous human-like vote).
+    agreement = analyze_signal_agreement(signals, reliabilities)
 
     # Step 3: Aggregate signals with agreement
     ai_probability = aggregate_signals_with_agreement(signals, reliabilities, agreement)
@@ -89,21 +104,14 @@ def _categorize_risk(ai_probability: float, confidence: float) -> str:
 
     Args:
         ai_probability: AI probability in [0.0, 1.0]
-        confidence: Confidence in [0.0, 1.0]
+        confidence: Confidence in [0.0, 1.0]. It used to be ignored, so an
+            uncertain 0.9 and a confident 0.9 were both "High". A low-confidence
+            result is now capped at "Elevated".
 
     Returns:
         Risk level: "Very Low" / "Low" / "Moderate" / "Elevated" / "High"
     """
-    if ai_probability < 0.25:
-        return "Very Low"
-    elif ai_probability < 0.45:
-        return "Low"
-    elif ai_probability < 0.65:
-        return "Moderate"
-    elif ai_probability < 0.80:
-        return "Elevated"
-    else:
-        return "High"
+    return categorize_risk(ai_probability, confidence)
 
 
 def create_detection_result(
@@ -132,17 +140,7 @@ def create_detection_result(
     agreement = fusion_result["agreement"]
     influential_signals = fusion_result["influential_signals"]
 
-    # Create signal labels
-    signal_labels = {
-        "perplexity": "Token Entropy",
-        "burstiness": "Line Complexity",
-        "stylometry": "Code Style",
-        "pattern_library": "LLM Patterns",
-        "structural_entropy": "AST Uniformity",
-        "vocabulary_richness": "Token Diversity",
-        "whitespace_rhythm": "Spacing Rhythm",
-        "docstring_density": "Documentation",
-    }
+    signal_labels = dict(SIGNAL_LABELS)
 
     # Create indicators from influential signals
     indicators = []

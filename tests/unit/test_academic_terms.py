@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from src.backend.api.routes.academic import (
     TERM_SEASON_RANK,
     TermCreate,
+    _get_org_term_or_error,
     _request_org_id,
     _term_date_to_response,
     _term_sort_key,
@@ -474,6 +475,10 @@ class _RecordingQuery:
         self.updates.append(values)
         return self._rowcount
 
+    def count(self):
+        """Row count for link checks (e.g. how many courses reference a term)."""
+        return self._rowcount
+
 
 class _ModelDb:
     """Fake session handing out one recording query per model class."""
@@ -532,12 +537,56 @@ def test_sync_term_on_courses_mirrors_name_and_year() -> None:
     assert query.updates == [{Course.term: "Winter", Course.year: 2027}]
 
 
+def _org_request(org_id: str | None) -> SimpleNamespace:
+    """Build a request stub whose session user carries ``org_id``."""
+    return SimpleNamespace(state=SimpleNamespace(user={"organization_id": org_id}))
+
+
+def test_get_org_term_or_error_rejects_a_foreign_organization() -> None:
+    """A term belonging to another org must be refused, not handed to the route."""
+    db = _FakeDb(_term("Fall", 2026, organization_id="org-someone-else"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        _get_org_term_or_error(db, _org_request(ORG_ID), "term-Fall-2026")
+
+    assert excinfo.value.status_code == 403
+    assert "another organization" in str(excinfo.value.detail)
+
+
+def test_get_org_term_or_error_fails_closed_without_an_organization() -> None:
+    """A session with no organization must not become a cross-org write."""
+    db = _FakeDb(_term("Fall", 2026, organization_id="org-someone-else"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        _get_org_term_or_error(db, _org_request(None), "term-Fall-2026")
+
+    assert excinfo.value.status_code == 403
+
+
+def test_get_org_term_or_error_404s_an_unknown_term() -> None:
+    """An absent row is a 404, distinct from a cross-tenant refusal."""
+    with pytest.raises(HTTPException) as excinfo:
+        _get_org_term_or_error(_FakeDb(None), _org_request(ORG_ID), "term-nope")
+
+    assert excinfo.value.status_code == 404
+
+
+def test_get_org_term_or_error_returns_a_matching_term() -> None:
+    """The owning organization gets its row back."""
+    row = _term("Fall", 2026, organization_id=ORG_ID)
+
+    assert _get_org_term_or_error(_FakeDb(row), _org_request(ORG_ID), "term-Fall-2026") is row
+
+
 def test_update_term_route_is_org_scoped_and_cascades() -> None:
     """The rename endpoint enforces tenancy and mirrors onto linked courses."""
     import inspect
 
     source = inspect.getsource(update_term)
-    assert "Term belongs to another organization" in source
+    # Tenancy is enforced by the shared loader rather than inline, so the check
+    # itself is covered by the _get_org_term_or_error tests above; what this
+    # asserts is that the route still routes *every* lookup through it.
+    assert "_get_org_term_or_error" in source
     assert "sync_term_on_courses" in source
     # A colliding (name, year) must not slip through to the unique constraint.
     assert "status_code=409" in source
@@ -627,5 +676,10 @@ def test_every_term_handler_uses_the_shared_org_lookup() -> None:
 
     for handler in (list_terms, create_term, update_term, delete_term):
         source = inspect.getsource(handler)
-        assert "_request_org_id(request)" in source
+        # Two shapes are legitimate: ``_request_org_id`` scopes a collection
+        # query, while ``_get_org_term_or_error`` scopes a single-row load. Both
+        # read the organization off the session, which is the point of the test.
+        assert (
+            "_request_org_id(request)" in source or "_get_org_term_or_error" in source
+        ), f"{handler.__name__} must scope through a shared organization helper"
         assert "current_user.get(" not in source

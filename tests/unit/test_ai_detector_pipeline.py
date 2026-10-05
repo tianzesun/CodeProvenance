@@ -77,7 +77,9 @@ def calculate_sum(numbers):
 
         assert result.ai_probability >= 0.0
         assert result.confidence >= 0.0
-        assert result.risk_level in ["Very Low", "Low", "Moderate", "Elevated", "High"]
+        # risk_level is the documented three-level scale; the five-level
+        # "Very Low"/"Moderate"/"Elevated" vocabulary belongs to risk_band.
+        assert result.risk_level in ["Low", "Medium", "High"]
 
     def test_detect_ai_generated_code_ai(self):
         """Test detection with AI code."""
@@ -98,7 +100,8 @@ def process_data(input_data):
 
         assert result.ai_probability >= 0.0
         assert result.confidence >= 0.0
-        assert result.risk_level in ["Very Low", "Low", "Moderate", "Elevated", "High"]
+        # Three-level scale; see the note in test_detect_ai_generated_code_human.
+        assert result.risk_level in ["Low", "Medium", "High"]
 
     def test_detect_ai_generated_code_with_evidence(self):
         """Test detection with evidence annotation."""

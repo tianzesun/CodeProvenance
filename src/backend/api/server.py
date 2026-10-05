@@ -126,22 +126,12 @@ elif parsed_frontend_url.hostname == "127.0.0.1":
         settings.FRONTEND_URL.replace("127.0.0.1", "localhost", 1).rstrip("/")
     )
 
-app.add_middleware(RequestIdMiddleware)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=sorted(frontend_origin_candidates),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "content-type",
-        "authorization",
-        "accept",
-        "accept-language",
-        "content-language",
-        "*",
-    ],
-)
+# NOTE: CORSMiddleware and RequestIdMiddleware are installed at the BOTTOM of this
+# module (see _install_outer_middleware). Starlette puts the middleware added LAST
+# outermost, and ``@app.middleware("http")`` below is registered while this module
+# loads, so adding them here made the auth layers wrap CORS: every 401/403/429 they
+# produced left without CORS headers (the browser reports a CORS failure instead of
+# the real error) and without an X-Request-ID.
 
 # Endpoints that are reachable without a session cookie or API key. Keep this
 # list deliberately small: every entry is a public surface.
@@ -158,7 +148,6 @@ PUBLIC_PATHS = frozenset(
         # account only activates through the link emailed to the address.
         "/api/auth/register",
         "/api/auth/verify-email",
-        "/api/auth/me-api-key",
         # Guest demo login. The endpoint itself is public; everything a guest
         # then does still goes through the authenticated middleware with the
         # short-lived cookie it returns.
@@ -210,8 +199,15 @@ if settings.EXPOSE_API_DOCS:
     AUTH_EXEMPT_PATHS.update({"/docs", "/redoc", "/openapi.json"})
 if settings.ALLOW_ANONYMOUS_ANALYSIS:
     AUTH_EXEMPT_PATHS.update(ANALYSIS_PATHS)
-# Setup default API keys for development
-setup_default_keys()
+# Setup default API keys for development. Only a digest of each key is stored, so a
+# generated value cannot be shown again: set DEV_API_KEY to use a fixed dev key.
+_dev_keys = setup_default_keys() or {}
+for _key_name, _key_value in _dev_keys.items():
+    logger.warning(
+        "Development API key %r created (%s...). Set DEV_API_KEY to pin a known key.",
+        _key_name,
+        _key_value[:12],
+    )
 
 # Add auth middleware (after CORS so auth headers are available)
 app.add_middleware(AuthMiddleware, excluded_paths=list(AUTH_EXEMPT_PATHS))
@@ -305,7 +301,10 @@ TOOLS_DIR = project_root.parent / "tools"
 ENV_SETTINGS_PATH = project_root / "backend" / ".env.local"
 AUTH_COOKIE_NAME = "integritydesk_session"
 AUTH_COOKIE_MAX_AGE_SECONDS = max(300, int(settings.AUTH_TOKEN_EXPIRE_MINUTES) * 60)
-AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/")
+# "/dossier/" was missing: that route is outside the other prefixes, so the session
+# middleware never authenticated it, request.state.user stayed empty and the owner of
+# a job got a 404 for their own dossier PDF.
+AUTH_PROTECTED_PREFIXES = ("/api/", "/report/", "/benchmark/", "/dossier/")
 
 # In-memory progress tracking for benchmark jobs
 import threading
@@ -1882,15 +1881,26 @@ def _ai_bucket(score: float) -> str:
 
 
 def _ai_status_label(score: float) -> str:
+    """Describe a review priority, not a verdict about the student.
+
+    Measured grouped-holdout AUC is ~0.53, so this detector both misses assisted
+    code and flags honest submissions. "High Risk" / "Low Risk" therefore reads
+    as a finding the evidence does not support: the high band asserts fault, and
+    "Low Risk" clears a file that was merely not flagged. Every band here names
+    the next action, and the bottom band reports missing evidence rather than
+    evidence of absence.
+
+    The numeric bands are unchanged from the previous labels.
+    """
     if score >= AI_HIGH_RISK_THRESHOLD:
-        return "High Risk"
+        return "Review first"
     if score >= AI_MEDIUM_RISK_THRESHOLD:
-        return "Needs Review"
+        return "Worth a look"
     if score >= _ai_refactor_threshold():
         # Heavily edited / paraphrased AI code may sit below the medium cutoff
         # but above the refactor floor — call it out rather than calling it low.
-        return "Possibly Refactored AI Code"
-    return "Low Risk"
+        return "Possible AI assistance"
+    return "No clear signal"
 
 
 _ai_refactor_cache: dict[str, float] = {}
@@ -2437,6 +2447,19 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
                 continue
             member_path = PathLib(member)
             if _is_code_file(member_path.name):
+                # Reject on the declared size and on the file count BEFORE
+                # decompressing: the per-file limit used to be checked only after
+                # ``src.read()`` had already inflated the whole member into memory.
+                max_member_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+                declared = zf.getinfo(member).file_size
+                if declared > max_member_bytes:
+                    raise UploadTooLargeError(
+                        f"File '{member_path.name}' is {declared / 1024 / 1024:.1f} MB, "
+                        f"which exceeds the {settings.MAX_FILE_SIZE_MB} MB per-file limit."
+                    )
+                count_error = _check_submission_count(len(extracted) + 1)
+                if count_error:
+                    raise UploadTooLargeError(count_error)
                 safe_parts = [
                     part
                     for part in member_path.parts
@@ -2448,7 +2471,7 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
                 target = _unique_child_path(target_dir, relative_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src:
-                    payload = src.read()
+                    payload = src.read(max_member_bytes + 1)
                 # The 200 MB cap bounds the *compressed* archive only, so a tiny
                 # zip can still expand into arbitrarily large submissions. Every
                 # member therefore carries the same per-file limits a direct
@@ -3879,7 +3902,7 @@ def _normalize_submission_ai_result(entry: dict[str, Any]) -> dict[str, Any]:
         "confidence": round(_coerce_float(entry.get("confidence")), 3),
         "method": str(entry.get("method") or "heuristic"),
         "model": str(entry.get("model") or ""),
-        "status": str(entry.get("status") or "Low Risk"),
+        "status": str(entry.get("status") or "No clear signal"),
         "signals": signals,
         "signal_labels": signal_labels,
         "indicators": indicators[:6],
@@ -5488,6 +5511,23 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+async def _read_json_object(request: Request) -> dict[str, Any]:
+    """Parse the body as a JSON object; anything else is a 400, not a 500.
+
+    ``await request.json()`` raised on malformed input, and a valid non-object
+    (a list, a string) crashed the handler's ``payload.get(...)`` with AttributeError.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="Request body must be valid JSON"
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+    return payload
+
+
 @app.get("/api/auth/status")
 async def auth_status():
     user_count = await run_in_threadpool(_get_user_count)
@@ -5504,7 +5544,7 @@ def _get_user_count():
 
 @app.post("/api/auth/bootstrap-admin")
 async def bootstrap_admin(request: Request):
-    payload = await request.json()
+    payload = await _read_json_object(request)
     email = _normalize_email(str(payload.get("email") or ""))
     full_name = str(payload.get("full_name") or payload.get("name") or "").strip()
     password = str(payload.get("password") or "")
@@ -5573,7 +5613,14 @@ def _login_sync(email, password):
             .first()
         )
 
-        if not user or not _verify_password(password, user.password_hash):
+        if user is None:
+            # Spend the same hashing time as a real check so response time does not
+            # reveal which email addresses have an account.
+            _verify_password(password, _dummy_password_hash())
+            password_ok = False
+        else:
+            password_ok = _verify_password(password, user.password_hash)
+        if not password_ok:
             _record_login_failure(email)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
@@ -5621,7 +5668,10 @@ def _check_login_rate_limit(email: str) -> None:
             for ts in LOGIN_ATTEMPTS.get(email, [])
             if now - ts < timedelta(seconds=LOGIN_WINDOW_SECONDS)
         ]
-        LOGIN_ATTEMPTS[email] = attempts
+        if attempts:
+            LOGIN_ATTEMPTS[email] = attempts
+        else:
+            LOGIN_ATTEMPTS.pop(email, None)
     if len(attempts) >= MAX_LOGIN_ATTEMPTS:
         raise HTTPException(
             status_code=429,
@@ -5631,14 +5681,35 @@ def _check_login_rate_limit(email: str) -> None:
 
 def _record_login_failure(email: str) -> None:
     """Record a failed login attempt for rate limiting."""
+    now = datetime.now(timezone.utc)
     with LOGIN_ATTEMPTS_LOCK:
-        LOGIN_ATTEMPTS[email].append(datetime.now(timezone.utc))
+        LOGIN_ATTEMPTS[email].append(now)
+        # Every failed login for ANY string (including addresses that do not exist)
+        # adds a key, and keys were only removed on a later success: unbounded memory.
+        if len(LOGIN_ATTEMPTS) > _MAX_TRACKED_LOGIN_EMAILS:
+            window = timedelta(seconds=LOGIN_WINDOW_SECONDS)
+            for stale in [
+                k for k, v in LOGIN_ATTEMPTS.items() if not v or now - v[-1] >= window
+            ]:
+                del LOGIN_ATTEMPTS[stale]
 
 
 def _clear_login_attempts(email: str) -> None:
     """Reset the attempt counter after a successful login."""
     with LOGIN_ATTEMPTS_LOCK:
         LOGIN_ATTEMPTS.pop(email, None)
+
+
+_MAX_TRACKED_LOGIN_EMAILS = 10_000
+_DUMMY_PASSWORD_HASH: str | None = None
+
+
+def _dummy_password_hash() -> str:
+    """A throwaway hash used to equalise login timing for unknown emails."""
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = _hash_password(secrets.token_urlsafe(16))
+    return _DUMMY_PASSWORD_HASH
 
 
 def _get_user_for_cookie(email):
@@ -5656,7 +5727,7 @@ def _get_user_by_id(user_id: str):
 
 @app.post("/api/auth/login")
 async def login(request: Request):
-    payload = await request.json()
+    payload = await _read_json_object(request)
     email = _normalize_email(str(payload.get("email") or ""))
     password = str(payload.get("password") or "")
 
@@ -5670,6 +5741,8 @@ async def login(request: Request):
     user_data = await run_in_threadpool(_login_sync, email, password)
     # Need to fetch user again for cookie issuance since we now return serialized data
     user = await run_in_threadpool(_get_user_for_cookie, email)
+    if user is None:  # deleted between the credential check and now
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     response = JSONResponse(content={"user": user_data})
     _issue_auth_cookie(response, user)
     return response
@@ -5705,7 +5778,7 @@ async def register(request: Request):
     self-registered account is a professor, and admins promote from the
     admin UI.
     """
-    payload = await request.json()
+    payload = await _read_json_object(request)
     email = _normalize_email(str(payload.get("email") or ""))
     full_name = str(payload.get("full_name") or "").strip()
     password = str(payload.get("password") or "")
@@ -5723,6 +5796,11 @@ async def register(request: Request):
             status_code=200, content={"message": _REGISTER_MAIL_SENT_MESSAGE}
         )
     _REGISTER_RATE_LIMIT[email] = now
+    if len(_REGISTER_RATE_LIMIT) > 10_000:  # was never pruned: unbounded memory
+        for stale in [
+            k for k, v in _REGISTER_RATE_LIMIT.items() if now - v >= _REGISTER_COOLDOWN_SECONDS
+        ]:
+            _REGISTER_RATE_LIMIT.pop(stale, None)
 
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
@@ -5738,7 +5816,7 @@ async def register(request: Request):
             # Pending from an earlier attempt: refresh the link and let the
             # latest typed password win — access still needs the inbox.
             existing.password_hash = _hash_password(password)
-            existing.verify_token = token
+            existing.verify_token = _hash_token(token)
             existing.verify_token_expires = expires_at
             db.add(existing)
         else:
@@ -5751,7 +5829,7 @@ async def register(request: Request):
                     password_hash=_hash_password(password),
                     role="professor",
                     is_active=False,
-                    verify_token=token,
+                    verify_token=_hash_token(token),
                     verify_token_expires=expires_at,
                 )
             )
@@ -5775,7 +5853,7 @@ async def verify_email(request: Request):
     pre-fetches the link cannot burn it: the token is not consumed until the
     first successful login clears it.
     """
-    payload = await request.json()
+    payload = await _read_json_object(request)
     token = str(payload.get("token") or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Verification token is required")
@@ -5784,7 +5862,7 @@ async def verify_email(request: Request):
         user = (
             db.query(User)
             .filter(
-                User.verify_token == token,
+                User.verify_token == _hash_token(token),
                 User.verify_token_expires > datetime.now(timezone.utc),
             )
             .first()
@@ -5877,7 +5955,7 @@ async def list_users(request: Request):
 @app.post("/api/admin/users")
 async def create_user(request: Request):
     current_user = _require_current_user(request, admin_only=True)
-    payload = await request.json()
+    payload = await _read_json_object(request)
 
     email = _normalize_email(str(payload.get("email") or ""))
     full_name = str(payload.get("full_name") or payload.get("name") or "").strip()
@@ -5927,17 +6005,41 @@ async def create_user(request: Request):
 @app.patch("/api/admin/users/{user_id}")
 async def update_user(request: Request, user_id: str):
     """Update a user (admin only)."""
-    _require_current_user(request, admin_only=True)
-    payload = await request.json()
+    current_user = _require_current_user(request, admin_only=True)
+    payload = await _read_json_object(request)
 
     suspension = payload.get("suspended")
-    is_active = not bool(suspension) if suspension is not None else None
+    # bool("false") is True, so a JSON string "false" used to SUSPEND the user.
+    if suspension is not None and not isinstance(suspension, bool):
+        raise HTTPException(status_code=400, detail="suspended must be true or false")
+    is_active = (not suspension) if suspension is not None else None
 
     with SessionLocal() as db:
         result = db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
+
+        if suspension is True:
+            if str(user.id) == str(current_user.get("id")):
+                raise HTTPException(
+                    status_code=400, detail="You cannot suspend your own account"
+                )
+            if user.role == "admin":
+                other_admins = db.scalar(
+                    select(func.count())
+                    .select_from(User)
+                    .where(
+                        User.role == "admin",
+                        User.is_active.is_(True),
+                        User.id != user.id,
+                    )
+                )
+                if not other_admins:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot suspend the last active administrator",
+                    )
 
         if suspension is not None:
             user.is_active = is_active
@@ -5957,6 +6059,8 @@ async def update_user(request: Request, user_id: str):
 #: Columns accepted when importing users. Extra columns are ignored so a file
 #: exported from this endpoint can be edited and re-imported safely even though
 #: the export carries read-only audit fields.
+MAX_USER_IMPORT_ROWS = 500
+
 USER_IMPORT_COLUMNS = (
     "email",
     "full_name",
@@ -6136,6 +6240,13 @@ async def import_users(request: Request) -> dict[str, Any]:
     )
     if parse_errors:
         raise HTTPException(status_code=400, detail=" ".join(parse_errors))
+    if len(rows) > MAX_USER_IMPORT_ROWS:
+        # Every row costs a password hash, done synchronously: an unbounded file
+        # froze the event loop for minutes.
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {MAX_USER_IMPORT_ROWS} users can be imported at once",
+        )
 
     dry_run = bool(payload.get("dry_run"))
     default_password = str(payload.get("default_password") or "")
@@ -6454,14 +6565,17 @@ async def update_retention_settings(request: Request):
     tenant_id = current_user.get("tenant_id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="No tenant associated with user")
-    payload = await request.json()
+    payload = await _read_json_object(request)
     retention_days = payload.get("retention_days")
     if retention_days is not None and (
-        not isinstance(retention_days, int) or retention_days < 0
+        isinstance(retention_days, bool)  # True/False are ints in Python
+        or not isinstance(retention_days, int)
+        or retention_days < 0
+        or retention_days > 3650
     ):
         raise HTTPException(
             status_code=400,
-            detail="retention_days must be a non-negative integer or null",
+            detail="retention_days must be an integer between 0 and 3650, or null",
         )
     with SessionLocal() as db:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -7343,6 +7457,16 @@ def apply_semantic_transforms(code: str, language: str) -> str:
     return code
 
 
+def _discard_upload(job_id: str, job_dir: PathLib) -> None:
+    """Drop a rejected upload's directory AND its in-memory job entry.
+
+    Rejected uploads removed (at best) the directory and always left a
+    "processing" entry in ``_jobs`` that nothing ever completed or swept.
+    """
+    shutil.rmtree(job_dir, ignore_errors=True)
+    _jobs.pop(job_id, None)
+
+
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
@@ -7353,7 +7477,7 @@ async def upload_files(
     assignment_name: str = Form(default=""),
     assignment_id: str | None = Form(default=None),
     assignment_mode: str = Form(default=""),
-    threshold: float = Form(default=0.5),
+    threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
@@ -7399,7 +7523,7 @@ async def upload_files(
     size_error = oversized[0] if oversized else None
     size_error = size_error or _check_submission_count(len(saved_files))
     if size_error:
-        shutil.rmtree(job_dir, ignore_errors=True)
+        _discard_upload(job_id, job_dir)
         return JSONResponse(status_code=400, content={"error": size_error})
 
     starter_dir = job_dir / "starter"
@@ -7416,6 +7540,7 @@ async def upload_files(
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
 
     if len(saved_files) < 2:
+        _discard_upload(job_id, job_dir)
         return JSONResponse(
             status_code=400, content={"error": "At least 2 code files are required"}
         )
@@ -7447,7 +7572,7 @@ async def upload_zip(
     assignment_name: str = Form(default=""),
     assignment_id: str | None = Form(default=None),
     assignment_mode: str = Form(default=""),
-    threshold: float = Form(default=0.5),
+    threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
@@ -7478,10 +7603,14 @@ async def upload_zip(
     job_dir = UPLOADS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    zip_path = job_dir / file.filename
-    content = await file.read()
-    if len(content) > 200 * 1024 * 1024:  # 200 MB ZIP limit
-        shutil.rmtree(job_dir, ignore_errors=True)
+    # The client-supplied filename is never used as a path: "../../x.zip" or an
+    # absolute name made ``job_dir / file.filename`` write outside the job directory.
+    zip_path = job_dir / "upload.zip"
+    max_zip_bytes = 200 * 1024 * 1024  # 200 MB ZIP limit
+    # Read at most one byte past the limit rather than buffering an arbitrary body.
+    content = await file.read(max_zip_bytes + 1)
+    if len(content) > max_zip_bytes:
+        _discard_upload(job_id, job_dir)
         return JSONResponse(
             status_code=400,
             content={"error": "ZIP file exceeds the 200 MB size limit."},
@@ -7491,16 +7620,23 @@ async def upload_zip(
     try:
         extracted = _extract_zip(zip_path, job_dir)
     except UploadTooLargeError as exc:
-        shutil.rmtree(job_dir, ignore_errors=True)
+        _discard_upload(job_id, job_dir)
         return JSONResponse(status_code=400, content={"error": str(exc)})
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError):
+        # A corrupt, encrypted or unsupported archive was an unhandled 500.
+        _discard_upload(job_id, job_dir)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "The file is not a valid, readable .zip archive."},
+        )
 
     count_error = _check_submission_count(len(extracted))
     if count_error:
-        shutil.rmtree(job_dir, ignore_errors=True)
+        _discard_upload(job_id, job_dir)
         return JSONResponse(status_code=400, content={"error": count_error})
 
     if len(extracted) < 2:
-        shutil.rmtree(job_dir)
+        _discard_upload(job_id, job_dir)
         return JSONResponse(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
@@ -12774,14 +12910,27 @@ def _format_env_value(value: Any) -> str | None:
 
 
 def _quote_env_value(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("Environment values cannot contain NUL")
     if value == "":
         return '""'
-    if any(ch in value for ch in [" ", "#", '"', "'"]):
-        return json.dumps(value)
+    # A raw newline was not quoted, so a value like "x\nALLOW_ANONYMOUS_ANALYSIS=true"
+    # wrote a second, attacker-chosen line into .env.local.
+    if any(ch in value for ch in (" ", "#", '"', "'", "\\", "\n", "\r", "\t", "$", "`")):
+        return json.dumps(value, ensure_ascii=False)
     return value
 
 
+_ENV_FILE_LOCK = threading.Lock()
+
+
 def _persist_env_settings(updates: dict[str, Any]) -> None:
+    # Read-modify-write of the file: two concurrent saves used to drop each other's keys.
+    with _ENV_FILE_LOCK:
+        _persist_env_settings_locked(updates)
+
+
+def _persist_env_settings_locked(updates: dict[str, Any]) -> None:
     lines = (
         ENV_SETTINGS_PATH.read_text(encoding="utf-8").splitlines()
         if ENV_SETTINGS_PATH.exists()
@@ -12816,6 +12965,10 @@ def _persist_env_settings(updates: dict[str, Any]) -> None:
 
     content = "\n".join(new_lines).rstrip()
     ENV_SETTINGS_PATH.write_text(f"{content}\n" if content else "", encoding="utf-8")
+    try:
+        os.chmod(ENV_SETTINGS_PATH, 0o600)  # it holds API keys: owner-only
+    except OSError:
+        logger.warning("Could not restrict permissions on the settings file", exc_info=True)
 
 
 def _should_require_auth(path: str) -> bool:
@@ -12833,6 +12986,19 @@ def _ensure_auth_secret() -> str:
             'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
         )
     return settings.auth_jwt_secret
+
+
+def _hash_token(token: str) -> str:
+    """Digest stored for an emailed one-time token (SHA-256, URL-safe base64).
+
+    Only the digest is persisted, so a database read cannot be replayed as a valid
+    link. It is 43 characters, the same length as the raw token. Links issued before
+    this change stop working; the user registers again to get a new one.
+    """
+    import base64
+
+    digest = hashlib.sha256(token.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
 def _normalize_email(value: str) -> str:
@@ -13564,15 +13730,9 @@ def _authenticate_request(request: Request) -> dict[str, Any]:
             key_data = api_key_manager.validate_key(api_key)
             if not key_data:
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            allowed, retry_after = api_key_manager.check_rate_limit(api_key)
-            if not allowed:
-                raise HTTPException(
-                    status_code=429,
-                    detail={
-                        "error": "Rate limit exceeded",
-                        "retry_after": retry_after,
-                    },
-                )
+            # The rate limit is NOT counted here: AuthMiddleware (which runs next for
+            # every protected path) already counts and enforces it. Counting in both
+            # places consumed two units per request and halved every key's limit.
             return {
                 "id": "",
                 "role": "api",
@@ -13582,7 +13742,12 @@ def _authenticate_request(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
-        payload = jwt.decode(token, _ensure_auth_secret(), algorithms=["HS256"])
+        payload = jwt.decode(
+            token,
+            _ensure_auth_secret(),
+            algorithms=["HS256"],
+            options={"require_exp": True},
+        )
     except JWTError as exc:
         raise HTTPException(
             status_code=401, detail="Invalid or expired session"
@@ -13699,7 +13864,9 @@ async def dashboard_auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     try:
-        user = _authenticate_request(request)
+        # Token decoding plus a user lookup: blocking database I/O that used to run
+        # directly on the event loop for every authenticated request.
+        user = await run_in_threadpool(_authenticate_request, request)
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
@@ -13724,8 +13891,10 @@ async def dashboard_auth_middleware(request: Request, call_next):
     if user.get("role") != "api":
         # API-key principals have no dashboard user; tenant runtime settings
         # are loaded for interactive sessions only.
-        _apply_runtime_settings_from_record(
-            _load_tenant_settings_record(user.get("tenant_id"))
+        await run_in_threadpool(
+            lambda: _apply_runtime_settings_from_record(
+                _load_tenant_settings_record(user.get("tenant_id"))
+            )
         )
     return await call_next(request)
 
@@ -16459,7 +16628,7 @@ async def suggest_assignment_mode(request: Request) -> dict[str, Any]:
 @app.patch("/api/settings")
 async def update_settings(request: Request):
     current_user = _require_current_user(request, admin_only=True)
-    data = await request.json()
+    data = await _read_json_object(request)
     tenant_id = current_user.get("tenant_id")
     if not tenant_id:
         raise HTTPException(
@@ -17078,14 +17247,65 @@ def _mount_secondary_routers() -> None:
 _mount_secondary_routers()
 
 
+def _install_outer_middleware() -> None:
+    """Install CORS and request-id tracing as the OUTERMOST middleware.
+
+    Must run after every other middleware is registered (the last one added is
+    outermost). Resulting order, outermost first: request id -> CORS ->
+    dashboard session auth -> API-key auth -> routes.
+    """
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=sorted(frontend_origin_candidates),
+        allow_credentials=True,
+        # PATCH was missing although several endpoints use it (review, user
+        # suspension, settings), so a cross-origin preflight for them was refused.
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "content-type",
+            "authorization",
+            "accept",
+            "accept-language",
+            "content-language",
+            "*",
+        ],
+        expose_headers=["X-Request-ID", "Retry-After"],
+    )
+    app.add_middleware(RequestIdMiddleware)
+
+
+_install_outer_middleware()
+
+_cleanup_worker_started = False
+_cleanup_worker_lock = threading.Lock()
+
+
+def _start_cleanup_worker() -> None:
+    """Start the retention sweeper once per process.
+
+    It used to start only inside ``main()``, so under ``uvicorn
+    src.backend.api.server:app`` (how a deployment normally runs) retention was
+    never enforced.
+    """
+    global _cleanup_worker_started
+    with _cleanup_worker_lock:
+        if _cleanup_worker_started:
+            return
+        _cleanup_worker_started = True
+    threading.Thread(
+        target=_cleanup_expired_jobs, daemon=True, name="job-cleanup-worker"
+    ).start()
+
+
+@app.on_event("startup")
+def _start_background_workers() -> None:
+    _start_cleanup_worker()
+
+
 def main():
     import uvicorn
-    import threading
 
-    cleanup_thread = threading.Thread(
-        target=_cleanup_expired_jobs, daemon=True, name="job-cleanup-worker"
-    )
-    cleanup_thread.start()
+    _start_cleanup_worker()
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("BACKEND_PORT", "8000")))
 

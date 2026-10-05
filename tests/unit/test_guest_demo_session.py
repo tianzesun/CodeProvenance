@@ -154,7 +154,10 @@ class TestGuestTokenValidation:
     ) -> None:
         """The guest branch must not swallow a normal session token."""
         user_token = server.jwt.encode(
-            {"sub": "someone-else", "role": "professor"},
+            # ``_authenticate_request`` decodes with ``require_exp``, so a token
+            # without one is rejected before the User lookup. This test is about
+            # the lookup happening, so the token must be otherwise valid.
+            {"sub": "someone-else", "role": "professor", "exp": 9999999999},
             server.settings.auth_jwt_secret,
             algorithm="HS256",
         )

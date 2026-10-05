@@ -12,8 +12,17 @@ Output format:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def _num(value: Any) -> float:
+    """A finite float, else 0.0 (NaN would slip past every ``<`` / ``>=`` rule below)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    value = float(value)
+    return value if math.isfinite(value) else 0.0
 
 
 @dataclass
@@ -52,18 +61,25 @@ class DecisionPolicy:
         Returns:
             Decision with verdict, confidence, evidence, and reason
         """
+        evidence = {key: _num(value) for key, value in (evidence or {}).items()}
+
         # Rule 0: Identity Override (HARD STOP)
         if evidence.get("identity", 0.0) >= 1.0:
             return Decision(
                 verdict="TRUE",
                 confidence=1.0,
-                evidence={"identity": evidence},
+                # (the whole evidence dict used to be nested under the "identity" key)
+                evidence={"identity": evidence["identity"]},
                 reason="identity_override",
                 triggered_layer="identity",
             )
 
         # Rule 1: Stability Guard - Require minimum structural evidence
-        # If max structural signal is weak, consider clean regardless of other signals
+        # If max structural signal is weak, consider clean regardless of other signals.
+        # NOTE: this guard makes Rule 6 (semantic-only REVIEW) and the first clause of Rule 7
+        # unreachable: past this point ``max_structural >= 0.50`` always holds, so a
+        # semantic-only pair is CLEAN, not REVIEW. That is the safer reading of the two
+        # contradictory rules and is kept; change the guard if semantic-only should be reviewed.
         structural = evidence.get("structural", 0.0)
         logic_flow = evidence.get("logic_flow", 0.0)
         fingerprint = evidence.get("fingerprint", 0.0)

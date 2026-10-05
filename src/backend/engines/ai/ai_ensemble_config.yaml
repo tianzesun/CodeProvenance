@@ -2,9 +2,13 @@
 #
 # Controls the ensemble scorer weights, the severity thresholds, and the
 # classification switch. Weights follow the same pattern as engine_weights.yaml
-# used for the similarity engines — all values are hot-loadable.
+# used for the similarity engines — all values are hot-loadable (the file is
+# re-read when it changes; no restart or explicit reload needed).
 #
-# Weights sum to 1.0 within each scoring mode.
+# Weights should sum to 1.0 within each scoring mode (they are normalised over
+# the signals that are present, so a missing signal does not break the score).
+# Invalid sections (non-numeric weights, negative values, wrong types) are
+# ignored with a warning and replaced by the built-in defaults.
 ensemble:
   # Scoring modes: 'heuristic' (no trained model available) or 'ml'
   # (trained classifier present). The scorer auto-selects.
@@ -34,6 +38,15 @@ classification:
   # under src/backend/engines/ai/models/. Grouped-holdout AUC ~0.66 vs ~0.52
   # for the heuristic on unseen problems — a real but modest improvement.
   #
+  # RETRAIN AFTER EXTRACTOR CHANGES. Models carry a feature-schema version and
+  # the perplexity model their training features came from. A model trained
+  # under an older schema is refused at load time (the ensemble then uses the
+  # heuristic path; status "unavailable"), and one trained with a different
+  # perplexity model than the one scoring the code is ignored (status
+  # "feature_mismatch"). Retrain with:
+  #   python -m src.backend.engines.ai.train_classifier <dataset> --refit-all
+  # (AICODE_ALLOW_STALE_MODEL=1 overrides the schema check deliberately.)
+  #
   # Enabled via the safe-blend fusion (2026-08-21): the orchestrator no longer
   # trusts the classifier outright. Its weight is gated by code length and the
   # fused score is capped below high-risk when the classifier disagrees with
@@ -59,6 +72,17 @@ perplexity:
   # cost and the ~17s one-time load no longer stall requests. Measured signal:
   # AUC 0.630 with the code LM vs 0.545 statistical (500-sample grouped fold).
   huggingface_model: "microsoft/CodeGPT-small-py"
+
+# False-positive safeguards applied to the fused score (orchestrator path).
+safeguards:
+  # Signal variance above this reduces confidence. Variance of [0, 1] signals
+  # cannot exceed 0.25, so a value >= 0.25 disables the check.
+  variance_threshold: 0.10
+  # Below this confidence a high score is capped (an uncertain call must not
+  # look like a confident one) ...
+  low_confidence_floor: 0.20
+  # ... at this probability, just under the 0.70 high-risk threshold.
+  low_confidence_cap: 0.66
 
 # Safe-blend fusion: how the orchestrator combines the trained classifier with
 # the explainable heuristic signals. The classifier's weight grows with code

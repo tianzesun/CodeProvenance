@@ -3,13 +3,14 @@ API routes for managing Organizations, Courses, Assignments, Students, and Enrol
 """
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.backend.api.middleware.auth import (
@@ -136,8 +137,7 @@ class OrganizationResponse(BaseModel):
     name: str
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TermCreate(BaseModel):
@@ -177,8 +177,7 @@ class TermResponse(BaseModel):
     course_count: int = 0
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CourseCreate(BaseModel):
@@ -199,11 +198,10 @@ class CourseResponse(BaseModel):
     code: Optional[str]
     term: Optional[str]
     year: Optional[int]
-    term_id: Optional[str]
+    term_id: Optional[str] = None
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssignmentCreate(BaseModel):
@@ -234,8 +232,7 @@ class AssignmentResponse(BaseModel):
     description: Optional[str]
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StudentCreate(BaseModel):
@@ -252,8 +249,7 @@ class StudentResponse(BaseModel):
     student_number: Optional[str]
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EnrollmentCreate(BaseModel):
@@ -269,8 +265,7 @@ class EnrollmentResponse(BaseModel):
     enrolled_at: str
     student: Optional[StudentResponse] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssignmentVersionCreate(BaseModel):
@@ -293,8 +288,7 @@ class AssignmentVersionResponse(BaseModel):
     is_active: bool
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Shared Academic Helpers ====================
@@ -462,6 +456,70 @@ def resolve_course_term(
     return None, name, year
 
 
+def _course_to_response(course: Course) -> CourseResponse:
+    """Serialize a course row, including its registry ``term_id``."""
+    return CourseResponse(
+        id=str(course.id),
+        organization_id=str(course.organization_id),
+        name=course.name,
+        code=course.code,
+        term=course.term,
+        year=course.year,
+        term_id=str(course.term_id) if course.term_id else None,
+        created_at=course.created_at.isoformat() if course.created_at else "",
+    )
+
+
+def _get_org_term_or_error(db: Session, request: Request, term_id: str) -> Term:
+    """Load a term and require it to belong to the caller's organization.
+
+    A caller with no organization is rejected rather than waved through, so a
+    missing ``organization_id`` can never turn into cross-organization writes.
+    """
+    org_id = _request_org_id(request)
+    term = db.query(Term).filter(Term.id == term_id).first()
+    if not term:
+        raise HTTPException(status_code=404, detail="Term not found")
+    if not org_id or str(term.organization_id) != str(org_id):
+        raise HTTPException(
+            status_code=403, detail="Term belongs to another organization"
+        )
+    return term
+
+
+def _require_org_access(org_id: str, user: dict) -> None:
+    """404 unless ``org_id`` is the caller's own organization.
+
+    Routes that take an organization id from the URL must compare it against the
+    session before touching the row. ``require_admin`` only proves the caller
+    holds the registry *role*; it says nothing about which organization they
+    administer, so without this check any admin could read or write another
+    organization's registry by editing the path.
+
+    Mirrors :func:`_require_course_in_caller_org`, and fails closed when the
+    caller carries no organization.
+    """
+    caller_org = (user or {}).get("organization_id")
+    if not caller_org or not org_id or str(caller_org) != str(org_id):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _require_row_in_caller_org(row: Any, user: dict, label: str) -> None:
+    """404 unless ``row`` belongs to the caller's organization.
+
+    Used where the organization is not in the path and must be resolved from the
+    row itself (e.g. a student fetched by id).
+    """
+    org_id = (user or {}).get("organization_id")
+    if not org_id or str(getattr(row, "organization_id", "")) != str(org_id):
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
+def _require_course_in_caller_org(course: Course, user: dict) -> None:
+    """404 unless ``course`` belongs to the caller's organization."""
+    _require_row_in_caller_org(course, user, "Course")
+
+
 # ==================== Term Routes ====================
 
 
@@ -525,7 +583,10 @@ async def create_term(
     if existing:
         # Idempotent: returning the existing term (rather than a 409) lets the
         # UI create-then-assign without a separate pre-check for conflicts.
-        return _term_to_response(existing, 0)
+        existing_count = (
+            db.query(Course).filter(Course.term_id == existing.id).count()
+        )
+        return _term_to_response(existing, existing_count)
 
     term = Term(
         organization_id=org_id,
@@ -536,7 +597,17 @@ async def create_term(
         end_date=term_data.end_date,
     )
     db.add(term)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The pre-check above is advisory: two concurrent requests can both pass
+        # it and then collide on uq_terms_org_name_year. Without this the driver
+        # surfaces the unique violation as an opaque 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Term '{name.title()} {term_data.year}' already exists",
+        )
     db.refresh(term)
     return _term_to_response(term, 0)
 
@@ -563,14 +634,7 @@ async def update_term(
             400 blank name or inverted date window, 409 when the new
             ``(name, year)`` is already registered for the organization.
     """
-    org_id = _request_org_id(request)
-    term = db.query(Term).filter(Term.id == term_id).first()
-    if not term:
-        raise HTTPException(status_code=404, detail="Term not found")
-    if org_id and str(term.organization_id) != str(org_id):
-        raise HTTPException(
-            status_code=403, detail="Term belongs to another organization"
-        )
+    term = _get_org_term_or_error(db, request, term_id)
 
     name = term_data.name.strip()
     if not name:
@@ -594,7 +658,17 @@ async def update_term(
         term.description = term_data.description
 
     # Flush first so the mirrored course text carries the new name/year.
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # The advisory pre-check above cannot close the race: a concurrent writer
+        # can insert the same (name, year) first, and the unique constraint then
+        # surfaces as an opaque 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"{term_label(name, term_data.year)} is already registered",
+        )
     sync_term_on_courses(db, term)
     db.commit()
     db.refresh(term)
@@ -617,14 +691,7 @@ async def delete_term(
     Courses keep their mirrored ``term``/``year`` text, so removing a term from
     the registry never strips a course of its term label.
     """
-    org_id = _request_org_id(request)
-    term = db.query(Term).filter(Term.id == term_id).first()
-    if not term:
-        raise HTTPException(status_code=404, detail="Term not found")
-    if org_id and str(term.organization_id) != str(org_id):
-        raise HTTPException(
-            status_code=403, detail="Term belongs to another organization"
-        )
+    term = _get_org_term_or_error(db, request, term_id)
 
     db.query(Course).filter(Course.term_id == term_id).update(
         {Course.term_id: None}, synchronize_session=False
@@ -681,7 +748,8 @@ async def get_organization(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ):
-    """Get organization by ID."""
+    """Get organization by ID (scoped to the caller's own organization)."""
+    _require_org_access(org_id, current_user)
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -706,64 +774,54 @@ async def create_course(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ):
-    """Create a new course within an organization."""
+    """Create a new course within an organization (own organization only)."""
+    _require_org_access(org_id, current_user)
     # Verify organization exists
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    term_id, term_name, year = resolve_course_term(
+        db, org_id, course_data.term_id, course_data.term, course_data.year
+    )
     course = Course(
         organization_id=org_id,
         name=course_data.name,
         code=course_data.code,
-        term=course_data.term,
-        year=course_data.year,
+        term_id=term_id,
+        term=term_name,
+        year=year,
+        department=course_data.department,
+        description=course_data.description,
     )
     db.add(course)
     db.commit()
     db.refresh(course)
-    return CourseResponse(
-        id=str(course.id),
-        organization_id=str(course.organization_id),
-        name=course.name,
-        code=course.code,
-        term=course.term,
-        year=course.year,
-        created_at=course.created_at.isoformat() if course.created_at else "",
-    )
+    return _course_to_response(course)
 
 
 @router.get("/organizations/{org_id}/courses", response_model=list[CourseResponse])
 async def list_courses(
     org_id: str,
+    request: Request,
     term: Optional[str] = Query(None, description="Filter by term"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_tenant),
+    _tenant: str = Depends(get_current_tenant),
 ):
     """List courses for an organization, optionally filtered by term.
 
     A professor's listing is narrowed to the courses they are assigned to, so
     the org filter can never widen "my courses" into the whole catalog.
     """
+    user = dashboard_user(request)
     query = db.query(Course).filter(Course.organization_id == org_id)
     query = query.filter(
-        Course.id.in_(academic_access.visible_course_id_query(db, current_user))
+        Course.id.in_(academic_access.visible_course_id_query(db, user))
     )
     if term:
         query = query.filter(Course.term == term)
     courses = query.order_by(Course.created_at.desc()).all()
-    return [
-        CourseResponse(
-            id=str(c.id),
-            organization_id=str(c.organization_id),
-            name=c.name,
-            code=c.code,
-            term=c.term,
-            year=c.year,
-            created_at=c.created_at.isoformat() if c.created_at else "",
-        )
-        for c in courses
-    ]
+    return [_course_to_response(c) for c in courses]
 
 
 @router.get("/courses")
@@ -787,9 +845,21 @@ async def list_my_courses(
         .all()
     )
 
+    course_ids = [c.id for c in courses]
+    counts = (
+        dict(
+            db.query(Assignment.course_id, func.count(Assignment.id))
+            .filter(Assignment.course_id.in_(course_ids))
+            .group_by(Assignment.course_id)
+            .all()
+        )
+        if course_ids
+        else {}
+    )
+
     result = []
     for c in courses:
-        count = db.query(Assignment).filter(Assignment.course_id == c.id).count()
+        count = int(counts.get(c.id, 0))
         result.append(
             {
                 "id": str(c.id),
@@ -818,15 +888,7 @@ async def get_course(
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    return CourseResponse(
-        id=str(course.id),
-        organization_id=str(course.organization_id),
-        name=course.name,
-        code=course.code,
-        term=course.term,
-        year=course.year,
-        created_at=course.created_at.isoformat() if course.created_at else "",
-    )
+    return _course_to_response(course)
 
 
 @router.post("/courses", status_code=status.HTTP_201_CREATED)
@@ -983,9 +1045,8 @@ async def delete_course_by_id(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This course's assignments " + _attachment_detail(jobs, cases),
             )
-        db.query(Assignment).filter(Assignment.course_id == course.id).delete(
-            synchronize_session=False
-        )
+        for assignment in assignments:
+            db.delete(assignment)
     db.delete(course)
     db.commit()
 
@@ -1137,7 +1198,12 @@ async def create_student(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_roster_write),
 ):
-    """Create a new student profile (admin-only: the roster is registry data)."""
+    """Create a new student profile (admin-only: the roster is registry data).
+
+    Scoped to the caller's own organization, so an admin cannot add students to
+    another organization's roster.
+    """
+    _require_org_access(org_id, current_user)
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -1172,7 +1238,8 @@ async def list_students(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
-    """List all students in an organization."""
+    """List all students in the caller's own organization."""
+    _require_org_access(org_id, current_user)
     students = db.query(Student).filter(Student.organization_id == org_id).all()
     return [
         StudentResponse(
@@ -1193,10 +1260,12 @@ async def get_student(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_tenant),
 ):
-    """Get student by ID."""
+    """Get student by ID (scoped to the caller's own organization)."""
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
+    # The organization is not in the path here, so it is resolved from the row.
+    _require_row_in_caller_org(student, current_user, "Student")
     return StudentResponse(
         id=str(student.id),
         organization_id=str(student.organization_id),
@@ -1226,8 +1295,11 @@ async def enroll_student(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
+    _require_course_in_caller_org(course, current_user)
+
     student = db.query(Student).filter(Student.id == enrollment_data.student_id).first()
-    if not student:
+    # A student from another organization must not be enrollable here.
+    if not student or str(student.organization_id) != str(course.organization_id):
         raise HTTPException(status_code=404, detail="Student not found")
 
     # Check if already enrolled
@@ -1271,9 +1343,18 @@ async def list_enrollments(
         raise HTTPException(status_code=404, detail="Course not found")
 
     enrollments = StudentService.get_course_enrollments(db, course_id)
+    student_ids = {e.student_id for e in enrollments}
+    students_by_id = (
+        {
+            s.id: s
+            for s in db.query(Student).filter(Student.id.in_(student_ids)).all()
+        }
+        if student_ids
+        else {}
+    )
     result = []
     for e in enrollments:
-        student = db.query(Student).filter(Student.id == e.student_id).first()
+        student = students_by_id.get(e.student_id)
         result.append(
             EnrollmentResponse(
                 id=str(e.id),
@@ -1305,9 +1386,14 @@ async def remove_enrollment(
     course_id: str,
     enrollment_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(require_roster_write),
 ):
-    """Remove a student from a course."""
+    """Remove a student from a course (same roster permission as enrolling)."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    _require_course_in_caller_org(course, current_user)
+
     enrollment = (
         db.query(Enrollment)
         .filter(Enrollment.id == enrollment_id, Enrollment.course_id == course_id)

@@ -8,9 +8,26 @@ all students using the same base code provided by instructors.
 
 from __future__ import annotations
 
+import posixpath
+import re
 from typing import Any
 
 from .deep_analysis import DeepCodeAnalyzer
+
+#: ``something.config.js`` style tool configuration files.
+_CONFIG_NAME_RE = re.compile(r"^[\w.-]+\.config\.(?:js|cjs|mjs|ts|json)$")
+
+#: base-name prefix -> tool, checked in this order.
+_TOOL_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("tailwind", "tailwind"), ("vite", "vite"), ("webpack", "webpack"), ("babel", "babel"),
+    ("tsconfig", "typescript"), ("typescript", "typescript"), ("package", "npm"),
+    ("yarn", "npm"), ("eslint", "eslint"), (".eslint", "eslint"), ("prettier", "prettier"),
+    (".prettier", "prettier"), ("jest", "jest"), ("next", "nextjs"), ("nuxt", "nuxt"),
+    ("vue", "vue"), ("angular", "angular"), ("svelte", "svelte"), ("rollup", "rollup"),
+    ("snowpack", "snowpack"), ("parcel", "parcel"), (".parcel", "parcel"), ("gulp", "gulp"),
+    ("grunt", "grunt"), ("docker", "docker"), ("readme", "readme"), ("license", "license"),
+    ("changelog", "changelog"), ("contributing", "contributing"), (".git", "git"),
+)  # fmt: skip
 
 
 class BoilerplateFilter:
@@ -98,6 +115,43 @@ class BoilerplateFilter:
         if analysis.get("structure_fingerprint"):
             self.template_fingerprints.add(analysis["structure_fingerprint"])
 
+    # ── template state ─────────────────────────────────────────────
+
+    def clear_templates(self) -> None:
+        """Forget every registered template."""
+        self.template_subtrees.clear()
+        self.template_patterns.clear()
+        self.template_fingerprints.clear()
+
+    def copy(self) -> BoilerplateFilter:
+        """An independent filter with the same templates.
+
+        ``global_boilerplate_filter`` is one object for the whole process, so a
+        template added for one course/job silently discounted similarity in every
+        other. Pipelines that serve more than one tenant should use a per-job copy.
+        """
+        clone = BoilerplateFilter()
+        clone.enabled = self.enabled
+        clone.config_file_types = set(self.config_file_types)
+        clone.template_subtrees = set(self.template_subtrees)
+        clone.template_patterns = set(self.template_patterns)
+        clone.template_fingerprints = set(self.template_fingerprints)
+        return clone
+
+    @staticmethod
+    def _basename(filename: str) -> str:
+        return posixpath.basename(str(filename).replace("\\", "/")).lower()
+
+    def _is_config_file(self, filename: str) -> bool:
+        """True for tool configuration files, matched on the base name.
+
+        The test was a SUBSTRING match, so a student's ``license_plate.py`` or
+        ``package_tracker.py`` counted as configuration files (and two of them for
+        "different tools" were then never compared).
+        """
+        base = self._basename(filename)
+        return base in self.config_file_types or bool(_CONFIG_NAME_RE.match(base))
+
     def should_skip_comparison(self, filename_a: str, filename_b: str) -> bool:
         """
         Check if two files should be skipped from plagiarism comparison
@@ -113,22 +167,11 @@ class BoilerplateFilter:
         if not self.enabled:
             return False
 
-        name_a = filename_a.lower()
-        name_b = filename_b.lower()
-
         # Skip comparison if both files are config/tool-specific files
         # but serve different purposes
-        a_is_config = any(
-            config_type in name_a for config_type in self.config_file_types
-        )
-        b_is_config = any(
-            config_type in name_b for config_type in self.config_file_types
-        )
-
-        if a_is_config and b_is_config:
-            # Extract the tool/framework name from filename
-            a_tool = self._extract_tool_name(name_a)
-            b_tool = self._extract_tool_name(name_b)
+        if self._is_config_file(filename_a) and self._is_config_file(filename_b):
+            a_tool = self._extract_tool_name(filename_a)
+            b_tool = self._extract_tool_name(filename_b)
 
             # If they're for different tools, skip comparison
             if a_tool and b_tool and a_tool != b_tool:
@@ -136,7 +179,7 @@ class BoilerplateFilter:
 
         return False
 
-    def _extract_tool_name(self, filename: str) -> str:
+    def _extract_tool_name(self, filename: str) -> str | None:
         """
         Extract the tool/framework name from a config filename.
 
@@ -145,61 +188,15 @@ class BoilerplateFilter:
         - 'vite.config.ts' -> 'vite'
         - 'webpack.config.js' -> 'webpack'
         - 'package.json' -> 'npm'
+
+        Matched on the base name (``"next" in filename`` used to turn any path containing
+        "next", such as ``next_prime.py``, into the Next.js config).
         """
-        filename = filename.lower()
-
-        # Direct mappings for common config files
-        if "tailwind" in filename:
-            return "tailwind"
-        elif "vite" in filename:
-            return "vite"
-        elif "webpack" in filename:
-            return "webpack"
-        elif "babel" in filename:
-            return "babel"
-        elif "typescript" in filename or "tsconfig" in filename:
-            return "typescript"
-        elif "package" in filename:
-            return "npm"
-        elif "eslint" in filename:
-            return "eslint"
-        elif "prettier" in filename:
-            return "prettier"
-        elif "jest" in filename:
-            return "jest"
-        elif "next" in filename:
-            return "nextjs"
-        elif "nuxt" in filename:
-            return "nuxt"
-        elif "vue" in filename:
-            return "vue"
-        elif "angular" in filename:
-            return "angular"
-        elif "svelte" in filename:
-            return "svelte"
-        elif "rollup" in filename:
-            return "rollup"
-        elif "snowpack" in filename:
-            return "snowpack"
-        elif "parcel" in filename:
-            return "parcel"
-        elif "gulp" in filename:
-            return "gulp"
-        elif "grunt" in filename:
-            return "grunt"
-        elif "docker" in filename:
-            return "docker"
-        elif "readme" in filename:
-            return "readme"
-        elif "license" in filename:
-            return "license"
-        elif "changelog" in filename:
-            return "changelog"
-        elif "contributing" in filename:
-            return "contributing"
-        elif "gitignore" in filename or "gitattributes" in filename:
-            return "git"
-
+        base = self._basename(filename)
+        for prefix, tool in _TOOL_PREFIXES:
+            # the prefix, optional letters (``dockerfile``, ``.eslintrc``), then ``.``/``-``/end
+            if re.match(rf"{re.escape(prefix)}[a-z]*(?:[.\-]|$)", base):
+                return tool
         return None
 
     def calculate_boilerplate_ratio(self, parsed_code: dict[str, Any]) -> float:
@@ -254,13 +251,18 @@ class BoilerplateFilter:
         # The maximum expected overlap from boilerplate is the minimum of the two ratios
         max_boilerplate_overlap = min(bp_ratio_a, bp_ratio_b)
 
+        if max_boilerplate_overlap >= 1.0:
+            # Both submissions ARE the template: there is nothing left to compare
+            # (this was a ZeroDivisionError).
+            return 0.0
+
         # Discount the score by the boilerplate overlap proportion
         adjusted_score = (raw_score - max_boilerplate_overlap) / (
             1.0 - max_boilerplate_overlap
         )
 
-        # Ensure we don't go below 0
-        return max(adjusted_score, 0.0)
+        # Keep the result a valid score
+        return max(0.0, min(1.0, adjusted_score))
 
     def is_boilerplate_match(
         self, matching_subtrees: list[str], matching_patterns: list[str]

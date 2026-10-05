@@ -12,6 +12,11 @@ from unittest.mock import MagicMock, patch
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
 
+#: Gate for "were the active thresholds fitted for the loaded model pair?". The
+#: scoring tests below describe the calibrated path, so they pin it on; without
+#: that, an uncalibrated pair reports UNCERTAIN instead of a verdict.
+CALIBRATED = "src.backend.engines.ai.binoculars_detector.is_calibrated"
+
 
 class TestBinocularsDetector:
     def test_short_code_returns_uncertain(self):
@@ -35,7 +40,8 @@ class TestBinocularsDetector:
             "def hello_world():\n    print('This is a longer example for testing')\n    return 42\n"
             * 3
         )
-        result = detector.analyze(long_code, language="python")
+        with patch(CALIBRATED, return_value=True):
+            result = detector.analyze(long_code, language="python")
 
         assert result["available"] is True
         assert result["label"] == "Most likely AI-generated"
@@ -45,6 +51,34 @@ class TestBinocularsDetector:
         # double-model inference and must never be called.
         mock_bino.predict.assert_not_called()
         mock_bino.compute_score.assert_called_once()
+
+    def test_uncalibrated_pair_withholds_the_verdict(self):
+        """Thresholds fitted for a different model pair must not produce a label.
+
+        The published cut-offs do not describe this pair, so the score is pulled
+        toward 0.5 and confidence is capped rather than letting a meaningless
+        number carry its full fusion weight.
+        """
+        detector = BinocularsDetector()
+        mock_bino = MagicMock()
+        mock_bino.compute_score.return_value = 0.60  # confidently AI if calibrated
+        detector._bino = mock_bino
+        detector._available = True
+
+        long_code = (
+            "def hello_world():\n    print('This is a longer example for testing')\n    return 42\n"
+            * 3
+        )
+        with patch(CALIBRATED, return_value=True):
+            calibrated = detector.analyze(long_code, language="python")
+        with patch(CALIBRATED, return_value=False):
+            uncalibrated = detector.analyze(long_code, language="python")
+
+        assert calibrated["label"] == "Most likely AI-generated"
+        assert uncalibrated["label"].startswith("UNCERTAIN")
+        # Shrunk toward "no opinion", and never more confident than the cap.
+        assert 0.5 < uncalibrated["ai_probability"] < calibrated["ai_probability"]
+        assert uncalibrated["confidence"] < calibrated["confidence"]
 
     def test_label_follows_the_loaded_instance_threshold(self):
         """Label banding mirrors ``np.where(score < threshold, AI, human)``."""
@@ -56,10 +90,11 @@ class TestBinocularsDetector:
         detector._available = True
 
         code = "def f(x):\n    return x * 2\n" * 8
-        assert detector.analyze(code)["label"] == "Most likely AI-generated"
+        with patch(CALIBRATED, return_value=True):
+            assert detector.analyze(code)["label"] == "Most likely AI-generated"
 
-        mock_bino.compute_score.return_value = 0.92
-        assert detector.analyze(code)["label"] == "Most likely human-generated"
+            mock_bino.compute_score.return_value = 0.92
+            assert detector.analyze(code)["label"] == "Most likely human-generated"
         mock_bino.predict.assert_not_called()
 
     def test_human_like_score(self):
@@ -77,7 +112,8 @@ class TestBinocularsDetector:
             "def process_data(items):\n    result = []\n    for item in items:\n        result.append(item * 2)\n    return result\n"
             * 3
         )
-        result = detector.analyze(long_code, language="python")
+        with patch(CALIBRATED, return_value=True):
+            result = detector.analyze(long_code, language="python")
 
         assert result["available"] is True
         assert result["ai_probability"] < 0.2
