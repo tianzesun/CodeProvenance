@@ -75,7 +75,7 @@ else
     DB_INIT_ATTEMPTS=3
     DB_INIT_SUCCESS=0
     for attempt in $(seq 1 $DB_INIT_ATTEMPTS); do
-        if "$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db()" 2>&1; then
+        if "$VENV_PYTHON" -c "from src.backend.config.database import init_db; init_db(['src.backend.models.database'])" 2>&1; then
             DB_INIT_SUCCESS=1
             break
         else

@@ -137,7 +137,7 @@ EOF
 # Initialize database (create tables if they don't exist)
 # -----------------------------------------------------------------------------
 log "Initializing database schema..."
-(cd "$APP_DIR" && "$APP_DIR/venv/bin/python" -c "from src.backend.config.database import init_db; init_db()") \
+(cd "$APP_DIR" && "$APP_DIR/venv/bin/python" -c "from src.backend.config.database import init_db; init_db(['src.backend.models.database'])") \
     || die "Database init failed. Check DATABASE_URL connectivity."
 
 # -----------------------------------------------------------------------------
