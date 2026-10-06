@@ -4,12 +4,30 @@ Base Intermediate Representation (IR) classes.
 Defines the abstract interface and metadata for all IR representations.
 """
 
+import contextlib
 import hashlib
 import json
+import os
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, ClassVar
+
+SUPPORTED_LANGUAGES = ("python", "java", "javascript")
+_LANGUAGE_ALIASES = {
+    "py": "python",
+    "python3": "python",
+    "js": "javascript",
+    "jsx": "javascript",
+    "node": "javascript",
+}
+
+
+def normalize_language(language: str) -> str:
+    """Canonical language name ("Python " -> "python", "js" -> "javascript")."""
+    lang = (language or "").strip().lower()
+    return _LANGUAGE_ALIASES.get(lang, lang)
 
 
 @dataclass
@@ -19,7 +37,7 @@ class IRMetadata:
     Attributes:
         language: Programming language (e.g., 'python', 'java', 'javascript')
         source_hash: SHA-256 hash of original source code
-        timestamp: When the IR was created
+        timestamp: When the IR was created (ISO-8601, UTC)
         representation_type: Type of IR ('ast', 'token', 'graph')
         file_path: Optional path to source file
         line_count: Number of lines in original source
@@ -73,30 +91,27 @@ class IRMetadata:
         rather than ``BaseIR.create_metadata``. Keeping the helper here
         preserves that public API.
         """
-        source_hash = hashlib.sha256(source_code.encode("utf-8")).hexdigest()
-        line_count = len(source_code.split("\n"))
-        char_count = len(source_code)
-        timestamp = datetime.now().isoformat()
-
         return cls(
             language=language,
-            source_hash=source_hash,
-            timestamp=timestamp,
+            # surrogatepass: lone surrogates (bad decoding upstream) must not
+            # crash hashing with UnicodeEncodeError.
+            source_hash=hashlib.sha256(
+                source_code.encode("utf-8", errors="surrogatepass")
+            ).hexdigest(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             representation_type=representation_type,
             file_path=file_path,
-            line_count=line_count,
-            char_count=char_count,
+            # split("\n") counted a phantom line after a trailing newline
+            # ("a\nb\n" -> 3) and reported 1 line for an empty file.
+            line_count=len(source_code.splitlines()),
+            char_count=len(source_code),
         )
 
     def validate(self) -> bool:
         """Validate metadata completeness."""
-        required_fields = [
-            self.language,
-            self.source_hash,
-            self.timestamp,
-            self.representation_type,
-        ]
-        return all(field for field in required_fields)
+        return all(
+            [self.language, self.source_hash, self.timestamp, self.representation_type]
+        )
 
 
 class BaseIR(ABC):
@@ -108,41 +123,48 @@ class BaseIR(ABC):
     - Metadata tracking
     """
 
-    def __init__(self, metadata: IRMetadata):
-        """Initialize IR with metadata.
+    #: 'ast' / 'token' / 'graph'; checked by :meth:`load`.
+    REPRESENTATION_TYPE: ClassVar[str] = ""
 
-        Args:
-            metadata: IR metadata containing language, hash, timestamp, etc.
-        """
+    def __init__(self, metadata: IRMetadata):
         self.metadata = metadata
 
     @abstractmethod
     def to_dict(self) -> dict[str, Any]:
-        """Serialize IR to dictionary format.
-
-        Returns:
-            Dictionary representation of the IR
-        """
+        """Serialize the IR payload (metadata is stored separately)."""
 
     @classmethod
     @abstractmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BaseIR":
-        """Deserialize IR from dictionary format.
+    def from_dict(
+        cls, data: dict[str, Any], metadata: IRMetadata | None = None
+    ) -> "BaseIR":
+        """Deserialize IR from the output of :meth:`to_dict`.
 
-        Args:
-            data: Dictionary containing IR data
-
-        Returns:
-            IR instance
+        ``metadata`` may be passed explicitly; otherwise ``data["metadata"]``
+        is used if present, else a placeholder. (Concrete ``from_dict``
+        implementations used to discard ``data`` entirely and return an empty
+        IR.)
         """
 
     @abstractmethod
     def validate(self) -> bool:
-        """Validate IR integrity and completeness.
+        """Validate IR integrity and completeness."""
 
-        Returns:
-            True if IR is valid, False otherwise
-        """
+    @classmethod
+    def _resolve_metadata(
+        cls, data: dict[str, Any], metadata: IRMetadata | None
+    ) -> IRMetadata:
+        if metadata is not None:
+            return metadata
+        embedded = data.get("metadata") if isinstance(data, dict) else None
+        if isinstance(embedded, dict):
+            return IRMetadata.from_dict(embedded)
+        return IRMetadata(
+            language="unknown",
+            source_hash="",
+            timestamp="",
+            representation_type=cls.REPRESENTATION_TYPE,
+        )
 
     @classmethod
     def create_metadata(
@@ -152,17 +174,7 @@ class BaseIR(ABC):
         representation_type: str,
         file_path: str | None = None,
     ) -> IRMetadata:
-        """Create metadata from source code.
-
-        Args:
-            source_code: Original source code
-            language: Programming language
-            representation_type: Type of IR ('ast', 'token', 'graph')
-            file_path: Optional path to source file
-
-        Returns:
-            IRMetadata instance
-        """
+        """Create metadata from source code."""
         return IRMetadata.create_metadata(
             source_code=source_code,
             language=language,
@@ -170,64 +182,66 @@ class BaseIR(ABC):
             file_path=file_path,
         )
 
-    def save(self, filepath: str) -> None:
-        """Save IR to JSON file.
-
-        Args:
-            filepath: Path to save the IR
-        """
-        data = {
-            "metadata": self.metadata.to_dict(),
-            "ir": self.to_dict(),
-        }
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+    def save(self, filepath: "str | os.PathLike[str]") -> None:
+        """Save IR to a JSON file (atomically: temp file + rename)."""
+        data = {"metadata": self.metadata.to_dict(), "ir": self.to_dict()}
+        path = os.fspath(filepath)
+        directory = os.path.dirname(os.path.abspath(path))
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".ir_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     @classmethod
-    def load(cls, filepath: str) -> "BaseIR":
-        """Load IR from JSON file.
+    def load(cls, filepath: "str | os.PathLike[str]") -> "BaseIR":
+        """Load IR from a JSON file written by :meth:`save`.
 
-        Args:
-            filepath: Path to load the IR from
-
-        Returns:
-            IR instance
+        Raises:
+            ValueError: If the file holds a different IR type than ``cls``
+                (e.g. ``ASTIR.load`` on a graph file used to die with KeyError).
         """
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
 
         metadata = IRMetadata.from_dict(data["metadata"])
-        ir_data = data["ir"]
-
-        # Create instance with metadata
-        instance = cls.__new__(cls)
-        instance.metadata = metadata
-
-        # Load IR-specific data
-        instance._load_from_dict(ir_data)
-
-        return instance
+        expected = cls.REPRESENTATION_TYPE
+        if expected and metadata.representation_type != expected:
+            raise ValueError(
+                f"{cls.__name__}.load() got a '{metadata.representation_type}' IR file"
+            )
+        return cls.from_dict(data["ir"], metadata)
 
     def _load_from_dict(self, data: dict[str, Any]) -> None:
-        """Load IR-specific data from dictionary.
-
-        Subclasses should override this to load their specific data.
-
-        Args:
-            data: IR-specific data dictionary
-        """
+        """Deprecated hook kept for subclasses written against the old loader."""
 
     def __repr__(self) -> str:
-        """String representation of IR."""
-        return f"{self.__class__.__name__}(language={self.metadata.language}, hash={self.metadata.source_hash[:8]}...)"
+        return (
+            f"{self.__class__.__name__}(language={self.metadata.language}, "
+            f"hash={self.metadata.source_hash[:8]}...)"
+        )
+
+    def _identity(self) -> tuple[str, str, str]:
+        return (
+            type(self).__name__,
+            self.metadata.representation_type,
+            self.metadata.source_hash,
+        )
 
     def __eq__(self, other: object) -> bool:
-        """Check equality based on source hash."""
+        """Equal if same IR class, representation and source hash.
+
+        (Previously an ASTIR equalled a TokenIR of the same source, and every
+        merged graph — hash "merged" — equalled every other.)
+        """
         if not isinstance(other, BaseIR):
             return False
-        return self.metadata.source_hash == other.metadata.source_hash
+        return self._identity() == other._identity()
 
     def __hash__(self) -> int:
-        """Hash based on source hash."""
-        return hash(self.metadata.source_hash)
+        return hash(self._identity())

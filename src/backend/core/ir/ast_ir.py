@@ -4,10 +4,12 @@ AST-based Intermediate Representation.
 Provides tree-based representation of code structure using Abstract Syntax Trees.
 """
 
+import ast as python_ast
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.backend.core.ir.base_ir import BaseIR, IRMetadata
+from .base_ir import BaseIR, IRMetadata, normalize_language
 
 
 @dataclass
@@ -20,9 +22,14 @@ class ASTNode:
         children: List of child AST nodes
         line_start: Starting line number in source (1-indexed)
         line_end: Ending line number in source (1-indexed)
-        col_start: Starting column number (0-indexed)
+        col_start: Starting column number (0-indexed, in characters)
         col_end: Ending column number (0-indexed)
-        metadata: Additional metadata about the node
+        metadata: Additional metadata about the node (e.g. ``const_type`` for
+            Python constants, ``calls`` for Java/JS function nodes)
+
+    All traversal helpers are iterative: the recursive versions raised
+    RecursionError on deep trees (a long ``a + b + c + ...`` chain nests one
+    level per operand).
     """
 
     node_type: str
@@ -34,68 +41,123 @@ class ASTNode:
     col_end: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def iter_nodes(self) -> Iterator["ASTNode"]:
+        """Pre-order (document order) iteration over this subtree."""
+        stack = [self]
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(reversed(node.children))
+
     def to_dict(self) -> dict[str, Any]:
-        """Serialize AST node to dictionary."""
-        return {
-            "node_type": self.node_type,
-            "value": self.value,
-            "children": [child.to_dict() for child in self.children],
-            "line_start": self.line_start,
-            "line_end": self.line_end,
-            "col_start": self.col_start,
-            "col_end": self.col_end,
-            "metadata": self.metadata,
-        }
+        """Serialize AST node to dictionary (iteratively)."""
+        root: dict[str, Any] = {}
+        stack: list[tuple[ASTNode, dict[str, Any]]] = [(self, root)]
+        while stack:
+            node, out = stack.pop()
+            out.update(
+                node_type=node.node_type,
+                value=node.value,
+                children=[{} for _ in node.children],
+                line_start=node.line_start,
+                line_end=node.line_end,
+                col_start=node.col_start,
+                col_end=node.col_end,
+                metadata=node.metadata,
+            )
+            stack.extend(zip(node.children, out["children"], strict=True))
+        return root
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ASTNode":
-        """Deserialize AST node from dictionary."""
-        children = [cls.from_dict(child) for child in data.get("children", [])]
-        return cls(
-            node_type=data["node_type"],
-            value=data["value"],
-            children=children,
-            line_start=data.get("line_start", 0),
-            line_end=data.get("line_end", 0),
-            col_start=data.get("col_start", 0),
-            col_end=data.get("col_end", 0),
-            metadata=data.get("metadata", {}),
-        )
+        """Deserialize AST node from dictionary (iteratively)."""
+
+        def make(d: dict[str, Any]) -> "ASTNode":
+            return cls(
+                node_type=d["node_type"],
+                value=d["value"],
+                line_start=d.get("line_start", 0),
+                line_end=d.get("line_end", 0),
+                col_start=d.get("col_start", 0),
+                col_end=d.get("col_end", 0),
+                metadata=d.get("metadata", {}),
+            )
+
+        root = make(data)
+        stack = [(root, data)]
+        while stack:
+            node, d = stack.pop()
+            for child_data in d.get("children", []):
+                child = make(child_data)
+                node.children.append(child)
+                stack.append((child, child_data))
+        return root
 
     def get_all_node_types(self) -> set[str]:
         """Get all unique node types in this subtree."""
-        types = {self.node_type}
-        for child in self.children:
-            types.update(child.get_all_node_types())
-        return types
+        return {n.node_type for n in self.iter_nodes()}
 
     def get_depth(self) -> int:
         """Get depth of this subtree."""
-        if not self.children:
-            return 1
-        return 1 + max(child.get_depth() for child in self.children)
+        deepest = 0
+        stack = [(self, 1)]
+        while stack:
+            node, depth = stack.pop()
+            deepest = max(deepest, depth)
+            stack.extend((c, depth + 1) for c in node.children)
+        return deepest
 
     def get_node_count(self) -> int:
         """Get total number of nodes in this subtree."""
-        count = 1
-        for child in self.children:
-            count += child.get_node_count()
-        return count
+        return sum(1 for _ in self.iter_nodes())
 
     def find_nodes_by_type(self, node_type: str) -> list["ASTNode"]:
-        """Find all nodes of a specific type in this subtree."""
-        results = []
-        if self.node_type == node_type:
-            results.append(self)
-        for child in self.children:
-            results.extend(child.find_nodes_by_type(node_type))
-        return results
+        """Find all nodes of a specific type in this subtree (document order)."""
+        return [n for n in self.iter_nodes() if n.node_type == node_type]
 
     def __repr__(self) -> str:
-        """String representation of AST node."""
         if self.children:
             return f"ASTNode({self.node_type}, children={len(self.children)})"
         return f"ASTNode({self.node_type}, '{self.value}')"
+
+
+_OP_HOLDERS = (
+    python_ast.BinOp,
+    python_ast.BoolOp,
+    python_ast.UnaryOp,
+    python_ast.AugAssign,
+)
+
+
+def _python_value(node: python_ast.AST) -> str:
+    """The identifying string of a Python AST node (name, literal, operator)."""
+    if isinstance(node, python_ast.Name):
+        return node.id
+    if isinstance(node, python_ast.Constant):
+        return str(node.value)
+    if isinstance(
+        node, (python_ast.FunctionDef, python_ast.AsyncFunctionDef, python_ast.ClassDef)
+    ):
+        return node.name  # async defs used to have no value
+    if isinstance(node, python_ast.Attribute):
+        return node.attr  # `a.b` and `a.c` were indistinguishable
+    if isinstance(node, python_ast.arg):
+        return node.arg
+    if isinstance(node, python_ast.keyword):
+        return node.arg or ""
+    if isinstance(node, python_ast.alias):
+        return node.name
+    if isinstance(node, python_ast.ImportFrom):
+        return node.module or ""
+    if isinstance(node, (python_ast.Global, python_ast.Nonlocal)):
+        return ",".join(node.names)
+    if isinstance(node, python_ast.ExceptHandler):
+        return node.name or ""
+    if isinstance(node, _OP_HOLDERS):
+        return type(node.op).__name__
+    if isinstance(node, python_ast.Compare):
+        return type(node.ops[0]).__name__ if node.ops else ""
+    return ""
 
 
 class ASTIR(BaseIR):
@@ -105,13 +167,15 @@ class ASTIR(BaseIR):
     a syntactic construct (function, loop, condition, etc.).
     """
 
-    def __init__(self, root: ASTNode, metadata: IRMetadata):
-        """Initialize AST IR.
+    REPRESENTATION_TYPE = "ast"
 
-        Args:
-            root: Root node of the AST
-            metadata: IR metadata
-        """
+    _FUNCTION_TYPES = ("FunctionDef", "AsyncFunctionDef", "Method", "Function")
+    _CLASS_TYPES = ("ClassDef", "Class")
+    _CONTROL_TYPES = (
+        "If", "For", "AsyncFor", "While", "Do", "IfStmt", "ForStmt", "WhileStmt",
+    )  # fmt: skip
+
+    def __init__(self, root: ASTNode, metadata: IRMetadata):
         super().__init__(metadata)
         self.root = root
 
@@ -121,43 +185,46 @@ class ASTIR(BaseIR):
             "root": self.root.to_dict(),
             "node_count": self.root.get_node_count(),
             "max_depth": self.root.get_depth(),
-            "node_types": list(self.root.get_all_node_types()),
+            "node_types": sorted(self.root.get_all_node_types()),  # was set order
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ASTIR":
-        """Deserialize AST IR from dictionary.
+    def from_dict(
+        cls, data: dict[str, Any], metadata: IRMetadata | None = None
+    ) -> "ASTIR":
+        """Deserialize AST IR from ``to_dict()`` output.
 
-        Note: This creates a placeholder. Use from_source() for actual parsing.
+        A payload without a ``"root"`` key yields an empty placeholder IR (the
+        historical behaviour); the old implementation did this for *every*
+        input, silently discarding the tree.
         """
-        # Create placeholder metadata
-        metadata = IRMetadata(
-            language="unknown",
-            source_hash="",
-            timestamp="",
-            representation_type="ast",
-        )
-
-        # Create placeholder root
-        root = ASTNode(node_type="Module", value="")
-
-        instance = cls(root=root, metadata=metadata)
-        return instance
+        meta = cls._resolve_metadata(data, metadata)
+        if isinstance(data, dict) and "root" in data:
+            root = ASTNode.from_dict(data["root"])
+        else:
+            root = ASTNode(node_type="Module", value="")
+        return cls(root=root, metadata=meta)
 
     def _load_from_dict(self, data: dict[str, Any]) -> None:
-        """Load AST-specific data from dictionary."""
         self.root = ASTNode.from_dict(data["root"])
 
     def validate(self) -> bool:
-        """Validate AST IR integrity."""
+        """Validate AST IR integrity (every node is a well-formed ASTNode)."""
         if not self.metadata.validate():
             return False
-
-        if self.root is None:
+        if not isinstance(self.root, ASTNode):
             return False
+        return all(
+            isinstance(n, ASTNode)
+            and isinstance(n.node_type, str)
+            and isinstance(n.children, list)
+            for n in self.root.iter_nodes()
+        )
 
-        # Check that root is a valid AST node
-        return isinstance(self.root, ASTNode)
+    @property
+    def has_error(self) -> bool:
+        """True if the source failed to parse (root is an ``Error`` node)."""
+        return self.root.node_type == "Error"
 
     @classmethod
     def from_source(
@@ -165,230 +232,152 @@ class ASTIR(BaseIR):
     ) -> "ASTIR":
         """Create AST IR from source code.
 
-        Args:
-            source_code: Source code to parse
-            language: Programming language
-            file_path: Optional path to source file
-
-        Returns:
-            ASTIR instance
-
         Raises:
             ValueError: If language is not supported
         """
-        # Create metadata
+        language = normalize_language(language)
+        root = cls._parse_source(source_code, language)  # fail before hashing
         metadata = cls.create_metadata(source_code, language, "ast", file_path)
-
-        # Parse source code into AST
-        root = cls._parse_source(source_code, language)
-
         return cls(root=root, metadata=metadata)
 
     @staticmethod
     def _parse_source(source_code: str, language: str) -> ASTNode:
-        """Parse source code into AST.
-
-        Args:
-            source_code: Source code to parse
-            language: Programming language
-
-        Returns:
-            Root AST node
-
-        Raises:
-            ValueError: If language is not supported
-        """
+        language = normalize_language(language)
         if language == "python":
             return ASTIR._parse_python(source_code)
-        elif language == "java":
+        if language == "java":
             return ASTIR._parse_java(source_code)
-        elif language == "javascript":
+        if language == "javascript":
             return ASTIR._parse_javascript(source_code)
-        else:
-            raise ValueError(f"Unsupported language: {language}")
+        raise ValueError(f"Unsupported language: {language}")
 
     @staticmethod
     def _parse_python(source_code: str) -> ASTNode:
-        """Parse Python source code into AST.
+        """Parse Python source with the built-in ``ast`` module.
 
-        Uses Python's built-in ast module.
+        Syntax problems yield an ``Error`` root (see :attr:`has_error`).
         """
         try:
-            import ast as python_ast
-        except ImportError:
-            raise ImportError("Python ast module not available")
-
-        try:
             tree = python_ast.parse(source_code)
-            return ASTIR._convert_python_ast(tree)
-        except SyntaxError as e:
-            # Return error node
+        except (
+            SyntaxError,
+            ValueError,
+            RecursionError,
+            OverflowError,
+            MemoryError,
+        ) as e:
             return ASTNode(
                 node_type="Error",
-                value=f"SyntaxError: {e!s}",
+                value=f"{type(e).__name__}: {e!s}",
+                line_start=getattr(e, "lineno", 0) or 0,
+                line_end=getattr(e, "lineno", 0) or 0,
                 metadata={"error": str(e)},
             )
+        return ASTIR._convert_python_ast(tree, lines=source_code.splitlines())
 
     @staticmethod
-    def _convert_python_ast(node, line_offset: int = 0) -> ASTNode:
-        """Convert Python ast node to our ASTNode format."""
-        import ast as python_ast
+    def _convert_python_ast(
+        node: python_ast.AST, line_offset: int = 0, lines: list[str] | None = None
+    ) -> ASTNode:
+        """Convert a Python ``ast`` tree to :class:`ASTNode` (iteratively).
 
-        # Get node type
-        node_type = type(node).__name__
-
-        # Get node value
-        value = ""
-        if isinstance(node, python_ast.Name):
-            value = node.id
-        elif isinstance(node, python_ast.Constant):
-            value = str(node.value)
-        elif isinstance(node, python_ast.Str):
-            value = node.s
-        elif isinstance(node, python_ast.Num):
-            value = str(node.n)
-        elif isinstance(node, (python_ast.FunctionDef, python_ast.ClassDef)):
-            value = node.name
-        elif isinstance(node, (python_ast.BinOp, python_ast.BoolOp)):
-            value = type(node.op).__name__
-        elif isinstance(node, python_ast.Compare):
-            value = type(node.ops[0]).__name__ if node.ops else ""
-
-        # Get line numbers
-        line_start = getattr(node, "lineno", 0) + line_offset
-        line_end = getattr(node, "end_lineno", line_start) + line_offset
-        col_start = getattr(node, "col_offset", 0)
-        col_end = getattr(node, "end_col_offset", col_start)
-
-        # Convert children
-        children = []
-        for child in python_ast.iter_child_nodes(node):
-            children.append(ASTIR._convert_python_ast(child, line_offset))
-
-        return ASTNode(
-            node_type=node_type,
-            value=value,
-            children=children,
-            line_start=line_start,
-            line_end=line_end,
-            col_start=col_start,
-            col_end=col_end,
+        Python reports ``col_offset`` in UTF-8 *bytes*; when ``lines`` is given
+        columns on non-ASCII lines are converted to character offsets.
+        """
+        non_ascii = (
+            {i + 1 for i, text in enumerate(lines) if not text.isascii()}
+            if lines
+            else set()
         )
+
+        def char_col(line: int, col: int) -> int:
+            if line in non_ascii and lines and 0 < line <= len(lines):
+                return len(
+                    lines[line - 1].encode("utf-8")[:col].decode("utf-8", "ignore")
+                )
+            return col
+
+        def make(n: python_ast.AST) -> ASTNode:
+            lineno = getattr(n, "lineno", 0) or 0
+            end_lineno = getattr(n, "end_lineno", None) or lineno
+            col = getattr(n, "col_offset", 0) or 0
+            end_col = getattr(n, "end_col_offset", None)
+            end_col = col if end_col is None else end_col
+            out = ASTNode(
+                node_type=type(n).__name__,
+                value=_python_value(n),
+                line_start=lineno + line_offset if lineno else 0,
+                line_end=end_lineno + line_offset if end_lineno else 0,
+                col_start=char_col(lineno, col),
+                col_end=char_col(end_lineno, end_col),
+            )
+            if isinstance(n, python_ast.Constant):
+                out.metadata["const_type"] = type(n.value).__name__
+            elif isinstance(n, python_ast.Compare):
+                out.metadata["ops"] = [type(o).__name__ for o in n.ops]
+            return out
+
+        root = make(node)
+        stack = [(node, root)]
+        while stack:
+            py_node, out = stack.pop()
+            for py_child in python_ast.iter_child_nodes(py_node):
+                child = make(py_child)
+                out.children.append(child)
+                stack.append((py_child, child))
+        return root
 
     @staticmethod
     def _parse_java(source_code: str) -> ASTNode:
-        """Parse Java source code into AST.
+        """Parse Java into a brace-nested tree (classes, methods, control flow).
 
-        Uses a simple regex-based parser for now.
+        Heuristic, not a full parser: the old line-by-line regexes produced a
+        flat list in which every ``if (...)`` was a "Method" named ``if``.
         """
-        import re
+        from ._clike import parse_clike
 
-        lines = source_code.split("\n")
-        root = ASTNode(node_type="CompilationUnit", value="")
-
-        # Simple pattern matching for Java constructs
-        patterns = {
-            "Class": r"^\s*(?:public|private|protected)?\s*(?:abstract)?\s*class\s+(\w+)",
-            "Method": r"^\s*(?:public|private|protected)?\s*(?:static)?\s*(?:\w+\s+)*(\w+)\s*\(",
-            "If": r"^\s*if\s*\(",
-            "For": r"^\s*for\s*\(",
-            "While": r"^\s*while\s*\(",
-        }
-
-        for i, line in enumerate(lines, 1):
-            for node_type, pattern in patterns.items():
-                match = re.search(pattern, line)
-                if match:
-                    value = match.group(1) if match.groups() else ""
-                    child = ASTNode(
-                        node_type=node_type,
-                        value=value,
-                        line_start=i,
-                        line_end=i,
-                    )
-                    root.children.append(child)
-                    break
-
-        return root
+        return parse_clike(source_code, "java")
 
     @staticmethod
     def _parse_javascript(source_code: str) -> ASTNode:
-        """Parse JavaScript source code into AST.
+        """Parse JavaScript into a brace-nested tree (see :meth:`_parse_java`)."""
+        from ._clike import parse_clike
 
-        Uses a simple regex-based parser for now.
-        """
-        import re
+        return parse_clike(source_code, "javascript")
 
-        lines = source_code.split("\n")
-        root = ASTNode(node_type="Program", value="")
-
-        # Simple pattern matching for JavaScript constructs
-        patterns = {
-            "Function": r"^\s*(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>))",
-            "Class": r"^\s*class\s+(\w+)",
-            "If": r"^\s*if\s*\(",
-            "For": r"^\s*for\s*\(",
-            "While": r"^\s*while\s*\(",
-        }
-
-        for i, line in enumerate(lines, 1):
-            for node_type, pattern in patterns.items():
-                match = re.search(pattern, line)
-                if match:
-                    # Get the first non-None group
-                    value = ""
-                    for group in match.groups():
-                        if group:
-                            value = group
-                            break
-
-                    child = ASTNode(
-                        node_type=node_type,
-                        value=value,
-                        line_start=i,
-                        line_end=i,
-                    )
-                    root.children.append(child)
-                    break
-
-        return root
+    def _find_types(self, types: tuple[str, ...]) -> list[ASTNode]:
+        wanted = set(types)
+        return [n for n in self.root.iter_nodes() if n.node_type in wanted]
 
     def get_functions(self) -> list[ASTNode]:
-        """Get all function/method definitions."""
-        return (
-            self.root.find_nodes_by_type("FunctionDef")
-            or self.root.find_nodes_by_type("Method")
-            or self.root.find_nodes_by_type("Function")
-        )
+        """All function/method definitions (the old ``or`` chain returned only
+        the first non-empty category, and ignored ``async def``)."""
+        return self._find_types(self._FUNCTION_TYPES)
 
     def get_classes(self) -> list[ASTNode]:
-        """Get all class definitions."""
-        return self.root.find_nodes_by_type("ClassDef") or self.root.find_nodes_by_type(
-            "Class"
-        )
+        """All class definitions."""
+        return self._find_types(self._CLASS_TYPES)
 
     def get_control_flow(self) -> list[ASTNode]:
-        """Get all control flow statements (if, for, while)."""
-        results = []
-        for node_type in ["If", "For", "While", "IfStmt", "ForStmt", "WhileStmt"]:
-            results.extend(self.root.find_nodes_by_type(node_type))
-        return results
+        """All control flow statements (if, for, while), in document order."""
+        return self._find_types(self._CONTROL_TYPES)
 
     def get_statistics(self) -> dict[str, Any]:
         """Get statistics about the AST."""
         node_types = self.root.get_all_node_types()
-
         return {
             "total_nodes": self.root.get_node_count(),
             "max_depth": self.root.get_depth(),
             "node_type_count": len(node_types),
-            "node_types": list(node_types),
+            "node_types": sorted(node_types),
             "function_count": len(self.get_functions()),
             "class_count": len(self.get_classes()),
             "control_flow_count": len(self.get_control_flow()),
         }
 
     def __repr__(self) -> str:
-        """String representation of AST IR."""
         stats = self.get_statistics()
-        return f"ASTIR(nodes={stats['total_nodes']}, depth={stats['max_depth']}, language={self.metadata.language})"
+        return (
+            f"ASTIR(nodes={stats['total_nodes']}, depth={stats['max_depth']}, "
+            f"language={self.metadata.language})"
+        )
