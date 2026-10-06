@@ -924,14 +924,31 @@ class PDGComparator:
 
     @staticmethod
     def _signatures(nodes: list[PDGNode]) -> Counter:
-        """Per-node dependency shape that does not depend on absolute node ids.
+        """Dependency shape of every definition, independent of numbering.
 
-        The old comparison used sets of raw node-id tuples, so two programs only
-        matched if their numbering happened to coincide — adding one earlier
-        function shifted every id and zeroed the match. Dependencies are now
-        expressed as distances back from the node.
+        Two earlier encodings were tried here, and each failed differently:
+
+        * raw node-id tuples only matched when two programs happened to be
+          numbered alike, so adding one function earlier zeroed the match;
+        * distances *back from the node* removed that coupling but still encoded
+          statement order — swapping two independent assignments shifted every
+          distance and dropped a reordered-but-identical program to ~0.47.
+
+        A node is now described by the shape of the sub-graph it reads from
+        (arity plus the shapes it depends on), which survives renumbering and
+        reordering alike. Definitions are visited in id order, and dependencies
+        always point backwards, so this is a single linear pass.
+
+        The result is a *presence* set rather than a multiset: how many
+        definitions each program has is already ``count_sim``'s term, and
+        repeating it here made one extra (dead) definition worth 0.8 of the
+        score instead of 0.2.
         """
-        return Counter(tuple(sorted(n.node_id - d for d in n.dep_from)) for n in nodes)
+        shapes: dict[int, tuple] = {}
+        for node in sorted(nodes, key=lambda n: n.node_id):
+            children = tuple(sorted(shapes.get(dependency, ()) for dependency in node.dep_from))
+            shapes[node.node_id] = (len(node.dep_from), children)
+        return Counter(set(shapes.values()))
 
     @staticmethod
     def compare(pdgs1: list[PDGNode], pdgs2: list[PDGNode]) -> float:

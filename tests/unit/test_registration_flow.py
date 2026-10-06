@@ -96,7 +96,10 @@ class TestRegistrationCreatesAnInactiveAccount:
                 assert user.role == "professor"
                 assert user.tenant_id is not None
                 assert user.password_hash != STRONG_PASSWORD
-                assert user.verify_token == _token_from(sent[0][1])
+                # The stored value is a digest of the emailed token, never the token itself,
+                # so a database leak cannot be replayed as a live verification link.
+                assert user.verify_token == server._hash_token(_token_from(sent[0][1]))
+                assert user.verify_token != _token_from(sent[0][1])
                 assert user.verify_token_expires is not None
         finally:
             _cleanup(email)

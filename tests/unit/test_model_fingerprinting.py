@@ -227,7 +227,7 @@ def func3():
     \"\"\"Docstring 3\"\"\"
     pass
 """
-        scores = fingerprinter._structural_fingerprints(gpt4_like, "python")
+        scores, _notes = fingerprinter._structural_bonus(gpt4_like, "python")
         assert "GPT-4" in scores or len(scores) == 0  # May detect GPT-4 structural pattern
 
     def test_multiple_model_ambiguity(self):

@@ -528,7 +528,13 @@ class TestWinnowingEdgeCases:
         assert score == 1.0
 
     def test_single_token_difference(self):
-        """Test detection of single token difference"""
+        """Test detection of single token difference
+
+        Winnowing folds literals to a type placeholder, so ``return 1`` and
+        ``return 2`` normalise to the same program and legitimately compare equal.
+        The difference that has to register is the token's kind, so this changes
+        the keyword and leaves the literal alone.
+        """
         parsed_a = {
             "tokens": [
                 {"type": "KEYWORD", "value": "return"},
@@ -538,15 +544,15 @@ class TestWinnowingEdgeCases:
         }
         parsed_b = {
             "tokens": [
-                {"type": "KEYWORD", "value": "return"},
-                {"type": "LITERAL", "value": "2"},
+                {"type": "KEYWORD", "value": "yield"},
+                {"type": "LITERAL", "value": "1"},
             ],
-            "raw": "return 2",
+            "raw": "yield 1",
         }
 
-        score = self.algorithm.compare(parsed_a, parsed_b)
+        finding = self.algorithm.compare(parsed_a, parsed_b)
         # Should detect difference
-        assert score < 1.0
+        assert finding.score < 1.0
 
     def test_whitespace_insensitivity(self):
         """Test that whitespace doesn't affect similarity"""

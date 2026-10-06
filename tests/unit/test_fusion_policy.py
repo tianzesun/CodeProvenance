@@ -15,7 +15,7 @@ def test_external_tool_scores_are_normalized_to_common_unit_scale() -> None:
     normalizer = default_score_normalizer()
 
     assert normalizer.normalize("moss", 87) == 0.87
-    assert normalizer.normalize("jplag", 0.42) == 0.42
+    assert normalizer.normalize("jplag", 42) == 0.42
     assert normalizer.normalize("dolos", 142) == 1.0
     assert normalizer.normalize("sherlock", -3) == 0.0
     assert normalizer.normalize("ast", 0.8) == 0.8

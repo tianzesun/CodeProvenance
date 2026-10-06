@@ -267,7 +267,7 @@ class TestCFGBuilderGrowth:
 
         assert len(nodes) > 0
 
-    def test_oversized_program_still_reports_ast_evidence(self) -> None:
+    def test_oversized_program_still_reports_ast_evidence(self, monkeypatch) -> None:
         """A refused graph must not discard the cheaper AST signal."""
         normalizer = ASTNormalizer()
 
@@ -275,7 +275,10 @@ class TestCFGBuilderGrowth:
             """Always refuse the graph."""
             raise CFGTooLargeError("too large")
 
-        normalizer.cfg_builder.build = refuse
+        # ``normalize`` mints a fresh CFGBuilder per program, so patching an instance
+        # attribute would silently do nothing. ``staticmethod`` keeps the stand-in
+        # unbound, which is how the real ``build(self, tree)`` caller sees it.
+        monkeypatch.setattr(CFGBuilder, "build", staticmethod(refuse))
 
         program = normalizer.normalize("def f():\n    return 1\n")
 
