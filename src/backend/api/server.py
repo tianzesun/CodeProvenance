@@ -8347,6 +8347,33 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
         }
 
 
+#: Ceiling on the worker pool sized by the admin-facing *Processing Batch Size*.
+#: The Detection Settings form accepts up to 10000, and the saved value reaches
+#: the frozen settings object through ``object.__setattr__`` (which skips pydantic
+#: validation), so the number must be sanity-checked before it sizes a thread pool.
+_MAX_PROCESSING_BATCH_WORKERS = 128
+
+
+def _processing_batch_workers() -> int:
+    """Resolve the saved *Processing Batch Size* into a pair-comparison pool size.
+
+    ``settings.BATCH_SIZE`` is written by the Detection Settings tab and stored on
+    the tenant record, but nothing ever read it back, so the control was a no-op.
+    It now sizes the thread pool that compares submission pairs — the lever behind
+    the UI's "increase batch size to 50-100 for faster processing" hint.
+
+    Returns:
+        A worker count clamped to ``[1, _MAX_PROCESSING_BATCH_WORKERS]``, or 8
+        (the pool ``BatchDetectionService`` builds itself) when the stored value
+        cannot be interpreted as an integer.
+    """
+    try:
+        workers = int(settings.BATCH_SIZE)
+    except (TypeError, ValueError):
+        return 8
+    return max(1, min(workers, _MAX_PROCESSING_BATCH_WORKERS))
+
+
 def _run_analysis_engines(
     selected_tool_ids,
     submissions,
@@ -8382,7 +8409,11 @@ def _run_analysis_engines(
             starter_sources=starter_sources,
         )
         results = service.compare_all_pairs(
-            submissions, progress_callback=progress_callback
+            submissions,
+            progress_callback=progress_callback,
+            # Sized by the Detection Settings "Processing Batch Size" so raising
+            # it for a large class actually widens the comparison pool.
+            max_workers=_processing_batch_workers(),
         )
         _merge_external_features_into_results(results, external_tool_results)
         report = service.generate_report(results)
