@@ -1,40 +1,27 @@
 """Schema Versioning - Enforce version compatibility.
 
-This module provides version management for schemas.
-Every pipeline stage checks schema version at runtime.
-Mismatched versions fail fast.
+Every pipeline stage checks schema version at runtime. Mismatched versions fail fast.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ._io import read_json, utc_now_iso, write_json_atomic
 from .schema_registry import SchemaVersion, registry
 
 
 @dataclass(frozen=True)
 class VersionManifest:
-    """Manifest of schema versions used in a run.
-
-    Attributes:
-        schemas: Dict of schema name to version info.
-        created_at: ISO timestamp of creation.
-        run_id: Unique run identifier.
-    """
+    """Manifest of schema versions used in a run."""
 
     schemas: dict[str, SchemaVersion]
     created_at: str
     run_id: str
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary.
-
-        Returns:
-            Serializable dict.
-        """
         return {
             "schemas": {
                 name: {"name": v.name, "version": v.version, "hash": v.hash}
@@ -45,127 +32,88 @@ class VersionManifest:
         }
 
     def save(self, path: Path) -> None:
-        """Save manifest to file.
-
-        Args:
-            path: File path to save to.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        write_json_atomic(path, self.to_dict())
 
     @classmethod
     def load(cls, path: Path) -> VersionManifest:
-        """Load manifest from file.
-
-        Args:
-            path: File path to load from.
-
-        Returns:
-            VersionManifest instance.
-        """
-        with open(path) as f:
-            data = json.load(f)
-        return cls.load_from_dict(data)
+        return cls.load_from_dict(read_json(path))
 
     @classmethod
     def load_from_dict(cls, data: dict[str, Any]) -> VersionManifest:
-        """Load manifest from dictionary.
+        """Build a manifest from a dict.
 
-        Args:
-            data: Dictionary with manifest data.
-
-        Returns:
-            VersionManifest instance.
+        Raises:
+            ValueError: If the data is malformed.
         """
-        schemas = {}
-        for name, info in data["schemas"].items():
-            schemas[name] = SchemaVersion(
-                name=info["name"],
-                version=info["version"],
-                hash=info["hash"],
+        try:
+            schemas = {
+                name: SchemaVersion(
+                    name=info["name"], version=info["version"], hash=info["hash"]
+                )
+                for name, info in data["schemas"].items()
+            }
+            return cls(
+                schemas=schemas, created_at=data["created_at"], run_id=data["run_id"]
             )
-
-        return cls(
-            schemas=schemas,
-            created_at=data["created_at"],
-            run_id=data["run_id"],
-        )
+        except (KeyError, TypeError, AttributeError) as e:
+            raise ValueError(f"Malformed version manifest: {e!r}") from e
 
 
 def check_compatibility(
-    schema_name: str,
-    expected_version: str,
-    actual_version: str,
+    schema_name: str, expected_version: str, actual_version: str
 ) -> bool:
-    """Check if two schema versions are compatible.
-
-    Args:
-        schema_name: Schema name.
-        expected_version: Expected version.
-        actual_version: Actual version.
-
-    Returns:
-        True if compatible.
-    """
-    # Same version is always compatible
+    """True if versions are identical or the registry lists ``actual_version``
+    as compatible. Fail-closed for anything else."""
     if expected_version == actual_version:
         return True
-
-    # Check registry for compatibility info
     return registry.check_compatibility(schema_name, actual_version)
 
 
 def create_version_manifest(run_id: str) -> VersionManifest:
-    """Create a version manifest for current schemas.
-
-    Args:
-        run_id: Unique run identifier.
-
-    Returns:
-        VersionManifest with all registered schemas.
-    """
-    from datetime import datetime
-
-    schemas = registry.list_schemas()
-
+    """Create a version manifest for all currently registered schemas."""
     return VersionManifest(
-        schemas=schemas,
-        created_at=datetime.now().isoformat(),
+        schemas=registry.list_schemas(),
+        created_at=utc_now_iso(),
         run_id=run_id,
     )
 
 
 def validate_manifest(manifest: VersionManifest) -> list[str]:
-    """Validate a version manifest against current registry.
-
-    Args:
-        manifest: Manifest to validate.
+    """Validate a manifest against the current registry.
 
     Returns:
         List of error messages (empty if valid).
     """
     errors: list[str] = []
+    current_schemas = registry.list_schemas()  # one snapshot, not one per loop
 
-    for name, version_info in manifest.schemas.items():
-        # Check if schema exists
-        if name not in registry.list_schemas():
+    for name, recorded in manifest.schemas.items():
+        current = current_schemas.get(name)
+        if current is None:
             errors.append(f"Schema '{name}' not in current registry")
             continue
 
-        # Check version compatibility
-        current_version = registry.get_version(name)
-        if not check_compatibility(name, current_version.version, version_info.version):
+        if recorded.name != name:
+            errors.append(f"Manifest entry '{name}' is labelled '{recorded.name}'")
+
+        if not check_compatibility(name, current.version, recorded.version):
             errors.append(
                 f"Schema '{name}' version mismatch: "
-                f"expected {current_version.version}, got {version_info.version}"
+                f"expected {current.version}, got {recorded.version}"
             )
 
-        # Check hash compatibility
-        if current_version.hash != version_info.hash:
-            errors.append(
-                f"Schema '{name}' hash mismatch: "
-                f"expected {current_version.hash}, got {version_info.hash}"
+        if current.hash != recorded.hash:
+            hint = (
+                " (definition changed without a version bump)"
+                if (current.version == recorded.version)
+                else ""
             )
+            errors.append(
+                f"Schema '{name}' hash mismatch{hint}: "
+                f"expected {current.hash}, got {recorded.hash}"
+            )
+
+    for name in current_schemas.keys() - manifest.schemas.keys():
+        errors.append(f"Schema '{name}' is registered but missing from manifest")
 
     return errors

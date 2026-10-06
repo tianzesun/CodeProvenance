@@ -1,11 +1,11 @@
 """Compatibility exports for the legacy analyzer API."""
 
-from src.backend.core.analyzer.batch_analyzer import (
+from .batch_analyzer import (
     BatchAnalysisResult,
     BatchAnalyzer,
     analyze_batch,
 )
-from src.backend.core.analyzer.code_analyzer import (
+from .code_analyzer import (
     CodeAnalysisResult,
     CodeAnalyzer,
     CodeComparisonResult,

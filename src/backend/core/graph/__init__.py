@@ -7,9 +7,9 @@ This module provides:
 - Combined CFG+DFG builder from Python AST
 """
 
-from .cfg_builder import ControlFlowGraphBuilder
-from .combined_builder import CFGDFGBuilder
-from .dfg_builder import DataFlowGraphBuilder
+from .cfg_builder import ControlFlowGraphBuilder, build_cfg
+from .combined_builder import CFGDFGBuilder, build_combined
+from .dfg_builder import DataFlowGraphBuilder, build_dfg
 from .models import (
     CFGEdge,
     CFGNode,
@@ -19,6 +19,7 @@ from .models import (
     DFEdge,
     DFNode,
     EdgeType,
+    VariableState,
 )
 
 __all__ = [
@@ -33,4 +34,8 @@ __all__ = [
     "DataFlowGraph",
     "DataFlowGraphBuilder",
     "EdgeType",
+    "VariableState",
+    "build_cfg",
+    "build_combined",
+    "build_dfg",
 ]

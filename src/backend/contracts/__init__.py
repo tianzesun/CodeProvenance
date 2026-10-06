@@ -17,7 +17,7 @@ from .reproducibility import (
     verify_golden_dataset,
     verify_run_fingerprint,
 )
-from .schema_registry import SchemaRegistry, ValidationError, registry
+from .schema_registry import SchemaRegistry, SchemaVersion, ValidationError, registry
 from .validation import (
     ValidationGate,
     ValidationResult,
@@ -25,7 +25,6 @@ from .validation import (
     validate_evaluation_result,
 )
 from .versioning import (
-    SchemaVersion,
     VersionManifest,
     check_compatibility,
     create_version_manifest,

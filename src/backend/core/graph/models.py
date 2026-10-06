@@ -3,6 +3,8 @@ Data models for Control Flow Graph (CFG) and Data Flow Graph (DFG).
 """
 
 import ast
+from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -43,11 +45,14 @@ class CFGNode:
         node_type: Type of AST node (e.g., 'Assign', 'If', 'For')
         source_code: Source code string for this node
         line_start: Starting line number in source
-        line_end: Ending line number in source
+        line_end: Ending line number in source (header only for compound statements)
         successors: List of (node_id, edge_type) tuples
         predecessors: List of (node_id, edge_type) tuples
-        scope: Lexical scope identifier (for nested functions/classes)
+        scope: Lexical scope identifier (qualified, e.g. ``Class.method``)
         metadata: Additional metadata
+        dominated_nodes: After ``compute_dominators``: the set of nodes that
+            *dominate* this node (the name is historical and misleading).
+        post_dominated_nodes: Likewise for post-dominators.
     """
 
     id: int
@@ -71,15 +76,15 @@ class CFGNode:
     def add_successor(
         self, node_id: int, edge_type: EdgeType = EdgeType.SEQUENTIAL
     ) -> None:
-        """Add a successor edge to this node."""
-        if node_id not in [s[0] for s in self.successors]:
+        """Add a successor edge (deduplicated on (target, type))."""
+        if (node_id, edge_type) not in self.successors:
             self.successors.append((node_id, edge_type))
 
     def add_predecessor(
         self, node_id: int, edge_type: EdgeType = EdgeType.SEQUENTIAL
     ) -> None:
-        """Add a predecessor edge to this node."""
-        if node_id not in [p[0] for p in self.predecessors]:
+        """Add a predecessor edge (deduplicated on (source, type))."""
+        if (node_id, edge_type) not in self.predecessors:
             self.predecessors.append((node_id, edge_type))
 
     def get_successor_ids(self, edge_type: EdgeType | None = None) -> list[int]:
@@ -97,15 +102,7 @@ class CFGNode:
 
 @dataclass
 class CFGEdge:
-    """An edge in the Control Flow Graph.
-
-    Attributes:
-        source: Source node ID
-        target: Target node ID
-        edge_type: Type of control flow
-        condition: Condition expression (for conditional branches)
-        metadata: Additional metadata
-    """
+    """An edge in the Control Flow Graph."""
 
     source: int
     target: int
@@ -123,7 +120,7 @@ class ControlFlowGraph:
 
     Attributes:
         nodes: Dictionary mapping node ID to CFGNode
-        edges: List of CFGEdge objects
+        edges: List of CFGEdge objects (no exact duplicates)
         entry_node: Entry point node ID
         exit_node: Exit point node ID
         source_code: Original source code
@@ -138,34 +135,54 @@ class ControlFlowGraph:
     source_code: str = ""
     ast_tree: ast.Module | None = None
     scopes: dict[str, list[int]] = field(default_factory=dict)
+    _edge_keys: set[tuple[int, int, EdgeType]] = field(
+        default_factory=set, init=False, repr=False
+    )
 
     @property
     def node_count(self) -> int:
-        """Return the number of nodes in the graph."""
         return len(self.nodes)
 
     @property
     def edge_count(self) -> int:
-        """Return the number of edges in the graph."""
         return len(self.edges)
 
     def add_node(self, node: CFGNode) -> None:
-        """Add a node to the graph."""
+        """Add a node to the graph.
+
+        Raises:
+            ValueError: If a node with the same ID already exists. (A silent
+                overwrite used to corrupt the graph when a builder reset its
+                ID counter mid-build.)
+        """
+        if node.id in self.nodes:
+            raise ValueError(f"Duplicate CFG node id {node.id}")
         self.nodes[node.id] = node
-        if node.scope not in self.scopes:
-            self.scopes[node.scope] = []
-        self.scopes[node.scope].append(node.id)
+        self.scopes.setdefault(node.scope, []).append(node.id)
 
     def add_edge(self, edge: CFGEdge) -> None:
-        """Add an edge to the graph and update node successor/predecessor lists."""
+        """Add an edge and update successor/predecessor lists.
+
+        Exact duplicates (same source, target, type) are ignored, so
+        ``edges`` and the per-node lists always agree.
+
+        Raises:
+            ValueError: If either endpoint is not in the graph.
+        """
+        if edge.source not in self.nodes or edge.target not in self.nodes:
+            raise ValueError(
+                f"Edge {edge.source}->{edge.target} references an unknown node"
+            )
+        key = (edge.source, edge.target, edge.edge_type)
+        if key in self._edge_keys:
+            return
+        self._edge_keys.add(key)
         self.edges.append(edge)
-        if edge.source in self.nodes:
-            self.nodes[edge.source].add_successor(edge.target, edge.edge_type)
-        if edge.target in self.nodes:
-            self.nodes[edge.target].add_predecessor(edge.source, edge.edge_type)
+        self.nodes[edge.source].add_successor(edge.target, edge.edge_type)
+        self.nodes[edge.target].add_predecessor(edge.source, edge.edge_type)
 
     def get_edge(self, source: int, target: int) -> CFGEdge | None:
-        """Get the edge between two nodes."""
+        """Get the first edge between two nodes."""
         for edge in self.edges:
             if edge.source == source and edge.target == target:
                 return edge
@@ -173,110 +190,138 @@ class ControlFlowGraph:
 
     def get_edges(self, source: int, target: int | None = None) -> list[CFGEdge]:
         """Get all edges from a source node, optionally to a specific target."""
-        result = []
-        for edge in self.edges:
-            if edge.source == source and (target is None or edge.target == target):
-                result.append(edge)
-        return result
+        return [
+            e
+            for e in self.edges
+            if e.source == source and (target is None or e.target == target)
+        ]
 
     def get_nodes_in_scope(self, scope: str) -> list[CFGNode]:
-        """Get all nodes in a given scope."""
         return [
             self.nodes[nid] for nid in self.scopes.get(scope, []) if nid in self.nodes
         ]
 
     def get_all_scopes(self) -> list[str]:
-        """Get all scope names in the graph."""
         return list(self.scopes.keys())
+
+    # ── graph analysis ──────────────────────────────────────────────
+
+    def _reverse_postorder(self, start: int) -> list[int]:
+        """Reverse postorder of nodes reachable from ``start`` (iterative DFS)."""
+        seen: set[int] = {start}
+        order: list[int] = []
+        stack: list[tuple[int, int]] = [(start, 0)]
+        while stack:
+            node_id, idx = stack.pop()
+            succs = self.nodes[node_id].get_successor_ids()
+            if idx < len(succs):
+                stack.append((node_id, idx + 1))
+                nxt = succs[idx]
+                if nxt not in seen and nxt in self.nodes:
+                    seen.add(nxt)
+                    stack.append((nxt, 0))
+            else:
+                order.append(node_id)
+        order.reverse()
+        return order
+
+    def find_unreachable_nodes(self) -> set[int]:
+        """Nodes that cannot be reached from the entry node."""
+        if self.entry_node is None or self.entry_node not in self.nodes:
+            return set(self.nodes)
+        return set(self.nodes) - set(self._reverse_postorder(self.entry_node))
 
     def compute_dominators(self) -> dict[int, set[int]]:
         """Compute dominator sets for all nodes.
 
+        Unreachable nodes dominate only themselves (previously they kept the
+        "all nodes" initial value, and a node whose predecessors were all
+        unknown crashed ``set.intersection()``).
+
         Returns:
-            Dictionary mapping node ID to set of nodes that dominate it.
+            Dictionary mapping node ID to the set of nodes that dominate it.
         """
-        if self.entry_node is None:
+        if self.entry_node is None or self.entry_node not in self.nodes:
             return {}
 
-        # Initialize dominators
-        all_nodes = set(self.nodes.keys())
-        dom: dict[int, set[int]] = {n: all_nodes.copy() for n in all_nodes}
+        order = self._reverse_postorder(self.entry_node)
+        reachable = set(order)
+        dom: dict[int, set[int]] = {n: set(reachable) for n in reachable}
         dom[self.entry_node] = {self.entry_node}
 
-        # Iterative fixed-point algorithm
         changed = True
         while changed:
             changed = False
-            for node_id in all_nodes:
+            for node_id in order:
                 if node_id == self.entry_node:
                     continue
-
-                node = self.nodes[node_id]
-                preds = node.get_predecessor_ids()
-                if not preds:
-                    continue
-
-                # Intersection of predecessors' dominators
-                new_dom = set.intersection(*[dom[p] for p in preds if p in dom])
-                new_dom.add(node_id)
-
+                preds = [
+                    p
+                    for p in self.nodes[node_id].get_predecessor_ids()
+                    if p in reachable
+                ]
+                new_dom = set.intersection(*(dom[p] for p in preds)) | {node_id}
                 if new_dom != dom[node_id]:
                     dom[node_id] = new_dom
                     changed = True
 
-        # Update nodes with dominator information
-        for node_id, dominators in dom.items():
-            if node_id in self.nodes:
-                self.nodes[node_id].dominated_nodes = dominators
-
+        for node_id in self.nodes:
+            dom.setdefault(node_id, {node_id})
+            self.nodes[node_id].dominated_nodes = dom[node_id]
         return dom
+
+    def compute_immediate_dominators(self) -> dict[int, int | None]:
+        """Immediate dominator of every node (``None`` for entry/unreachable)."""
+        dom = self.compute_dominators()
+        idom: dict[int, int | None] = {}
+        for node_id, dominators in dom.items():
+            strict = dominators - {node_id}
+            # Dominators form a chain; the closest one has the largest set.
+            idom[node_id] = max(strict, key=lambda d: len(dom[d])) if strict else None
+        return idom
 
     def compute_post_dominators(self) -> dict[int, set[int]]:
         """Compute post-dominator sets for all nodes.
 
-        Returns:
-            Dictionary mapping node ID to set of nodes that post-dominate it.
+        post_dom(n) = {n} ∪ ⋂ post_dom(s) over the *successors* s of n. The old
+        code intersected over predecessors (it computed dominators of the
+        reversed labelling) and so returned wrong sets. Nodes that cannot reach
+        the exit (infinite loops, function bodies hung off a module CFG)
+        post-dominate only themselves.
         """
-        if self.exit_node is None:
+        if self.exit_node is None or self.exit_node not in self.nodes:
             return {}
 
-        # Initialize post-dominators (reverse graph)
-        all_nodes = set(self.nodes.keys())
-        post_dom: dict[int, set[int]] = {n: all_nodes.copy() for n in all_nodes}
+        # Nodes that can reach the exit: backward BFS.
+        can_reach: set[int] = {self.exit_node}
+        queue = deque([self.exit_node])
+        while queue:
+            current = queue.popleft()
+            for pred in self.nodes[current].get_predecessor_ids():
+                if pred in self.nodes and pred not in can_reach:
+                    can_reach.add(pred)
+                    queue.append(pred)
+
+        post_dom: dict[int, set[int]] = {n: set(can_reach) for n in can_reach}
         post_dom[self.exit_node] = {self.exit_node}
 
-        # Build reverse adjacency
-        reverse_adj: dict[int, list[int]] = {n: [] for n in all_nodes}
-        for edge in self.edges:
-            reverse_adj[edge.target].append(edge.source)
-
-        # Iterative fixed-point algorithm
         changed = True
         while changed:
             changed = False
-            for node_id in all_nodes:
+            for node_id in sorted(can_reach, reverse=True):
                 if node_id == self.exit_node:
                     continue
-
-                succs = reverse_adj.get(node_id, [])
-                if not succs:
-                    continue
-
-                # Intersection of successors' post-dominators
-                new_dom = set.intersection(
-                    *[post_dom[s] for s in succs if s in post_dom]
-                )
-                new_dom.add(node_id)
-
+                succs = [
+                    s for s in self.nodes[node_id].get_successor_ids() if s in can_reach
+                ]
+                new_dom = set.intersection(*(post_dom[s] for s in succs)) | {node_id}
                 if new_dom != post_dom[node_id]:
                     post_dom[node_id] = new_dom
                     changed = True
 
-        # Update nodes with post-dominator information
-        for node_id, post_dominators in post_dom.items():
-            if node_id in self.nodes:
-                self.nodes[node_id].post_dominated_nodes = post_dominators
-
+        for node_id in self.nodes:
+            post_dom.setdefault(node_id, {node_id})
+            self.nodes[node_id].post_dominated_nodes = post_dom[node_id]
         return post_dom
 
     def to_dict(self) -> dict[str, Any]:
@@ -308,6 +353,7 @@ class ControlFlowGraph:
                 }
                 for e in self.edges
             ],
+            "scopes": {name: list(ids) for name, ids in self.scopes.items()},
         }
 
 
@@ -320,16 +366,10 @@ class ControlFlowGraph:
 class DFNode:
     """A node in the Data Flow Graph representing a variable definition or use.
 
-    Attributes:
-        id: Unique identifier for this node
-        variable_name: Name of the variable
-        state: State of the variable (defined, used, modified, killed)
-        cfg_node_id: Corresponding CFG node ID
-        line_number: Line number in source
-        source_code: Source code snippet
-        scope: Lexical scope
-        reaching_definitions: Set of definition node IDs that reach this point
-        metadata: Additional metadata
+    ``metadata["owner"]`` (set by the builder) names the scope that owns the
+    variable binding; it can differ from ``scope`` for globals, closures and
+    comprehension variables. Reaching definitions are computed per
+    (owner, variable) so a local never kills a same-named variable elsewhere.
     """
 
     id: int
@@ -344,20 +384,20 @@ class DFNode:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __repr__(self) -> str:
-        return f"DFNode({self.id}: {self.variable_name} [{self.state.value}] at line {self.line_number})"
+        return (
+            f"DFNode({self.id}: {self.variable_name} [{self.state.value}] "
+            f"at line {self.line_number})"
+        )
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """(owner scope, variable name) identity used by flow analysis."""
+        return (self.metadata.get("owner", self.scope), self.variable_name)
 
 
 @dataclass
 class DFEdge:
-    """An edge in the Data Flow Graph representing a data dependency.
-
-    Attributes:
-        source: Source node ID (definition)
-        target: Target node ID (use)
-        variable: Variable being tracked
-        edge_type: Type of data dependency
-        metadata: Additional metadata
-    """
+    """An edge in the Data Flow Graph (definition -> use)."""
 
     source: int
     target: int
@@ -369,18 +409,20 @@ class DFEdge:
         return f"DFEdge({self.source} --{self.variable}--> {self.target})"
 
 
+_State = dict[tuple[str, str], frozenset[int]]
+
+
+def _merge_states(states: Iterable[_State]) -> _State:
+    merged: _State = {}
+    for state in states:
+        for key, defs in state.items():
+            merged[key] = merged[key] | defs if key in merged else defs
+    return merged
+
+
 @dataclass
 class DataFlowGraph:
-    """A Data Flow Graph representing data dependencies in a program.
-
-    Attributes:
-        nodes: Dictionary mapping node ID to DFNode
-        edges: List of DFEdge objects
-        variable_definitions: Dictionary mapping variable name to set of definition node IDs
-        variable_uses: Dictionary mapping variable name to set of use node IDs
-        cfg_reference: Reference to the associated CFG
-        source_code: Original source code
-    """
+    """A Data Flow Graph representing data dependencies in a program."""
 
     nodes: dict[int, DFNode] = field(default_factory=dict)
     edges: list[DFEdge] = field(default_factory=list)
@@ -391,150 +433,132 @@ class DataFlowGraph:
 
     @property
     def node_count(self) -> int:
-        """Return the number of nodes in the graph."""
         return len(self.nodes)
 
     @property
     def edge_count(self) -> int:
-        """Return the number of edges in the graph."""
         return len(self.edges)
 
     @property
     def variables(self) -> set[str]:
-        """Get all variables tracked in the data flow graph."""
-        return set(self.variable_definitions.keys()) | set(self.variable_uses.keys())
+        """All variables tracked in the data flow graph."""
+        return set(self.variable_definitions) | set(self.variable_uses)
 
     def add_node(self, node: DFNode) -> None:
-        """Add a node to the graph."""
+        """Add a node; MODIFIED nodes count as both a definition and a use.
+
+        Raises:
+            ValueError: If the ID is already present.
+        """
+        if node.id in self.nodes:
+            raise ValueError(f"Duplicate DFG node id {node.id}")
         self.nodes[node.id] = node
-
-        # Track definitions and uses
         if node.state in (VariableState.DEFINED, VariableState.MODIFIED):
-            if node.variable_name not in self.variable_definitions:
-                self.variable_definitions[node.variable_name] = set()
-            self.variable_definitions[node.variable_name].add(node.id)
-
+            self.variable_definitions.setdefault(node.variable_name, set()).add(node.id)
         if node.state in (VariableState.USED, VariableState.MODIFIED):
-            if node.variable_name not in self.variable_uses:
-                self.variable_uses[node.variable_name] = set()
-            self.variable_uses[node.variable_name].add(node.id)
+            self.variable_uses.setdefault(node.variable_name, set()).add(node.id)
 
     def add_edge(self, edge: DFEdge) -> None:
-        """Add an edge to the graph."""
         self.edges.append(edge)
 
     def get_definition_chains(self, variable: str) -> list[list[int]]:
-        """Get all definition-use chains for a variable.
-
-        Returns:
-            List of chains, where each chain is a list of node IDs from def to use.
+        """For each definition of ``variable``: the def followed by every node
+        reachable from it along that variable's edges (BFS order, no repeats).
         """
         if variable not in self.variable_definitions:
             return []
 
+        adjacency: dict[int, list[int]] = {}
+        for edge in self.edges:  # built once, not rescanned per BFS step
+            if edge.variable == variable:
+                adjacency.setdefault(edge.source, []).append(edge.target)
+
         chains = []
-        for def_id in self.variable_definitions[variable]:
-            # BFS to find all reachable uses
-            visited = set()
-            queue = [def_id]
+        for def_id in sorted(self.variable_definitions[variable]):
             chain = [def_id]
-
+            visited = {def_id}
+            queue = deque([def_id])
             while queue:
-                current = queue.pop(0)
-                if current in visited:
-                    continue
-                visited.add(current)
-
-                for edge in self.edges:
-                    if edge.source == current and edge.variable == variable:
-                        chain.append(edge.target)
-                        queue.append(edge.target)
-
+                current = queue.popleft()
+                for target in adjacency.get(current, ()):
+                    if target not in visited:
+                        visited.add(target)
+                        chain.append(target)
+                        queue.append(target)
             if len(chain) > 1:
                 chains.append(chain)
-
         return chains
 
     def compute_reaching_definitions(self) -> dict[int, set[int]]:
-        """Compute reaching definitions for each node.
+        """Classic forward may-analysis over the CFG.
+
+        State is kept per (owner scope, variable). A DEFINED/MODIFIED node
+        kills all earlier definitions of its variable. Several DF nodes may
+        share one CFG node; they are applied in ID order (= evaluation order).
+
+        The previous implementation mixed CFG IDs and DF-node IDs in the same
+        dictionary, ignored MODIFIED nodes, tracked all variables in one set,
+        and gave up after 100 iterations.
 
         Returns:
-            Dictionary mapping node ID to set of reaching definition node IDs.
+            DF node ID -> reaching definition IDs. For USED/MODIFIED nodes
+            these are the definitions that reach the read; a DEFINED node maps
+            to ``{itself}``.
         """
         cfg = self.cfg_reference
         if cfg is None or cfg.entry_node is None:
             return {}
 
-        # Initialize
-        all_nodes = set(self.nodes.keys())
-        reaching: dict[int, set[int]] = {n: set() for n in all_nodes}
+        by_cfg: dict[int, list[DFNode]] = {}
+        for node in sorted(self.nodes.values(), key=lambda n: n.id):
+            by_cfg.setdefault(node.cfg_node_id, []).append(node)
 
-        # For each definition node, add to its own reaching set
-        for def_ids in self.variable_definitions.values():
-            for def_id in def_ids:
-                if def_id in reaching:
-                    reaching[def_id].add(def_id)
+        defining = (VariableState.DEFINED, VariableState.MODIFIED)
+        in_state: dict[int, _State] = {cid: {} for cid in cfg.nodes}
+        out_state: dict[int, _State] = {cid: {} for cid in cfg.nodes}
 
-        # Build CFG-based worklist
-        worklist = list(cfg.nodes.keys())
+        worklist = deque(sorted(cfg.nodes))
+        queued = set(worklist)
+        while worklist:
+            cid = worklist.popleft()
+            queued.discard(cid)
+            cfg_node = cfg.nodes[cid]
+            new_in = _merge_states(out_state[p] for p in cfg_node.get_predecessor_ids())
+            in_state[cid] = new_in
+            new_out = dict(new_in)
+            for df_node in by_cfg.get(cid, ()):
+                if df_node.state in defining:
+                    new_out[df_node.key] = frozenset((df_node.id,))
+            if new_out != out_state[cid]:
+                out_state[cid] = new_out
+                for succ in cfg_node.get_successor_ids():
+                    if succ not in queued:
+                        queued.add(succ)
+                        worklist.append(succ)
 
-        # Iterate until fixed point
-        changed = True
-        max_iterations = 100
-        iteration = 0
-        while changed and iteration < max_iterations:
-            changed = False
-            iteration += 1
-
-            for node_id in worklist:
-                if node_id not in cfg.nodes:
-                    continue
-
-                # Get predecessors from CFG
-                cfg_node = cfg.nodes[node_id]
-                preds = cfg_node.get_predecessor_ids()
-
-                for pred_id in preds:
-                    # Transfer function: add definitions, kill same-variable definitions
-                    new_defs = reaching.get(pred_id, set()).copy()
-
-                    if node_id in self.nodes:
-                        df_node = self.nodes[node_id]
-                        if df_node.state == VariableState.DEFINED:
-                            # Kill previous definitions of same variable
-                            same_var_defs = self.variable_definitions.get(
-                                df_node.variable_name, set()
-                            )
-                            new_defs = new_defs - same_var_defs
-                            new_defs.add(node_id)
-
-                new_reaching = set()
-                for pred_id in preds:
-                    new_reaching.update(reaching.get(pred_id, set()))
-
-                if node_id in self.nodes:
-                    df_node = self.nodes[node_id]
-                    if df_node.state == VariableState.DEFINED:
-                        same_var_defs = self.variable_definitions.get(
-                            df_node.variable_name, set()
-                        )
-                        new_reaching = new_reaching - same_var_defs
-                        new_reaching.add(node_id)
-
-                if new_reaching != reaching.get(node_id, set()):
-                    reaching[node_id] = new_reaching
-                    changed = True
-                    if node_id in self.nodes:
-                        self.nodes[node_id].reaching_definitions = new_reaching
-
-        return reaching
+        result: dict[int, set[int]] = {}
+        for cid, df_nodes in by_cfg.items():
+            current: _State = dict(in_state.get(cid, {}))
+            for df_node in df_nodes:
+                key = df_node.key
+                if df_node.state is VariableState.DEFINED:
+                    reach = {df_node.id}
+                    current[key] = frozenset((df_node.id,))
+                elif df_node.state is VariableState.MODIFIED:
+                    reach = set(current.get(key, ()))
+                    current[key] = frozenset((df_node.id,))
+                else:
+                    reach = set(current.get(key, ()))
+                result[df_node.id] = reach
+                df_node.reaching_definitions = reach
+        return result
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert graph to dictionary representation for serialization."""
+        """Convert graph to dictionary representation (deterministic order)."""
         return {
             "node_count": self.node_count,
             "edge_count": self.edge_count,
-            "variables": list(self.variables),
+            "variables": sorted(self.variables),
             "nodes": {
                 nid: {
                     "id": n.id,
@@ -544,7 +568,7 @@ class DataFlowGraph:
                     "line_number": n.line_number,
                     "source_code": n.source_code[:100] if n.source_code else "",
                     "scope": n.scope,
-                    "reaching_definitions": list(n.reaching_definitions),
+                    "reaching_definitions": sorted(n.reaching_definitions),
                 }
                 for nid, n in self.nodes.items()
             },
@@ -567,17 +591,7 @@ class DataFlowGraph:
 
 @dataclass
 class CombinedGraph:
-    """Combined Control Flow Graph and Data Flow Graph.
-
-    This integrates control flow and data flow information for
-    comprehensive program analysis.
-
-    Attributes:
-        cfg: The control flow graph
-        dfg: The data flow graph
-        source_code: Original source code
-        metadata: Additional metadata about the analyzed code
-    """
+    """Combined Control Flow Graph and Data Flow Graph."""
 
     cfg: ControlFlowGraph = field(default_factory=ControlFlowGraph)
     dfg: DataFlowGraph = field(default_factory=DataFlowGraph)
@@ -593,51 +607,30 @@ class CombinedGraph:
         )
 
     def get_node_mapping(self) -> dict[int, list[int]]:
-        """Get mapping from CFG node IDs to DFG node IDs.
-
-        Returns:
-            Dictionary mapping CFG node ID to list of DFG node IDs.
-        """
+        """Mapping from CFG node IDs to DFG node IDs."""
         mapping: dict[int, list[int]] = {}
         for df_node_id, df_node in self.dfg.nodes.items():
-            cfg_id = df_node.cfg_node_id
-            if cfg_id not in mapping:
-                mapping[cfg_id] = []
-            mapping[cfg_id].append(df_node_id)
+            mapping.setdefault(df_node.cfg_node_id, []).append(df_node_id)
         return mapping
 
     def compute_graph_edit_distance(self, other: "CombinedGraph") -> float:
-        """Compute a simple graph edit distance between this graph and another.
+        """Count-based distance heuristic (NOT a true graph edit distance).
 
-        This is a simplified heuristic based on node and edge counts.
-        For more accurate comparison, structural similarity algorithms
-        like graph kernel methods should be used.
-
-        Args:
-            other: Another CombinedGraph to compare against
-
-        Returns:
-            Distance value (0 means identical, higher means more different)
+        0 means identical counts and variable sets; use a graph kernel or real
+        GED for structural comparison.
         """
-        # Control flow distance
         cfg_dist = abs(self.cfg.node_count - other.cfg.node_count) + abs(
             self.cfg.edge_count - other.cfg.edge_count
         )
-
-        # Data flow distance
         dfg_dist = abs(self.dfg.node_count - other.dfg.node_count) + abs(
             self.dfg.edge_count - other.dfg.edge_count
         )
-
-        # Variable overlap distance
-        self_vars = set(self.dfg.variables)
-        other_vars = set(other.dfg.variables)
-        var_dist = len(self_vars.symmetric_difference(other_vars))
-
+        var_dist = len(
+            set(self.dfg.variables).symmetric_difference(other.dfg.variables)
+        )
         return cfg_dist + dfg_dist + var_dist
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert combined graph to dictionary representation."""
         return {
             "cfg": self.cfg.to_dict(),
             "dfg": self.dfg.to_dict(),

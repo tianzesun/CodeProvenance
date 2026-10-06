@@ -1,46 +1,76 @@
 """
 Combined CFG + DFG Builder for Python AST.
 
-This module provides a unified builder that constructs both Control Flow Graph
-and Data Flow Graph from Python AST in a single pass, ensuring proper
-correspondence between the two graphs.
+This module provides a unified builder that constructs both the Control Flow
+Graph and the Data Flow Graph from a Python AST (CFG first, then the DFG on top
+of it), ensuring proper correspondence between the two graphs.
 """
 
 import ast
+from collections import deque
+from collections.abc import Iterator
 
 from .cfg_builder import ControlFlowGraphBuilder
 from .dfg_builder import DataFlowGraphBuilder
 from .models import (
     CombinedGraph,
     ControlFlowGraph,
+    EdgeType,
 )
+
+_FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _iter_definitions(node: ast.AST, prefix: str = "") -> Iterator[tuple[str, ast.AST]]:
+    """Yield (qualified name, node) for every function/class, in source order."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (*_FUNCTION_TYPES, ast.ClassDef)):
+            qualified = f"{prefix}{child.name}"
+            yield qualified, child
+            yield from _iter_definitions(child, f"{qualified}.")
+        else:
+            yield from _iter_definitions(child, prefix)
+
+
+def _find_definition(
+    tree: ast.AST, name: str, node_types: tuple[type, ...]
+) -> ast.AST | None:
+    """Find a function/class by bare (``method``) or qualified (``Class.method``) name.
+
+    Several definitions can share a bare name (e.g. ``__init__``); the shallowest
+    match wins, then source order.
+    """
+    matches = [
+        (qualified, node)
+        for qualified, node in _iter_definitions(tree)
+        if isinstance(node, node_types)
+        and (qualified == name or qualified.rsplit(".", 1)[-1] == name)
+    ]
+    if not matches:
+        return None
+    exact = [m for m in matches if m[0] == name]
+    pool = exact or matches
+    return min(pool, key=lambda m: m[0].count("."))[1]
 
 
 class CFGDFGBuilder:
     """Unified builder that constructs both CFG and DFG from Python AST.
 
-    This builder creates a CombinedGraph containing:
+    Creates a CombinedGraph containing:
     - A Control Flow Graph representing execution paths
     - A Data Flow Graph representing variable dependencies
     - Cross-references between CFG nodes and DFG nodes
+
+    Each ``build*`` call uses fresh sub-builders, so one instance can be shared
+    across threads.
 
     Usage:
         builder = CFGDFGBuilder()
         combined = builder.build(source_code)
     """
 
-    def __init__(self) -> None:
-        self._cfg_builder: ControlFlowGraphBuilder = ControlFlowGraphBuilder()
-        self._dfg_builder: DataFlowGraphBuilder = DataFlowGraphBuilder()
-
     def build(self, source_code: str) -> CombinedGraph:
         """Build combined CFG + DFG from source code.
-
-        Args:
-            source_code: Python source code string
-
-        Returns:
-            CombinedGraph containing both CFG and DFG
 
         Raises:
             SyntaxError: If source code cannot be parsed
@@ -49,23 +79,10 @@ class CFGDFGBuilder:
         return self.build_from_ast(tree, source_code)
 
     def build_from_ast(self, tree: ast.Module, source_code: str = "") -> CombinedGraph:
-        """Build combined CFG + DFG from AST.
-
-        Args:
-            tree: Python AST module
-            source_code: Original source code string
-
-        Returns:
-            CombinedGraph containing both CFG and DFG
-        """
-        # Step 1: Build CFG
-        cfg = self._cfg_builder.build(tree, source_code)
-
-        # Step 2: Build DFG using CFG
-        dfg = self._dfg_builder.build(tree, cfg, source_code)
-
-        # Step 3: Create combined graph
-        combined = CombinedGraph(
+        """Build combined CFG + DFG from an AST."""
+        cfg = ControlFlowGraphBuilder().build(tree, source_code)
+        dfg = DataFlowGraphBuilder().build(tree, cfg, source_code)
+        return CombinedGraph(
             cfg=cfg,
             dfg=dfg,
             source_code=source_code,
@@ -75,8 +92,6 @@ class CFGDFGBuilder:
             },
         )
 
-        return combined
-
     def build_for_function(
         self,
         source_code: str,
@@ -84,104 +99,64 @@ class CFGDFGBuilder:
     ) -> CombinedGraph | None:
         """Build combined CFG + DFG for a specific function.
 
-        Args:
-            source_code: Python source code string
-            function_name: Name of function to extract
-
-        Returns:
-            CombinedGraph for the function, or None if not found
+        ``function_name`` may be qualified (``Class.method``) to disambiguate.
+        Returns None if no such function exists.
         """
         tree = ast.parse(source_code)
+        node = _find_definition(tree, function_name, _FUNCTION_TYPES)
+        if node is None:
+            return None
 
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == function_name
-            ):
-                # Build CFG for function
-                cfg = self._cfg_builder.build_from_function(node, source_code)
-
-                # Build DFG for function
-                dfg = self._dfg_builder.build_for_function(node, cfg, source_code)
-
-                return CombinedGraph(
-                    cfg=cfg,
-                    dfg=dfg,
-                    source_code=source_code,
-                    metadata={
-                        "language": "python",
-                        "function_name": function_name,
-                    },
-                )
-
-        return None
+        cfg = ControlFlowGraphBuilder().build_from_function(node, source_code)  # type: ignore[arg-type]
+        dfg = DataFlowGraphBuilder().build_for_function(node, cfg, source_code)  # type: ignore[arg-type]
+        return CombinedGraph(
+            cfg=cfg,
+            dfg=dfg,
+            source_code=source_code,
+            metadata={"language": "python", "function_name": function_name},
+        )
 
     def build_for_class(
         self,
         source_code: str,
         class_name: str,
     ) -> CombinedGraph | None:
-        """Build combined CFG + DFG for a specific class.
+        """Build combined CFG + DFG for a specific class (None if not found).
 
-        Args:
-            source_code: Python source code string
-            class_name: Name of class to extract
-
-        Returns:
-            CombinedGraph for the class, or None if not found
+        The DFG is now built from the class body. It used to be built from the
+        whole module while the CFG covered only the class, so the two graphs
+        described different code.
         """
         tree = ast.parse(source_code)
+        node = _find_definition(tree, class_name, (ast.ClassDef,))
+        if node is None:
+            return None
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == class_name:
-                cfg = self._cfg_builder.build_from_class(node, source_code)
-
-                dfg = self._dfg_builder.build(tree, cfg, source_code)
-
-                return CombinedGraph(
-                    cfg=cfg,
-                    dfg=dfg,
-                    source_code=source_code,
-                    metadata={
-                        "language": "python",
-                        "class_name": class_name,
-                    },
-                )
-
-        return None
+        cfg = ControlFlowGraphBuilder().build_from_class(node, source_code)  # type: ignore[arg-type]
+        dfg = DataFlowGraphBuilder().build_for_class(node, cfg, source_code)  # type: ignore[arg-type]
+        return CombinedGraph(
+            cfg=cfg,
+            dfg=dfg,
+            source_code=source_code,
+            metadata={"language": "python", "class_name": class_name},
+        )
 
 
 def build_combined(source_code: str) -> CombinedGraph:
     """Convenience function to build combined CFG + DFG from source code.
 
-    Args:
-        source_code: Python source code string
-
-    Returns:
-        CombinedGraph containing both CFG and DFG
-
     Raises:
         SyntaxError: If source code cannot be parsed
     """
-    builder = CFGDFGBuilder()
-    return builder.build(source_code)
+    return CFGDFGBuilder().build(source_code)
 
 
 def build_combined_for_function(
     source_code: str,
     function_name: str,
 ) -> CombinedGraph | None:
-    """Convenience function to build combined CFG + DFG for a function.
-
-    Args:
-        source_code: Python source code string
-        function_name: Name of function to analyze
-
-    Returns:
-        CombinedGraph for the function, or None if not found
-    """
-    builder = CFGDFGBuilder()
-    return builder.build_for_function(source_code, function_name)
+    """Convenience function to build combined CFG + DFG for a function."""
+    return CFGDFGBuilder().build_for_function(source_code, function_name)
 
 
 # ─────────────────────────────────────────────
@@ -189,133 +164,86 @@ def build_combined_for_function(
 # ─────────────────────────────────────────────
 
 
-def compute_cyclomatic_complexity(cfg: ControlFlowGraph) -> int:
-    """Compute the cyclomatic complexity of a CFG.
+def compute_cyclomatic_complexity(
+    cfg: ControlFlowGraph, scope: str | None = None
+) -> int:
+    """Cyclomatic complexity as 1 + the number of extra branches.
 
-    Cyclomatic complexity = E - N + 2P
-    where E = edges, N = nodes, P = connected components (usually 1)
+    Equivalent to E - N + 2 for a single-entry/single-exit graph, but robust to
+    several sinks (function bodies hang off a module CFG, ``raise`` exits, ...)
+    where E - N + 2P gave wrong values. FUNCTION_CALL edges are not decisions.
 
     Args:
         cfg: Control Flow Graph
-
-    Returns:
-        Cyclomatic complexity value
+        scope: Restrict to one scope's nodes (e.g. ``"Class.method"``) to get
+            per-function complexity; ``None`` measures the whole graph.
     """
-    edges = cfg.edge_count
-    nodes = cfg.node_count
-    components = 1  # Assuming connected graph
-
-    return max(1, edges - nodes + 2 * components)
+    ids = set(cfg.nodes) if scope is None else set(cfg.scopes.get(scope, ()))
+    extra = 0
+    for node_id in ids:
+        targets = {
+            target
+            for target, edge_type in cfg.nodes[node_id].successors
+            if edge_type is not EdgeType.FUNCTION_CALL and target in ids
+        }
+        extra += max(0, len(targets) - 1)
+    return 1 + extra
 
 
 def find_reachable_nodes(cfg: ControlFlowGraph, start: int) -> set[int]:
-    """Find all nodes reachable from a start node in the CFG.
-
-    Args:
-        cfg: Control Flow Graph
-        start: Starting node ID
-
-    Returns:
-        Set of reachable node IDs
-    """
-    visited: set[int] = set()
-    queue = [start]
-
+    """All nodes reachable from ``start`` (empty if ``start`` is not in the graph)."""
+    if start not in cfg.nodes:
+        return set()
+    visited: set[int] = {start}
+    queue = deque([start])  # deque: list.pop(0) made this quadratic
     while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-
-        if current in cfg.nodes:
-            for successor_id in cfg.nodes[current].get_successor_ids():
-                if successor_id not in visited:
-                    queue.append(successor_id)
-
+        current = queue.popleft()
+        for successor_id in cfg.nodes[current].get_successor_ids():
+            if successor_id not in visited and successor_id in cfg.nodes:
+                visited.add(successor_id)
+                queue.append(successor_id)
     return visited
 
 
 def find_dominance_frontier(cfg: ControlFlowGraph) -> dict[int, set[int]]:
-    """Compute dominance frontiers for all nodes.
+    """Dominance frontiers for all nodes (Cooper-Harvey-Kennedy).
 
-    The dominance frontier of a node n is the set of all nodes m such that
-    n dominates a predecessor of m but does not strictly dominate m.
-
-    Args:
-        cfg: Control Flow Graph
-
-    Returns:
-        Dictionary mapping node ID to its dominance frontier
+    DF(n) = nodes m such that n dominates a predecessor of m but does not
+    strictly dominate m. The previous loop condition was a mangled conditional
+    expression that also called ``.pop()`` on the real dominator sets, silently
+    corrupting them.
     """
-    dominators = cfg.compute_dominators()
+    idom = cfg.compute_immediate_dominators()
+    reachable = {n for n, d in idom.items() if d is not None or n == cfg.entry_node}
     frontier: dict[int, set[int]] = {n: set() for n in cfg.nodes}
 
-    for node_id in cfg.nodes:
-        preds = cfg.nodes[node_id].get_predecessor_ids()
-
-        if len(preds) >= 2:
-            for pred_id in preds:
-                runner = pred_id
-                while (
-                    runner != dominators.get(node_id, set()).pop()
-                    if dominators.get(node_id)
-                    else runner
-                ):
-                    if runner in frontier:
-                        frontier[runner].add(node_id)
-                    # Get immediate dominator
-                    runner_doms = dominators.get(runner, set())
-                    runners = [r for r in runner_doms if r != runner]
-                    if runners:
-                        runner = runners[0]
-                    else:
-                        break
-
+    for node_id in reachable:
+        preds = [p for p in cfg.nodes[node_id].get_predecessor_ids() if p in reachable]
+        if len(preds) < 2:
+            continue
+        for pred in preds:
+            runner: int | None = pred
+            while runner is not None and runner != idom[node_id]:
+                frontier[runner].add(node_id)
+                runner = idom[runner]
     return frontier
 
 
 def extract_variable_dependencies(
     combined: CombinedGraph,
 ) -> dict[str, list[tuple[int, int]]]:
-    """Extract variable dependency chains from the combined graph.
-
-    Args:
-        combined: Combined CFG + DFG
-
-    Returns:
-        Dictionary mapping variable name to list of (def_id, use_id) pairs
-    """
+    """Variable name -> list of (def_id, use_id) pairs."""
     deps: dict[str, list[tuple[int, int]]] = {}
-
     for edge in combined.dfg.edges:
-        if edge.variable not in deps:
-            deps[edge.variable] = []
-        deps[edge.variable].append((edge.source, edge.target))
-
+        deps.setdefault(edge.variable, []).append((edge.source, edge.target))
     return deps
 
 
 def compute_code_metrics(combined: CombinedGraph) -> dict[str, float]:
-    """Compute various code metrics from the combined graph.
-
-    Args:
-        combined: Combined CFG + DFG
-
-    Returns:
-        Dictionary of metric names to values
-    """
+    """Compute various code metrics from the combined graph."""
     cfg = combined.cfg
     dfg = combined.dfg
-
-    def get_all_variables_in_scope(scope: str) -> set[str]:
-        """Get all variables defined or used in a scope."""
-        vars = set()
-        for node in dfg.nodes.values():
-            if node.scope == scope:
-                vars.add(node.variable_name)
-        return vars
-
-    metrics = {
+    return {
         "cyclomatic_complexity": compute_cyclomatic_complexity(cfg),
         "cfg_nodes": cfg.node_count,
         "cfg_edges": cfg.edge_count,
@@ -327,21 +255,13 @@ def compute_code_metrics(combined: CombinedGraph) -> dict[str, float]:
             sum(len(defs) for defs in dfg.variable_definitions.values())
             / max(1, len(dfg.variable_definitions))
         ),
+        # Size (in CFG nodes) of the largest scope.
         "max_variable_scope_size": max(
             (len(nodes) for nodes in cfg.scopes.values()), default=0
         ),
     }
 
-    return metrics
-
 
 def serialize_graph(combined: CombinedGraph) -> dict:
-    """Serialize combined graph to JSON-serializable dictionary.
-
-    Args:
-        combined: Combined CFG + DFG
-
-    Returns:
-        Dictionary representation suitable for JSON serialization
-    """
+    """Serialize combined graph to a JSON-serializable dictionary."""
     return combined.to_dict()

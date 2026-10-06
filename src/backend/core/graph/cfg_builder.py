@@ -3,908 +3,432 @@ Control Flow Graph (CFG) Builder for Python AST.
 
 This module traverses a Python AST and constructs a Control Flow Graph
 that represents all possible execution paths through the code.
+
+Design notes
+------------
+* Every edge is typed (TRUE_BRANCH / FALSE_BRANCH / LOOP_BACK / LOOP_EXIT /
+  BREAK / CONTINUE / EXCEPTION / FUNCTION_RETURN ...). Handlers return the
+  *pending* exits ``(node_id, edge_type)`` of a statement, so the type of the
+  edge that eventually leaves it is preserved.
+* ``return``/``raise`` are wired to the exit node (or to exception handlers),
+  ``break`` to the loop exit and ``continue`` to the loop header.
+* A nested ``def`` is a single statement in the enclosing flow; its body is a
+  separate sub-graph (FunctionEntry ... FunctionExit) hanging off the def node
+  via a FUNCTION_CALL edge, because the body does not run at definition time.
+  A class body *does* run at definition time, so it is inlined.
+* Scopes are qualified (``Outer.inner``, ``Class.method``) so same-named
+  methods in different classes no longer share a scope.
+
+Known simplifications: ``return``/``break`` inside ``try`` do not route through
+``finally``; only ``raise`` and the try-entry are linked to handlers.
 """
 
-import ast
+from __future__ import annotations
 
+import ast
+from dataclasses import dataclass, field
+
+from ._ast_utils import header_end_line, source_for_node
 from .models import CFGEdge, CFGNode, ControlFlowGraph, EdgeType
+
+Pending = tuple[int, EdgeType]
+FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+@dataclass
+class _LoopContext:
+    header: int
+    breaks: list[Pending] = field(default_factory=list)
+
+
+@dataclass
+class _Frame:
+    """Per-function (or module) state for abrupt control flow."""
+
+    return_edge: EdgeType
+    returns: list[Pending] = field(default_factory=list)
+    raises: list[Pending] = field(default_factory=list)
+    loops: list[_LoopContext] = field(default_factory=list)
+    handlers: list[list[int]] = field(default_factory=list)
+
+
+def _dedupe(pending: list[Pending]) -> list[Pending]:
+    seen: set[Pending] = set()
+    out: list[Pending] = []
+    for item in pending:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 class ControlFlowGraphBuilder:
     """Builds a Control Flow Graph from a Python AST.
 
-    The builder recursively processes AST nodes, creating CFG nodes for
-    each statement and connecting them with appropriate edges based on
-    control flow semantics.
-
     Usage:
         builder = ControlFlowGraphBuilder()
         cfg = builder.build(tree, source_code)
+
+    A builder instance is reusable but not thread-safe.
     """
 
     def __init__(self) -> None:
         self._node_counter: int = 0
         self._source_lines: list[str] = []
         self._current_scope: str = "global"
-        self._scope_stack: list[str] = []
+        self._frames: list[_Frame] = []
+        self._handlers = {
+            ast.If: self._handle_if,
+            ast.For: self._handle_for,
+            ast.AsyncFor: self._handle_for,
+            ast.While: self._handle_while,
+            ast.With: self._handle_with,
+            ast.AsyncWith: self._handle_with,
+            ast.Try: self._handle_try,
+            ast.Return: self._handle_return,
+            ast.Break: self._handle_break,
+            ast.Continue: self._handle_continue,
+            ast.Raise: self._handle_raise,
+            ast.FunctionDef: self._handle_function_def,
+            ast.AsyncFunctionDef: self._handle_function_def,
+            ast.ClassDef: self._handle_class_def,
+        }
+        if hasattr(ast, "TryStar"):  # Python 3.11+
+            self._handlers[ast.TryStar] = self._handle_try
+        if hasattr(ast, "Match"):  # Python 3.10+
+            self._handlers[ast.Match] = self._handle_match
+
+    # ── public API ──────────────────────────────────────────────────
 
     def build(self, tree: ast.Module, source_code: str = "") -> ControlFlowGraph:
-        """Build a CFG from a Python AST module.
+        """Build a CFG from a Python AST module."""
+        self._reset(source_code, "global", EdgeType.RETURN)
+        cfg = ControlFlowGraph(source_code=source_code, ast_tree=tree)
 
-        Args:
-            tree: Python AST module
-            source_code: Original source code string
-
-        Returns:
-            ControlFlowGraph representing the execution flow
-        """
-        self._node_counter = 0
-        self._source_lines = source_code.splitlines() if source_code else []
-        self._current_scope = "global"
-        self._scope_stack = ["global"]
-
-        cfg = ControlFlowGraph(
-            source_code=source_code,
-            ast_tree=tree,
-        )
-
-        # Create entry node
-        entry = self._create_cfg_node(
-            ast_node=tree,
-            node_type="Module",
-            scope="global",
-        )
-        cfg.add_node(entry)
+        entry = self._new_node(cfg, tree, "Module")
         cfg.entry_node = entry.id
+        exits = self._sequence(tree.body, cfg, [(entry.id, EdgeType.SEQUENTIAL)])
 
-        # Process all top-level statements
-        prev_nodes: list[int] = [entry.id]
-
-        for stmt in tree.body:
-            next_nodes = self._handle_statement(stmt, cfg, prev_nodes)
-            prev_nodes = next_nodes
-
-        # Create exit node and connect from all final nodes
-        exit_node = self._create_cfg_node(
-            node_type="Exit",
-            scope="global",
-        )
-        cfg.add_node(exit_node)
+        exit_node = self._new_node(cfg, None, "Exit")
         cfg.exit_node = exit_node.id
-
-        for node_id in prev_nodes:
-            if node_id in cfg.nodes:
-                cfg.add_edge(
-                    CFGEdge(
-                        source=node_id,
-                        target=exit_node.id,
-                        edge_type=EdgeType.SEQUENTIAL,
-                    )
-                )
-
+        self._finish_frame(cfg, exit_node.id, exits)
         return cfg
 
     def build_from_function(
-        self, func_def: ast.FunctionDef, source_code: str = ""
+        self, func_def: FunctionNode, source_code: str = ""
     ) -> ControlFlowGraph:
-        """Build a CFG for a single function definition.
-
-        Args:
-            func_def: FunctionDef AST node
-            source_code: Original source code string
-
-        Returns:
-            ControlFlowGraph for the function body
-        """
-        self._node_counter = 0
-        self._source_lines = source_code.splitlines() if source_code else []
-        func_name = func_def.name
-        self._current_scope = func_name
-        self._scope_stack = ["global", func_name]
-
+        """Build a CFG for a single function (FunctionEntry ... FunctionExit)."""
+        self._reset(source_code, func_def.name, EdgeType.FUNCTION_RETURN)
         cfg = ControlFlowGraph(
             source_code=source_code,
-            ast_tree=ast.Module(body=[func_def]),
+            ast_tree=ast.Module(body=[func_def], type_ignores=[]),
         )
-
-        # Create entry node
-        entry = self._create_cfg_node(
-            ast_node=func_def,
-            node_type="FunctionEntry",
-            scope=func_name,
-        )
-        cfg.add_node(entry)
+        entry = self._new_node(cfg, func_def, "FunctionEntry")
         cfg.entry_node = entry.id
+        exits = self._sequence(func_def.body, cfg, [(entry.id, EdgeType.SEQUENTIAL)])
 
-        # Process function body
-        prev_nodes: list[int] = [entry.id]
-
-        for stmt in func_def.body:
-            next_nodes = self._handle_statement(stmt, cfg, prev_nodes)
-            prev_nodes = next_nodes
-
-        # Check if we need an implicit return
-        has_explicit_return = any(
-            isinstance(node, ast.Return) for node in ast.walk(func_def)
-        )
-
-        exit_node = self._create_cfg_node(
-            node_type="FunctionExit",
-            scope=func_name,
-        )
-        cfg.add_node(exit_node)
+        exit_node = self._new_node(cfg, None, "FunctionExit")
         cfg.exit_node = exit_node.id
-
-        for node_id in prev_nodes:
-            if node_id in cfg.nodes:
-                cfg.add_edge(
-                    CFGEdge(
-                        source=node_id,
-                        target=exit_node.id,
-                        edge_type=(
-                            EdgeType.FUNCTION_RETURN
-                            if has_explicit_return
-                            else EdgeType.SEQUENTIAL
-                        ),
-                    )
-                )
-
+        self._finish_frame(cfg, exit_node.id, exits)
         return cfg
 
     def build_from_class(
         self, class_def: ast.ClassDef, source_code: str = ""
     ) -> ControlFlowGraph:
-        """Build a CFG for a class definition.
+        """Build a CFG for a class body (methods become sub-graphs).
 
-        Args:
-            class_def: ClassDef AST node
-            source_code: Original source code string
-
-        Returns:
-            ControlFlowGraph for the class body
+        The old version called ``build_from_function`` for each method, which
+        reset the node counter mid-build: later nodes reused IDs 1, 2, ... and
+        silently overwrote the entry node.
         """
-        self._node_counter = 0
-        self._source_lines = source_code.splitlines() if source_code else []
-        class_name = class_def.name
-
+        self._reset(source_code, class_def.name, EdgeType.RETURN)
         cfg = ControlFlowGraph(
             source_code=source_code,
-            ast_tree=ast.Module(body=[class_def]),
+            ast_tree=ast.Module(body=[class_def], type_ignores=[]),
         )
-
-        entry = self._create_cfg_node(
-            ast_node=class_def,
-            node_type="ClassEntry",
-            scope=class_name,
-        )
-        cfg.add_node(entry)
+        entry = self._new_node(cfg, class_def, "ClassEntry")
         cfg.entry_node = entry.id
 
-        # Process class body
-        prev_nodes: list[int] = [entry.id]
-
+        exits: list[Pending] = [(entry.id, EdgeType.SEQUENTIAL)]
         for stmt in class_def.body:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # Each method has its own scope
-                self.build_from_function(stmt, source_code)
-                # Add method entry as a single node in class CFG
-                method_node = self._create_cfg_node(
-                    ast_node=stmt,
-                    node_type="MethodDef",
-                    scope=class_name,
+                exits = self._handle_function_def(
+                    stmt, cfg, exits, node_type="MethodDef"
                 )
-                cfg.add_node(method_node)
-                for prev_id in prev_nodes:
-                    cfg.add_edge(CFGEdge(source=prev_id, target=method_node.id))
-                prev_nodes = [method_node.id]
             else:
-                next_nodes = self._handle_statement(stmt, cfg, prev_nodes)
-                prev_nodes = next_nodes
+                exits = self._handle_statement(stmt, cfg, exits)
 
-        exit_node = self._create_cfg_node(node_type="ClassExit", scope=class_name)
-        cfg.add_node(exit_node)
+        exit_node = self._new_node(cfg, None, "ClassExit")
         cfg.exit_node = exit_node.id
-
-        for node_id in prev_nodes:
-            if node_id in cfg.nodes:
-                cfg.add_edge(CFGEdge(source=node_id, target=exit_node.id))
-
+        self._finish_frame(cfg, exit_node.id, exits)
         return cfg
 
-    def _create_cfg_node(
+    # ── infrastructure ──────────────────────────────────────────────
+
+    def _reset(self, source_code: str, scope: str, return_edge: EdgeType) -> None:
+        self._node_counter = 0
+        self._source_lines = source_code.splitlines() if source_code else []
+        self._current_scope = scope
+        self._frames = [_Frame(return_edge)]
+
+    def _qualify(self, name: str) -> str:
+        return (
+            name if self._current_scope == "global" else f"{self._current_scope}.{name}"
+        )
+
+    def _new_node(
         self,
-        ast_node: ast.AST | None = None,
-        node_type: str = "",
+        cfg: ControlFlowGraph,
+        ast_node: ast.AST | None,
+        node_type: str,
         scope: str | None = None,
     ) -> CFGNode:
-        """Create a new CFG node.
-
-        Args:
-            ast_node: Associated AST node
-            node_type: Type identifier
-            scope: Lexical scope
-
-        Returns:
-            New CFGNode instance
-        """
         self._node_counter += 1
-        current_scope = scope if scope is not None else self._current_scope
-
-        line_start = 0
-        line_end = 0
-        source_code = ""
-
+        line_start = line_end = 0
+        source = ""
         if ast_node is not None:
             line_start = getattr(ast_node, "lineno", 0)
-            line_end = getattr(ast_node, "end_lineno", line_start)
-            source_code = self._get_source_line(ast_node)
-
-        return CFGNode(
+            line_end = header_end_line(ast_node, self._source_lines) or line_start
+            source = source_for_node(self._source_lines, ast_node)
+        node = CFGNode(
             id=self._node_counter,
             ast_node=ast_node,
-            node_type=node_type or (ast_node.__class__.__name__ if ast_node else ""),
-            source_code=source_code,
+            node_type=node_type or (type(ast_node).__name__ if ast_node else ""),
+            source_code=source,
             line_start=line_start,
             line_end=line_end,
-            scope=current_scope,
+            scope=scope if scope is not None else self._current_scope,
         )
+        cfg.add_node(node)
+        return node
 
-    def _get_source_line(self, ast_node: ast.AST) -> str:
-        """Get the source code line for an AST node."""
-        line_start = getattr(ast_node, "lineno", None)
-        line_end = getattr(ast_node, "end_lineno", line_start)
+    @staticmethod
+    def _link(cfg: ControlFlowGraph, entries: list[Pending], target: int) -> None:
+        for source, edge_type in entries:
+            cfg.add_edge(CFGEdge(source=source, target=target, edge_type=edge_type))
 
-        if line_start and line_end and self._source_lines:
-            start_idx = line_start - 1
-            end_idx = line_end
-            if 0 <= start_idx < len(self._source_lines):
-                return " ".join(self._source_lines[start_idx:end_idx]).strip()
-        return ""
+    def _make(
+        self,
+        cfg: ControlFlowGraph,
+        ast_node: ast.AST,
+        node_type: str,
+        entries: list[Pending],
+    ) -> CFGNode:
+        node = self._new_node(cfg, ast_node, node_type)
+        self._link(cfg, entries, node.id)
+        return node
+
+    def _finish_frame(
+        self, cfg: ControlFlowGraph, exit_id: int, fallthrough: list[Pending]
+    ) -> None:
+        frame = self._frames.pop()
+        self._link(cfg, _dedupe(fallthrough + frame.returns + frame.raises), exit_id)
 
     def _handle_statement(
-        self,
-        stmt: ast.AST,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle a single statement and return exit nodes.
+        self, stmt: ast.AST, cfg: ControlFlowGraph, entries: list[Pending]
+    ) -> list[Pending]:
+        handler = self._handlers.get(type(stmt))
+        if handler is not None:
+            return handler(stmt, cfg, entries)
+        node = self._make(cfg, stmt, type(stmt).__name__, entries)
+        return [(node.id, EdgeType.SEQUENTIAL)]
 
-        Args:
-            stmt: AST statement node
-            cfg: Control flow graph being built
-            entry_nodes: List of node IDs that can reach this statement
-
-        Returns:
-            List of exit node IDs after processing this statement
-        """
-        # Connect entry nodes to this statement
-        handler_map = {
-            ast.Assign: self._handle_assign,
-            ast.AugAssign: self._handle_aug_assign,
-            ast.AnnAssign: self._handle_ann_assign,
-            ast.If: self._handle_if,
-            ast.For: self._handle_for,
-            ast.While: self._handle_while,
-            ast.With: self._handle_with,
-            ast.Try: self._handle_try,
-            ast.Return: self._handle_return,
-            ast.Break: self._handle_break,
-            ast.Continue: self._handle_continue,
-            ast.FunctionDef: self._handle_function_def,
-            ast.AsyncFunctionDef: self._handle_function_def,
-            ast.ClassDef: self._handle_class_def,
-            ast.Import: self._handle_import,
-            ast.ImportFrom: self._handle_import_from,
-            ast.Expression: self._handle_expression,
-            ast.Expr: self._handle_expr,
-            ast.Pass: self._handle_pass,
-            ast.Assert: self._handle_assert,
-            ast.Raise: self._handle_raise,
-            ast.Delete: self._handle_delete,
-            ast.Global: self._handle_global,
-            ast.Nonlocal: self._handle_nonlocal,
-        }
-
-        handler = handler_map.get(type(stmt))
-        if handler:
-            return handler(stmt, cfg, entry_nodes)
-
-        # Default handling for other statement types
-        node = self._create_cfg_node(stmt)
-        cfg.add_node(node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=node.id))
-
-        return [node.id]
-
-    def _handle_statements_sequence(
-        self,
-        stmts: list[ast.AST],
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle a sequence of statements.
-
-        Args:
-            stmts: List of AST statements
-            cfg: Control flow graph
-            entry_nodes: Entry node IDs
-
-        Returns:
-            Exit node IDs after all statements
-        """
-        current_nodes = entry_nodes
+    def _sequence(
+        self, stmts: list[ast.stmt], cfg: ControlFlowGraph, entries: list[Pending]
+    ) -> list[Pending]:
+        current = entries
         for stmt in stmts:
-            current_nodes = self._handle_statement(stmt, cfg, current_nodes)
-        return current_nodes
+            current = self._handle_statement(stmt, cfg, current)
+        return current
 
-    def _handle_assign(
-        self,
-        node: ast.Assign,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle assignment statements."""
-        cfg_node = self._create_cfg_node(node, node_type="Assign")
-        cfg.add_node(cfg_node)
+    # ── compound statements ─────────────────────────────────────────
 
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=cfg_node.id))
+    def _handle_if(self, node: ast.If, cfg, entries):
+        """entry -> Condition -(true)-> body ... ; Condition -(false)-> else/next."""
+        cond = self._make(cfg, node.test, "Condition", entries)
+        true_exits = self._sequence(node.body, cfg, [(cond.id, EdgeType.TRUE_BRANCH)])
+        false_entry = [(cond.id, EdgeType.FALSE_BRANCH)]
+        if node.orelse:
+            false_exits = self._sequence(node.orelse, cfg, false_entry)
+        else:
+            false_exits = false_entry
+        return _dedupe(true_exits + false_exits)
 
-        return [cfg_node.id]
+    def _loop(self, node, cfg, header_id: int, infinite: bool = False) -> list[Pending]:
+        frame = self._frames[-1]
+        ctx = _LoopContext(header_id)
+        frame.loops.append(ctx)
+        body_exits = self._sequence(node.body, cfg, [(header_id, EdgeType.TRUE_BRANCH)])
+        frame.loops.pop()
 
-    def _handle_aug_assign(
-        self,
-        node: ast.AugAssign,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle augmented assignment statements (+=, -=, etc.)."""
-        cfg_node = self._create_cfg_node(node, node_type="AugAssign")
-        cfg.add_node(cfg_node)
+        for source, _ in body_exits:
+            cfg.add_edge(CFGEdge(source, header_id, EdgeType.LOOP_BACK))
 
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=cfg_node.id))
+        if infinite:  # `while True`: only `break` leaves the loop
+            exits: list[Pending] = []
+        elif node.orelse:  # else runs on normal exit, never after `break`
+            exits = self._sequence(node.orelse, cfg, [(header_id, EdgeType.LOOP_EXIT)])
+        else:
+            exits = [(header_id, EdgeType.LOOP_EXIT)]
+        return _dedupe(exits + ctx.breaks)
 
-        return [cfg_node.id]
+    def _handle_for(self, node, cfg, entries):
+        header = self._make(cfg, node, "ForHeader", entries)
+        return self._loop(node, cfg, header.id)
 
-    def _handle_ann_assign(
-        self,
-        node: ast.AnnAssign,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle annotated assignment statements."""
-        cfg_node = self._create_cfg_node(node, node_type="AnnAssign")
-        cfg.add_node(cfg_node)
+    def _handle_while(self, node: ast.While, cfg, entries):
+        cond = self._make(cfg, node.test, "WhileCondition", entries)
+        infinite = isinstance(node.test, ast.Constant) and bool(node.test.value)
+        return self._loop(node, cfg, cond.id, infinite=infinite)
 
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=cfg_node.id))
+    def _handle_with(self, node, cfg, entries):
+        entry = self._make(cfg, node, "WithEntry", entries)
+        body_exits = self._sequence(node.body, cfg, [(entry.id, EdgeType.SEQUENTIAL)])
+        if not body_exits:  # body always returns/raises/breaks
+            return []
+        exit_node = self._new_node(cfg, None, "WithExit")
+        self._link(cfg, body_exits, exit_node.id)
+        return [(exit_node.id, EdgeType.SEQUENTIAL)]
 
-        return [cfg_node.id]
+    def _handle_try(self, node, cfg, entries):
+        entry = self._make(cfg, node, "TryEntry", entries)
+        frame = self._frames[-1]
 
-    def _handle_if(
-        self,
-        node: ast.If,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle if-else statements.
-        
-        Creates a diamond structure:
-            entry -> condition -> true_branch  \
-                                     -> merge
-            entry -> condition -> false_branch /
-        """
-        # Create condition node
-        condition_node = self._create_cfg_node(node.test, node_type="Condition")
-        cfg.add_node(condition_node)
+        handler_nodes = [self._new_node(cfg, h, "ExceptHandler") for h in node.handlers]
+        for h in handler_nodes:  # an exception may arise anywhere in the body
+            cfg.add_edge(CFGEdge(entry.id, h.id, EdgeType.EXCEPTION))
 
-        # Connect entries to condition
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=condition_node.id))
+        frame.handlers.append([h.id for h in handler_nodes])
+        body_exits = self._sequence(node.body, cfg, [(entry.id, EdgeType.SEQUENTIAL)])
+        frame.handlers.pop()
 
-        # Handle true branch (if body)
-        true_exit = self._handle_statements_sequence(
-            node.body, cfg, [condition_node.id]
+        ok_exits = (
+            self._sequence(node.orelse, cfg, body_exits) if node.orelse else body_exits
         )
 
-        # Handle false branch (else body) or direct pass-through
-        if node.orelse:
-            false_exit = self._handle_statements_sequence(
-                node.orelse, cfg, [condition_node.id]
-            )
-        else:
-            # No else branch - connect condition directly to merge
-            false_exit = [condition_node.id]
-            for entry_id in entry_nodes:
-                cfg.add_edge(
-                    CFGEdge(
-                        source=condition_node.id,
-                        target=condition_node.id,
-                        edge_type=EdgeType.FALSE_BRANCH,
-                    )
-                )
-
-        # Update edge types
-        # Condition -> true body
-        if node.body:
-            cfg.nodes.get(true_exit[0]) if true_exit else None
-            # Actually connect to the first statement in body
-
-        # Re-structure: connect condition to first body node with TRUE_BRANCH
-        if true_exit:
-            # Find the actual first node in the body (not exit)
-            pass
-
-        # Merge point: all exits converge
-        # We return both true and false exits - caller should merge
-        return list(set(true_exit + false_exit))
-
-    def _handle_for(
-        self,
-        node: ast.For,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle for loops.
-
-        Creates structure:
-            entry -> loop_header -> body -> loop_header (back edge)
-                 -> exit (when iteration completes)
-        """
-        # Create loop header node
-        header_node = self._create_cfg_node(node, node_type="ForHeader")
-        cfg.add_node(header_node)
-
-        # Connect entries to header
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=header_node.id))
-
-        # Handle loop body
-        body_exit = self._handle_statements_sequence(node.body, cfg, [header_node.id])
-
-        # Add loop back edges
-        for body_id in body_exit:
-            cfg.add_edge(
-                CFGEdge(
-                    source=body_id,
-                    target=header_node.id,
-                    edge_type=EdgeType.LOOP_BACK,
-                )
+        handler_exits: list[Pending] = []
+        for handler, h_node in zip(node.handlers, handler_nodes, strict=True):
+            handler_exits += self._sequence(
+                handler.body, cfg, [(h_node.id, EdgeType.SEQUENTIAL)]
             )
 
-        # Handle else clause (executes when loop completes normally)
-        if node.orelse:
-            else_exit = self._handle_statements_sequence(
-                node.orelse, cfg, [header_node.id]
-            )
-            return else_exit
-
-        # Exit from loop header (when iteration completes)
-        return [header_node.id]
-
-    def _handle_while(
-        self,
-        node: ast.While,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle while loops.
-
-        Creates structure:
-            entry -> condition -> body -> condition (back edge)
-                  -> else/exit (when condition false)
-        """
-        # Create condition node
-        condition_node = self._create_cfg_node(node.test, node_type="WhileCondition")
-        cfg.add_node(condition_node)
-
-        # Connect entries to condition
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=condition_node.id))
-
-        # Handle loop body
-        body_exit = self._handle_statements_sequence(
-            node.body, cfg, [condition_node.id]
-        )
-
-        # Add loop back edges
-        for body_id in body_exit:
-            cfg.add_edge(
-                CFGEdge(
-                    source=body_id,
-                    target=condition_node.id,
-                    edge_type=EdgeType.LOOP_BACK,
-                )
-            )
-
-        # Handle else clause
-        if node.orelse:
-            else_exit = self._handle_statements_sequence(
-                node.orelse, cfg, [condition_node.id]
-            )
-            return else_exit
-
-        return [condition_node.id]
-
-    def _handle_with(
-        self,
-        node: ast.With,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle with statements (context managers)."""
-        entry_node = self._create_cfg_node(node, node_type="WithEntry")
-        cfg.add_node(entry_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=entry_node.id))
-
-        body_exit = self._handle_statements_sequence(node.body, cfg, [entry_node.id])
-
-        exit_node = self._create_cfg_node(node_type="WithExit")
-        cfg.add_node(exit_node)
-
-        for body_id in body_exit:
-            cfg.add_edge(CFGEdge(source=body_id, target=exit_node.id))
-
-        return [exit_node.id]
-
-    def _handle_try(
-        self,
-        node: ast.Try,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle try-except-finally statements."""
-        # Try entry
-        try_entry_node = self._create_cfg_node(node, node_type="TryEntry")
-        cfg.add_node(try_entry_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=try_entry_node.id))
-
-        # Try body
-        try_exit = self._handle_statements_sequence(node.body, cfg, [try_entry_node.id])
-
-        # Exception handlers
-        handler_exits: list[int] = []
-        for handler in node.handlers:
-            handler_node = self._create_cfg_node(handler, node_type="ExceptHandler")
-            cfg.add_node(handler_node)
-
-            # Connect from try entry (exception can occur anywhere)
-            cfg.add_edge(
-                CFGEdge(
-                    source=try_entry_node.id,
-                    target=handler_node.id,
-                    edge_type=EdgeType.EXCEPTION,
-                )
-            )
-
-            handler_body_exit = self._handle_statements_sequence(
-                handler.body, cfg, [handler_node.id]
-            )
-            handler_exits.extend(handler_body_exit)
-
-        # Else clause (executes if no exception)
-        if node.orelse:
-            else_exit = self._handle_statements_sequence(node.orelse, cfg, try_exit)
-            merge_exits = else_exit
-        else:
-            merge_exits = try_exit
-
-        # Finally clause (always executes)
+        merged = _dedupe(ok_exits + handler_exits)
         if node.finalbody:
-            finally_exit = self._handle_statements_sequence(
-                node.finalbody, cfg, merge_exits + handler_exits
+            # If every path leaves early, keep `finally` reachable from the try.
+            return self._sequence(
+                node.finalbody, cfg, merged or [(entry.id, EdgeType.SEQUENTIAL)]
             )
-            return finally_exit
+        return merged
 
-        return merge_exits + handler_exits
+    def _handle_match(self, node, cfg, entries):
+        subject = self._make(cfg, node.subject, "Match", entries)
+        exits: list[Pending] = []
+        previous: list[Pending] = [(subject.id, EdgeType.SEQUENTIAL)]
+        irrefutable = False
+        for case in node.cases:
+            case_node = self._make(cfg, case.pattern, "MatchCase", previous)
+            exits += self._sequence(
+                case.body, cfg, [(case_node.id, EdgeType.TRUE_BRANCH)]
+            )
+            previous = [(case_node.id, EdgeType.FALSE_BRANCH)]
+            pattern = case.pattern
+            irrefutable = (
+                case.guard is None
+                and type(pattern).__name__ == "MatchAs"
+                and pattern.pattern is None
+            )
+        if not irrefutable:  # no case matched: fall through
+            exits += previous
+        return _dedupe(exits)
 
-    def _handle_return(
-        self,
-        node: ast.Return,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle return statements.
+    # ── definitions ─────────────────────────────────────────────────
 
-        Return is a terminal node - no successors within the function.
-        """
-        return_node = self._create_cfg_node(node, node_type="Return")
-        cfg.add_node(return_node)
+    def _handle_function_def(self, node, cfg, entries, node_type: str = "FunctionDef"):
+        """The def statement flows on; its body is a detached sub-graph."""
+        def_node = self._make(cfg, node, node_type, entries)
 
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=return_node.id))
+        scope = self._qualify(node.name)
+        entry = self._new_node(cfg, node, "FunctionEntry", scope=scope)
+        cfg.add_edge(CFGEdge(def_node.id, entry.id, EdgeType.FUNCTION_CALL))
 
-        # Return has no successors - return empty list
+        outer_scope = self._current_scope
+        self._current_scope = scope
+        self._frames.append(_Frame(EdgeType.FUNCTION_RETURN))
+        body_exits = self._sequence(node.body, cfg, [(entry.id, EdgeType.SEQUENTIAL)])
+        exit_node = self._new_node(cfg, None, "FunctionExit")
+        self._finish_frame(cfg, exit_node.id, body_exits)
+        self._current_scope = outer_scope
+
+        return [(def_node.id, EdgeType.SEQUENTIAL)]
+
+    def _handle_class_def(self, node: ast.ClassDef, cfg, entries):
+        """A class body executes at definition time, so it is inlined."""
+        class_node = self._make(cfg, node, "ClassDef", entries)
+        outer_scope = self._current_scope
+        self._current_scope = self._qualify(node.name)
+        exits = self._sequence(node.body, cfg, [(class_node.id, EdgeType.SEQUENTIAL)])
+        self._current_scope = outer_scope
+        return exits
+
+    # ── abrupt control flow ─────────────────────────────────────────
+
+    def _handle_return(self, node, cfg, entries):
+        ret = self._make(cfg, node, "Return", entries)
+        frame = self._frames[-1]
+        frame.returns.append((ret.id, frame.return_edge))
         return []
 
-    def _handle_break(
-        self,
-        node: ast.Break,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle break statements.
+    def _handle_raise(self, node, cfg, entries):
+        raise_node = self._make(cfg, node, "Raise", entries)
+        frame = self._frames[-1]
+        targets = next((h for h in reversed(frame.handlers) if h), [])
+        if targets:
+            for handler_id in targets:
+                cfg.add_edge(CFGEdge(raise_node.id, handler_id, EdgeType.EXCEPTION))
+        else:
+            frame.raises.append((raise_node.id, EdgeType.EXCEPTION))
+        return []
 
-        Break exits the innermost loop - target is determined by context.
-        """
-        break_node = self._create_cfg_node(node, node_type="Break")
-        cfg.add_node(break_node)
+    def _handle_break(self, node, cfg, entries):
+        brk = self._make(cfg, node, "Break", entries)
+        frame = self._frames[-1]
+        if frame.loops:
+            frame.loops[-1].breaks.append((brk.id, EdgeType.BREAK))
+        else:  # `break` outside a loop (parses, never compiles)
+            frame.returns.append((brk.id, EdgeType.BREAK))
+        return []
 
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=break_node.id))
-
-        return []  # Break is terminal within current scope
-
-    def _handle_continue(
-        self,
-        node: ast.Continue,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle continue statements.
-
-        Continue jumps back to loop header - target determined by context.
-        """
-        continue_node = self._create_cfg_node(node, node_type="Continue")
-        cfg.add_node(continue_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=continue_node.id))
-
-        return []  # Continue is terminal within current scope
-
-    def _handle_function_def(
-        self,
-        node: ast.FunctionDef | ast.AsyncFunctionDef,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle function definitions."""
-        func_node = self._create_cfg_node(node, node_type="FunctionDef")
-        cfg.add_node(func_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=func_node.id))
-
-        # Also process the function body statements
-        old_scope = self._current_scope
-        self._current_scope = node.name
-
-        body_nodes = self._handle_statements_sequence(node.body, cfg, [func_node.id])
-
-        self._current_scope = old_scope
-
-        # Return both the function def node and the body exit nodes
-        return [func_node.id] + body_nodes
-
-    def _handle_class_def(
-        self,
-        node: ast.ClassDef,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle class definitions."""
-        class_node = self._create_cfg_node(node, node_type="ClassDef")
-        cfg.add_node(class_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=class_node.id))
-
-        # Also process the class body statements
-        old_scope = self._current_scope
-        self._current_scope = node.name
-
-        body_nodes = self._handle_statements_sequence(node.body, cfg, [class_node.id])
-
-        self._current_scope = old_scope
-
-        return [class_node.id] + body_nodes
-
-    def _handle_import(
-        self,
-        node: ast.Import,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle import statements."""
-        import_node = self._create_cfg_node(node, node_type="Import")
-        cfg.add_node(import_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=import_node.id))
-
-        return [import_node.id]
-
-    def _handle_import_from(
-        self,
-        node: ast.ImportFrom,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle from-import statements."""
-        import_node = self._create_cfg_node(node, node_type="ImportFrom")
-        cfg.add_node(import_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=import_node.id))
-
-        return [import_node.id]
-
-    def _handle_expr(
-        self,
-        node: ast.Expr,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle expression statements (e.g., function calls)."""
-        expr_node = self._create_cfg_node(node, node_type="Expr")
-        cfg.add_node(expr_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=expr_node.id))
-
-        return [expr_node.id]
-
-    def _handle_expression(
-        self,
-        node: ast.Expression,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle expression nodes."""
-        expr_node = self._create_cfg_node(node, node_type="Expression")
-        cfg.add_node(expr_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=expr_node.id))
-
-        return [expr_node.id]
-
-    def _handle_pass(
-        self,
-        node: ast.Pass,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle pass statements."""
-        pass_node = self._create_cfg_node(node, node_type="Pass")
-        cfg.add_node(pass_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=pass_node.id))
-
-        return [pass_node.id]
-
-    def _handle_assert(
-        self,
-        node: ast.Assert,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle assert statements.
-
-        Assert is like an if that raises AssertionError on false.
-        """
-        assert_node = self._create_cfg_node(node, node_type="Assert")
-        cfg.add_node(assert_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=assert_node.id))
-
-        return [assert_node.id]
-
-    def _handle_raise(
-        self,
-        node: ast.Raise,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle raise statements.
-
-        Raise is terminal - no successors within normal flow.
-        """
-        raise_node = self._create_cfg_node(node, node_type="Raise")
-        cfg.add_node(raise_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=raise_node.id))
-
-        return []  # Terminal node
-
-    def _handle_delete(
-        self,
-        node: ast.Delete,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle delete statements."""
-        del_node = self._create_cfg_node(node, node_type="Delete")
-        cfg.add_node(del_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=del_node.id))
-
-        return [del_node.id]
-
-    def _handle_global(
-        self,
-        node: ast.Global,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle global declarations."""
-        global_node = self._create_cfg_node(node, node_type="Global")
-        cfg.add_node(global_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=global_node.id))
-
-        return [global_node.id]
-
-    def _handle_nonlocal(
-        self,
-        node: ast.Nonlocal,
-        cfg: ControlFlowGraph,
-        entry_nodes: list[int],
-    ) -> list[int]:
-        """Handle nonlocal declarations."""
-        nonlocal_node = self._create_cfg_node(node, node_type="Nonlocal")
-        cfg.add_node(nonlocal_node)
-
-        for entry_id in entry_nodes:
-            cfg.add_edge(CFGEdge(source=entry_id, target=nonlocal_node.id))
-
-        return [nonlocal_node.id]
+    def _handle_continue(self, node, cfg, entries):
+        cont = self._make(cfg, node, "Continue", entries)
+        frame = self._frames[-1]
+        if frame.loops:
+            cfg.add_edge(CFGEdge(cont.id, frame.loops[-1].header, EdgeType.CONTINUE))
+        else:
+            frame.returns.append((cont.id, EdgeType.CONTINUE))
+        return []
 
 
 def build_cfg(source_code: str, tree: ast.Module | None = None) -> ControlFlowGraph:
     """Convenience function to build a CFG from source code.
-
-    Args:
-        source_code: Python source code string
-        tree: Pre-parsed AST (optional, will parse if not provided)
-
-    Returns:
-        ControlFlowGraph representing the code
 
     Raises:
         SyntaxError: If source code cannot be parsed
     """
     if tree is None:
         tree = ast.parse(source_code)
-
-    builder = ControlFlowGraphBuilder()
-    return builder.build(tree, source_code)
+    return ControlFlowGraphBuilder().build(tree, source_code)
 
 
 def build_cfg_for_function(
     source_code: str,
     function_name: str,
 ) -> ControlFlowGraph | None:
-    """Build a CFG for a specific function in the source code.
-
-    Args:
-        source_code: Python source code string
-        function_name: Name of the function to extract
-
-    Returns:
-        ControlFlowGraph for the function, or None if not found
-    """
+    """Build a CFG for a specific function in the source code (``None`` if absent)."""
     tree = ast.parse(source_code)
-
     for node in ast.walk(tree):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == function_name
         ):
-            builder = ControlFlowGraphBuilder()
-            return builder.build_from_function(node, source_code)
-
+            return ControlFlowGraphBuilder().build_from_function(node, source_code)
     return None

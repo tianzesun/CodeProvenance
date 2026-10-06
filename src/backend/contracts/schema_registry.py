@@ -6,16 +6,21 @@ Unregistered schemas cannot be used in the system.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
+import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from src.backend.benchmark.contracts.evaluation_result import (
-    EnrichedPair,
-    EvaluationResult,
-)
+from src.backend.contracts.evaluation_result import EnrichedPair, EvaluationResult
 
 T = TypeVar("T")
+
+
+class ValidationError(Exception):
+    """Raised when validation fails."""
 
 
 @dataclass(frozen=True)
@@ -25,7 +30,7 @@ class SchemaVersion:
     Attributes:
         name: Schema name.
         version: Version string (semantic versioning).
-        hash: SHA256 hash of schema definition.
+        hash: SHA256 hash of the schema definition (field names + types).
     """
 
     name: str
@@ -34,29 +39,20 @@ class SchemaVersion:
 
 
 class SchemaRegistry:
-    """Central registry for all schemas.
-
-    This is the SINGLE SOURCE OF TRUTH for schema validation.
-    Every module must register its schemas here.
+    """Central registry for all schemas (thread-safe).
 
     Enforcement:
     - No unregistered schemas can be used
     - Schema mismatch detected at runtime
-    - Version compatibility enforced
-
-    Usage:
-        registry = SchemaRegistry()
-        registry.register("EvaluationResult", EvaluationResult, version="1.0")
-
-        # Later, validate:
-        result = registry.validate("EvaluationResult", data)
+    - Version compatibility enforced (fail-closed: a version is compatible only
+      if it equals the registered one or is explicitly listed)
     """
 
     def __init__(self) -> None:
-        """Initialize empty registry."""
+        self._lock = threading.RLock()
         self._schemas: dict[str, type[Any]] = {}
         self._versions: dict[str, SchemaVersion] = {}
-        self._compatibility: dict[str, set[str]] = {}
+        self._compatibility: dict[str, frozenset[str]] = {}
 
     def register(
         self,
@@ -67,68 +63,41 @@ class SchemaRegistry:
     ) -> SchemaVersion:
         """Register a schema.
 
-        Args:
-            name: Unique schema name.
-            schema: Schema class (dataclass or Pydantic model).
-            version: Version string.
-            compatible_with: Set of compatible versions.
-
-        Returns:
-            SchemaVersion with hash.
-
         Raises:
-            ValueError: If schema already registered with different type.
+            ValueError: If the name is already registered with a different type.
         """
-        if name in self._schemas:
-            existing = self._schemas[name]
-            if existing != schema:
+        with self._lock:
+            existing = self._schemas.get(name)
+            if existing is not None and existing != schema:
                 raise ValueError(
                     f"Schema '{name}' already registered with different type: "
                     f"{existing.__name__} vs {schema.__name__}"
                 )
 
-        # Compute schema hash
-        schema_hash = self._compute_schema_hash(schema)
-
-        # Store
-        self._schemas[name] = schema
-        version_info = SchemaVersion(name=name, version=version, hash=schema_hash)
-        self._versions[name] = version_info
-
-        # Compatibility
-        if compatible_with:
-            self._compatibility[name] = compatible_with
-
-        return version_info
+            version_info = SchemaVersion(
+                name=name, version=version, hash=self._compute_schema_hash(schema)
+            )
+            self._schemas[name] = schema
+            self._versions[name] = version_info
+            # Always overwrite so a re-register can't leave stale compatibility behind.
+            self._compatibility[name] = frozenset(compatible_with or ())
+            return version_info
 
     def get(self, name: str) -> type[Any]:
         """Get schema by name.
 
-        Args:
-            name: Schema name.
-
-        Returns:
-            Schema class.
-
         Raises:
             KeyError: If schema not registered.
         """
-        if name not in self._schemas:
-            raise KeyError(
-                f"Schema '{name}' not registered. "
-                f"Available: {list(self._schemas.keys())}"
-            )
-        return self._schemas[name]
+        with self._lock:
+            if name not in self._schemas:
+                raise KeyError(
+                    f"Schema '{name}' not registered. Available: {sorted(self._schemas)}"
+                )
+            return self._schemas[name]
 
     def validate(self, name: str, data: Any) -> Any:
-        """Validate data against schema.
-
-        Args:
-            name: Schema name.
-            data: Data to validate.
-
-        Returns:
-            Validated schema instance.
+        """Validate data against schema and return an instance.
 
         Raises:
             KeyError: If schema not registered.
@@ -136,79 +105,68 @@ class SchemaRegistry:
         """
         schema = self.get(name)
 
-        # If already instance of schema, return as-is
         if isinstance(data, schema):
             return data
 
-        # If dict, try to construct
-        if isinstance(data, dict):
+        if isinstance(data, Mapping):
             try:
                 return schema(**data)
             except (TypeError, ValueError) as e:
                 raise ValidationError(f"Failed to validate '{name}': {e}") from e
 
         raise ValidationError(
-            f"Cannot validate '{name}': expected dict or {schema.__name__}, "
+            f"Cannot validate '{name}': expected mapping or {schema.__name__}, "
             f"got {type(data).__name__}"
         )
 
     def get_version(self, name: str) -> SchemaVersion:
         """Get version info for schema.
 
-        Args:
-            name: Schema name.
-
-        Returns:
-            SchemaVersion info.
+        Raises:
+            KeyError: If schema not registered.
         """
-        return self._versions[name]
+        with self._lock:
+            if name not in self._versions:
+                raise KeyError(f"Schema '{name}' not registered.")
+            return self._versions[name]
 
     def check_compatibility(self, name: str, other_version: str) -> bool:
-        """Check if a version is compatible.
-
-        Args:
-            name: Schema name.
-            other_version: Version to check.
-
-        Returns:
-            True if compatible.
-        """
-        if name not in self._compatibility:
-            return True
-        return other_version in self._compatibility[name]
+        """True if ``other_version`` equals the registered version or is listed
+        in ``compatible_with``. Unknown schemas are never compatible."""
+        with self._lock:
+            current = self._versions.get(name)
+            if current is None:
+                return False
+            return (
+                other_version == current.version
+                or other_version in self._compatibility.get(name, frozenset())
+            )
 
     def list_schemas(self) -> dict[str, SchemaVersion]:
-        """List all registered schemas.
+        """Snapshot of all registered schemas."""
+        with self._lock:
+            return dict(self._versions)
 
-        Returns:
-            Dict of schema name to version info.
+    @staticmethod
+    def _compute_schema_hash(schema: type[Any]) -> str:
+        """Deterministic hash over schema name and (field name, type) pairs.
+
+        Hashing only field names (the old behaviour) missed type changes such as
+        ``score: float`` -> ``score: str``.
         """
-        return dict(self._versions)
-
-    def _compute_schema_hash(self, schema: type[Any]) -> str:
-        """Compute deterministic hash of schema.
-
-        Args:
-            schema: Schema class.
-
-        Returns:
-            SHA256 hash string.
-        """
-        # Get schema fields
-        if hasattr(schema, "__dataclass_fields__"):
-            fields = sorted(schema.__dataclass_fields__.keys())
-        elif hasattr(schema, "__annotations__"):
-            fields = sorted(schema.__annotations__.keys())
+        if dataclasses.is_dataclass(schema):
+            fields = [(f.name, str(f.type)) for f in dataclasses.fields(schema)]
+        elif hasattr(schema, "model_fields"):  # Pydantic v2
+            fields = [
+                (n, str(getattr(f, "annotation", "")))
+                for n, f in schema.model_fields.items()
+            ]
         else:
-            fields = []
-
-        # Compute hash
-        schema_str = f"{schema.__name__}:{','.join(fields)}"
-        return hashlib.sha256(schema_str.encode()).hexdigest()[:16]
-
-
-class ValidationError(Exception):
-    """Raised when validation fails."""
+            fields = [
+                (n, str(t)) for n, t in getattr(schema, "__annotations__", {}).items()
+            ]
+        payload = json.dumps({"name": schema.__qualname__, "fields": sorted(fields)})
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # Global registry instance
