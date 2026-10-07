@@ -3,17 +3,26 @@
 import asyncio
 import json
 
+import pytest
+
+from src.backend.api import server
 from src.backend.application.services.batch_detection_service import (
-    BatchDetectionService,
     DECISION_BLOCK_TOKEN,
     ITERATIVE_BLOCK_TOKEN,
+    BatchDetectionService,
     _apply_structure_sensitivity_floor,
     _clean_similarity_baseline,
-    _logic_flow_tokens,
     _logic_flow_similarity,
+    _logic_flow_tokens,
     _subtract_clean_baseline,
 )
-from src.backend.api import server
+
+
+def _skip_unless_dataset_downloaded(dataset_id: str) -> None:
+    """Skip when an optional benchmark dataset has not been downloaded."""
+    root = server.BENCHMARK_DATA_DIR / dataset_id
+    if not root.exists() or not any(root.iterdir()):
+        pytest.skip(f"{dataset_id} is not present under {server.BENCHMARK_DATA_DIR}")
 
 
 class _DummyFeatures:
@@ -75,10 +84,10 @@ def test_benchmark_pair_scores_keep_raw_score_as_primary() -> None:
             self,
             code_a: str,
             code_b: str,
-            filename_a: str = None,
-            filename_b: str = None,
+            filename_a: str | None = None,
+            filename_b: str | None = None,
         ) -> _DummyFeatures:
-            return _DummyFeatures(0.60 if "plag" in code_b else 0.60)
+            return _DummyFeatures(0.60)
 
     class Fusion:
         def fuse(
@@ -475,23 +484,28 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
 
     dataset_ids = asyncio.run(load_dataset_ids())
 
-    assert "kaggle_student_code" in dataset_ids
-    assert "synthetic" in dataset_ids
-    assert "xiangtan" in dataset_ids
-    assert "poj104" in dataset_ids
+    # Datasets appear only when their data is present. Mirror the server's
+    # readiness checks instead of hardcoding one machine's download state.
+    def _runnable(dataset_id: str) -> bool:
+        return bool(
+            server._build_benchmark_dataset_readiness(
+                dataset_id, server.BENCHMARK_DATA_DIR / dataset_id
+            ).get("runnable")
+        )
+
+    for dataset_id in ("kaggle_student_code", "synthetic", "xiangtan", "poj104"):
+        if _runnable(dataset_id):
+            assert dataset_id in dataset_ids, f"{dataset_id} is runnable; list it"
+        else:
+            assert (
+                dataset_id not in dataset_ids
+            ), f"{dataset_id} is not runnable; hide it"
     if (server.BENCHMARK_DATA_DIR / "poolc_600k_python").exists():
         assert "poolc_600k_python" in dataset_ids
 
     # Download-dependent datasets appear only when their data is complete.
-    # Expectations must mirror the server's readiness checks rather than
-    # hardcode a machine's download state.
     def _downloaded(dataset_id: str, marker: str) -> bool:
-        dataset_root = server.BENCHMARK_DATA_DIR / dataset_id
-        return bool(
-            server._build_benchmark_dataset_readiness(dataset_id, dataset_root).get(
-                "runnable"
-            )
-        )
+        return _runnable(dataset_id)
 
     for dataset_id, marker in (
         ("codexglue_clone", "huggingface"),
@@ -510,6 +524,7 @@ def test_benchmark_dataset_listing_hides_unrunnable_datasets() -> None:
 
 def test_xiangtan_loader_produces_positive_and_negative_pairs(tmp_path) -> None:
     """Xiangtan should be usable as a labeled Java benchmark dataset."""
+    _skip_unless_dataset_downloaded("xiangtan")
     submissions, pairs = server._load_xiangtan_pair_dataset(
         server.BENCHMARK_DATA_DIR / "xiangtan", tmp_path
     )
@@ -524,6 +539,7 @@ def test_xiangtan_loader_produces_positive_and_negative_pairs(tmp_path) -> None:
 
 def test_xiangtan_negative_pairs_use_different_behavior_signatures(tmp_path) -> None:
     """Xiangtan negatives must not pair same-solution aliases as false negatives."""
+    _skip_unless_dataset_downloaded("xiangtan")
     submissions, pairs = server._load_xiangtan_pair_dataset(
         server.BENCHMARK_DATA_DIR / "xiangtan", tmp_path
     )
@@ -688,6 +704,7 @@ def test_structure_sensitivity_floor_keeps_reorder_and_control_flow_matches() ->
 
 def test_xiangtan_renamed_and_structured_pairs_remain_detectable(tmp_path) -> None:
     """Type-2 rename gains should not come at the expense of Type-3 structure."""
+    _skip_unless_dataset_downloaded("xiangtan")
     submissions, pairs = server._load_xiangtan_pair_dataset(
         server.BENCHMARK_DATA_DIR / "xiangtan", tmp_path
     )

@@ -75,6 +75,10 @@ def test_run_competitor_tool_supports_expanded_repo_tools():
         if result is None:
             continue
         assert "pairs" in result, tool_id
+        if not result["pairs"]:
+            # Adapters signal "tool not installed" by returning zero pairs;
+            # a tool that actually ran emits one entry per requested pair.
+            continue
         assert len(result["pairs"]) == 1, tool_id
         assert 0.0 <= result["pairs"][0]["score"] <= 1.0, tool_id
 
@@ -84,13 +88,9 @@ def test_prepare_moss_script_uses_settings_and_writable_log(tmp_path):
 
     script_path = tmp_path / "moss.pl"
     script_path.write_text(
-        "\n".join(
-            [
-                "my $logfile = '/var/log/moss/' . ${prof}.${now};",
-                "$userid=394450069;",
-                'system("bash", "save_moss_report.sh","$logfile");',
-            ]
-        ),
+        "my $logfile = '/var/log/moss/' . ${prof}.${now};\n"
+        "$userid=394450069;\n"
+        'system("bash", "save_moss_report.sh","$logfile");',
         encoding="utf-8",
     )
 
