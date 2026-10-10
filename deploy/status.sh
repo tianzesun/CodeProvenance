@@ -5,7 +5,7 @@
 
 set -uo pipefail
 
-SERVICES="integritydesk-backend integritydesk-dashboard integritydesk-worker"
+SERVICES="integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker"
 
 if systemctl list-unit-files integritydesk-embedding.service >/dev/null 2>&1; then
     SERVICES="$SERVICES integritydesk-embedding"

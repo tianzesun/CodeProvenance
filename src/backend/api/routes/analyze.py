@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
@@ -174,7 +174,6 @@ def prepare_submissions(raw: Any, allowed_extensions: Any) -> list[dict[str, Any
 def analyze_submissions(
     request: Request,
     analysis_data: dict[str, Any],
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -230,7 +229,6 @@ def analyze_submissions(
     from src.backend.api.server import (
         ALLOWED_EXTENSIONS,
         REPORTS_DIR,
-        _run_analysis_background,
     )
 
     # Validate EVERYTHING before touching the database or the disk, so a bad
@@ -287,19 +285,22 @@ def analyze_submissions(
         ) from None
 
     # Queue background processing using the same engine as the upload flow.
-    background_tasks.add_task(
-        _run_analysis_background,
-        str(job.id),
-        job_dir,
-        job_name,
-        job_name,
-        assignment_id,
-        str(options.get("assignment_mode", "")),
-        threshold,
-        None,
-        "",
-        "",
-        None,
+    # dispatch_analysis sends the job to Celery when a broker is reachable
+    # and runs it in-process otherwise, so the API stays up without Redis.
+    from src.backend.workers.dispatch import dispatch_analysis as _dispatch_analysis
+
+    _dispatch_analysis(
+        job_id=str(job.id),
+        job_dir=job_dir,
+        course_name=job_name,
+        assignment_name=job_name,
+        assignment_id=assignment_id,
+        assignment_mode=str(options.get("assignment_mode", "")),
+        threshold=threshold,
+        current_user=None,
+        engine_keys_raw="",
+        tool_ids_raw="",
+        starter_sources=None,
     )
 
     # Estimated completion: roughly 2 seconds per pairwise comparison.

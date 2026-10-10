@@ -44,9 +44,9 @@ BACKEND_URL="http://127.0.0.1:$BACKEND_PORT"
 )
 
 log "Restarting services..."
-systemctl restart integritydesk-backend integritydesk-dashboard integritydesk-worker || true
+systemctl restart integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker || true
 if systemctl list-unit-files integritydesk-embedding.service >/dev/null 2>&1; then
     systemctl restart integritydesk-embedding || true
 fi
 
-log "Update complete. Verify with: systemctl status integritydesk-{backend,dashboard,worker}"
+log "Update complete. Verify with: systemctl status integritydesk-{backend,dashboard,worker,analysis-worker}"

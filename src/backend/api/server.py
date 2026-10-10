@@ -104,6 +104,7 @@ from src.backend.models.database import (
     User,
     VivaOutcome,
 )
+from src.backend.workers.dispatch import dispatch_analysis
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -7470,7 +7471,6 @@ def _discard_upload(job_id: str, job_dir: PathLib) -> None:
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
-    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -7545,19 +7545,18 @@ async def upload_files(
             status_code=400, content={"error": "At least 2 code files are required"}
         )
 
-    background_tasks.add_task(
-        _run_analysis_background,
-        job_id,
-        job_dir,
-        course_name,
-        assignment_name,
-        assignment_id,
-        assignment_mode,
-        threshold,
-        current_user,
-        engine_keys,
-        tool_ids,
-        starter_sources,
+    dispatch_analysis(
+        job_id=job_id,
+        job_dir=job_dir,
+        course_name=course_name,
+        assignment_name=assignment_name,
+        assignment_id=assignment_id,
+        assignment_mode=assignment_mode,
+        threshold=threshold,
+        current_user=current_user,
+        engine_keys_raw=engine_keys,
+        tool_ids_raw=tool_ids,
+        starter_sources=starter_sources,
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
@@ -7565,7 +7564,6 @@ async def upload_files(
 @app.post("/api/upload-zip")
 async def upload_zip(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     starter_files: list[UploadFile] = File(default=[]),
     course_name: str = Form(default=""),
@@ -7654,19 +7652,18 @@ async def upload_zip(
                 target.write_bytes(content)
                 starter_sources.append(content.decode("utf-8", errors="ignore"))
 
-    background_tasks.add_task(
-        _run_analysis_background,
-        job_id,
-        job_dir,
-        course_name,
-        assignment_name,
-        assignment_id,
-        assignment_mode,
-        threshold,
-        current_user,
-        engine_keys,
-        tool_ids,
-        starter_sources,
+    dispatch_analysis(
+        job_id=job_id,
+        job_dir=job_dir,
+        course_name=course_name,
+        assignment_name=assignment_name,
+        assignment_id=assignment_id,
+        assignment_mode=assignment_mode,
+        threshold=threshold,
+        current_user=current_user,
+        engine_keys_raw=engine_keys,
+        tool_ids_raw=tool_ids,
+        starter_sources=starter_sources,
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 

@@ -180,6 +180,7 @@ install_service() {
 install_service "$SERVICES_DIR/integritydesk-backend.service"
 install_service "$SERVICES_DIR/integritydesk-dashboard.service"
 install_service "$SERVICES_DIR/integritydesk-worker.service"
+install_service "$SERVICES_DIR/integritydesk-analysis-worker.service"
 
 # Embedding server only if the ML stack is enabled
 if [ -n "${EMBEDDING_SERVER_URL:-}" ]; then
@@ -248,8 +249,8 @@ fi
 # Start services
 # -----------------------------------------------------------------------------
 log "Starting services..."
-systemctl enable integritydesk-backend integritydesk-dashboard integritydesk-worker
-systemctl restart integritydesk-backend integritydesk-dashboard integritydesk-worker
+systemctl enable integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker
+systemctl restart integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker
 if [ -n "${EMBEDDING_SERVER_URL:-}" ]; then
     systemctl enable integritydesk-embedding
     systemctl restart integritydesk-embedding
@@ -258,7 +259,7 @@ fi
 sleep 3
 
 log "Service status:"
-systemctl --no-pager --full status integritydesk-backend integritydesk-dashboard integritydesk-worker \
+systemctl --no-pager --full status integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker \
     | grep -E "Loaded:|Active:" || true
 
 log ""
@@ -266,5 +267,5 @@ log "Setup complete."
 log "  Dashboard: https://$APP_DOMAIN"
 log "  Backend:   $BACKEND_URL (docs at $BACKEND_URL/docs)"
 log ""
-log "Manage with:  sudo systemctl status|restart integritydesk-{backend,dashboard,worker}"
+log "Manage with:  sudo systemctl status|restart integritydesk-{backend,dashboard,worker,analysis-worker}"
 log "After future 'git pull', run:  sudo bash $SCRIPT_DIR/update.sh"

@@ -1,0 +1,21 @@
+[Unit]
+Description=IntegrityDesk Analysis Worker (Celery)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/src/backend/.env.local
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@APP_DIR@/venv/bin/python -m celery -A src.backend.workers.celery_app:celery_app worker --loglevel=info --queues=analysis --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --prefetch-multiplier=1
+Restart=always
+RestartSec=10
+# A stuck analysis must not wedge the worker forever; Celery also enforces
+# CELERY_TASK_TIME_LIMIT per job.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

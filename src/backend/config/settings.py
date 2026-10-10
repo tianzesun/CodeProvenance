@@ -375,6 +375,14 @@ class AppSettings(BaseSettings):
     # Expert
     DEBUG_MODE: bool = False
 
+    # Background analysis queue (Celery + Redis). The upload endpoints send
+    # jobs to the ``analysis`` queue when the broker is reachable and run
+    # them in-process otherwise, so these only take effect with workers up.
+    #: Worker child processes per ``celery worker`` instance (CPU-heavy work).
+    CELERY_WORKER_CONCURRENCY: int = Field(4, ge=1, le=32)
+    #: Hard kill per analysis job, in seconds.
+    CELERY_TASK_TIME_LIMIT: int = Field(3600, ge=60)
+
     # ── Field validators ─────────────────────────────────────────────────────
 
     @field_validator("AUDIT_LOG_LEVEL", mode="before")
