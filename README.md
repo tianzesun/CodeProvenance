@@ -9,7 +9,8 @@ review workspace — so the output is not just a score, but evidence a faculty m
 act on and a committee can defend.
 
 **Stack:** Python 3.12 · FastAPI · PostgreSQL (row-level multi-tenancy) · Alembic ·
-Next.js 16 / React 19 dashboard · systemd + Apache/nginx deployment.
+Celery + Redis job queue · Next.js 16 / React 19 dashboard · systemd + Apache/nginx
+deployment.
 
 ---
 
@@ -33,7 +34,7 @@ flag through a band-based review policy with human dispositions.
 | **Public REST API** | `/api/v1/analyze` with API-key auth, rate limiting, job polling, results, reports, and usage metering |
 | **LLM providers** | Multi-vendor catalog (OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek, Groq, OpenRouter, Ollama) with live model discovery |
 | **Source scanning** | Matches submissions against GitHub and Stack Overflow sources |
-| **Operations** | Background analysis with live progress, migration CI against a fresh Postgres, gitleaks secret scan, Locust/k6 load tests |
+| **Operations** | Celery + Redis analysis queue with bounded workers and in-process fallback, live job progress, migration CI against a fresh Postgres, gitleaks secret scan, Locust/k6 load tests |
 
 ### 📊 Feature Comparison
 
@@ -174,7 +175,7 @@ CodeProvenance/
 │   │   │   │                      #   academic, analyze, benchmark, reviews, ...)
 │   │   │   ├── middleware/        # Auth + API keys, rate limiting, request ID
 │   │   │   ├── schemas/           # Pydantic request/response contracts
-│   │   │   └── server.py          # ASGI app, core endpoints, background jobs
+│   │   │   └── server.py          # ASGI app, core endpoints, job dispatch
 │   │   ├── application/           # Services, pipelines, use cases
 │   │   ├── domain/                # Domain models, decision engine
 │   │   ├── contracts/             # Schema registry, versioning, reproducibility
@@ -197,7 +198,7 @@ CodeProvenance/
 │   │   ├── infrastructure/        # DB, email, PDF/CSV report exporters, GPU service
 │   │   ├── models/                # SQLAlchemy models (31 Alembic migrations)
 │   │   ├── plugins/               # Drop-in algorithms (Jaccard, LCS, Levenshtein)
-│   │   ├── workers/               # Webhook, batch and GPU workers
+│   │   ├── workers/               # Celery analysis queue, webhook, batch and GPU workers
 │   │   ├── load_tests/            # Locust + k6 suites
 │   │   ├── cli/                   # Typer CLI commands
 │   │   └── main.py                # Minimal public entrypoint
@@ -213,6 +214,22 @@ CodeProvenance/
 ├── docs/                          # Architecture, PRD, benchmarks, guides
 └── scripts/                       # Operational helpers
 ```
+
+### Runtime topology
+
+```
+Browser ──► reverse proxy ──► FastAPI ──► PostgreSQL
+                     │
+                     ├── Celery analysis queue (Redis) ──► analysis workers
+                     │                                        │
+                     │            job status/progress ◄───────┘
+                     ▼
+              Next.js dashboard (polls /api/job/{id})
+```
+
+Uploads return a job id immediately; analysis runs in the bounded Celery worker
+pool (`integritydesk-analysis-worker`), or on a bounded in-process pool when
+Redis is unavailable.
 
 ### Dashboard map
 
@@ -232,7 +249,7 @@ CodeProvenance/
 | `/datasets`, `/tools/fpr-validation` | Dataset readiness and false-positive validation runs |
 | `/error-analysis` | Per-file false-positive deep dive |
 | `/settings` | Detection thresholds, engine config, profiles, AI providers, limits |
-| `/compare-tools`, `/evidence-view`, `/cluster-detection`, `/historical-fingerprint` | R&D surfaces (see *Current gaps*) |
+| `/compare-tools`, `/evidence-view`, `/cluster-detection`, `/historical-fingerprint` | R&D surfaces |
 
 ---
 
@@ -243,7 +260,7 @@ CodeProvenance/
 - **Python 3.12** (3.10+ supported)
 - **PostgreSQL** (Neon or any Postgres) — required; SQLite is not supported
 - **Node.js 20+** for the dashboard
-- Redis — required only for the webhook worker / caching
+- Redis — analysis queue (Celery), webhook worker and caching; uploads still work without it via the bounded in-process fallback
 
 ### Backend
 
@@ -442,6 +459,7 @@ TLS via Let's Encrypt, managed by systemd:
 | FastAPI backend | 127.0.0.1:8000 | `integritydesk-backend` |
 | Next.js dashboard | 127.0.0.1:3000 | `integritydesk-dashboard` |
 | Webhook worker (Redis) | – | `integritydesk-worker` |
+| Analysis worker (Celery) | – | `integritydesk-analysis-worker` |
 | Embedding server *(optional)* | 127.0.0.1:8001 | `integritydesk-embedding` |
 
 ```bash
@@ -450,40 +468,6 @@ cp deploy/deploy.conf.example deploy.conf && vim deploy.conf
 sudo bash deploy/setup.sh              # build + start
 sudo bash deploy/update.sh             # after every git pull
 ```
-
----
-
-## 🗂️ Documentation Map
-
-| Document | Contents |
-|----------|----------|
-| `docs/ARCHITECTURE.md` | Architecture decisions (AI, database, RAG) |
-| `docs/FIVE_LAYER_DETECTION_ARCHITECTURE.md` | Layered detection design |
-| `docs/ENGINE_ARCHITECTURE.md`, `docs/COURSE_PROFILE_SYSTEM.md` | Engine and profile design |
-| `docs/BENCHMARK_*.md`, `docs/CODEPROVENANCE_BENCHMARK.md` | Benchmarking methodology and results |
-| `docs/product/API_REFERENCE.md` | REST interface reference |
-| `docs/product/USER_GUIDE.md`, `docs/PROFESSOR_GUIDE.md` | End-user and professor guides |
-| `docs/INVESTIGATION_SYSTEM_DESIGN.md` | Investigation & evidence management design |
-| `docs/LOAD_TESTING.md` | Locust / k6 load testing guide |
-| `docs/product/CANVAS_INTEGRATION.md` | LTI 1.3 / Canvas integration plan |
-| `docs/product/SCIENTIFIC_WHITE_PAPER.md` | Methodology and evaluation |
-| `docs/archive/` | Superseded fix notes and session records |
-| `deploy/README.md` | Production deployment |
-| `AGENTS.md`, `CLAUDE.md` | Contributor / agent working rules |
-| `CHANGELOG.md` | Release history |
-
----
-
-## ⚠️ Current Gaps
-
-- Several routers exist but are not yet mounted on the ASGI app in
-  `src/backend/api/server.py`: LTI/Canvas (`lti`), webhooks and usage management,
-  visualize, and the cluster-detection / evidence-view / historical-fingerprint routers.
-  Their dashboard pages therefore have no live backend yet.
-- The `academic` router is mounted with a duplicated `/api` prefix, so those endpoints
-  currently resolve under `/api/api/...`.
-- Python and frontend lint jobs are non-blocking until the pre-existing findings are
-  cleared.
 
 ---
 
