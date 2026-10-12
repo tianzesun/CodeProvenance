@@ -151,10 +151,20 @@ else
         docker run -d --name "$GPU_CONTAINER" --gpus all --network host \
             -v "$PROJECT_DIR:/app" -w /app "$GPU_IMAGE" sleep infinity
     fi
+    # One interpreter for everything below: bare `pip` and `python3` can
+    # resolve to different Pythons in these images (system python vs the
+    # conda env that ships the CUDA torch). Prefer conda's python so the
+    # backend runs with GPU torch.
+    if docker exec "$GPU_CONTAINER" test -x /opt/conda/bin/python; then
+        GPU_PY=/opt/conda/bin/python
+    else
+        GPU_PY=python3
+    fi
+    echo "Using container python: $GPU_PY"
     # Deps minus torch: the image ships its own CUDA torch for its arch, and
     # requirements.txt must never overwrite it with a CPU-only wheel.
     REQ_HASH_FILE="$PROJECT_DIR/logs/.backend-gpu-req.sha256"
-    REQ_HASH="$(sha256sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)"
+    REQ_HASH="$GPU_PY $(sha256sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)"
     if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$REQ_HASH" ]; then
         echo "Installing backend deps inside GPU container (first run takes a few minutes)..."
         mapfile -t GPU_PKGS < <(grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' "$PROJECT_DIR/requirements.txt")
@@ -163,7 +173,7 @@ else
         PIP_INDEX_ARGS=()
         if [ -n "${PIP_INDEX_URL:-}" ]; then PIP_INDEX_ARGS+=(--index-url "$PIP_INDEX_URL"); fi
         if [ -n "${PIP_TRUSTED_HOST:-}" ]; then PIP_INDEX_ARGS+=(--trusted-host "$PIP_TRUSTED_HOST"); fi
-        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" pip install --break-system-packages "${PIP_INDEX_ARGS[@]}" "${GPU_PKGS[@]}"
+        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" "$GPU_PY" -m pip install --break-system-packages "${PIP_INDEX_ARGS[@]}" "${GPU_PKGS[@]}"
         printf '%s\n' "$REQ_HASH" > "$REQ_HASH_FILE"
     fi
     # Stop any previous uvicorn inside the container so the port is free.
@@ -215,11 +225,13 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
             ENV_ARGS+=(-e "$line")
         done < "$ENV_FILE"
     fi
-    docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec python3 -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
+    docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec $GPU_PY -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
     echo "Waiting for backend..."
     for i in {1..30}; do
         if curl -s "http://$BACKEND_HOST:$BACKEND_PORT/health" >/dev/null 2>&1; then
             echo "✔ Backend ready (GPU container)"
+            echo "--- container torch ---"
+            docker exec "$GPU_CONTAINER" "$GPU_PY" -c "import torch; print('torch', torch.__version__, '| CUDA build:', torch.version.cuda, '| cuda_available:', torch.cuda.is_available())" 2>&1 || echo "(torch probe failed — backend runs, but check GPU support)"
             break
         fi
         if [ $i -eq 30 ]; then
