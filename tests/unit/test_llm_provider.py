@@ -46,6 +46,21 @@ def _anthropic_ok_handler(request: httpx.Request) -> httpx.Response:
     )
 
 
+def _ollama_ok_handler(request: httpx.Request) -> httpx.Response:
+    """Return a minimal Ollama chat-completions response.
+
+    Ollama needs no key, so no ``Authorization`` header may be sent: an
+    empty ``Bearer `` value is rejected as an illegal header value before
+    the request reaches the server.
+    """
+    assert request.url.path.endswith("/chat/completions")
+    assert "Authorization" not in request.headers
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "Evidence summary text"}}]},
+    )
+
+
 def _error_handler(request: httpx.Request) -> httpx.Response:
     """Return a 401 so connection-testing failure paths can be exercised."""
     return httpx.Response(401, text="invalid api key")
@@ -79,6 +94,33 @@ class TestLLMProviderAnthropic:
             transport=transport,
         )
         assert await_provider(provider) == "Evidence summary text"
+
+
+class TestLLMProviderOllama:
+    """Keyless local runtimes must not send an empty Bearer header."""
+
+    def test_complete_omits_authorization_header_without_key(self) -> None:
+        transport = httpx.MockTransport(_ollama_ok_handler)
+        provider = LLMProvider(
+            provider="ollama",
+            api_key="",
+            model="qwen3:8b",
+            base_url="http://localhost:11434/v1",
+            transport=transport,
+        )
+        assert await_provider(provider) == "Evidence summary text"
+
+    def test_connection_ok_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(app_settings, "LLM_API_KEYS", {})
+        monkeypatch.setattr(app_settings, "LLM_MODEL_OVERRIDES", {"ollama": "qwen3:8b"})
+        result = pytest_unwrap(
+            _test_provider_connection(
+                "ollama",
+                transport=httpx.MockTransport(_ollama_ok_handler),
+            )
+        )
+        assert result["ok"] is True
+        assert result["message"] == "Connected"
 
 
 class TestLLMProviderValidation:
