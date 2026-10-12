@@ -1,6 +1,9 @@
 #!/bin/bash
 # IntegrityDesk - Robust Startup Script
 # Backend + Embedding Server + Next.js Dashboard
+#
+# GPU backend (ARM/Blackwell hosts without a pip CUDA torch wheel):
+#   BACKEND_GPU=1 ./scripts/start.sh   (image override: GPU_IMAGE=...)
 
 set -e
 
@@ -26,6 +29,13 @@ fi
 DASHBOARD_PORT="${1:-${DASHBOARD_PORT:-3000}}"
 BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
 EMBEDDING_PORT="${EMBEDDING_PORT:-8001}"
+
+# GPU backend (NVIDIA ARM/Blackwell hosts where pip has no CUDA torch wheel).
+# Opt in with BACKEND_GPU=1 (override the image with GPU_IMAGE=...).
+# A container left over from a previous GPU run is reused automatically;
+# BACKEND_GPU=0 forces the host venv backend.
+GPU_CONTAINER="integritydesk-backend-gpu"
+GPU_IMAGE="${GPU_IMAGE:-nvcr.io/nvidia/pytorch:25.02-py3}"
 
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_URL="http://${BACKEND_HOST}:${BACKEND_PORT}"
@@ -97,19 +107,87 @@ else
 fi
 
 # ----------------------------
-# BACKEND START
+# BACKEND START (host venv, or NVIDIA GPU container when requested)
 # ----------------------------
-echo "Starting backend..."
+mkdir -p "$PROJECT_DIR/logs"
 
-if lsof -i :$BACKEND_PORT >/dev/null 2>&1; then
-    echo "✔ Backend already running"
+GPU_WANTS_HOST=1
+if [ "${BACKEND_GPU:-}" = "1" ]; then
+    GPU_WANTS_HOST=0
+elif [ "${BACKEND_GPU:-}" != "0" ] \
+    && command -v docker >/dev/null 2>&1 \
+    && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$GPU_CONTAINER"; then
+    # A GPU backend container from a previous run: keep using it.
+    GPU_WANTS_HOST=0
+fi
+
+if [ "$GPU_WANTS_HOST" = "1" ]; then
+    # A stale GPU container would still hold the port: stop it for a clean start.
+    if command -v docker >/dev/null 2>&1 \
+        && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$GPU_CONTAINER"; then
+        echo "Stopping GPU backend container (host backend requested)..."
+        docker stop "$GPU_CONTAINER" >/dev/null
+    fi
+    echo "Starting backend..."
+    if lsof -i :$BACKEND_PORT >/dev/null 2>&1; then
+        echo "✔ Backend already running"
+    else
+        nohup "$VENV_PYTHON" -m uvicorn src.backend.api.server:app \
+            --host 127.0.0.1 \
+            --port "$BACKEND_PORT" \
+            --log-level warning > "$BACKEND_LOG" 2>&1 &
+
+        sleep 2
+    fi
 else
-    nohup "$VENV_PYTHON" -m uvicorn src.backend.api.server:app \
-        --host 127.0.0.1 \
-        --port "$BACKEND_PORT" \
-        --log-level warning > "$BACKEND_LOG" 2>&1 &
-
-    sleep 2
+    echo "Starting backend in GPU container ($GPU_IMAGE)..."
+    command -v docker >/dev/null 2>&1 || { echo "❌ BACKEND_GPU=1 needs the docker CLI"; exit 1; }
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$GPU_CONTAINER"; then
+        docker start "$GPU_CONTAINER" >/dev/null
+    else
+        # --network host keeps every localhost URL (DB, embedding, Ollama)
+        # and .env.local working unchanged inside the container (Linux only).
+        docker pull "$GPU_IMAGE"
+        docker run -d --name "$GPU_CONTAINER" --gpus all --network host \
+            -v "$PROJECT_DIR:/app" -w /app "$GPU_IMAGE" sleep infinity
+    fi
+    # Deps minus torch: the image ships its own CUDA torch for its arch, and
+    # requirements.txt must never overwrite it with a CPU-only wheel.
+    REQ_HASH_FILE="$PROJECT_DIR/logs/.backend-gpu-req.sha256"
+    REQ_HASH="$(sha256sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)"
+    if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$REQ_HASH" ]; then
+        echo "Installing backend deps inside GPU container (first run takes a few minutes)..."
+        mapfile -t GPU_PKGS < <(grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' "$PROJECT_DIR/requirements.txt")
+        docker exec "$GPU_CONTAINER" pip install --break-system-packages "${GPU_PKGS[@]}"
+        printf '%s\n' "$REQ_HASH" > "$REQ_HASH_FILE"
+    fi
+    # Stop any previous uvicorn inside the container so the port is free.
+    docker exec "$GPU_CONTAINER" pkill -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
+    sleep 1
+    # .env.local is (re)passed on every start, so edits apply without rebuilds.
+    ENV_ARGS=()
+    if [ -f "$ENV_FILE" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            case "$line" in ''|\#*) continue ;; esac
+            ENV_ARGS+=(-e "$line")
+        done < "$ENV_FILE"
+    fi
+    docker exec -d "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec python3 -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
+    echo "Waiting for backend..."
+    for i in {1..30}; do
+        if curl -s "http://$BACKEND_HOST:$BACKEND_PORT/health" >/dev/null 2>&1; then
+            echo "✔ Backend ready (GPU container)"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "❌ Backend failed to start in GPU container"
+            echo "---- Last logs ----"
+            docker logs --tail 30 "$GPU_CONTAINER"
+            exit 1
+        fi
+        sleep 1
+    done
 fi
 
 # ----------------------------
