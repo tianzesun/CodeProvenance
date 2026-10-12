@@ -179,6 +179,9 @@ class TestCheckLlmProvider:
 
         monkeypatch.setattr(system_status, "list_provider_models", fake_list)
         monkeypatch.setattr(app_settings, "LLM_API_KEYS", {})
+        # Neutralize the legacy env-backed key too: ambient values (real env
+        # or state leaked by other tests) would otherwise flip this to down.
+        monkeypatch.setattr(app_settings, "OPENAI_API_KEY", "")
         result = run(check_llm_provider("openai"))
         assert result["status"] == "unconfigured"
         assert "key" in result["detail"].lower()

@@ -101,6 +101,10 @@ class TestApplyRuntimeSettingsFromRecord:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "")
+        # _apply_runtime_settings_from_record writes through object.__setattr__
+        # (bypassing monkeypatch tracking), so snapshot the settings value or
+        # it leaks "sk-runtime-test" into every test running after this one.
+        monkeypatch.setattr(app_settings, "OPENAI_API_KEY", "")
         server._apply_runtime_settings_from_record(
             {"openai_api_key": "sk-runtime-test"}
         )
