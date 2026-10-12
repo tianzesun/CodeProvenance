@@ -40,18 +40,20 @@ from src.backend.infrastructure.reporting.visualizations import (
 
 logger = logging.getLogger(__name__)
 
-# PDF backend detection
+# PDF backend detection. Missing system libraries (Pango/Cairo for
+# WeasyPrint) raise OSError, not ImportError — both must degrade to the next
+# backend so a bare OS image can never kill the import (and the boot).
 PDF_BACKEND = None
 try:
     import weasyprint
 
     PDF_BACKEND = "weasyprint"
-except ImportError:
+except (ImportError, OSError):
     try:
         import pdfkit  # noqa: F401
 
         PDF_BACKEND = "pdfkit"
-    except ImportError:
+    except (ImportError, OSError):
         PDF_BACKEND = None
 
 

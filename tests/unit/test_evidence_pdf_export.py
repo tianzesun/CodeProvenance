@@ -38,14 +38,48 @@ SAMPLE_CASE_DATA = {
         "AI generation probability is low — likely human-authored.",
     ],
     "tool_comparison": [
-        {"name": "MOSS", "similarity": 0.82, "precision": 0.78, "recall": 0.75, "f1": 0.76, "ci_lower": 0.70, "ci_upper": 0.82},
-        {"name": "JPlag", "similarity": 0.85, "precision": 0.80, "recall": 0.78, "f1": 0.79, "ci_lower": 0.73, "ci_upper": 0.85},
-        {"name": "Ours", "similarity": 0.91, "precision": 0.88, "recall": 0.86, "f1": 0.87, "ci_lower": 0.82, "ci_upper": 0.92},
+        {
+            "name": "MOSS",
+            "similarity": 0.82,
+            "precision": 0.78,
+            "recall": 0.75,
+            "f1": 0.76,
+            "ci_lower": 0.70,
+            "ci_upper": 0.82,
+        },
+        {
+            "name": "JPlag",
+            "similarity": 0.85,
+            "precision": 0.80,
+            "recall": 0.78,
+            "f1": 0.79,
+            "ci_lower": 0.73,
+            "ci_upper": 0.85,
+        },
+        {
+            "name": "Ours",
+            "similarity": 0.91,
+            "precision": 0.88,
+            "recall": 0.86,
+            "f1": 0.87,
+            "ci_lower": 0.82,
+            "ci_upper": 0.92,
+        },
     ],
     "significance_statement": "Ours is significantly better than MOSS (F1: 0.87 vs 0.76, p=0.003).",
     "external_tools": [
-        {"name": "MOSS", "status": "success", "summary": "82% similarity detected", "details": "Winnowing-based analysis"},
-        {"name": "JPlag", "status": "success", "summary": "85% similarity detected", "details": "AST-based analysis"},
+        {
+            "name": "MOSS",
+            "status": "success",
+            "summary": "82% similarity detected",
+            "details": "Winnowing-based analysis",
+        },
+        {
+            "name": "JPlag",
+            "status": "success",
+            "summary": "85% similarity detected",
+            "details": "AST-based analysis",
+        },
     ],
     "ai_details": [
         {"name": "CodeBERT", "probability": 0.28, "confidence": 0.92},
@@ -139,6 +173,46 @@ class TestVisualizationGenerators:
         assert len(uri) > 500
 
 
+class TestPdfBackendDegradation:
+    """A bare OS image (missing Pango/Cairo .so files) must degrade, not crash.
+
+    Regression test: ``import weasyprint`` raises ``OSError`` — not
+    ``ImportError`` — when system libraries are absent, which used to escape
+    the backend detection and kill the whole server at boot import.
+    """
+
+    @staticmethod
+    def _reload_with_blocked(names: set[str]):
+        import builtins
+        import importlib
+        from unittest import mock
+
+        import src.backend.infrastructure.reporting.evidence_pdf_exporter as mod
+
+        real_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if str(name).split(".")[0] in names:
+                if "weasyprint" in str(name):
+                    raise OSError("cannot load library 'libpango-1.0-0'")
+                raise ImportError(f"No module named {name!r}")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with mock.patch.object(builtins, "__import__", side_effect=fake_import):
+            importlib.reload(mod)
+            backend = mod.PDF_BACKEND
+        importlib.reload(mod)
+        return backend
+
+    def test_weasyprint_oserror_falls_back_to_pdfkit(self):
+        """Test that missing system libs fall back instead of raising."""
+        assert self._reload_with_blocked({"weasyprint"}) == "pdfkit"
+
+    def test_all_backends_missing_disables_pdf(self):
+        """Test that no PDF backend at all degrades to None, not a crash."""
+        assert self._reload_with_blocked({"weasyprint", "pdfkit"}) is None
+
+
 class TestEvidenceChainPdfExporter:
     @pytest.fixture
     def exporter(self, tmp_path):
@@ -186,7 +260,10 @@ class TestEvidenceChainPdfExporter:
         assert "Committee Chair" in content
 
     def test_export_pdf_requires_backend(self, exporter, tmp_path):
-        from src.backend.infrastructure.reporting.evidence_pdf_exporter import PDF_BACKEND
+        from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
+            PDF_BACKEND,
+        )
+
         if PDF_BACKEND is None:
             result = exporter.export(SAMPLE_CASE_DATA, tmp_path / "test.pdf")
             assert result is None
@@ -211,7 +288,9 @@ class TestEvidenceChainIntegration:
     def test_full_pipeline_produces_complete_report(self, tmp_path):
         exporter = EvidenceChainPdfExporter(output_dir=tmp_path)
 
-        html_path = exporter.export_html(SAMPLE_CASE_DATA, tmp_path / "full_report.html")
+        html_path = exporter.export_html(
+            SAMPLE_CASE_DATA, tmp_path / "full_report.html"
+        )
         assert html_path.exists()
 
         content = html_path.read_text()

@@ -314,15 +314,15 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
         done < "$ENV_FILE"
     fi
     docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec $GPU_PY -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
-    echo "Waiting for backend..."
-    for i in {1..30}; do
+    echo "Waiting for backend (first boot imports torch/transformers — can take minutes on ARM)..."
+    for i in $(seq 1 120); do
         if curl -s "http://$BACKEND_HOST:$BACKEND_PORT/health" >/dev/null 2>&1; then
             echo "✔ Backend ready (GPU container)"
             echo "--- container torch ---"
             docker exec "$GPU_CONTAINER" "$GPU_PY" -c "import torch; print('torch', torch.__version__, '| CUDA build:', torch.version.cuda, '| cuda_available:', torch.cuda.is_available())" 2>&1 || echo "(torch probe failed — backend runs, but check GPU support)"
             break
         fi
-        if [ $i -eq 30 ]; then
+        if [ "$i" -eq 120 ]; then
             echo "❌ Backend failed to start in GPU container"
             echo "---- backend.log (exec'd uvicorn output) ----"
             tail -n 30 "$BACKEND_LOG" 2>/dev/null || echo "(no backend log yet)"
@@ -332,9 +332,16 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
             docker logs --tail 5 "$GPU_CONTAINER" 2>/dev/null || true
             exit 1
         fi
+        if [ $((i % 30)) -eq 0 ]; then
+            echo "  …still waiting ($i s)"
+        fi
         sleep 1
     done
 fi
+
+# ----------------------------
+# EMBEDDING START (FIXED)
+# ----------------------------
 
 # ----------------------------
 # EMBEDDING START (FIXED)
