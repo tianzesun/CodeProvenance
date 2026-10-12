@@ -173,7 +173,7 @@ else
         PIP_INDEX_ARGS=()
         if [ -n "${PIP_INDEX_URL:-}" ]; then PIP_INDEX_ARGS+=(--index-url "$PIP_INDEX_URL"); fi
         if [ -n "${PIP_TRUSTED_HOST:-}" ]; then PIP_INDEX_ARGS+=(--trusted-host "$PIP_TRUSTED_HOST"); fi
-        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" "$GPU_PY" -m pip install --break-system-packages "${PIP_INDEX_ARGS[@]}" "${GPU_PKGS[@]}"
+        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" "$GPU_PY" -m pip install --break-system-packages --retries 10 --timeout 60 "${PIP_INDEX_ARGS[@]}" "${GPU_PKGS[@]}"
         printf '%s\n' "$REQ_HASH" > "$REQ_HASH_FILE"
     fi
     # Stop any previous uvicorn inside the container so the port is free.
