@@ -310,6 +310,46 @@ async def check_llm(
     )
 
 
+def _nvidia_smi_summary() -> str:
+    """Summarize GPUs visible to the OS driver, independent of PyTorch.
+
+    Returns:
+        A one-line summary (GPU names + driver version), or why the query
+        itself failed. An OS-visible GPU that torch cannot see points at a
+        CPU-only torch build or a container started without GPU passthrough.
+    """
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return "nvidia-smi not found (no NVIDIA driver visible here)"
+    try:
+        proc = subprocess.run(
+            [
+                exe,
+                "--query-gpu=name,driver_version",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return f"nvidia-smi failed: {exc}"
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()
+        return f"nvidia-smi error: {err[0][:100] if err else 'unknown'}"
+    lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        return "nvidia-smi reports no GPUs"
+    names = sorted({line.split(",")[0].strip() for line in lines})
+    driver = lines[0].split(",")[-1].strip()
+    gpu_word = "GPU" if len(lines) == 1 else "GPUs"
+    return f"OS sees {len(lines)} {gpu_word} ({', '.join(names)}) · driver {driver}"
+
+
 def check_gpu() -> dict[str, Any]:
     """Report CUDA GPU availability from the API process.
 
@@ -325,8 +365,17 @@ def check_gpu() -> dict[str, Any]:
         return _service("down", "GPU", "PyTorch is not installed")
     try:
         if not torch.cuda.is_available():
+            build = getattr(getattr(torch, "version", None), "cuda", None)
+            build_note = (
+                "CPU-only torch build — reinstall a CUDA wheel"
+                if build is None
+                else f"torch CUDA {build} build, but no device visible"
+            )
             return _service(
-                "down", "GPU", f"No CUDA device (torch {torch.__version__}, CPU only)"
+                "down",
+                "GPU",
+                f"No CUDA device (torch {torch.__version__}; {build_note}; "
+                f"{_nvidia_smi_summary()})",
             )
         count = torch.cuda.device_count()
         name = torch.cuda.get_device_name(0)

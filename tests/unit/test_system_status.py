@@ -212,7 +212,11 @@ class TestCheckGpu:
             get_device_name=lambda index: "NVIDIA A100",
             mem_get_info=lambda index: (40_000_000_000, 80_000_000_000),
         )
-        fake_torch = SimpleNamespace(__version__="2.2.1", cuda=cuda)
+        fake_torch = SimpleNamespace(
+            __version__="2.2.1",
+            version=SimpleNamespace(cuda="12.1"),
+            cuda=cuda,
+        )
         monkeypatch.setitem(sys.modules, "torch", fake_torch)
         result = check_gpu()
         assert result["status"] == "up"
@@ -220,13 +224,41 @@ class TestCheckGpu:
         assert "free" in result["detail"]
 
     def test_reports_down_without_cuda(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that a CPU-only box reports down instead of raising."""
+        """Test that a CUDA build with no visible device names the cause."""
         cuda = SimpleNamespace(is_available=lambda: False)
-        fake_torch = SimpleNamespace(__version__="2.2.1", cuda=cuda)
+        fake_torch = SimpleNamespace(
+            __version__="2.2.1+cu121",
+            version=SimpleNamespace(cuda="12.1"),
+            cuda=cuda,
+        )
         monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(
+            system_status,
+            "_nvidia_smi_summary",
+            lambda: "OS sees 1 GPU (NVIDIA A100) · driver 550.54",
+        )
         result = check_gpu()
         assert result["status"] == "down"
-        assert "CPU" in result["detail"]
+        assert "no device visible" in result["detail"]
+        assert "A100" in result["detail"]
+
+    def test_cpu_only_build_says_reinstall(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that a CPU-only torch build points at the wheel."""
+        cuda = SimpleNamespace(is_available=lambda: False)
+        fake_torch = SimpleNamespace(
+            __version__="2.2.1+cpu",
+            version=SimpleNamespace(cuda=None),
+            cuda=cuda,
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(
+            system_status, "_nvidia_smi_summary", lambda: "nvidia-smi not found"
+        )
+        result = check_gpu()
+        assert result["status"] == "down"
+        assert "CPU-only torch build" in result["detail"]
 
 
 class TestCheckStorage:
