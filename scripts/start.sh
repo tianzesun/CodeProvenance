@@ -198,8 +198,12 @@ else
         fi
         if [ $i -eq 30 ]; then
             echo "❌ Backend failed to start in GPU container"
-            echo "---- Last logs ----"
-            docker logs --tail 30 "$GPU_CONTAINER"
+            echo "---- backend.log (exec'd uvicorn output) ----"
+            tail -n 30 "$BACKEND_LOG" 2>/dev/null || echo "(no backend log yet)"
+            echo "---- uvicorn process inside container ----"
+            docker exec "$GPU_CONTAINER" pgrep -af "uvicorn src.backend.api.server:app" 2>/dev/null || echo "(no uvicorn process)"
+            echo "---- container log tail (entrypoint/banner only) ----"
+            docker logs --tail 5 "$GPU_CONTAINER" 2>/dev/null || true
             exit 1
         fi
         sleep 1
